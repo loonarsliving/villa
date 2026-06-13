@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Operasional — Loonars Private Living</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0C0C0C;--bg2:#141414;--bg3:#1C1C1C;--bg4:#242424;--white:#fff;--w80:rgba(255,255,255,.80);--w50:rgba(255,255,255,.50);--w30:rgba(255,255,255,.30);--w15:rgba(255,255,255,.15);--w07:rgba(255,255,255,.07);--gold:#C4A05C;--goldbg:rgba(196,160,92,.1);--goldborder:rgba(196,160,92,.25);--sage:#5E8060;--sagebg:rgba(94,128,96,.15);--sageborder:rgba(94,128,96,.3);--red:#C0392B;--redbg:rgba(192,57,43,.12);--border:rgba(255,255,255,.08);--border2:rgba(255,255,255,.05);--sw:220px;--hh:56px}
+html{font-size:14px}body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--white);display:flex;min-height:100vh}
+.sb{width:var(--sw);min-width:var(--sw);height:100vh;background:var(--bg2);border-right:1px solid var(--border);position:fixed;top:0;left:0;display:flex;flex-direction:column;z-index:100}
+.sb-logo{padding:22px 20px 18px;border-bottom:1px solid var(--border)}
+.brand{font-size:9px;color:var(--gold);letter-spacing:.25em;text-transform:uppercase;font-weight:500}
+.brand-main{font-family:'Cormorant Garamond',serif;font-size:17px;font-weight:300;color:var(--white);line-height:1.2;margin-top:4px}
+.brand-main em{font-style:italic;color:var(--gold)}
+.sb-role{margin:12px 12px 0;background:var(--bg3);border:1px solid var(--border);border-radius:2px;padding:10px 13px}
+.rl{font-size:8.5px;color:var(--w30);letter-spacing:.14em;text-transform:uppercase;margin-bottom:3px}
+.rn{font-size:12px;font-weight:500;color:var(--white)}.rs{font-size:9.5px;color:var(--sage);margin-top:2px;display:flex;align-items:center;gap:5px}
+.dot{width:5px;height:5px;background:var(--sage);border-radius:50%;animation:p 2s infinite}
+@keyframes p{0%,100%{opacity:1}50%{opacity:.3}}
+.sb-nav{flex:1;padding:14px 10px;overflow-y:auto}
+.sb-sec{font-size:8.5px;font-weight:600;color:var(--w30);letter-spacing:.18em;text-transform:uppercase;padding:0 8px;margin:12px 0 4px}
+.sb-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:2px;font-size:12px;color:var(--w50);cursor:pointer;transition:all .15s;margin-bottom:1px;border:none;background:none;width:100%;text-align:left}
+.sb-item:hover{background:var(--w07);color:var(--w80)}
+.sb-item.active{background:var(--goldbg);color:var(--gold);border-left:2px solid var(--gold);padding-left:8px}
+.si{font-size:13px;width:16px;text-align:center;flex-shrink:0}
+.sb-num{margin-left:auto;background:var(--red);color:#fff;font-size:8.5px;font-weight:700;padding:2px 6px;border-radius:100px;display:none}
+.sb-foot{padding:12px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px}
+.sb-av{width:28px;height:28px;background:var(--goldbg);border:1px solid var(--goldborder);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;color:var(--gold)}
+.sb-un{font-size:11.5px;font-weight:500;color:var(--white)}.sb-ur{font-size:9.5px;color:var(--w30)}
+.main{margin-left:var(--sw);flex:1;display:flex;flex-direction:column}
+.topbar{height:var(--hh);background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 28px;position:sticky;top:0;z-index:50}
+.pt{font-family:'Cormorant Garamond',serif;font-size:20px;font-weight:300;color:var(--white);letter-spacing:.02em}
+.ps{font-size:10px;color:var(--w30);margin-top:1px;letter-spacing:.05em}
+.tb-right{display:flex;align-items:center;gap:10px}
+.clock{font-family:'JetBrains Mono',monospace;font-size:12.5px;color:var(--w50);background:var(--bg3);border:1px solid var(--border);border-radius:2px;padding:6px 12px}
+.tb-btn{font-size:11px;color:var(--w80);background:var(--bg3);border:1px solid var(--border);border-radius:2px;padding:7px 14px;cursor:pointer;white-space:nowrap;transition:border-color .15s}
+.tb-btn:hover{border-color:var(--w30)}
+.tb-btn.p{background:var(--gold);color:#0A0A0A;border-color:var(--gold);font-weight:600}
+.tb-btn.p:hover{opacity:.9}
+.notif-wrap{position:relative;cursor:pointer}
+.notif-icon{width:32px;height:32px;background:var(--bg3);border:1px solid var(--border);border-radius:2px;display:flex;align-items:center;justify-content:center;font-size:14px}
+.notif-dot{width:7px;height:7px;background:var(--red);border-radius:50%;position:absolute;top:4px;right:4px;border:1.5px solid var(--bg2);display:none}
+.logout-btn{font-size:10.5px;color:var(--w30);cursor:pointer;padding:6px 12px;border:1px solid var(--border);border-radius:2px;background:transparent}
+.content{padding:22px 28px;flex:1}
+/* CARDS */
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:3px;overflow:hidden;margin-bottom:14px}
+.ch{padding:13px 20px;border-bottom:1px solid var(--border2);display:flex;align-items:center;justify-content:space-between}
+.ct{font-size:11px;font-weight:600;color:var(--w80);letter-spacing:.06em;text-transform:uppercase}
+.cs{font-size:10px;color:var(--w30);margin-top:2px}
+.cb{padding:16px}
+.ca{font-size:10px;font-weight:500;color:var(--gold);cursor:pointer;letter-spacing:.03em}
+/* STRIP */
+.strip{display:grid;grid-template-columns:repeat(5,1fr);gap:11px;margin-bottom:14px}
+.sc{background:var(--bg2);border:1px solid var(--border);border-radius:3px;padding:13px 16px;position:relative;overflow:hidden;cursor:pointer;transition:border-color .2s}
+.sc:hover{border-color:var(--w15)}
+.sc::before{content:'';position:absolute;top:0;left:0;width:2px;height:100%;background:var(--border)}
+.sc.g::before{background:var(--sage)}.sc.gd::before{background:var(--gold)}.sc.r::before{background:var(--red)}.sc.b::before{background:#2563EB}
+.sc-lbl{font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--w30)}
+.sc-val{font-family:'Cormorant Garamond',serif;font-size:26px;font-weight:300;color:var(--white);line-height:1;margin-top:5px}
+.sc-sub{font-size:9.5px;color:var(--w30);margin-top:4px}
+/* SITEPLAN */
+.siteplan{display:flex;flex-direction:column;gap:16px}
+.blok-wrap{background:var(--bg3);border:1px solid var(--border);border-radius:3px;overflow:hidden}
+.blok-header{padding:10px 16px;background:var(--goldbg);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.blok-title{font-family:'Cormorant Garamond',serif;font-size:16px;font-weight:300;color:var(--gold);letter-spacing:.08em}
+.blok-sub{font-size:9.5px;color:var(--w30)}
+.blok-units{display:flex;gap:8px;padding:14px 16px;flex-wrap:wrap}
+.unit-card{background:var(--bg2);border:1px solid var(--border);border-radius:3px;padding:14px 12px;min-width:88px;text-align:center;cursor:pointer;transition:all .18s;position:relative}
+.unit-card:hover{border-color:var(--gold);transform:translateY(-2px)}
+.unit-card.available{border-color:rgba(94,128,96,.3)}
+.unit-card.occupied{background:var(--bg4);border-color:var(--goldborder)}
+.unit-card.dirty{border-style:dashed;border-color:var(--w15)}
+.unit-card.checkout{border-color:rgba(196,160,92,.5);background:var(--goldbg)}
+.unit-card.maintenance{border-color:rgba(192,57,43,.3);background:var(--redbg)}
+.unit-num{font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:300;color:var(--white)}
+.unit-card.occupied .unit-num{color:var(--gold)}
+.unit-card.available .unit-num{color:var(--sage)}
+.unit-card.dirty .unit-num{color:var(--w30)}
+.unit-lbl{font-size:9px;color:var(--w30);margin-top:3px;letter-spacing:.05em}
+.unit-card.occupied .unit-lbl{color:var(--gold)}
+.unit-card.available .unit-lbl{color:var(--sage)}
+/* G21 */
+.g21{display:grid;grid-template-columns:2fr 1fr;gap:14px}
+/* QUICK ACTIONS */
+.qa{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.qa-btn{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:14px 8px;border-radius:3px;cursor:pointer;transition:all .15s;border:1px solid var(--border);background:var(--bg3);text-align:center}
+.qa-btn:hover{border-color:var(--gold)}
+.qa-btn.p{background:var(--gold);border-color:var(--gold)}
+.qa-btn.p:hover{opacity:.9}
+.qa-icon{font-size:18px}.qa-lbl{font-size:10.5px;font-weight:500;color:var(--w50);margin-top:5px}
+.qa-btn.p .qa-lbl{color:#0A0A0A;font-weight:600}
+/* TIMELINE */
+.tl-item{display:flex;gap:12px;padding:10px 20px;border-bottom:1px solid var(--border2);align-items:flex-start}
+.tl-item:last-child{border-bottom:none}
+.tl-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:3px}
+.tl-dot.in{background:var(--sage)}.tl-dot.out{background:var(--red)}.tl-dot.book{background:#2563EB}.tl-dot.notif{background:var(--gold)}
+.tl-title{font-size:11.5px;font-weight:500;color:var(--w80)}.tl-sub{font-size:10px;color:var(--w30);margin-top:1px}
+.tl-time{margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--w30);flex-shrink:0;padding-top:2px}
+/* NOTIF */
+.np-item{display:flex;gap:11px;padding:11px 20px;border-bottom:1px solid var(--border2);align-items:flex-start}
+.np-item:last-child{border-bottom:none}
+.np-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;margin-top:4px}
+.np-dot.g{background:var(--sage)}.np-dot.gd{background:var(--gold)}.np-dot.r{background:var(--red)}
+.np-text{font-size:11.5px;color:var(--w50);line-height:1.5}.np-text b{color:var(--white)}
+.np-time{font-size:9.5px;color:var(--w30);margin-top:2px}
+/* CHECKLIST */
+.ck-item{display:flex;align-items:center;gap:11px;padding:10px 20px;border-bottom:1px solid var(--border2);cursor:pointer;transition:background .1s}
+.ck-item:hover{background:var(--bg3)}.ck-item:last-child{border-bottom:none}
+.ck-box{width:17px;height:17px;border-radius:3px;border:1.5px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all .15s;font-size:10px}
+.ck-item.done .ck-box{background:var(--sage);border-color:var(--sage);color:#fff}
+.ck-text{font-size:11.5px;color:var(--w50)}.ck-item.done .ck-text{text-decoration:line-through;color:var(--w30)}
+.ck-room{font-size:9.5px;color:var(--w30);margin-left:auto}
+/* TABLE */
+.tbl{width:100%;border-collapse:collapse;font-size:11.5px}
+.tbl th{text-align:left;padding:8px 14px;font-size:8.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--w30);border-bottom:1px solid var(--border);background:var(--bg3)}
+.tbl td{padding:10px 14px;border-bottom:1px solid var(--border2);vertical-align:middle;color:var(--w80)}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tr:hover td{background:var(--bg3)}
+.bdg{display:inline-flex;font-size:9px;font-weight:600;padding:2px 8px;border-radius:100px;letter-spacing:.04em}
+.bdg.ok{background:var(--sagebg);color:var(--sage)}.bdg.pnd{background:var(--goldbg);color:var(--gold)}.bdg.co{background:var(--redbg);color:var(--red)}
+.tbl-act{font-size:10.5px;font-weight:600;color:var(--gold);cursor:pointer}
+/* MODAL */
+.mo{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s}
+.mo.open{opacity:1;pointer-events:all}
+.mo-box{background:var(--bg2);border:1px solid var(--border);border-radius:3px;width:440px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.6);transform:translateY(16px);transition:transform .2s}
+.mo.open .mo-box{transform:translateY(0)}
+.mo-head{padding:16px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.mo-title{font-family:'Cormorant Garamond',serif;font-size:18px;font-weight:300;color:var(--white)}
+.mo-close{width:26px;height:26px;border-radius:2px;border:1px solid var(--border);background:var(--bg3);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--w50)}
+.mo-body{padding:22px}
+label{display:block;font-size:9.5px;font-weight:600;color:var(--w30);letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px}
+input,select{width:100%;padding:10px 0;border:none;border-bottom:1px solid var(--border);background:transparent;font-size:12.5px;font-family:'Inter',sans-serif;color:var(--white);outline:none;transition:border-color .2s;margin-bottom:22px}
+input::placeholder{color:var(--w30)}
+input:focus,select:focus{border-bottom-color:var(--gold)}
+select option{background:#1C1C1C;color:#fff}
+.fg{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.mo-foot{padding:14px 22px;border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end}
+.btn{padding:9px 18px;border-radius:2px;font-size:11.5px;font-weight:600;cursor:pointer;border:none;font-family:'Inter',sans-serif;transition:all .15s;letter-spacing:.04em}
+.btn-g{background:var(--bg3);color:var(--w50);border:1px solid var(--border)}
+.btn-p{background:var(--gold);color:#0A0A0A}
+.btn-p:hover{opacity:.9}
+/* TOAST */
+.toast-wrap{position:fixed;top:16px;right:16px;z-index:300;display:flex;flex-direction:column;gap:10px}
+.toast{background:var(--bg3);border:1px solid var(--border);border-radius:3px;padding:14px 16px;width:290px;box-shadow:0 8px 32px rgba(0,0,0,.5);display:flex;gap:11px;animation:si .3s ease}
+@keyframes si{from{transform:translateX(310px);opacity:0}to{transform:translateX(0);opacity:1}}
+.toast.g{border-left:2px solid var(--sage)}.toast.gd{border-left:2px solid var(--gold)}.toast.b{border-left:2px solid #2563EB}
+.t-ico{font-size:15px;flex-shrink:0;margin-top:1px}
+.t-title{font-size:11.5px;font-weight:600;color:var(--white)}.t-msg{font-size:10px;color:var(--w50);margin-top:2px;line-height:1.4}
+.t-close{margin-left:auto;cursor:pointer;color:var(--w30);font-size:12px}
+.loading{text-align:center;padding:24px;color:var(--w30);font-size:11px;letter-spacing:.05em}
+</style>
+</head>
+<body>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<!-- MODAL CHECK-IN -->
+<div class="mo" id="mo-ci">
+<div class="mo-box">
+  <div class="mo-head"><div class="mo-title">Check-In Tamu</div><div class="mo-close" onclick="closeMo('mo-ci')">✕</div></div>
+  <div class="mo-body">
+    <label>Nama Tamu</label><input id="ci-nama" placeholder="Nama lengkap">
+    <label>No. KTP / Paspor</label><input id="ci-ktp" placeholder="Nomor identitas">
+    <div class="fg">
+      <div><label>Unit</label><select id="ci-unit"><option value="">Pilih unit</option></select></div>
+      <div><label>Tipe</label><select id="ci-tipe"><option value="harian">Harian</option><option value="bulanan">Bulanan</option></select></div>
+    </div>
+    <div class="fg">
+      <div><label>Check-in</label><input type="date" id="ci-in"></div>
+      <div><label>Check-out</label><input type="date" id="ci-out"></div>
+    </div>
+    <label>Sumber Booking</label>
+    <select id="ci-src"><option value="walk-in">Walk-in</option><option value="airbnb">Airbnb</option><option value="tiket">Tiket.com</option><option value="agoda">Agoda</option><option value="website">Website Loonars</option><option value="whatsapp">WhatsApp</option></select>
+    <label>No. HP Tamu</label><input id="ci-hp" placeholder="+62 8xx-xxxx-xxxx">
+    <label>Tarif (Rp)</label><input type="number" id="ci-tarif" placeholder="500000">
+  </div>
+  <div class="mo-foot"><button class="btn btn-g" onclick="closeMo('mo-ci')">Batal</button><button class="btn btn-p" onclick="doCheckin()">Proses Check-In</button></div>
+</div></div>
+
+<!-- MODAL CHECKOUT -->
+<div class="mo" id="mo-co">
+<div class="mo-box">
+  <div class="mo-head"><div class="mo-title">Check-Out Tamu</div><div class="mo-close" onclick="closeMo('mo-co')">✕</div></div>
+  <div class="mo-body">
+    <label>Pilih Unit</label><select id="co-unit"></select>
+    <label>Kondisi Unit</label>
+    <select id="co-cond"><option>✓ Baik — tidak ada kerusakan</option><option>⚠ Ada kerusakan minor</option><option>🔴 Ada kerusakan signifikan</option></select>
+    <label>Catatan</label><input id="co-note" placeholder="Opsional...">
+  </div>
+  <div class="mo-foot"><button class="btn btn-g" onclick="closeMo('mo-co')">Batal</button><button class="btn btn-p" onclick="doCheckout()">Proses Check-Out</button></div>
+</div></div>
+
+<aside class="sb">
+  <div class="sb-logo">
+    <div class="brand">Loonars Private Living</div>
+    <div class="brand-main">Panel <em>Operasional</em></div>
+  </div>
+  <div class="sb-role">
+    <div class="rl">Login Sebagai</div>
+    <div class="rn" id="sb-rn">—</div>
+    <div class="rs"><span class="dot"></span>Online</div>
+  </div>
+  <nav class="sb-nav">
+    <div class="sb-sec">Operasional</div>
+    <button class="sb-item active" onclick="go('frontdesk')"><span class="si">◈</span>Front Desk</button>
+    <button class="sb-item" onclick="go('siteplan')"><span class="si">◻</span>Siteplan Villa</button>
+    <button class="sb-item" onclick="go('booking')"><span class="si">◎</span>Booking</button>
+    <button class="sb-item" onclick="go('housekeeping')"><span class="si">◉</span>Housekeeping<span class="sb-num" id="hk-num">0</span></button>
+    <div class="sb-sec">Log</div>
+    <button class="sb-item" onclick="go('notif')"><span class="si">◉</span>Notifikasi<span class="sb-num" id="sb-notif-num">0</span></button>
+  </nav>
+  <div class="sb-foot">
+    <div class="sb-av" id="sb-av">—</div>
+    <div><div class="sb-un" id="sb-un">—</div><div class="sb-ur">Resepsionis</div></div>
+    <div class="logout-btn" style="margin-left:auto;padding:4px 8px;font-size:9.5px" onclick="logout()">Keluar</div>
+  </div>
+</aside>
+
+<div class="main">
+  <div class="topbar">
+    <div><div class="pt" id="pt">Front Desk</div><div class="ps" id="ps">—</div></div>
+    <div class="tb-right">
+      <div class="clock" id="clock">--:--:--</div>
+      <div class="tb-btn p" onclick="openMo('mo-ci')">+ Check-In</div>
+      <div class="tb-btn" onclick="openMo('mo-co')">Check-Out</div>
+      <div class="notif-wrap" onclick="go('notif')">
+        <div class="notif-icon">🔔</div>
+        <div class="notif-dot" id="notif-dot"></div>
+      </div>
+      <div class="logout-btn" onclick="logout()">Keluar</div>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- FRONT DESK -->
+    <div id="pg-frontdesk">
+      <div class="strip">
+        <div class="sc g"><div class="sc-lbl">Tersedia</div><div class="sc-val" id="s-av">—</div></div>
+        <div class="sc gd"><div class="sc-lbl">Terisi</div><div class="sc-val" id="s-occ">—</div><div class="sc-sub">dari 13 unit</div></div>
+        <div class="sc b"><div class="sc-lbl">Check-In Hari Ini</div><div class="sc-val" id="s-ci">—</div></div>
+        <div class="sc r"><div class="sc-lbl">Checkout Hari Ini</div><div class="sc-val" id="s-co">—</div></div>
+        <div class="sc r"><div class="sc-lbl">Perlu Dibersihkan</div><div class="sc-val" id="s-dirty">—</div></div>
+      </div>
+
+      <div class="g21">
+        <div>
+          <!-- Siteplan mini di front desk -->
+          <div class="card" style="margin-bottom:14px">
+            <div class="ch"><div class="ct">Peta Unit — 13 Villa</div><div class="ca" onclick="go('siteplan')">Siteplan lengkap →</div></div>
+            <div class="cb">
+              <div style="display:flex;gap:8px;flex-wrap:wrap" id="mini-map"><div class="loading">Memuat...</div></div>
+              <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;font-size:9.5px">
+                <span style="display:flex;align-items:center;gap:5px;color:var(--w30)"><span style="width:8px;height:8px;background:var(--sagebg);border:1px solid rgba(94,128,96,.3);border-radius:1px;display:inline-block"></span>Tersedia</span>
+                <span style="display:flex;align-items:center;gap:5px;color:var(--w30)"><span style="width:8px;height:8px;background:var(--goldbg);border:1px solid var(--goldborder);border-radius:1px;display:inline-block"></span>Terisi</span>
+                <span style="display:flex;align-items:center;gap:5px;color:var(--w30)"><span style="width:8px;height:8px;background:var(--goldbg);border:1px dashed var(--goldborder);border-radius:1px;display:inline-block"></span>Checkout</span>
+              </div>
+            </div>
+          </div>
+          <!-- Notif -->
+          <div class="card">
+            <div class="ch"><div class="ct">Notifikasi Terbaru</div><div class="ca" onclick="go('notif')">Semua →</div></div>
+            <div id="notif-preview"><div class="loading">Memuat...</div></div>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <div class="card">
+            <div class="ch"><div class="ct">Aksi Cepat</div></div>
+            <div class="cb">
+              <div class="qa">
+                <div class="qa-btn p" onclick="openMo('mo-ci')"><span class="qa-icon">🛎️</span><span class="qa-lbl">Check-In</span></div>
+                <div class="qa-btn" onclick="openMo('mo-co')"><span class="qa-icon">👋</span><span class="qa-lbl">Check-Out</span></div>
+                <div class="qa-btn" onclick="go('housekeeping')"><span class="qa-icon">🧹</span><span class="qa-lbl">Housekeeping</span></div>
+                <div class="qa-btn" onclick="go('booking')"><span class="qa-icon">📅</span><span class="qa-lbl">Booking</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="ch"><div class="ct">Agenda Hari Ini</div></div>
+            <div id="agenda"><div class="loading">Memuat...</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SITEPLAN -->
+    <div id="pg-siteplan" style="display:none">
+      <div class="siteplan" id="siteplan-full"><div class="loading">Memuat...</div></div>
+    </div>
+
+    <!-- BOOKING -->
+    <div id="pg-booking" style="display:none">
+      <div class="card">
+        <div class="ch"><div class="ct">Semua Booking</div></div>
+        <div style="overflow-x:auto">
+          <table class="tbl"><thead><tr><th>Tamu</th><th>Unit</th><th>Check-In</th><th>Tipe</th><th>Sumber</th><th>Status</th><th>Aksi</th></tr></thead>
+          <tbody id="booking-table"></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <!-- HOUSEKEEPING -->
+    <div id="pg-housekeeping" style="display:none">
+      <div class="card">
+        <div class="ch"><div><div class="ct">Housekeeping</div><div class="cs">Checklist hari ini</div></div><div style="font-size:11px;color:var(--w30)" id="hk-prog">—</div></div>
+        <div id="hk-list"><div class="loading">Memuat...</div></div>
+      </div>
+    </div>
+
+    <!-- NOTIF -->
+    <div id="pg-notif" style="display:none">
+      <div class="card">
+        <div class="ch"><div class="ct">Notifikasi Real-Time</div><div style="font-size:9.5px;color:var(--w30);display:flex;align-items:center;gap:5px"><span style="width:5px;height:5px;background:var(--sage);border-radius:50%;display:inline-block;animation:p 2s infinite"></span>Terhubung</div></div>
+        <div id="notif-full"><div class="loading">Memuat...</div></div>
+      </div>
+      <div style="background:var(--goldbg);border-left:2px solid var(--gold);border-radius:0 3px 3px 0;padding:12px 18px;font-size:11px;color:var(--w50);line-height:1.6;margin-top:0">
+        Setiap check-in, checkout, dan booking baru otomatis terkirim ke dashboard pemilik masing-masing unit.
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const API   = 'https://svcmybsziaelwwdrnzcv.supabase.co/functions/v1/villa-api';
+const TOKEN = 'loonars-villa-2026';
+const user  = JSON.parse(localStorage.getItem('villa_user') || 'null');
+if (!user) location.href = 'index.html';
+
+document.getElementById('sb-av').textContent = (user?.nama||'?')[0].toUpperCase();
+document.getElementById('sb-un').textContent = user?.nama || '—';
+document.getElementById('sb-rn').textContent = user?.nama || '—';
+
+const today     = new Date().toISOString().split('T')[0];
+const todayFull = new Date().toLocaleDateString('id-ID',{weekday:'long',day:'2-digit',month:'long',year:'numeric'});
+
+let allUnits = [];
+
+function clock() {
+  const n=new Date(); const p=v=>String(v).padStart(2,'0');
+  document.getElementById('clock').textContent=`${p(n.getHours())}:${p(n.getMinutes())}:${p(n.getSeconds())}`;
+}
+setInterval(clock,1000); clock();
+
+async function api(path,opts={}) {
+  const r=await fetch(API+path,{headers:{'x-villa-token':TOKEN,'Content-Type':'application/json'},...opts});
+  return r.json();
+}
+
+function toast(icon,title,msg,type='gd') {
+  const c=document.getElementById('toastWrap');
+  const t=document.createElement('div'); t.className=`toast ${type}`;
+  t.innerHTML=`<div class="t-ico">${icon}</div><div><div class="t-title">${title}</div><div class="t-msg">${msg}</div></div><div class="t-close" onclick="this.parentElement.remove()">✕</div>`;
+  c.appendChild(t); setTimeout(()=>t.remove(),5000);
+}
+
+function logout(){localStorage.clear();location.href='index.html';}
+
+function openMo(id){
+  if(id==='mo-ci'){
+    const avail=allUnits.filter(u=>u.status==='available');
+    const el=document.getElementById('ci-unit');
+    el.innerHTML='<option value="">Pilih unit</option>'+avail.map(u=>`<option value="${u.id}" data-nomor="${u.nomor}">Unit ${u.nomor}</option>`).join('');
+    document.getElementById('ci-in').value=today;
+    document.getElementById('ci-out').value=today;
+  }
+  if(id==='mo-co'){
+    const occupied=allUnits.filter(u=>u.status==='occupied'||u.status==='checkout');
+    const el=document.getElementById('co-unit');
+    el.innerHTML=occupied.map(u=>`<option value="${u.id}" data-nomor="${u.nomor}">Unit ${u.nomor} (${u.status})</option>`).join('')||'<option>Tidak ada unit terisi</option>';
+  }
+  document.getElementById(id).classList.add('open');
+}
+function closeMo(id){document.getElementById(id).classList.remove('open');}
+document.querySelectorAll('.mo').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open');}));
+
+async function doCheckin(){
+  const uSel=document.getElementById('ci-unit');
+  const unit_id=uSel.value;
+  const unit_nomor=uSel.options[uSel.selectedIndex]?.dataset?.nomor||'?';
+  const nama=document.getElementById('ci-nama').value.trim();
+  if(!unit_id||!nama){alert('Isi nama tamu dan pilih unit');return;}
+  const tipe=document.getElementById('ci-tipe').value;
+  const tarif=Number(document.getElementById('ci-tarif').value)||(tipe==='harian'?500000:8000000);
+  const bk=await api('/bookings',{method:'POST',body:JSON.stringify({unit_id,unit_nomor,guest_nama:nama,tipe,sumber:document.getElementById('ci-src').value,tgl_checkin:document.getElementById('ci-in').value,tgl_checkout:document.getElementById('ci-out').value,tarif,total_bayar:tarif,guest_hp:document.getElementById('ci-hp').value,guest_ktp:document.getElementById('ci-ktp').value})});
+  await api('/checkin',{method:'POST',body:JSON.stringify({booking_id:bk.id,unit_id,unit_nomor,guest_nama:nama,tipe,total_bayar:tarif,checkin_by:user?.nama||'Staff'})});
+  closeMo('mo-ci');
+  toast('🛎️','Check-In Berhasil',`${nama} — Unit ${unit_nomor} sudah check-in.`,'g');
+  setTimeout(()=>toast('📱','Pemilik Unit Diberitahu',`Notifikasi terkirim ke dashboard pemilik Unit ${unit_nomor}.`,'gd'),1200);
+  loadFrontDesk();
+}
+
+async function doCheckout(){
+  const uSel=document.getElementById('co-unit');
+  const unit_id=uSel.value;
+  const unit_nomor=uSel.options[uSel.selectedIndex]?.dataset?.nomor||uSel.options[uSel.selectedIndex]?.text?.match(/Unit (\w+)/)?.[1]||'?';
+  const bks=await api(`/bookings?unit_id=${unit_id}&status=checkin`);
+  const bk=(bks||[])[0];
+  if(!bk){toast('⚠','Error','Tidak ada booking aktif','gd');return;}
+  await api('/checkout',{method:'POST',body:JSON.stringify({booking_id:bk.id,unit_id,unit_nomor,guest_nama:bk.guest_nama,kondisi:document.getElementById('co-cond').value,checkout_by:user?.nama||'Staff'})});
+  closeMo('mo-co');
+  toast('👋','Checkout Diproses',`Unit ${unit_nomor} checkout. Housekeeping dijadwalkan.`,'gd');
+  setTimeout(()=>toast('📱','Pemilik Unit Diberitahu',`Checkout Unit ${unit_nomor} tercatat.`,'g'),1000);
+  loadFrontDesk();
+}
+
+const pages={
+  frontdesk:   {title:'Front Desk',     sub:todayFull},
+  siteplan:    {title:'Siteplan Villa', sub:'13 unit · Blok A, B, C'},
+  booking:     {title:'Daftar Booking', sub:'Semua unit'},
+  housekeeping:{title:'Housekeeping',   sub:'Checklist hari ini'},
+  notif:       {title:'Notifikasi',     sub:'Real-time'},
+};
+
+function go(name){
+  document.querySelectorAll('[id^="pg-"]').forEach(p=>p.style.display='none');
+  document.getElementById('pg-'+name).style.display='';
+  document.querySelectorAll('.sb-item').forEach(b=>b.classList.toggle('active',b.getAttribute('onclick')===`go('${name}')`));
+  const p=pages[name]||{title:name,sub:''};
+  document.getElementById('pt').textContent=p.title;
+  document.getElementById('ps').textContent=p.sub;
+  loadPage(name); window.scrollTo(0,0);
+}
+
+async function loadPage(name){
+  if(name==='frontdesk')    await loadFrontDesk();
+  if(name==='siteplan')     await loadSiteplan();
+  if(name==='booking')      await loadBooking();
+  if(name==='housekeeping') await loadHousekeeping();
+  if(name==='notif')        await loadNotif();
+}
+
+const statusCfg={
+  available:{cls:'available',lbl:'Tersedia'},
+  occupied: {cls:'occupied', lbl:'Terisi'},
+  checkout: {cls:'checkout', lbl:'Checkout'},
+  dirty:    {cls:'dirty',    lbl:'Kotor'},
+  maintenance:{cls:'maintenance',lbl:'Maintenance'},
+};
+
+async function loadFrontDesk(){
+  const [sum,units,notifs]=await Promise.all([
+    api('/summary'),
+    api('/units'),
+    api('/notifications?role=all'),
+  ]);
+  allUnits=units||[];
+  document.getElementById('s-av').textContent=sum.available??'—';
+  document.getElementById('s-occ').textContent=sum.occupied??'—';
+  document.getElementById('s-ci').textContent=sum.checkin_today??'—';
+  document.getElementById('s-co').textContent=sum.checkout_today??'—';
+  document.getElementById('s-dirty').textContent=sum.dirty??'—';
+
+  const hkN=sum.housekeeping_pending||0;
+  ['hk-num','sb-notif-num'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(id==='hk-num'){el.style.display=hkN>0?'inline':'none';el.textContent=hkN;}
+  });
+
+  // Mini map
+  document.getElementById('mini-map').innerHTML=allUnits.map(u=>{
+    const s=statusCfg[u.status]||statusCfg.available;
+    return `<div style="background:${u.status==='occupied'?'var(--goldbg)':u.status==='checkout'?'rgba(196,160,92,.07)':'var(--bg3)'};border:1px solid ${u.status==='occupied'?'var(--goldborder)':u.status==='checkout'?'rgba(196,160,92,.3) dashed 1px':'var(--border)'};border-radius:2px;padding:8px 10px;min-width:52px;text-align:center;cursor:pointer;transition:border-color .15s" onclick="go('siteplan')" title="${s.lbl}">
+      <div style="font-family:'Cormorant Garamond',serif;font-size:16px;font-weight:300;color:${u.status==='occupied'?'var(--gold)':u.status==='available'?'var(--sage)':'var(--w30)'}">${u.nomor}</div>
+      <div style="font-size:8.5px;color:var(--w30);margin-top:2px">${s.lbl}</div>
+    </div>`;
+  }).join('');
+
+  // Agenda
+  const agenda=[];
+  const coToday=allUnits.filter(u=>u.status==='checkout');
+  coToday.forEach(u=>agenda.push({type:'out',title:`Checkout — Unit ${u.nomor}`,sub:'Hari ini',time:'12:00'}));
+  if(sum.checkin_today>0) agenda.push({type:'book',title:`${sum.checkin_today} check-in terjadwal`,sub:'Siapkan unit',time:'14:00'});
+  if(sum.dirty>0) agenda.push({type:'notif',title:`${sum.dirty} unit perlu dibersihkan`,sub:'Housekeeping',time:'Segera'});
+  document.getElementById('agenda').innerHTML=agenda.length
+    ?agenda.map(a=>`<div class="tl-item"><div class="tl-dot ${a.type}"></div><div style="flex:1"><div class="tl-title">${a.title}</div><div class="tl-sub">${a.sub}</div></div><div class="tl-time">${a.time}</div></div>`).join('')
+    :'<div class="loading">Tidak ada agenda khusus</div>';
+
+  const dotMap={checkin:'g',checkout:'gd',booking:'b',info:'gd'};
+  document.getElementById('notif-preview').innerHTML=(notifs||[]).slice(0,4).map(n=>`
+    <div class="np-item"><div class="np-dot ${dotMap[n.tipe]||'gd'}"></div>
+    <div><div class="np-text"><b>${n.judul}</b> — ${n.pesan}</div><div class="np-time">${new Date(n.created_at).toLocaleDateString('id-ID',{day:'2-digit',month:'short'})}</div></div></div>`
+  ).join('')||'<div class="loading">Tidak ada notifikasi</div>';
+}
+
+async function loadSiteplan(){
+  const units=await api('/units');
+  allUnits=units||[];
+  const bloks=['A','B','C'];
+  const counts={A:5,B:4,C:4};
+  document.getElementById('siteplan-full').innerHTML=bloks.map(blok=>{
+    const blokUnits=allUnits.filter(u=>u.blok===blok);
+    const terisi=blokUnits.filter(u=>u.status==='occupied').length;
+    return `<div class="blok-wrap">
+      <div class="blok-header">
+        <div class="blok-title">Blok ${blok}</div>
+        <div class="blok-sub">${counts[blok]} unit · ${terisi} terisi</div>
+      </div>
+      <div class="blok-units">
+        ${blokUnits.map(u=>{
+          const s=statusCfg[u.status]||statusCfg.available;
+          return `<div class="unit-card ${s.cls}" onclick="toast('◈','Unit ${u.nomor}','${s.lbl} · ${u.owner_nama||'Belum ada pemilik'}','gd')">
+            <div class="unit-num">${u.nomor}</div>
+            <div class="unit-lbl">${s.lbl}</div>
+            ${u.owner_nama?`<div style="font-size:8.5px;color:var(--w30);margin-top:3px">${u.owner_nama}</div>`:''}
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function loadBooking(){
+  const bks=await api('/bookings');
+  const statusBdg={terjadwal:'<span class="bdg pnd">Terjadwal</span>',checkin:'<span class="bdg ok">Check-In</span>',checkout:'<span class="bdg co">Checkout</span>'};
+  document.getElementById('booking-table').innerHTML=(bks||[]).length===0
+    ?'<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--w30)">Belum ada booking</td></tr>'
+    :(bks||[]).map(b=>`<tr>
+      <td style="font-weight:500">${b.guest_nama}</td>
+      <td style="color:var(--gold)">${b.unit_nomor}</td>
+      <td>${new Date(b.tgl_checkin).toLocaleDateString('id-ID',{day:'2-digit',month:'short'})}</td>
+      <td><span style="font-size:9.5px;color:var(--w30)">${b.tipe}</span></td>
+      <td><span style="font-size:9.5px;color:var(--w30)">${b.sumber}</span></td>
+      <td>${statusBdg[b.status]||b.status}</td>
+      <td>${b.status==='terjadwal'?`<span class="tbl-act" onclick="openMo('mo-ci')">Check-In →</span>`:'—'}</td>
+    </tr>`).join('');
+}
+
+async function loadHousekeeping(){
+  const tasks=await api(`/housekeeping?tgl=${today}`);
+  const list=tasks||[];
+  const done=list.filter(t=>t.status==='done').length;
+  document.getElementById('hk-prog').textContent=`${done} / ${list.length} selesai`;
+  document.getElementById('hk-list').innerHTML=list.length===0
+    ?'<div class="loading">Tidak ada tugas hari ini</div>'
+    :list.map(t=>`<div class="ck-item ${t.status==='done'?'done':''}" onclick="toggleHk('${t.id}','${t.unit_id||''}',this)">
+      <div class="ck-box">${t.status==='done'?'✓':''}</div>
+      <div class="ck-text">${t.tugas}</div>
+      <div class="ck-room">${t.unit_nomor||'Area umum'}</div>
+    </div>`).join('');
+}
+
+async function toggleHk(id,unit_id,el){
+  if(el.classList.contains('done'))return;
+  el.classList.add('done'); el.querySelector('.ck-box').textContent='✓';
+  await api('/housekeeping/done',{method:'PATCH',body:JSON.stringify({task_id:id,unit_id:unit_id||null,done_by:user?.nama||'Staff'})});
+  toast('🧹','Selesai',`${el.querySelector('.ck-room').textContent} — bersih.`,'g');
+  const items=document.querySelectorAll('.ck-item');
+  const doneC=document.querySelectorAll('.ck-item.done').length;
+  document.getElementById('hk-prog').textContent=`${doneC} / ${items.length} selesai`;
+}
+
+async function loadNotif(){
+  const data=await api('/notifications?role=all');
+  const dotMap={checkin:'g',checkout:'gd',booking:'b',info:'gd'};
+  document.getElementById('notif-full').innerHTML=(data||[]).length===0
+    ?'<div class="loading">Tidak ada notifikasi</div>'
+    :(data||[]).map(n=>`<div class="np-item">
+      <div class="np-dot ${dotMap[n.tipe]||'gd'}"></div>
+      <div><div class="np-text"><b>${n.judul}</b> — ${n.pesan}</div><div class="np-time">${new Date(n.created_at).toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'})}</div></div>
+    </div>`).join('');
+  await fetch(API+'/notifications/read',{method:'PATCH',headers:{'x-villa-token':TOKEN,'Content-Type':'application/json'},body:JSON.stringify({role:'receptionist'})});
+  document.getElementById('notif-dot').style.display='none';
+  document.getElementById('sb-notif-num').style.display='none';
+}
+
+async function pollNotif(){
+  try{
+    const data=await api('/notifications?role=all');
+    const unread=(data||[]).filter(n=>!n.is_read_staff);
+    const dot=document.getElementById('notif-dot');
+    const num=document.getElementById('sb-notif-num');
+    if(unread.length>0){
+      dot.style.display='block';num.style.display='inline';num.textContent=unread.length;
+      if(unread[0]&&!sessionStorage.getItem('n_'+unread[0].id)){
+        sessionStorage.setItem('n_'+unread[0].id,'1');
+        toast('🔔',unread[0].judul,unread[0].pesan,'gd');
+      }
+    }else{dot.style.display='none';num.style.display='none';}
+  }catch(e){}
+}
+
+loadFrontDesk(); pollNotif(); setInterval(pollNotif,30000);
+</script>
+</body>
+</html>
