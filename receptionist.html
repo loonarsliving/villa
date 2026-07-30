@@ -326,9 +326,9 @@ select option{background:#1C1C1C;color:#fff}
 
 <script>
 const API   = 'https://svcmybsziaelwwdrnzcv.supabase.co/functions/v1/villa-api';
-const TOKEN = 'loonars-villa-2026';
+const TOKEN = localStorage.getItem('villa_token');
 const user  = JSON.parse(localStorage.getItem('villa_user') || 'null');
-if (!user) location.href = 'index.html';
+if (!user || !TOKEN) location.href = 'index.html';
 
 document.getElementById('sb-av').textContent = (user?.nama||'?')[0].toUpperCase();
 document.getElementById('sb-un').textContent = user?.nama || '—';
@@ -347,6 +347,7 @@ setInterval(clock,1000); clock();
 
 async function api(path,opts={}) {
   const r=await fetch(API+path,{headers:{'x-villa-token':TOKEN,'Content-Type':'application/json'},...opts});
+  if (r.status === 401) { logout(); return {}; }
   return r.json();
 }
 
@@ -385,11 +386,12 @@ async function doCheckin(){
   if(!unit_id||!nama){alert('Isi nama tamu dan pilih unit');return;}
   const tipe=document.getElementById('ci-tipe').value;
   const tarif=Number(document.getElementById('ci-tarif').value)||(tipe==='harian'?500000:8000000);
-  const bk=await api('/bookings',{method:'POST',body:JSON.stringify({unit_id,unit_nomor,guest_nama:nama,tipe,sumber:document.getElementById('ci-src').value,tgl_checkin:document.getElementById('ci-in').value,tgl_checkout:document.getElementById('ci-out').value,tarif,total_bayar:tarif,guest_hp:document.getElementById('ci-hp').value,guest_ktp:document.getElementById('ci-ktp').value})});
-  await api('/checkin',{method:'POST',body:JSON.stringify({booking_id:bk.id,unit_id,unit_nomor,guest_nama:nama,tipe,total_bayar:tarif,checkin_by:user?.nama||'Staff'})});
+  const guestHp=document.getElementById('ci-hp').value;
+  const bk=await api('/bookings',{method:'POST',body:JSON.stringify({unit_id,unit_nomor,guest_nama:nama,tipe,sumber:document.getElementById('ci-src').value,tgl_checkin:document.getElementById('ci-in').value,tgl_checkout:document.getElementById('ci-out').value,tarif,total_bayar:tarif,guest_hp:guestHp,guest_ktp:document.getElementById('ci-ktp').value})});
+  const ci=await api('/checkin',{method:'POST',body:JSON.stringify({booking_id:bk.id,unit_id,unit_nomor,guest_nama:nama,tipe,total_bayar:tarif,guest_hp:guestHp,checkin_by:user?.nama||'Staff'})});
   closeMo('mo-ci');
-  toast('🛎️','Check-In Berhasil',`${nama} — Unit ${unit_nomor} sudah check-in.`,'g');
-  setTimeout(()=>toast('📱','Pemilik Unit Diberitahu',`Notifikasi terkirim ke dashboard pemilik Unit ${unit_nomor}.`,'gd'),1200);
+  toast('🛎️','Check-In Berhasil',`${nama} — Unit ${unit_nomor} sudah check-in. PIN kamar: ${ci.pin_kode||'-'}`,'g');
+  setTimeout(()=>toast('📱','WhatsApp Terkirim',`Konfirmasi & PIN kamar dikirim ke tamu (jika WhaCenter aktif) dan notifikasi masuk ke dashboard pemilik Unit ${unit_nomor}.`,'gd'),1200);
   loadFrontDesk();
 }
 

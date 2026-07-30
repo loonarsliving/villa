@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Super Admin — Loonars Private Living</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0C0C0C;--bg2:#141414;--bg3:#1C1C1C;--bg4:#242424;--white:#fff;--w80:rgba(255,255,255,.80);--w50:rgba(255,255,255,.50);--w30:rgba(255,255,255,.30);--w15:rgba(255,255,255,.15);--w07:rgba(255,255,255,.07);--gold:#C4A05C;--goldbg:rgba(196,160,92,.1);--goldborder:rgba(196,160,92,.25);--sage:#5E8060;--sagebg:rgba(94,128,96,.15);--sageborder:rgba(94,128,96,.3);--red:#C0392B;--redbg:rgba(192,57,43,.12);--border:rgba(255,255,255,.08);--border2:rgba(255,255,255,.05);--sw:220px;--hh:56px}
+html{font-size:14px}body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--white);display:flex;min-height:100vh}
+.sb{width:var(--sw);min-width:var(--sw);height:100vh;background:var(--bg2);border-right:1px solid var(--border);position:fixed;top:0;left:0;display:flex;flex-direction:column;z-index:100}
+.sb-logo{padding:22px 20px 18px;border-bottom:1px solid var(--border)}
+.brand{font-size:9px;color:var(--gold);letter-spacing:.25em;text-transform:uppercase;font-weight:500}
+.brand-main{font-family:'Cormorant Garamond',serif;font-size:17px;font-weight:300;color:var(--white);line-height:1.2;margin-top:4px}
+.brand-main em{font-style:italic;color:var(--gold)}
+.sb-role{margin:12px 12px 0;background:var(--bg3);border:1px solid var(--border);border-radius:2px;padding:10px 13px}
+.rl{font-size:8.5px;color:var(--w30);letter-spacing:.14em;text-transform:uppercase;margin-bottom:3px}
+.rn{font-size:12px;font-weight:500;color:var(--white)}.rs{font-size:9.5px;color:var(--gold);margin-top:2px}
+.sb-nav{flex:1;padding:14px 10px;overflow-y:auto}
+.sb-sec{font-size:8.5px;font-weight:600;color:var(--w30);letter-spacing:.18em;text-transform:uppercase;padding:0 8px;margin:12px 0 4px}
+.sb-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:2px;font-size:12px;color:var(--w50);cursor:pointer;transition:all .15s;margin-bottom:1px;border:none;background:none;width:100%;text-align:left}
+.sb-item:hover{background:var(--w07);color:var(--w80)}
+.sb-item.active{background:var(--goldbg);color:var(--gold);border-left:2px solid var(--gold);padding-left:8px}
+.si{font-size:13px;width:16px;text-align:center;flex-shrink:0}
+.sb-num{margin-left:auto;background:var(--red);color:#fff;font-size:8.5px;font-weight:700;padding:2px 6px;border-radius:100px;display:none}
+.sb-foot{padding:12px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px}
+.sb-av{width:28px;height:28px;background:var(--goldbg);border:1px solid var(--goldborder);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;color:var(--gold)}
+.sb-un{font-size:11.5px;font-weight:500;color:var(--white)}.sb-ur{font-size:9.5px;color:var(--w30)}
+.main{margin-left:var(--sw);flex:1;display:flex;flex-direction:column}
+.topbar{height:var(--hh);background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 28px;position:sticky;top:0;z-index:50}
+.pt{font-family:'Cormorant Garamond',serif;font-size:20px;font-weight:300;color:var(--white);letter-spacing:.02em}
+.ps{font-size:10px;color:var(--w30);margin-top:1px;letter-spacing:.05em}
+.logout-btn{font-size:10.5px;color:var(--w30);cursor:pointer;padding:6px 12px;border:1px solid var(--border);border-radius:2px;background:transparent}
+.content{padding:22px 28px;flex:1}
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:3px;overflow:hidden;margin-bottom:14px}
+.ch{padding:13px 20px;border-bottom:1px solid var(--border2);display:flex;align-items:center;justify-content:space-between}
+.ct{font-size:11px;font-weight:600;color:var(--w80);letter-spacing:.06em;text-transform:uppercase}
+.cs{font-size:10px;color:var(--w30);margin-top:2px}
+.cb{padding:20px}
+.strip{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
+.sc{background:var(--bg2);border:1px solid var(--border);border-radius:3px;padding:16px 18px;position:relative;overflow:hidden}
+.sc::before{content:'';position:absolute;top:0;left:0;width:2px;height:100%;background:var(--border)}
+.sc.g::before{background:var(--sage)}.sc.gd::before{background:var(--gold)}.sc.r::before{background:var(--red)}
+.sc-lbl{font-size:9px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--w30)}
+.sc-val{font-family:'Cormorant Garamond',serif;font-size:28px;font-weight:300;color:var(--white);line-height:1;margin-top:6px}
+.sc-sub{font-size:10px;color:var(--w30);margin-top:5px}
+.tbl{width:100%;border-collapse:collapse;font-size:11.5px}
+.tbl th{text-align:left;padding:8px 14px;font-size:8.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--w30);border-bottom:1px solid var(--border);background:var(--bg3)}
+.tbl td{padding:10px 14px;border-bottom:1px solid var(--border2);vertical-align:middle;color:var(--w80)}
+.tbl tr:last-child td{border-bottom:none}
+.bdg{display:inline-flex;font-size:9px;font-weight:600;padding:2px 8px;border-radius:100px;letter-spacing:.04em}
+.bdg.ok{background:var(--sagebg);color:var(--sage)}.bdg.pnd{background:var(--goldbg);color:var(--gold)}.bdg.co{background:var(--redbg);color:var(--red)}
+label{display:block;font-size:9.5px;font-weight:600;color:var(--w30);letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px}
+input,select{width:100%;padding:10px 0;border:none;border-bottom:1px solid var(--border);background:transparent;font-size:12.5px;font-family:'Inter',sans-serif;color:var(--white);outline:none;transition:border-color .2s;margin-bottom:18px}
+input:focus,select:focus{border-bottom-color:var(--gold)}
+select option{background:#1C1C1C;color:#fff}
+.fg{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.btn{padding:9px 18px;border-radius:2px;font-size:11.5px;font-weight:600;cursor:pointer;border:none;font-family:'Inter',sans-serif;transition:all .15s;letter-spacing:.04em}
+.btn-g{background:var(--bg3);color:var(--w50);border:1px solid var(--border)}
+.btn-p{background:var(--gold);color:#0A0A0A}
+.btn-p:hover{opacity:.9}
+.toggle-row{display:flex;align-items:center;gap:10px;margin-bottom:18px}
+.toggle-row input{width:auto;margin:0}
+.pill{display:inline-flex;font-size:9px;font-weight:600;padding:3px 9px;border-radius:100px;letter-spacing:.05em}
+.pill.on{background:var(--sagebg);color:var(--sage)}.pill.off{background:var(--redbg);color:var(--red)}
+.toast-wrap{position:fixed;top:16px;right:16px;z-index:300;display:flex;flex-direction:column;gap:10px}
+.toast{background:var(--bg3);border:1px solid var(--border);border-radius:3px;padding:14px 16px;width:300px;box-shadow:0 8px 32px rgba(0,0,0,.5);display:flex;gap:11px;animation:si .3s ease}
+@keyframes si{from{transform:translateX(320px);opacity:0}to{transform:translateX(0);opacity:1}}
+.toast.g{border-left:2px solid var(--sage)}.toast.gd{border-left:2px solid var(--gold)}.toast.r{border-left:2px solid var(--red)}
+.t-ico{font-size:16px;flex-shrink:0;margin-top:1px}
+.t-title{font-size:12px;font-weight:600;color:var(--white)}.t-msg{font-size:10.5px;color:var(--w50);margin-top:2px;line-height:1.4}
+.t-close{margin-left:auto;cursor:pointer;color:var(--w30);font-size:12px}
+.loading{text-align:center;padding:24px;color:var(--w30);font-size:11px;letter-spacing:.05em}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.mono{font-family:'JetBrains Mono',monospace}
+</style>
+</head>
+<body>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<aside class="sb">
+  <div class="sb-logo">
+    <div class="brand">Loonars Private Living</div>
+    <div class="brand-main">Super <em>Admin</em></div>
+  </div>
+  <div class="sb-role">
+    <div class="rl">Login Sebagai</div>
+    <div class="rn" id="sb-rn">—</div>
+    <div class="rs">● Admin Penuh</div>
+  </div>
+  <nav class="sb-nav">
+    <div class="sb-sec">Ikhtisar</div>
+    <button class="sb-item active" onclick="go('overview')"><span class="si">◈</span>Overview</button>
+    <div class="sb-sec">Manajemen</div>
+    <button class="sb-item" onclick="go('users')"><span class="si">◎</span>Kelola User</button>
+    <div class="sb-sec">Integrasi</div>
+    <button class="sb-item" onclick="go('cloudbeds')"><span class="si">◻</span>Cloudbeds (OTA)</button>
+    <button class="sb-item" onclick="go('whacenter')"><span class="si">◻</span>WhaCenter (WA)</button>
+    <div class="sb-sec">Log</div>
+    <button class="sb-item" onclick="go('cblog')"><span class="si">◉</span>Log Booking OTA</button>
+    <button class="sb-item" onclick="go('walog')"><span class="si">◉</span>Log WhatsApp</button>
+  </nav>
+  <div class="sb-foot">
+    <div class="sb-av" id="sb-av">—</div>
+    <div><div class="sb-un" id="sb-un">—</div><div class="sb-ur">Super Admin</div></div>
+    <div class="logout-btn" style="margin-left:auto;padding:4px 8px;font-size:9.5px" onclick="logout()">Keluar</div>
+  </div>
+</aside>
+
+<div class="main">
+  <div class="topbar">
+    <div><div class="pt" id="pt">Overview</div><div class="ps" id="ps">—</div></div>
+    <div class="logout-btn" onclick="logout()">Keluar</div>
+  </div>
+
+  <div class="content">
+
+    <!-- OVERVIEW -->
+    <div id="pg-overview">
+      <div class="strip">
+        <div class="sc g"><div class="sc-lbl">Unit Terisi</div><div class="sc-val" id="ov-occ">—</div><div class="sc-sub">dari total unit</div></div>
+        <div class="sc gd"><div class="sc-lbl">Revenue Bulan Ini</div><div class="sc-val" id="ov-rev">—</div><div class="sc-sub">Semua unit</div></div>
+        <div class="sc r"><div class="sc-lbl">Booking OTA Belum Dipetakan</div><div class="sc-val" id="ov-cb">—</div><div class="sc-sub">Perlu mapping room</div></div>
+        <div class="sc r"><div class="sc-lbl">WA Gagal Terkirim</div><div class="sc-val" id="ov-wa">—</div><div class="sc-sub">Cek log WhatsApp</div></div>
+      </div>
+      <div class="card">
+        <div class="ch"><div class="ct">Status Integrasi</div></div>
+        <div class="cb" id="ov-integrasi"><div class="loading">Memuat...</div></div>
+      </div>
+    </div>
+
+    <!-- USERS -->
+    <div id="pg-users" style="display:none">
+      <div class="g2">
+        <div class="card">
+          <div class="ch"><div class="ct">Tambah User</div></div>
+          <div class="cb">
+            <label>Nama</label><input id="u-nama" placeholder="Nama lengkap">
+            <label>Email</label><input id="u-email" type="email" placeholder="email@domain.id">
+            <label>Password</label><input id="u-pass" type="password" placeholder="Min. 8 karakter">
+            <div class="fg">
+              <div><label>Role</label><select id="u-role" onchange="toggleUnitField()"><option value="owner">Pemilik</option><option value="receptionist">Resepsionis</option><option value="admin">Super Admin</option></select></div>
+              <div id="u-unit-wrap"><label>Unit (untuk Pemilik)</label><select id="u-unit"><option value="">Pilih unit</option></select></div>
+            </div>
+            <label>No. HP (opsional)</label><input id="u-hp" placeholder="+62 8xx-xxxx-xxxx">
+            <button class="btn btn-p" style="width:100%" onclick="createUser()">Buat User</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="ch"><div class="ct">Semua User</div></div>
+          <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Nama</th><th>Role</th><th>Unit</th><th>Status</th><th>Aksi</th></tr></thead><tbody id="user-table"><tr><td colspan="5" class="loading">Memuat...</td></tr></tbody></table></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CLOUDBEDS -->
+    <div id="pg-cloudbeds" style="display:none">
+      <div class="g2">
+        <div class="card">
+          <div class="ch"><div class="ct">Kredensial Cloudbeds</div><div class="cs">Simpan API key & webhook secret</div></div>
+          <div class="cb">
+            <div class="toggle-row"><input type="checkbox" id="cb-enabled"><span style="font-size:11.5px;color:var(--w50)">Aktifkan sinkronisasi Cloudbeds</span></div>
+            <label>API Key</label><input id="cb-apikey" placeholder="Cloudbeds API key">
+            <label>Property ID</label><input id="cb-property" placeholder="Cloudbeds property ID">
+            <label>Webhook Secret</label><input id="cb-secret" placeholder="Secret untuk validasi webhook masuk">
+            <button class="btn btn-p" style="width:100%" onclick="saveSettings('cloudbeds')">Simpan</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="ch"><div class="ct">Cara Sambung</div></div>
+          <div class="cb" style="font-size:11.5px;color:var(--w50);line-height:1.7">
+            1. Isi API Key & Property ID dari akun Cloudbeds Anda, lalu Simpan.<br>
+            2. Buat Webhook Secret bebas (contoh: string acak panjang) dan simpan juga di sini.<br>
+            3. Di dashboard Cloudbeds, daftarkan webhook URL berikut untuk event reservasi baru:<br>
+            <div class="mono" style="background:var(--bg3);padding:10px;border-radius:2px;margin:8px 0;word-break:break-all;color:var(--gold)">https://svcmybsziaelwwdrnzcv.supabase.co/functions/v1/villa-api/webhooks/cloudbeds?secret=<span id="cb-secret-preview">[webhook secret]</span></div>
+            4. Petakan setiap tipe kamar Cloudbeds ke unit villa di bawah ini.
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="ch"><div><div class="ct">Mapping Room Cloudbeds → Unit Villa</div></div></div>
+        <div class="cb">
+          <div class="fg" style="margin-bottom:0">
+            <div><label>Cloudbeds Room ID</label><input id="map-roomid" placeholder="ID room di Cloudbeds"></div>
+            <div><label>Nama Room Cloudbeds</label><input id="map-roomname" placeholder="mis. Villa A1"></div>
+          </div>
+          <label>Unit Villa</label><select id="map-unit"><option value="">Pilih unit</option></select>
+          <button class="btn btn-p" onclick="addMapping()">Tambah Mapping</button>
+        </div>
+        <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Cloudbeds Room</th><th>Room ID</th><th>Unit Villa</th><th>Aksi</th></tr></thead><tbody id="mapping-table"><tr><td colspan="4" class="loading">Memuat...</td></tr></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- WHACENTER -->
+    <div id="pg-whacenter" style="display:none">
+      <div class="card">
+        <div class="ch"><div class="ct">Kredensial WhaCenter</div><div class="cs">Dipakai untuk konfirmasi booking & kirim PIN kamar otomatis</div></div>
+        <div class="cb">
+          <div class="toggle-row"><input type="checkbox" id="wa-enabled"><span style="font-size:11.5px;color:var(--w50)">Aktifkan pengiriman WhatsApp otomatis</span></div>
+          <label>API Key</label><input id="wa-apikey" placeholder="WhaCenter API key">
+          <label>Device ID</label><input id="wa-device" placeholder="WhaCenter device ID">
+          <label>Base URL API</label><input id="wa-baseurl" placeholder="https://api.whacenter.com/api/send">
+          <button class="btn btn-p" style="width:100%" onclick="saveSettings('whacenter')">Simpan</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="ch"><div class="ct">Kirim WA Manual (Tes)</div></div>
+        <div class="cb">
+          <div class="fg">
+            <div><label>No. HP Tujuan</label><input id="wa-test-phone" placeholder="08xxxxxxxxxx"></div>
+            <div><label>Pesan</label><input id="wa-test-msg" placeholder="Isi pesan..."></div>
+          </div>
+          <button class="btn btn-p" onclick="sendTestWa()">Kirim</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- CLOUDBEDS LOG -->
+    <div id="pg-cblog" style="display:none">
+      <div class="card">
+        <div class="ch"><div class="ct">Log Event Cloudbeds Masuk</div></div>
+        <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Waktu</th><th>Reservation ID</th><th>Event</th><th>Status</th></tr></thead><tbody id="cblog-table"><tr><td colspan="4" class="loading">Memuat...</td></tr></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- WA LOG -->
+    <div id="pg-walog" style="display:none">
+      <div class="card">
+        <div class="ch"><div class="ct">Log Pengiriman WhatsApp</div></div>
+        <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Waktu</th><th>No. HP</th><th>Template</th><th>Status</th></tr></thead><tbody id="walog-table"><tr><td colspan="4" class="loading">Memuat...</td></tr></tbody></table></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const API   = 'https://svcmybsziaelwwdrnzcv.supabase.co/functions/v1/villa-api';
+const TOKEN = localStorage.getItem('villa_token');
+const user  = JSON.parse(localStorage.getItem('villa_user') || 'null');
+if (!user || !TOKEN || user.role !== 'admin') location.href = 'index.html';
+
+document.getElementById('sb-av').textContent = (user?.nama||'?')[0].toUpperCase();
+document.getElementById('sb-un').textContent = user?.nama || '—';
+document.getElementById('sb-rn').textContent = user?.nama || '—';
+
+function logout(){ localStorage.clear(); location.href = 'index.html'; }
+
+async function api(path, opts={}) {
+  const r = await fetch(API+path, {headers:{'x-villa-token':TOKEN,'Content-Type':'application/json'}, ...opts});
+  if (r.status === 401) { logout(); return {}; }
+  return r.json();
+}
+
+function toast(icon,title,msg,type='gd') {
+  const c=document.getElementById('toastWrap');
+  const t=document.createElement('div'); t.className=`toast ${type}`;
+  t.innerHTML=`<div class="t-ico">${icon}</div><div><div class="t-title">${title}</div><div class="t-msg">${msg}</div></div><div class="t-close" onclick="this.parentElement.remove()">✕</div>`;
+  c.appendChild(t); setTimeout(()=>t.remove(),5000);
+}
+
+function fmt(n) {
+  if (!n || n==0) return 'Rp 0';
+  if (n >= 1e6) return 'Rp ' + (n/1e6).toFixed(1).replace('.0','') + ' Jt';
+  return 'Rp ' + Number(n).toLocaleString('id-ID');
+}
+
+const pages = {
+  overview:  {title:'Overview',            sub:'Ringkasan seluruh sistem'},
+  users:     {title:'Kelola User',         sub:'Pemilik, resepsionis, super admin'},
+  cloudbeds: {title:'Integrasi Cloudbeds', sub:'Sinkronisasi booking OTA otomatis'},
+  whacenter: {title:'Integrasi WhaCenter', sub:'Pengiriman WhatsApp otomatis'},
+  cblog:     {title:'Log Booking OTA',     sub:'Event masuk dari Cloudbeds'},
+  walog:     {title:'Log WhatsApp',        sub:'Riwayat pengiriman pesan'},
+};
+
+let allUnits = [];
+
+function go(name) {
+  document.querySelectorAll('[id^="pg-"]').forEach(p=>p.style.display='none');
+  document.getElementById('pg-'+name).style.display='';
+  document.querySelectorAll('.sb-item').forEach(b=>b.classList.toggle('active', b.getAttribute('onclick')===`go('${name}')`));
+  const p = pages[name]||{title:name,sub:''};
+  document.getElementById('pt').textContent = p.title;
+  document.getElementById('ps').textContent = p.sub;
+  loadPage(name); window.scrollTo(0,0);
+}
+
+async function loadPage(name){
+  if(name==='overview')  await loadOverview();
+  if(name==='users')     await loadUsers();
+  if(name==='cloudbeds') await loadCloudbeds();
+  if(name==='whacenter') await loadWhacenter();
+  if(name==='cblog')     await loadCbLog();
+  if(name==='walog')     await loadWaLog();
+}
+
+async function loadOverview(){
+  const ov = await api('/admin/overview');
+  document.getElementById('ov-occ').textContent = `${ov.occupied??0}/${ov.total_unit??0}`;
+  document.getElementById('ov-rev').textContent = fmt(ov.gross_revenue_bulan_ini||0);
+  document.getElementById('ov-cb').textContent = ov.cloudbeds_belum_dipetakan??0;
+  document.getElementById('ov-wa').textContent = ov.wa_gagal_terkirim??0;
+
+  const settings = await api('/admin/settings');
+  const cb = settings.find(s=>s.key==='cloudbeds')?.value||{};
+  const wa = settings.find(s=>s.key==='whacenter')?.value||{};
+  document.getElementById('ov-integrasi').innerHTML = `
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <div style="flex:1;min-width:220px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;padding:14px 16px">
+        <div style="font-size:11px;font-weight:600;color:var(--w80);margin-bottom:6px">Cloudbeds (OTA)</div>
+        <span class="pill ${cb.enabled?'on':'off'}">${cb.enabled?'Aktif':'Belum Aktif'}</span>
+        <div style="font-size:10px;color:var(--w30);margin-top:8px">${cb.api_key?'API key tersimpan':'Belum ada API key'}</div>
+      </div>
+      <div style="flex:1;min-width:220px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;padding:14px 16px">
+        <div style="font-size:11px;font-weight:600;color:var(--w80);margin-bottom:6px">WhaCenter (WhatsApp)</div>
+        <span class="pill ${wa.enabled?'on':'off'}">${wa.enabled?'Aktif':'Belum Aktif'}</span>
+        <div style="font-size:10px;color:var(--w30);margin-top:8px">${wa.api_key?'API key tersimpan':'Belum ada API key'}</div>
+      </div>
+    </div>`;
+}
+
+function toggleUnitField(){
+  document.getElementById('u-unit-wrap').style.display = document.getElementById('u-role').value==='owner' ? '' : 'none';
+}
+
+async function loadUsers(){
+  const units = await api('/units');
+  allUnits = Array.isArray(units) ? units : [];
+  const uEl = document.getElementById('u-unit');
+  uEl.innerHTML = '<option value="">Pilih unit</option>'+allUnits.map(u=>`<option value="${u.id}" data-nomor="${u.nomor}">Unit ${u.nomor}</option>`).join('');
+  toggleUnitField();
+
+  const users = await api('/admin/users');
+  document.getElementById('user-table').innerHTML = (users||[]).map(u=>`
+    <tr>
+      <td style="font-weight:500">${u.nama}<div style="font-size:9.5px;color:var(--w30)">${u.email}</div></td>
+      <td>${u.role}</td>
+      <td>${u.unit_nomor||'—'}</td>
+      <td>${u.is_active?'<span class="bdg ok">Aktif</span>':'<span class="bdg co">Nonaktif</span>'}</td>
+      <td>
+        <span style="font-size:10.5px;color:var(--gold);cursor:pointer;margin-right:10px" onclick="toggleUserActive('${u.id}',${!u.is_active})">${u.is_active?'Nonaktifkan':'Aktifkan'}</span>
+        <span style="font-size:10.5px;color:var(--w50);cursor:pointer" onclick="resetPassword('${u.id}')">Reset Password</span>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="5" class="loading">Belum ada user</td></tr>';
+}
+
+async function createUser(){
+  const nama = document.getElementById('u-nama').value.trim();
+  const email = document.getElementById('u-email').value.trim();
+  const password = document.getElementById('u-pass').value;
+  const role = document.getElementById('u-role').value;
+  const hp = document.getElementById('u-hp').value.trim();
+  if(!nama||!email||!password){ toast('⚠','Error','Nama, email, dan password wajib diisi','r'); return; }
+  const uSel = document.getElementById('u-unit');
+  const unit_id = role==='owner' ? uSel.value : null;
+  const unit_nomor = role==='owner' ? (uSel.options[uSel.selectedIndex]?.dataset?.nomor||null) : null;
+  const res = await api('/admin/users', {method:'POST', body:JSON.stringify({nama,email,password,role,unit_id,unit_nomor,hp})});
+  if(res.error){ toast('⚠','Gagal',res.error,'r'); return; }
+  toast('✓','User Dibuat',`${nama} (${role}) berhasil dibuat.`,'g');
+  document.getElementById('u-nama').value=''; document.getElementById('u-email').value=''; document.getElementById('u-pass').value=''; document.getElementById('u-hp').value='';
+  loadUsers();
+}
+
+async function toggleUserActive(id, newState){
+  await api('/admin/users', {method:'PATCH', body:JSON.stringify({id, is_active:newState})});
+  toast('✓','Berhasil', newState?'User diaktifkan.':'User dinonaktifkan.', 'g');
+  loadUsers();
+}
+
+async function resetPassword(id){
+  const pw = prompt('Masukkan password baru untuk user ini:');
+  if(!pw) return;
+  await api('/admin/users', {method:'PATCH', body:JSON.stringify({id, new_password:pw})});
+  toast('✓','Password Direset','Password baru sudah aktif.','g');
+}
+
+async function loadCloudbeds(){
+  const units = await api('/units');
+  allUnits = Array.isArray(units) ? units : [];
+  document.getElementById('map-unit').innerHTML = '<option value="">Pilih unit</option>'+allUnits.map(u=>`<option value="${u.id}">Unit ${u.nomor}</option>`).join('');
+
+  const settings = await api('/admin/settings');
+  const cb = settings.find(s=>s.key==='cloudbeds')?.value||{};
+  document.getElementById('cb-enabled').checked = !!cb.enabled;
+  document.getElementById('cb-apikey').value = cb.api_key && cb.api_key.includes('••••') ? '' : (cb.api_key||'');
+  document.getElementById('cb-apikey').placeholder = cb.api_key ? `Tersimpan: ${cb.api_key}` : 'Cloudbeds API key';
+  document.getElementById('cb-property').value = cb.property_id||'';
+  document.getElementById('cb-secret').value = cb.webhook_secret && cb.webhook_secret.includes('••••') ? '' : (cb.webhook_secret||'');
+  document.getElementById('cb-secret-preview').textContent = cb.webhook_secret || '[webhook secret]';
+
+  await loadMappingTable();
+}
+
+async function loadMappingTable(){
+  const rows = await api('/admin/cloudbeds/mapping');
+  document.getElementById('mapping-table').innerHTML = (rows||[]).map(r=>`
+    <tr>
+      <td>${r.cloudbeds_room_name||'—'}</td>
+      <td class="mono">${r.cloudbeds_room_id}</td>
+      <td>Unit ${r.units?.nomor||'—'}</td>
+      <td><span style="font-size:10.5px;color:var(--red);cursor:pointer" onclick="deleteMapping('${r.id}')">Hapus</span></td>
+    </tr>`).join('') || '<tr><td colspan="4" class="loading">Belum ada mapping</td></tr>';
+}
+
+async function addMapping(){
+  const cloudbeds_room_id = document.getElementById('map-roomid').value.trim();
+  const cloudbeds_room_name = document.getElementById('map-roomname').value.trim();
+  const unit_id = document.getElementById('map-unit').value;
+  if(!cloudbeds_room_id||!unit_id){ toast('⚠','Error','Room ID dan Unit wajib diisi','r'); return; }
+  const res = await api('/admin/cloudbeds/mapping', {method:'POST', body:JSON.stringify({cloudbeds_room_id,cloudbeds_room_name,unit_id})});
+  if(res.error){ toast('⚠','Gagal',res.error,'r'); return; }
+  toast('✓','Mapping Ditambahkan','Room Cloudbeds sudah dipetakan ke unit.','g');
+  document.getElementById('map-roomid').value=''; document.getElementById('map-roomname').value='';
+  loadMappingTable();
+}
+
+async function deleteMapping(id){
+  await api('/admin/cloudbeds/mapping?id='+id, {method:'DELETE'});
+  toast('✓','Dihapus','Mapping room dihapus.','g');
+  loadMappingTable();
+}
+
+async function saveSettings(key){
+  let value;
+  if(key==='cloudbeds'){
+    value = {
+      enabled: document.getElementById('cb-enabled').checked,
+      api_key: document.getElementById('cb-apikey').value.trim() || undefined,
+      property_id: document.getElementById('cb-property').value.trim(),
+      webhook_secret: document.getElementById('cb-secret').value.trim() || undefined,
+    };
+  } else {
+    value = {
+      enabled: document.getElementById('wa-enabled').checked,
+      api_key: document.getElementById('wa-apikey').value.trim() || undefined,
+      device_id: document.getElementById('wa-device').value.trim(),
+      base_url: document.getElementById('wa-baseurl').value.trim() || 'https://api.whacenter.com/api/send',
+    };
+  }
+  // Leaving a secret field blank omits it from the payload (JSON.stringify drops `undefined`
+  // keys); the backend merges it with the previously stored real value server-side, so a
+  // masked "ab••••yz" placeholder never gets written back as the actual secret.
+  const res = await api('/admin/settings', {method:'POST', body:JSON.stringify({key, value})});
+  if(res.error){ toast('⚠','Gagal',res.error,'r'); return; }
+  toast('✓','Tersimpan',`Pengaturan ${key} berhasil disimpan.`,'g');
+  if(key==='cloudbeds') loadCloudbeds(); else loadWhacenter();
+}
+
+async function loadWhacenter(){
+  const settings = await api('/admin/settings');
+  const wa = settings.find(s=>s.key==='whacenter')?.value||{};
+  document.getElementById('wa-enabled').checked = !!wa.enabled;
+  document.getElementById('wa-apikey').value = wa.api_key && wa.api_key.includes('••••') ? '' : (wa.api_key||'');
+  document.getElementById('wa-apikey').placeholder = wa.api_key ? `Tersimpan: ${wa.api_key}` : 'WhaCenter API key';
+  document.getElementById('wa-device').value = wa.device_id||'';
+  document.getElementById('wa-baseurl').value = wa.base_url||'https://api.whacenter.com/api/send';
+}
+
+async function sendTestWa(){
+  const phone = document.getElementById('wa-test-phone').value.trim();
+  const message = document.getElementById('wa-test-msg').value.trim();
+  if(!phone||!message){ toast('⚠','Error','No. HP dan pesan wajib diisi','r'); return; }
+  const res = await api('/wa/send', {method:'POST', body:JSON.stringify({phone,message,template_type:'manual_test'})});
+  if(res.error){ toast('⚠','Gagal',res.error,'r'); return; }
+  toast('✓','Terkirim','Cek log WhatsApp untuk status pengiriman.','g');
+}
+
+async function loadCbLog(){
+  const rows = await api('/admin/cloudbeds/log');
+  document.getElementById('cblog-table').innerHTML = (rows||[]).map(r=>`
+    <tr>
+      <td class="mono" style="font-size:10.5px">${new Date(r.created_at).toLocaleString('id-ID')}</td>
+      <td class="mono">${r.reservation_id||'—'}</td>
+      <td>${r.event_type||'—'}</td>
+      <td>${r.matched?'<span class="bdg ok">Dipetakan</span>':'<span class="bdg pnd">Belum Dipetakan</span>'}${r.error?' <span class="bdg co">Error</span>':''}</td>
+    </tr>`).join('') || '<tr><td colspan="4" class="loading">Belum ada event masuk</td></tr>';
+}
+
+async function loadWaLog(){
+  const rows = await api('/admin/wa/log');
+  const statusBdg = {sent:'<span class="bdg ok">Terkirim</span>', failed:'<span class="bdg co">Gagal</span>', error:'<span class="bdg co">Error</span>', skipped_not_configured:'<span class="bdg pnd">Belum Dikonfigurasi</span>', skipped_no_phone:'<span class="bdg pnd">Tanpa No. HP</span>'};
+  document.getElementById('walog-table').innerHTML = (rows||[]).map(r=>`
+    <tr>
+      <td class="mono" style="font-size:10.5px">${new Date(r.created_at).toLocaleString('id-ID')}</td>
+      <td class="mono">${r.phone||'—'}</td>
+      <td>${r.template_type||'—'}</td>
+      <td>${statusBdg[r.status]||r.status}</td>
+    </tr>`).join('') || '<tr><td colspan="4" class="loading">Belum ada pesan terkirim</td></tr>';
+}
+
+loadOverview();
+</script>
+</body>
+</html>

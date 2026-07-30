@@ -57,7 +57,8 @@ async function login() {
   if (!res.ok) { document.getElementById('err').style.display='block'; return; }
   localStorage.setItem('villa_token', data.token);
   localStorage.setItem('villa_user',  JSON.stringify(data.user));
-  location.href = data.user.role === 'receptionist' ? 'receptionist.html' : 'owner.html';
+  const dest = data.user.role === 'admin' ? 'admin.html' : data.user.role === 'receptionist' ? 'receptionist.html' : 'owner.html';
+  location.href = dest;
 }
 </script>
 </body>
