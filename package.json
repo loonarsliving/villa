@@ -1,0 +1,9 @@
+{
+  "name": "loonars-villa-bridge",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Vercel serverless functions bridging Cloudbeds and WhaCenter to the Supabase-backed Loonars Private Living system.",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0"
+  }
+}

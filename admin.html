@@ -157,26 +157,20 @@ select option{background:#1C1C1C;color:#fff}
 
     <!-- CLOUDBEDS -->
     <div id="pg-cloudbeds" style="display:none">
-      <div class="g2">
-        <div class="card">
-          <div class="ch"><div class="ct">Kredensial Cloudbeds</div><div class="cs">Simpan API key & webhook secret</div></div>
-          <div class="cb">
-            <div class="toggle-row"><input type="checkbox" id="cb-enabled"><span style="font-size:11.5px;color:var(--w50)">Aktifkan sinkronisasi Cloudbeds</span></div>
-            <label>API Key</label><input id="cb-apikey" placeholder="Cloudbeds API key">
-            <label>Property ID</label><input id="cb-property" placeholder="Cloudbeds property ID">
-            <label>Webhook Secret</label><input id="cb-secret" placeholder="Secret untuk validasi webhook masuk">
-            <button class="btn btn-p" style="width:100%" onclick="saveSettings('cloudbeds')">Simpan</button>
-          </div>
-        </div>
-        <div class="card">
-          <div class="ch"><div class="ct">Cara Sambung</div></div>
-          <div class="cb" style="font-size:11.5px;color:var(--w50);line-height:1.7">
-            1. Isi API Key & Property ID dari akun Cloudbeds Anda, lalu Simpan.<br>
-            2. Buat Webhook Secret bebas (contoh: string acak panjang) dan simpan juga di sini.<br>
-            3. Di dashboard Cloudbeds, daftarkan webhook URL berikut untuk event reservasi baru:<br>
-            <div class="mono" style="background:var(--bg3);padding:10px;border-radius:2px;margin:8px 0;word-break:break-all;color:var(--gold)">https://svcmybsziaelwwdrnzcv.supabase.co/functions/v1/villa-api/webhooks/cloudbeds?secret=<span id="cb-secret-preview">[webhook secret]</span></div>
-            4. Petakan setiap tipe kamar Cloudbeds ke unit villa di bawah ini.
-          </div>
+      <div class="card">
+        <div class="ch"><div><div class="ct">Kredensial Cloudbeds</div><div class="cs">Dikonfigurasi lewat Environment Variables di Vercel, bukan di panel ini</div></div></div>
+        <div class="cb" style="font-size:11.5px;color:var(--w50);line-height:1.8">
+          API key Cloudbeds tersimpan sebagai Environment Variable di project Vercel (<span class="mono" style="color:var(--gold)">living.haluoleo.id</span>), supaya tidak lewat form web. Set variabel berikut di <span class="mono">Vercel &rarr; Project Settings &rarr; Environment Variables</span>:
+          <table class="tbl" style="margin-top:10px"><thead><tr><th>Variabel</th><th>Keterangan</th></tr></thead><tbody>
+            <tr><td class="mono">CLOUDBEDS_API_KEY</td><td>API key dari akun Cloudbeds Anda</td></tr>
+            <tr><td class="mono">CLOUDBEDS_PROPERTY_ID</td><td>Property ID Cloudbeds</td></tr>
+            <tr><td class="mono">CLOUDBEDS_WEBHOOK_SECRET</td><td>Secret bebas untuk validasi webhook masuk</td></tr>
+            <tr><td class="mono">SUPABASE_URL</td><td class="mono">https://svcmybsziaelwwdrnzcv.supabase.co</td></tr>
+            <tr><td class="mono">SUPABASE_SERVICE_ROLE_KEY</td><td>Dari Supabase Dashboard &rarr; Project Settings &rarr; API</td></tr>
+          </tbody></table>
+          Setelah itu, daftarkan URL webhook berikut di dashboard Cloudbeds untuk event reservasi baru:
+          <div class="mono" style="background:var(--bg3);padding:10px;border-radius:2px;margin:8px 0;word-break:break-all;color:var(--gold)">https://living.haluoleo.id/api/webhooks/cloudbeds?secret=&lt;isi sama dengan CLOUDBEDS_WEBHOOK_SECRET&gt;</div>
+          Lalu petakan setiap tipe kamar Cloudbeds ke unit villa di bawah ini (data mapping ini bukan secret, tetap dikelola di sini seperti biasa).
         </div>
       </div>
       <div class="card">
@@ -196,13 +190,16 @@ select option{background:#1C1C1C;color:#fff}
     <!-- WHACENTER -->
     <div id="pg-whacenter" style="display:none">
       <div class="card">
-        <div class="ch"><div class="ct">Kredensial WhaCenter</div><div class="cs">Dipakai untuk konfirmasi booking & kirim PIN kamar otomatis</div></div>
-        <div class="cb">
-          <div class="toggle-row"><input type="checkbox" id="wa-enabled"><span style="font-size:11.5px;color:var(--w50)">Aktifkan pengiriman WhatsApp otomatis</span></div>
-          <label>API Key</label><input id="wa-apikey" placeholder="WhaCenter API key">
-          <label>Device ID</label><input id="wa-device" placeholder="WhaCenter device ID">
-          <label>Base URL API</label><input id="wa-baseurl" placeholder="https://api.whacenter.com/api/send">
-          <button class="btn btn-p" style="width:100%" onclick="saveSettings('whacenter')">Simpan</button>
+        <div class="ch"><div><div class="ct">Kredensial WhaCenter</div><div class="cs">Dikonfigurasi lewat Environment Variables di Vercel, bukan di panel ini</div></div></div>
+        <div class="cb" style="font-size:11.5px;color:var(--w50);line-height:1.8">
+          API key WhaCenter tersimpan sebagai Environment Variable di project Vercel (<span class="mono" style="color:var(--gold)">living.haluoleo.id</span>). Set variabel berikut di <span class="mono">Vercel &rarr; Project Settings &rarr; Environment Variables</span>:
+          <table class="tbl" style="margin-top:10px"><thead><tr><th>Variabel</th><th>Keterangan</th></tr></thead><tbody>
+            <tr><td class="mono">WHACENTER_API_KEY</td><td>API key dari akun WhaCenter Anda</td></tr>
+            <tr><td class="mono">WHACENTER_DEVICE_ID</td><td>Device ID WhaCenter yang terhubung ke nomor WA</td></tr>
+            <tr><td class="mono">WHACENTER_BASE_URL</td><td>Opsional, default <span class="mono">https://api.whacenter.com/api/send</span></td></tr>
+            <tr><td class="mono">INTERNAL_BRIDGE_SECRET</td><td class="mono">fa0acfa7926b88c5ad6e268b15a0fd3121c4a06da889b1c9</td></tr>
+          </tbody></table>
+          <span style="color:var(--w80)">INTERNAL_BRIDGE_SECRET</span> harus persis sama dengan nilai di atas — ini kunci rahasia supaya hanya sistem villa (bukan sembarang orang) yang bisa memicu pengiriman WA lewat Vercel. Setelah semua variabel di-set dan project di-redeploy, konfirmasi booking & PIN kamar saat check-in akan terkirim otomatis.
         </div>
       </div>
       <div class="card">
@@ -305,19 +302,14 @@ async function loadOverview(){
   document.getElementById('ov-wa').textContent = ov.wa_gagal_terkirim??0;
 
   const settings = await api('/admin/settings');
-  const cb = settings.find(s=>s.key==='cloudbeds')?.value||{};
-  const wa = settings.find(s=>s.key==='whacenter')?.value||{};
+  const bridge = settings.find(s=>s.key==='vercel_bridge')?.value||{};
   document.getElementById('ov-integrasi').innerHTML = `
     <div style="display:flex;gap:12px;flex-wrap:wrap">
-      <div style="flex:1;min-width:220px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;padding:14px 16px">
-        <div style="font-size:11px;font-weight:600;color:var(--w80);margin-bottom:6px">Cloudbeds (OTA)</div>
-        <span class="pill ${cb.enabled?'on':'off'}">${cb.enabled?'Aktif':'Belum Aktif'}</span>
-        <div style="font-size:10px;color:var(--w30);margin-top:8px">${cb.api_key?'API key tersimpan':'Belum ada API key'}</div>
-      </div>
-      <div style="flex:1;min-width:220px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;padding:14px 16px">
-        <div style="font-size:11px;font-weight:600;color:var(--w80);margin-bottom:6px">WhaCenter (WhatsApp)</div>
-        <span class="pill ${wa.enabled?'on':'off'}">${wa.enabled?'Aktif':'Belum Aktif'}</span>
-        <div style="font-size:10px;color:var(--w30);margin-top:8px">${wa.api_key?'API key tersimpan':'Belum ada API key'}</div>
+      <div style="flex:1;min-width:260px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;padding:14px 16px">
+        <div style="font-size:11px;font-weight:600;color:var(--w80);margin-bottom:6px">Jembatan ke Vercel (Cloudbeds &amp; WhaCenter)</div>
+        <span class="pill ${bridge.base_url&&bridge.secret?'on':'off'}">${bridge.base_url&&bridge.secret?'Terhubung':'Belum Dikonfigurasi'}</span>
+        <div style="font-size:10px;color:var(--w30);margin-top:8px">${bridge.base_url||'—'}</div>
+        <div style="font-size:10px;color:var(--w30);margin-top:4px">API key Cloudbeds &amp; WhaCenter sendiri dikonfigurasi sebagai Environment Variables di Vercel (lihat menu Cloudbeds/WhaCenter di samping) — status aktualnya baru kelihatan lewat "Kirim WA Manual (Tes)" atau Log.</div>
       </div>
     </div>`;
 }
@@ -381,16 +373,6 @@ async function loadCloudbeds(){
   const units = await api('/units');
   allUnits = Array.isArray(units) ? units : [];
   document.getElementById('map-unit').innerHTML = '<option value="">Pilih unit</option>'+allUnits.map(u=>`<option value="${u.id}">Unit ${u.nomor}</option>`).join('');
-
-  const settings = await api('/admin/settings');
-  const cb = settings.find(s=>s.key==='cloudbeds')?.value||{};
-  document.getElementById('cb-enabled').checked = !!cb.enabled;
-  document.getElementById('cb-apikey').value = cb.api_key && cb.api_key.includes('••••') ? '' : (cb.api_key||'');
-  document.getElementById('cb-apikey').placeholder = cb.api_key ? `Tersimpan: ${cb.api_key}` : 'Cloudbeds API key';
-  document.getElementById('cb-property').value = cb.property_id||'';
-  document.getElementById('cb-secret').value = cb.webhook_secret && cb.webhook_secret.includes('••••') ? '' : (cb.webhook_secret||'');
-  document.getElementById('cb-secret-preview').textContent = cb.webhook_secret || '[webhook secret]';
-
   await loadMappingTable();
 }
 
@@ -423,40 +405,9 @@ async function deleteMapping(id){
   loadMappingTable();
 }
 
-async function saveSettings(key){
-  let value;
-  if(key==='cloudbeds'){
-    value = {
-      enabled: document.getElementById('cb-enabled').checked,
-      api_key: document.getElementById('cb-apikey').value.trim() || undefined,
-      property_id: document.getElementById('cb-property').value.trim(),
-      webhook_secret: document.getElementById('cb-secret').value.trim() || undefined,
-    };
-  } else {
-    value = {
-      enabled: document.getElementById('wa-enabled').checked,
-      api_key: document.getElementById('wa-apikey').value.trim() || undefined,
-      device_id: document.getElementById('wa-device').value.trim(),
-      base_url: document.getElementById('wa-baseurl').value.trim() || 'https://api.whacenter.com/api/send',
-    };
-  }
-  // Leaving a secret field blank omits it from the payload (JSON.stringify drops `undefined`
-  // keys); the backend merges it with the previously stored real value server-side, so a
-  // masked "ab••••yz" placeholder never gets written back as the actual secret.
-  const res = await api('/admin/settings', {method:'POST', body:JSON.stringify({key, value})});
-  if(res.error){ toast('⚠','Gagal',res.error,'r'); return; }
-  toast('✓','Tersimpan',`Pengaturan ${key} berhasil disimpan.`,'g');
-  if(key==='cloudbeds') loadCloudbeds(); else loadWhacenter();
-}
-
 async function loadWhacenter(){
-  const settings = await api('/admin/settings');
-  const wa = settings.find(s=>s.key==='whacenter')?.value||{};
-  document.getElementById('wa-enabled').checked = !!wa.enabled;
-  document.getElementById('wa-apikey').value = wa.api_key && wa.api_key.includes('••••') ? '' : (wa.api_key||'');
-  document.getElementById('wa-apikey').placeholder = wa.api_key ? `Tersimpan: ${wa.api_key}` : 'WhaCenter API key';
-  document.getElementById('wa-device').value = wa.device_id||'';
-  document.getElementById('wa-baseurl').value = wa.base_url||'https://api.whacenter.com/api/send';
+  // Credentials now live as Vercel env vars (see the static instructions on this page);
+  // nothing to fetch or render here anymore.
 }
 
 async function sendTestWa(){
