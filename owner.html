@@ -240,9 +240,9 @@ html{font-size:14px}body{font-family:'Inter',sans-serif;background:var(--bg);col
 
 <script>
 const API   = 'https://svcmybsziaelwwdrnzcv.supabase.co/functions/v1/villa-api';
-const TOKEN = 'loonars-villa-2026';
+const TOKEN = localStorage.getItem('villa_token');
 const user  = JSON.parse(localStorage.getItem('villa_user') || 'null');
-if (!user) location.href = 'index.html';
+if (!user || !TOKEN) location.href = 'index.html';
 
 const UNIT_ID    = user?.unit_id;
 const UNIT_NOMOR = user?.unit_nomor || '—';
