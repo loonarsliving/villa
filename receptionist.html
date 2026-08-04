@@ -326,9 +326,9 @@ select option{background:#1C1C1C;color:#fff}
 
 <script>
 const API   = 'https://svcmybsziaelwwdrnzcv.supabase.co/functions/v1/villa-api';
-const TOKEN = 'loonars-villa-2026';
+const TOKEN = localStorage.getItem('villa_token');
 const user  = JSON.parse(localStorage.getItem('villa_user') || 'null');
-if (!user) location.href = 'index.html';
+if (!user || !TOKEN) location.href = 'index.html';
 
 document.getElementById('sb-av').textContent = (user?.nama||'?')[0].toUpperCase();
 document.getElementById('sb-un').textContent = user?.nama || '—';
