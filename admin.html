@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard Manajemen — Loonars Private Living</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0C0C0C;--bg2:#141414;--bg3:#1C1C1C;--bg4:#242424;--white:#fff;--w80:rgba(255,255,255,.80);--w50:rgba(255,255,255,.50);--w30:rgba(255,255,255,.30);--w15:rgba(255,255,255,.15);--w07:rgba(255,255,255,.07);--gold:#C4A05C;--goldbg:rgba(196,160,92,.1);--goldborder:rgba(196,160,92,.25);--sage:#5E8060;--sagebg:rgba(94,128,96,.15);--red:#C0392B;--redbg:rgba(192,57,43,.12);--border:rgba(255,255,255,.08);--border2:rgba(255,255,255,.05);--sw:220px;--hh:56px}
+html{font-size:14px}body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--white);display:flex;min-height:100vh}
+.sb{width:var(--sw);min-width:var(--sw);height:100vh;background:var(--bg2);border-right:1px solid var(--border);position:fixed;top:0;left:0;display:flex;flex-direction:column;z-index:100}
+.sb-logo{padding:22px 20px 18px;border-bottom:1px solid var(--border)}
+.brand{font-size:9px;color:var(--gold);letter-spacing:.25em;text-transform:uppercase;font-weight:500}
+.brand-main{font-family:'Cormorant Garamond',serif;font-size:17px;font-weight:300;color:var(--white);line-height:1.2;margin-top:4px}
+.brand-main em{font-style:italic;color:var(--gold)}
+.sb-nav{flex:1;padding:14px 10px;overflow-y:auto}
+.sb-sec{font-size:8.5px;font-weight:600;color:var(--w30);letter-spacing:.18em;text-transform:uppercase;padding:0 8px;margin:12px 0 4px}
+.sb-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:2px;font-size:12px;color:var(--w50);cursor:pointer;transition:all .15s;margin-bottom:1px;border:none;background:none;width:100%;text-align:left}
+.sb-item:hover{background:var(--w07);color:var(--w80)}
+.sb-item.active{background:var(--goldbg);color:var(--gold);border-left:2px solid var(--gold);padding-left:8px}
+.si{font-size:13px;width:16px;text-align:center;flex-shrink:0}
+.sb-foot{padding:12px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px}
+.sb-av{width:28px;height:28px;background:var(--goldbg);border:1px solid var(--goldborder);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;color:var(--gold)}
+.sb-un{font-size:11.5px;font-weight:500;color:var(--white)}.sb-ur{font-size:9.5px;color:var(--w30)}
+.main{margin-left:var(--sw);flex:1;display:flex;flex-direction:column}
+.topbar{height:var(--hh);background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 28px;position:sticky;top:0;z-index:50}
+.pt{font-family:'Cormorant Garamond',serif;font-size:20px;font-weight:300;color:var(--white)}
+.ps{font-size:10px;color:var(--w30);margin-top:1px}
+.logout-btn{font-size:10.5px;color:var(--w30);cursor:pointer;padding:6px 12px;border:1px solid var(--border);border-radius:2px;background:transparent}
+.content{padding:22px 28px;flex:1}
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:3px;overflow:hidden;margin-bottom:14px}
+.ch{padding:13px 20px;border-bottom:1px solid var(--border2);display:flex;align-items:center;justify-content:space-between}
+.ct{font-size:11px;font-weight:600;color:var(--w80);letter-spacing:.06em;text-transform:uppercase}
+.cs{font-size:10px;color:var(--w30);margin-top:2px}
+.cb{padding:16px}
+.ca{font-size:10.5px;font-weight:600;color:var(--gold);cursor:pointer;padding:6px 12px;border:1px solid var(--goldborder);border-radius:2px;background:var(--goldbg)}
+.strip{display:grid;grid-template-columns:repeat(4,1fr);gap:11px;margin-bottom:14px}
+.sc{background:var(--bg2);border:1px solid var(--border);border-radius:3px;padding:13px 16px;position:relative;overflow:hidden}
+.sc::before{content:'';position:absolute;top:0;left:0;width:2px;height:100%;background:var(--border)}
+.sc.g::before{background:var(--sage)}.sc.gd::before{background:var(--gold)}.sc.r::before{background:var(--red)}
+.sc-lbl{font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--w30)}
+.sc-val{font-family:'Cormorant Garamond',serif;font-size:26px;font-weight:300;color:var(--white);margin-top:5px}
+.tbl{width:100%;border-collapse:collapse;font-size:11.5px}
+.tbl th{text-align:left;padding:8px 14px;font-size:8.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--w30);border-bottom:1px solid var(--border);background:var(--bg3)}
+.tbl td{padding:10px 14px;border-bottom:1px solid var(--border2);vertical-align:middle;color:var(--w80)}
+.tbl tr:last-child td{border-bottom:none}
+.bdg{display:inline-flex;font-size:9px;font-weight:600;padding:2px 8px;border-radius:100px;letter-spacing:.04em}
+.bdg.ok{background:var(--sagebg);color:var(--sage)}.bdg.pnd{background:var(--goldbg);color:var(--gold)}.bdg.off{background:var(--redbg);color:var(--red)}
+.tbl-act{font-size:10.5px;font-weight:600;color:var(--gold);cursor:pointer;margin-right:10px}
+.mo{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s}
+.mo.open{opacity:1;pointer-events:all}
+.mo-box{background:var(--bg2);border:1px solid var(--border);border-radius:3px;width:440px;max-width:95vw;max-height:90vh;overflow-y:auto}
+.mo-head{padding:16px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.mo-title{font-family:'Cormorant Garamond',serif;font-size:18px;font-weight:300;color:var(--white)}
+.mo-close{width:26px;height:26px;border-radius:2px;border:1px solid var(--border);background:var(--bg3);cursor:pointer;color:var(--w50)}
+.mo-body{padding:22px}
+label{display:block;font-size:9.5px;font-weight:600;color:var(--w30);letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px}
+input,select{width:100%;padding:10px 0;border:none;border-bottom:1px solid var(--border);background:transparent;font-size:12.5px;font-family:'Inter',sans-serif;color:var(--white);outline:none;margin-bottom:20px}
+select option{background:#1C1C1C;color:#fff}
+.mo-foot{padding:14px 22px;border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end}
+.btn{padding:9px 18px;border-radius:2px;font-size:11.5px;font-weight:600;cursor:pointer;border:none;font-family:'Inter',sans-serif}
+.btn-g{background:var(--bg3);color:var(--w50);border:1px solid var(--border)}
+.btn-p{background:var(--gold);color:#0A0A0A}
+.note{background:var(--goldbg);border-left:2px solid var(--gold);border-radius:0 3px 3px 0;padding:12px 18px;font-size:11px;color:var(--w50);line-height:1.6;margin-bottom:14px}
+.loading{text-align:center;padding:24px;color:var(--w30);font-size:11px}
+.toast-wrap{position:fixed;top:16px;right:16px;z-index:300;display:flex;flex-direction:column;gap:10px}
+.toast{background:var(--bg3);border:1px solid var(--border);border-left:2px solid var(--gold);border-radius:3px;padding:14px 16px;width:290px;box-shadow:0 8px 32px rgba(0,0,0,.5)}
+.t-title{font-size:11.5px;font-weight:600;color:var(--white)}.t-msg{font-size:10px;color:var(--w50);margin-top:2px}
+</style>
+</head>
+<body>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<!-- MODAL: new user -->
+<div class="mo" id="mo-user"><div class="mo-box">
+  <div class="mo-head"><div class="mo-title">Tambah User Login</div><div class="mo-close" onclick="closeMo('mo-user')">✕</div></div>
+  <div class="mo-body">
+    <label>Role</label>
+    <select id="u-role" onchange="toggleUnitField()">
+      <option value="owner">Investor (owner)</option>
+      <option value="receptionist">Resepsionis</option>
+      <option value="admin">Admin</option>
+    </select>
+    <div id="u-unit-wrap"><label>Unit (untuk investor)</label><select id="u-unit"><option value="">Pilih unit</option></select></div>
+    <label>Nama</label><input id="u-nama" placeholder="Nama lengkap">
+    <label>Email (username login)</label><input id="u-email" placeholder="a1@loonars.id">
+    <label>Password Awal</label><input id="u-pass" placeholder="Investor wajib ganti di login pertama">
+    <label>No. HP</label><input id="u-hp" placeholder="+62...">
+  </div>
+  <div class="mo-foot"><button class="btn btn-g" onclick="closeMo('mo-user')">Batal</button><button class="btn btn-p" onclick="createUser()">Buat User</button></div>
+</div></div>
+
+<!-- MODAL: new staff -->
+<div class="mo" id="mo-staff"><div class="mo-box">
+  <div class="mo-head"><div class="mo-title">Tambah Staff</div><div class="mo-close" onclick="closeMo('mo-staff')">✕</div></div>
+  <div class="mo-body">
+    <label>Role</label>
+    <select id="s-role">
+      <option value="security">Security</option>
+      <option value="cleaning_service">Cleaning Service (on-call)</option>
+      <option value="guest_greeter">Penyambut Tamu / Cafe & Resto</option>
+    </select>
+    <label>Nama</label><input id="s-nama" placeholder="Nama lengkap">
+    <label>No. HP (WhatsApp)</label><input id="s-hp" placeholder="+62...">
+  </div>
+  <div class="mo-foot"><button class="btn btn-g" onclick="closeMo('mo-staff')">Batal</button><button class="btn btn-p" onclick="createStaff()">Tambah</button></div>
+</div></div>
+
+<!-- MODAL: cloudbeds mapping -->
+<div class="mo" id="mo-map"><div class="mo-box">
+  <div class="mo-head"><div class="mo-title">Petakan Room Cloudbeds</div><div class="mo-close" onclick="closeMo('mo-map')">✕</div></div>
+  <div class="mo-body">
+    <label>Cloudbeds Room ID</label><input id="m-roomid" placeholder="ID room dari Cloudbeds">
+    <label>Nama Room di Cloudbeds</label><input id="m-roomname" placeholder="Opsional">
+    <label>Unit Villa</label><select id="m-unit"><option value="">Pilih unit</option></select>
+  </div>
+  <div class="mo-foot"><button class="btn btn-g" onclick="closeMo('mo-map')">Batal</button><button class="btn btn-p" onclick="createMapping()">Simpan</button></div>
+</div></div>
+
+<aside class="sb">
+  <div class="sb-logo">
+    <div class="brand">Loonars Private Living</div>
+    <div class="brand-main">Dashboard <em>Manajemen</em></div>
+  </div>
+  <nav class="sb-nav">
+    <div class="sb-sec">Ikhtisar</div>
+    <button class="sb-item active" onclick="go('overview')"><span class="si">◈</span>Overview</button>
+    <div class="sb-sec">Akses</div>
+    <button class="sb-item" onclick="go('users')"><span class="si">◎</span>User Login</button>
+    <button class="sb-item" onclick="go('investors')"><span class="si">◈</span>Investor per Kamar</button>
+    <button class="sb-item" onclick="go('staff')"><span class="si">◉</span>Staff (Security/CS/Greeter)</button>
+    <div class="sb-sec">Integrasi</div>
+    <button class="sb-item" onclick="go('cloudbeds')"><span class="si">☁</span>Cloudbeds</button>
+    <button class="sb-item" onclick="go('wa')"><span class="si">◻</span>WhatsApp Log</button>
+    <button class="sb-item" onclick="go('settings')"><span class="si">⚙</span>Pengaturan</button>
+  </nav>
+  <div class="sb-foot">
+    <div class="sb-av" id="sb-av">—</div>
+    <div><div class="sb-un" id="sb-un">—</div><div class="sb-ur">Manajemen</div></div>
+    <div class="logout-btn" style="margin-left:auto;padding:4px 8px;font-size:9.5px" onclick="logout()">Keluar</div>
+  </div>
+</aside>
+
+<div class="main">
+  <div class="topbar">
+    <div><div class="pt" id="pt">Overview</div><div class="ps" id="ps">—</div></div>
+    <div class="logout-btn" onclick="logout()">Keluar</div>
+  </div>
+
+  <div class="content">
+
+    <div id="pg-overview">
+      <div class="strip">
+        <div class="sc g"><div class="sc-lbl">Tersedia</div><div class="sc-val" id="o-available">—</div></div>
+        <div class="sc gd"><div class="sc-lbl">Terisi</div><div class="sc-val" id="o-occupied">—</div><div class="cs">dari <span id="o-total">13</span> unit</div></div>
+        <div class="sc"><div class="sc-lbl">Gross Revenue</div><div class="sc-val" id="o-gross">—</div><div class="cs">Bulan ini</div></div>
+        <div class="sc r"><div class="sc-lbl">WA Gagal Terkirim</div><div class="sc-val" id="o-wafail">—</div></div>
+      </div>
+      <div class="card"><div class="ch"><div class="ct">Status Integrasi</div></div>
+        <div class="cb" id="o-status"><div class="loading">Memuat...</div></div>
+      </div>
+    </div>
+
+    <div id="pg-users" style="display:none">
+      <div class="card">
+        <div class="ch"><div><div class="ct">User Login</div><div class="cs">Investor per kamar, resepsionis, manajemen</div></div><div class="ca" onclick="openMo('mo-user')">+ Tambah User</div></div>
+        <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Nama</th><th>Email</th><th>Role</th><th>Unit</th><th>Status</th><th>Password</th><th>Aksi</th></tr></thead><tbody id="users-table"></tbody></table></div>
+      </div>
+    </div>
+
+    <div id="pg-investors" style="display:none">
+      <div class="note">Arsip permanen: satu baris baru tersimpan setiap kali investor mengisi data ini (mis. setelah ganti password pertama kali). Baris terbaru per unit = data investor yang berlaku sekarang.</div>
+      <div class="card">
+        <div class="ch"><div class="ct">Arsip Data Investor</div></div>
+        <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Unit</th><th>Nama</th><th>No. HP</th><th>Diisi Tanggal</th></tr></thead><tbody id="investors-table"></tbody></table></div>
+      </div>
+    </div>
+
+    <div id="pg-staff" style="display:none">
+      <div class="note">Staff ini tidak login ke dashboard — mereka dihubungi lewat WhatsApp (mis. cleaning service otomatis di-WA 3 jam sebelum tamu checkin).</div>
+      <div class="card">
+        <div class="ch"><div class="ct">Direktori Staff</div><div class="ca" onclick="openMo('mo-staff')">+ Tambah Staff</div></div>
+        <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Nama</th><th>Role</th><th>No. HP</th><th>Status</th><th>Aksi</th></tr></thead><tbody id="staff-table"></tbody></table></div>
+      </div>
+    </div>
+
+    <div id="pg-cloudbeds" style="display:none">
+      <div class="note">Webhook Cloudbeds: arahkan ke <code>https://svcmybsziaelwwdrnzcv.supabase.co/functions/v1/villa-api/webhook/cloudbeds</code> dengan header <code>x-cloudbeds-secret</code> sesuai nilai di Pengaturan → Cloudbeds.</div>
+      <div class="card">
+        <div class="ch"><div class="ct">Pemetaan Room → Unit</div><div class="ca" onclick="openMo('mo-map')">+ Petakan Room</div></div>
+        <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Cloudbeds Room ID</th><th>Nama Room</th><th>Unit Villa</th><th>Aksi</th></tr></thead><tbody id="mapping-table"></tbody></table></div>
+      </div>
+      <div class="card">
+        <div class="ch"><div class="ct">Log Event Cloudbeds Terbaru</div></div>
+        <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Waktu</th><th>Event</th><th>Reservation ID</th><th>Matched</th></tr></thead><tbody id="cblog-table"></tbody></table></div>
+      </div>
+    </div>
+
+    <div id="pg-wa" style="display:none">
+      <div class="card">
+        <div class="ch"><div class="ct">Log Pengiriman WhatsApp</div></div>
+        <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Waktu</th><th>Tipe</th><th>Nomor</th><th>Status</th></tr></thead><tbody id="wa-table"></tbody></table></div>
+      </div>
+    </div>
+
+    <div id="pg-settings" style="display:none">
+      <div class="card">
+        <div class="ch"><div><div class="ct">Cloudbeds</div><div class="cs">API key & webhook secret</div></div></div>
+        <div class="cb">
+          <label>API Key Cloudbeds</label><input id="set-cb-key" placeholder="Tempel API key di sini">
+          <label>Webhook Secret (dikirim Cloudbeds sebagai x-cloudbeds-secret)</label><input id="set-cb-secret" placeholder="Buat rahasia acak, lalu isi di pengaturan webhook Cloudbeds">
+          <button class="btn btn-p" onclick="saveSetting('cloudbeds',{api_key:val('set-cb-key'),webhook_secret:val('set-cb-secret')})">Simpan Cloudbeds</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="ch"><div><div class="ct">Jembatan WhatsApp (file hub)</div><div class="cs">Diteruskan ke WhaCenter via MK Connect</div></div></div>
+        <div class="cb">
+          <label>Base URL File Hub</label><input id="set-wa-url" placeholder="https://filehub-loonars.vercel.app">
+          <label>Secret</label><input id="set-wa-secret" placeholder="Sama dengan VILLA_BRIDGE_SECRET di file hub">
+          <button class="btn btn-p" onclick="saveSetting('vercel_bridge',{base_url:val('set-wa-url'),secret:val('set-wa-secret')})">Simpan WA Bridge</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="ch"><div><div class="ct">Keuangan</div><div class="cs">Persentase marketing dari omset kotor (25-30%)</div></div></div>
+        <div class="cb">
+          <label>Marketing % (angka desimal, mis. 0.275 = 27.5%)</label><input id="set-fin-pct" placeholder="0.275">
+          <button class="btn btn-p" onclick="saveSetting('finance',{marketing_pct:parseFloat(val('set-fin-pct'))})">Simpan</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const API   = 'https://svcmybsziaelwwdrnzcv.supabase.co/functions/v1/villa-api';
+const TOKEN = localStorage.getItem('villa_token');
+const user  = JSON.parse(localStorage.getItem('villa_user') || 'null');
+if (!user || !TOKEN || user.role!=='admin') location.href = 'index.html';
+
+document.getElementById('sb-av').textContent = (user?.nama||'?')[0].toUpperCase();
+document.getElementById('sb-un').textContent = user?.nama || '—';
+
+function val(id){ return document.getElementById(id).value.trim(); }
+function fmt(n){ if(!n) return 'Rp 0'; if(n>=1e6) return 'Rp '+(n/1e6).toFixed(1).replace('.0','')+' Jt'; return 'Rp '+Number(n).toLocaleString('id-ID'); }
+function logout(){ localStorage.clear(); location.href='index.html'; }
+function toast(title,msg){ const c=document.getElementById('toastWrap'); const t=document.createElement('div'); t.className='toast'; t.innerHTML=`<div class="t-title">${title}</div><div class="t-msg">${msg}</div>`; c.appendChild(t); setTimeout(()=>t.remove(),5000); }
+
+async function api(path,opts={}){
+  const r=await fetch(API+path,{headers:{'x-villa-token':TOKEN,'Content-Type':'application/json'},...opts});
+  const d=await r.json();
+  if(!r.ok) throw new Error(d.error||'Gagal');
+  return d;
+}
+
+function openMo(id){ document.getElementById(id).classList.add('open'); }
+function closeMo(id){ document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.mo').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open');}));
+
+let allUnits=[];
+async function loadUnitOptions(){
+  if(allUnits.length) return;
+  allUnits = await api('/units');
+  const opts = '<option value="">Pilih unit</option>'+allUnits.map(u=>`<option value="${u.id}" data-nomor="${u.nomor}">Unit ${u.nomor} (Blok ${u.blok})</option>`).join('');
+  document.getElementById('u-unit').innerHTML = opts;
+  document.getElementById('m-unit').innerHTML = opts;
+}
+function toggleUnitField(){
+  document.getElementById('u-unit-wrap').style.display = document.getElementById('u-role').value==='owner' ? '' : 'none';
+}
+
+const pages = {
+  overview: {title:'Overview', sub:'Ringkasan operasional & integrasi'},
+  users:    {title:'User Login', sub:'Investor, resepsionis, manajemen'},
+  investors:{title:'Investor per Kamar', sub:'Arsip nama & kontak investor tiap unit'},
+  staff:    {title:'Staff', sub:'Security, cleaning service, penyambut tamu'},
+  cloudbeds:{title:'Cloudbeds', sub:'Pemetaan room & log event'},
+  wa:       {title:'WhatsApp Log', sub:'Riwayat pengiriman'},
+  settings: {title:'Pengaturan', sub:'Integrasi & keuangan'},
+};
+function go(name){
+  document.querySelectorAll('[id^="pg-"]').forEach(p=>p.style.display='none');
+  document.getElementById('pg-'+name).style.display='';
+  document.querySelectorAll('.sb-item').forEach(b=>b.classList.toggle('active',b.getAttribute('onclick')===`go('${name}')`));
+  const p=pages[name]||{title:name,sub:''};
+  document.getElementById('pt').textContent=p.title;
+  document.getElementById('ps').textContent=p.sub;
+  loadPage(name);
+}
+async function loadPage(name){
+  try{
+    if(name==='overview') await loadOverview();
+    if(name==='users'){ await loadUnitOptions(); await loadUsers(); }
+    if(name==='investors') await loadInvestors();
+    if(name==='staff') await loadStaff();
+    if(name==='cloudbeds'){ await loadUnitOptions(); await loadCloudbeds(); }
+    if(name==='wa') await loadWa();
+    if(name==='settings') await loadSettings();
+  }catch(e){ toast('Error', e.message); }
+}
+
+async function loadOverview(){
+  const d = await api('/admin/overview');
+  document.getElementById('o-available').textContent = d.available;
+  document.getElementById('o-occupied').textContent = d.occupied;
+  document.getElementById('o-total').textContent = d.total_unit;
+  document.getElementById('o-gross').textContent = fmt(d.gross_revenue_bulan_ini);
+  document.getElementById('o-wafail').textContent = d.wa_gagal_terkirim;
+  document.getElementById('o-status').innerHTML = `
+    <table class="tbl"><tbody>
+      <tr><td>Cloudbeds — event belum terpetakan</td><td>${d.cloudbeds_belum_dipetakan}</td></tr>
+      <tr><td>Total user login</td><td>${d.total_user} (${d.user_aktif} aktif)</td></tr>
+    </tbody></table>`;
+}
+
+async function loadUsers(){
+  const rows = await api('/admin/users');
+  const roleLbl={owner:'Investor',receptionist:'Resepsionis',admin:'Manajemen',security:'Security',cleaning_service:'Cleaning Service'};
+  document.getElementById('users-table').innerHTML = rows.map(u=>`<tr>
+    <td style="font-weight:500">${u.nama}</td>
+    <td>${u.email}</td>
+    <td>${roleLbl[u.role]||u.role}</td>
+    <td style="color:var(--gold)">${u.unit_nomor||'—'}</td>
+    <td>${u.is_active?'<span class="bdg ok">Aktif</span>':'<span class="bdg off">Nonaktif</span>'}</td>
+    <td>${u.must_change_password?'<span class="bdg pnd">Wajib ganti</span>':'<span class="bdg ok">OK</span>'}</td>
+    <td>
+      <span class="tbl-act" onclick="resetPass('${u.id}')">Reset Password</span>
+      <span class="tbl-act" onclick="toggleActive('${u.id}',${!u.is_active})">${u.is_active?'Nonaktifkan':'Aktifkan'}</span>
+    </td>
+  </tr>`).join('') || '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--w30)">Belum ada user</td></tr>';
+}
+async function createUser(){
+  const role=val('u-role');
+  const unitSel=document.getElementById('u-unit');
+  const unit_id = role==='owner' ? unitSel.value : null;
+  const unit_nomor = role==='owner' ? unitSel.options[unitSel.selectedIndex]?.dataset?.nomor : null;
+  const nama=val('u-nama'), email=val('u-email'), password=val('u-pass'), hp=val('u-hp');
+  if(!nama||!email||!password){ toast('Error','Nama, email, password wajib diisi'); return; }
+  if(role==='owner' && !unit_id){ toast('Error','Pilih unit untuk investor'); return; }
+  try{
+    await api('/admin/users',{method:'POST',body:JSON.stringify({nama,email,password,role,unit_id,unit_nomor,hp})});
+    closeMo('mo-user'); toast('Berhasil',`User ${nama} dibuat. Wajib ganti password di login pertama.`); loadUsers();
+  }catch(e){ toast('Error', e.message); }
+}
+async function resetPass(id){
+  const p = prompt('Password baru (min. 6 karakter):');
+  if(!p) return;
+  try{ await api('/admin/users',{method:'PATCH',body:JSON.stringify({id,new_password:p})}); toast('Berhasil','Password direset, user wajib ganti di login berikutnya.'); loadUsers(); }
+  catch(e){ toast('Error', e.message); }
+}
+async function toggleActive(id,active){
+  try{ await api('/admin/users',{method:'PATCH',body:JSON.stringify({id,is_active:active})}); loadUsers(); }
+  catch(e){ toast('Error', e.message); }
+}
+
+async function loadInvestors(){
+  const rows = await api('/admin/investors');
+  document.getElementById('investors-table').innerHTML = rows.map(r=>`<tr>
+    <td style="color:var(--gold)">${r.units?`Unit ${r.units.nomor} (Blok ${r.units.blok})`:r.unit_nomor}</td>
+    <td style="font-weight:500">${r.nama}</td>
+    <td>${r.hp}</td>
+    <td>${new Date(r.created_at).toLocaleString('id-ID')}</td>
+  </tr>`).join('') || '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--w30)">Belum ada data investor</td></tr>';
+}
+
+async function loadStaff(){
+  const rows = await api('/admin/staff');
+  const roleLbl={security:'Security',cleaning_service:'Cleaning Service',guest_greeter:'Penyambut Tamu'};
+  document.getElementById('staff-table').innerHTML = rows.map(s=>`<tr>
+    <td style="font-weight:500">${s.nama}</td>
+    <td>${roleLbl[s.role]||s.role}</td>
+    <td>${s.hp||'—'}</td>
+    <td>${s.is_active?'<span class="bdg ok">Aktif</span>':'<span class="bdg off">Nonaktif</span>'}</td>
+    <td><span class="tbl-act" onclick="toggleStaff('${s.id}',${!s.is_active})">${s.is_active?'Nonaktifkan':'Aktifkan'}</span></td>
+  </tr>`).join('') || '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--w30)">Belum ada staff</td></tr>';
+}
+async function createStaff(){
+  const nama=val('s-nama'), role=val('s-role'), hp=val('s-hp');
+  if(!nama){ toast('Error','Nama wajib diisi'); return; }
+  try{ await api('/admin/staff',{method:'POST',body:JSON.stringify({nama,role,hp})}); closeMo('mo-staff'); toast('Berhasil',`${nama} ditambahkan.`); loadStaff(); }
+  catch(e){ toast('Error', e.message); }
+}
+async function toggleStaff(id,active){
+  try{ await api('/admin/staff',{method:'PATCH',body:JSON.stringify({id,is_active:active})}); loadStaff(); }
+  catch(e){ toast('Error', e.message); }
+}
+
+async function loadCloudbeds(){
+  const [mapping, log] = await Promise.all([api('/admin/cloudbeds/mapping'), api('/admin/cloudbeds/log')]);
+  document.getElementById('mapping-table').innerHTML = mapping.map(m=>`<tr>
+    <td>${m.cloudbeds_room_id}</td><td>${m.cloudbeds_room_name||'—'}</td>
+    <td style="color:var(--gold)">${m.units?`Unit ${m.units.nomor} (Blok ${m.units.blok})`:'—'}</td>
+    <td><span class="tbl-act" onclick="deleteMapping('${m.id}')">Hapus</span></td>
+  </tr>`).join('') || '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--w30)">Belum ada pemetaan</td></tr>';
+  document.getElementById('cblog-table').innerHTML = log.map(l=>`<tr>
+    <td>${new Date(l.created_at).toLocaleString('id-ID')}</td><td>${l.event_type}</td><td>${l.reservation_id||'—'}</td>
+    <td>${l.matched?'<span class="bdg ok">Ya</span>':'<span class="bdg off">Tidak</span>'}</td>
+  </tr>`).join('') || '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--w30)">Belum ada event</td></tr>';
+}
+async function createMapping(){
+  const cloudbeds_room_id=val('m-roomid'), cloudbeds_room_name=val('m-roomname');
+  const unitSel=document.getElementById('m-unit'); const unit_id=unitSel.value;
+  if(!cloudbeds_room_id||!unit_id){ toast('Error','Room ID dan unit wajib diisi'); return; }
+  try{ await api('/admin/cloudbeds/mapping',{method:'POST',body:JSON.stringify({cloudbeds_room_id,cloudbeds_room_name,unit_id})}); closeMo('mo-map'); toast('Berhasil','Pemetaan disimpan.'); loadCloudbeds(); }
+  catch(e){ toast('Error', e.message); }
+}
+async function deleteMapping(id){
+  if(!confirm('Hapus pemetaan ini?')) return;
+  try{ await api('/admin/cloudbeds/mapping?id='+id,{method:'DELETE'}); loadCloudbeds(); }
+  catch(e){ toast('Error', e.message); }
+}
+
+async function loadWa(){
+  const rows = await api('/admin/wa/log');
+  document.getElementById('wa-table').innerHTML = rows.map(w=>`<tr>
+    <td>${new Date(w.created_at).toLocaleString('id-ID')}</td><td>${w.template_type||'—'}</td><td>${w.phone||'—'}</td>
+    <td>${w.status==='sent'?'<span class="bdg ok">Terkirim</span>':w.status?.includes('fail')||w.status==='error'?'<span class="bdg off">Gagal</span>':'<span class="bdg pnd">'+w.status+'</span>'}</td>
+  </tr>`).join('') || '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--w30)">Belum ada log</td></tr>';
+}
+
+async function loadSettings(){
+  const rows = await api('/admin/settings');
+  const byKey = Object.fromEntries(rows.map(r=>[r.key,r.value]));
+  if(byKey.cloudbeds?.api_key) document.getElementById('set-cb-key').placeholder = 'Tersimpan: '+byKey.cloudbeds.api_key;
+  if(byKey.cloudbeds?.webhook_secret) document.getElementById('set-cb-secret').placeholder = 'Tersimpan: '+byKey.cloudbeds.webhook_secret;
+  if(byKey.vercel_bridge?.base_url) document.getElementById('set-wa-url').placeholder = 'Tersimpan: '+byKey.vercel_bridge.base_url;
+  if(byKey.vercel_bridge?.secret) document.getElementById('set-wa-secret').placeholder = 'Tersimpan: '+byKey.vercel_bridge.secret;
+  if(typeof byKey.finance?.marketing_pct === 'number') document.getElementById('set-fin-pct').placeholder = 'Tersimpan: '+byKey.finance.marketing_pct;
+}
+async function saveSetting(key,value){
+  const cleaned = Object.fromEntries(Object.entries(value).filter(([,v])=>v!==''&&v!==null&&!Number.isNaN(v)));
+  if(Object.keys(cleaned).length===0){ toast('Info','Tidak ada perubahan untuk disimpan.'); return; }
+  try{ await api('/admin/settings',{method:'POST',body:JSON.stringify({key,value:cleaned})}); toast('Tersimpan',`Pengaturan ${key} diperbarui.`); loadSettings(); }
+  catch(e){ toast('Error', e.message); }
+}
+
+go('overview');
+</script>
+</body>
+</html>

@@ -30,7 +30,7 @@ button:hover{opacity:.88}
 <div class="box">
   <div class="logo-wrap">
     <div class="logo">Loonars Private Living</div>
-    <div class="tagline">Portal <em>Pemilik</em><br>& Operasional</div>
+    <div class="tagline">Portal <em>Investor</em>, Manajemen<br>& Resepsionis</div>
     <div class="divider"></div>
   </div>
   <label>Email</label>
@@ -40,9 +40,46 @@ button:hover{opacity:.88}
   <button onclick="login()" id="btn">Masuk</button>
   <div class="err" id="err">Email atau password tidak valid.</div>
 </div>
+
+<div class="box" id="box-newpass" style="display:none">
+  <div class="logo-wrap">
+    <div class="logo">Loonars Private Living</div>
+    <div class="tagline">Buat <em>Password</em><br>Baru</div>
+    <div class="divider"></div>
+  </div>
+  <div style="font-size:12px;color:rgba(255,255,255,.5);line-height:1.6;margin-bottom:24px">Ini login pertama Anda. Buat password baru sebelum melanjutkan ke dashboard.</div>
+  <label>Password Baru</label>
+  <input type="password" id="np1" placeholder="Minimal 6 karakter">
+  <label>Ulangi Password Baru</label>
+  <input type="password" id="np2" placeholder="••••••••" onkeydown="if(event.key==='Enter')setNewPassword()">
+  <button onclick="setNewPassword()" id="np-btn">Simpan &amp; Lanjutkan</button>
+  <div class="err" id="np-err">Password tidak cocok atau terlalu pendek.</div>
+</div>
+
+<div class="box" id="box-profile" style="display:none">
+  <div class="logo-wrap">
+    <div class="logo">Loonars Private Living</div>
+    <div class="tagline">Data <em>Investor</em><br>Unit <span id="pf-unit"></span></div>
+    <div class="divider"></div>
+  </div>
+  <div style="font-size:12px;color:rgba(255,255,255,.5);line-height:1.6;margin-bottom:24px">Lengkapi data Anda sebagai investor unit ini — tersimpan permanen sebagai arsip kepemilikan.</div>
+  <label>Nama Lengkap</label>
+  <input type="text" id="pf-nama" placeholder="Nama sesuai identitas">
+  <label>Nomor HP / WhatsApp</label>
+  <input type="text" id="pf-hp" placeholder="+62 8xx-xxxx-xxxx" onkeydown="if(event.key==='Enter')saveProfile()">
+  <button onclick="saveProfile()" id="pf-btn">Simpan &amp; Masuk Dashboard</button>
+  <div class="err" id="pf-err">Nama dan nomor HP wajib diisi.</div>
+</div>
 <div class="footer-logo">PT. Maha Karya Haluoleo</div>
 <script>
 const API = 'https://svcmybsziaelwwdrnzcv.supabase.co/functions/v1/villa-api';
+
+function destFor(role) {
+  if (role === 'receptionist') return 'receptionist.html';
+  if (role === 'admin') return 'admin.html';
+  return 'owner.html';
+}
+
 async function login() {
   const email = document.getElementById('email').value.trim();
   const pass  = document.getElementById('pass').value;
@@ -57,7 +94,59 @@ async function login() {
   if (!res.ok) { document.getElementById('err').style.display='block'; return; }
   localStorage.setItem('villa_token', data.token);
   localStorage.setItem('villa_user',  JSON.stringify(data.user));
-  location.href = data.user.role === 'receptionist' ? 'receptionist.html' : 'owner.html';
+  if (data.user.must_change_password) {
+    document.querySelector('.box').style.display = 'none';
+    document.getElementById('box-newpass').style.display = '';
+    return;
+  }
+  location.href = destFor(data.user.role);
+}
+
+async function setNewPassword() {
+  const p1 = document.getElementById('np1').value;
+  const p2 = document.getElementById('np2').value;
+  const errEl = document.getElementById('np-err');
+  errEl.style.display = 'none';
+  if (p1.length < 6 || p1 !== p2) { errEl.style.display='block'; return; }
+  const token = localStorage.getItem('villa_token');
+  document.getElementById('np-btn').textContent = '...';
+  const res = await fetch(API + '/me/password', {
+    method:'POST', headers:{'Content-Type':'application/json','x-villa-token':token},
+    body: JSON.stringify({ password: p1 })
+  });
+  document.getElementById('np-btn').textContent = 'Simpan & Lanjutkan';
+  if (!res.ok) { errEl.style.display='block'; return; }
+  const user = JSON.parse(localStorage.getItem('villa_user'));
+  user.must_change_password = false;
+  localStorage.setItem('villa_user', JSON.stringify(user));
+
+  if (user.role === 'owner') {
+    document.getElementById('box-newpass').style.display = 'none';
+    document.getElementById('pf-unit').textContent = user.unit_nomor || '';
+    document.getElementById('box-profile').style.display = '';
+    return;
+  }
+  location.href = destFor(user.role);
+}
+
+async function saveProfile() {
+  const nama = document.getElementById('pf-nama').value.trim();
+  const hp   = document.getElementById('pf-hp').value.trim();
+  const errEl = document.getElementById('pf-err');
+  errEl.style.display = 'none';
+  if (!nama || !hp) { errEl.style.display='block'; return; }
+  const token = localStorage.getItem('villa_token');
+  document.getElementById('pf-btn').textContent = '...';
+  const res = await fetch(API + '/me/investor-profile', {
+    method:'POST', headers:{'Content-Type':'application/json','x-villa-token':token},
+    body: JSON.stringify({ nama, hp })
+  });
+  document.getElementById('pf-btn').textContent = 'Simpan & Masuk Dashboard';
+  if (!res.ok) { errEl.style.display='block'; return; }
+  const user = JSON.parse(localStorage.getItem('villa_user'));
+  user.nama = nama; user.hp = hp;
+  localStorage.setItem('villa_user', JSON.stringify(user));
+  location.href = destFor(user.role);
 }
 </script>
 </body>

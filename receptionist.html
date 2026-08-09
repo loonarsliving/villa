@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Operasional — Loonars Private Living</title>
+<title>Dashboard Resepsionis — Loonars Private Living</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -195,7 +195,7 @@ select option{background:#1C1C1C;color:#fff}
 <aside class="sb">
   <div class="sb-logo">
     <div class="brand">Loonars Private Living</div>
-    <div class="brand-main">Panel <em>Operasional</em></div>
+    <div class="brand-main">Dashboard <em>Resepsionis</em></div>
   </div>
   <div class="sb-role">
     <div class="rl">Login Sebagai</div>
@@ -317,7 +317,7 @@ select option{background:#1C1C1C;color:#fff}
         <div id="notif-full"><div class="loading">Memuat...</div></div>
       </div>
       <div style="background:var(--goldbg);border-left:2px solid var(--gold);border-radius:0 3px 3px 0;padding:12px 18px;font-size:11px;color:var(--w50);line-height:1.6;margin-top:0">
-        Setiap check-in, checkout, dan booking baru otomatis terkirim ke dashboard pemilik masing-masing unit.
+        Booking dari OTA (Traveloka, Airbnb, dll) otomatis masuk lewat Cloudbeds. Check-in & checkout tetap diproses manual oleh resepsionis di sini. Setiap aksi otomatis terkirim ke dashboard investor masing-masing unit.
       </div>
     </div>
 
@@ -389,7 +389,7 @@ async function doCheckin(){
   await api('/checkin',{method:'POST',body:JSON.stringify({booking_id:bk.id,unit_id,unit_nomor,guest_nama:nama,tipe,total_bayar:tarif,checkin_by:user?.nama||'Staff'})});
   closeMo('mo-ci');
   toast('🛎️','Check-In Berhasil',`${nama} — Unit ${unit_nomor} sudah check-in.`,'g');
-  setTimeout(()=>toast('📱','Pemilik Unit Diberitahu',`Notifikasi terkirim ke dashboard pemilik Unit ${unit_nomor}.`,'gd'),1200);
+  setTimeout(()=>toast('📱','Investor Unit Diberitahu',`Notifikasi terkirim ke dashboard investor Unit ${unit_nomor}.`,'gd'),1200);
   loadFrontDesk();
 }
 
@@ -403,7 +403,7 @@ async function doCheckout(){
   await api('/checkout',{method:'POST',body:JSON.stringify({booking_id:bk.id,unit_id,unit_nomor,guest_nama:bk.guest_nama,kondisi:document.getElementById('co-cond').value,checkout_by:user?.nama||'Staff'})});
   closeMo('mo-co');
   toast('👋','Checkout Diproses',`Unit ${unit_nomor} checkout. Housekeeping dijadwalkan.`,'gd');
-  setTimeout(()=>toast('📱','Pemilik Unit Diberitahu',`Checkout Unit ${unit_nomor} tercatat.`,'g'),1000);
+  setTimeout(()=>toast('📱','Investor Unit Diberitahu',`Checkout Unit ${unit_nomor} tercatat.`,'g'),1000);
   loadFrontDesk();
 }
 
@@ -502,7 +502,7 @@ async function loadSiteplan(){
       <div class="blok-units">
         ${blokUnits.map(u=>{
           const s=statusCfg[u.status]||statusCfg.available;
-          return `<div class="unit-card ${s.cls}" onclick="toast('◈','Unit ${u.nomor}','${s.lbl} · ${u.owner_nama||'Belum ada pemilik'}','gd')">
+          return `<div class="unit-card ${s.cls}" onclick="toast('◈','Unit ${u.nomor}','${s.lbl} · ${u.owner_nama||'Belum ada investor'}','gd')">
             <div class="unit-num">${u.nomor}</div>
             <div class="unit-lbl">${s.lbl}</div>
             ${u.owner_nama?`<div style="font-size:8.5px;color:var(--w30);margin-top:3px">${u.owner_nama}</div>`:''}
@@ -523,7 +523,7 @@ async function loadBooking(){
       <td style="color:var(--gold)">${b.unit_nomor}</td>
       <td>${new Date(b.tgl_checkin).toLocaleDateString('id-ID',{day:'2-digit',month:'short'})}</td>
       <td><span style="font-size:9.5px;color:var(--w30)">${b.tipe}</span></td>
-      <td><span style="font-size:9.5px;color:var(--w30)">${b.sumber}</span></td>
+      <td><span style="font-size:9.5px;color:${b.sumber==='cloudbeds'?'var(--gold)':'var(--w30)'}">${b.sumber==='cloudbeds'?'☁ Cloudbeds':b.sumber}</span></td>
       <td>${statusBdg[b.status]||b.status}</td>
       <td>${b.status==='terjadwal'?`<span class="tbl-act" onclick="openMo('mo-ci')">Check-In →</span>`:'—'}</td>
     </tr>`).join('');

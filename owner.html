@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Dashboard Pemilik — Loonars Private Living</title>
+<title>Dashboard Investor — Loonars Private Living</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -122,7 +122,7 @@ html{font-size:14px}body{font-family:'Inter',sans-serif;background:var(--bg);col
 <aside class="sb">
   <div class="sb-logo">
     <div class="brand">Loonars Private Living</div>
-    <div class="brand-main">Dashboard<br><em>Pemilik</em></div>
+    <div class="brand-main">Dashboard<br><em>Investor</em></div>
   </div>
   <div class="sb-unit">
     <div class="su-lbl">Unit Anda</div>
@@ -143,7 +143,7 @@ html{font-size:14px}body{font-family:'Inter',sans-serif;background:var(--bg);col
   <div class="sb-foot">
     <div style="display:flex;align-items:center;gap:10px">
       <div class="sb-av" id="sb-av">—</div>
-      <div><div class="sb-un" id="sb-un">—</div><div class="sb-ur">Pemilik Unit</div></div>
+      <div><div class="sb-un" id="sb-un">—</div><div class="sb-ur">Investor Unit</div></div>
       <div class="logout-btn" style="margin-left:auto;padding:4px 8px;font-size:10px" onclick="logout()">Keluar</div>
     </div>
   </div>
@@ -179,10 +179,10 @@ html{font-size:14px}body{font-family:'Inter',sans-serif;background:var(--bg);col
       </div>
 
       <div class="strip">
-        <div class="sc g"><div class="sc-lbl">Pendapatan Anda</div><div class="sc-val" id="s-owner">—</div><div class="sc-sub">Bulan ini</div></div>
+        <div class="sc g"><div class="sc-lbl">Pendapatan Anda</div><div class="sc-val" id="s-owner">—</div><div class="sc-sub">Bulan ini (70%)</div></div>
         <div class="sc"><div class="sc-lbl">Gross Revenue</div><div class="sc-val" id="s-gross">—</div><div class="sc-sub">Unit ini</div></div>
-        <div class="sc gd"><div class="sc-lbl">Opex Unit</div><div class="sc-val" id="s-opex">—</div><div class="sc-sub">Dibagi rata 13 unit</div></div>
-        <div class="sc"><div class="sc-lbl">Gross Profit</div><div class="sc-val" id="s-gp">—</div><div class="sc-sub">Setelah opex</div></div>
+        <div class="sc gd"><div class="sc-lbl">Opex + Marketing</div><div class="sc-val" id="s-opex">—</div><div class="sc-sub">Opex ÷13 unit + iklan 25-30%</div></div>
+        <div class="sc"><div class="sc-lbl">Net Profit</div><div class="sc-val" id="s-gp">—</div><div class="sc-sub">Dasar bagi hasil 70/30</div></div>
       </div>
 
       <div class="g21">
@@ -200,10 +200,10 @@ html{font-size:14px}body{font-family:'Inter',sans-serif;background:var(--bg);col
     <!-- PENDAPATAN -->
     <div id="pg-pendapatan" style="display:none">
       <div class="strip">
-        <div class="sc g"><div class="sc-lbl">Pemilik (70%)</div><div class="sc-val" id="p-owner">—</div></div>
+        <div class="sc g"><div class="sc-lbl">Investor (70%)</div><div class="sc-val" id="p-owner">—</div></div>
         <div class="sc"><div class="sc-lbl">Gross Revenue</div><div class="sc-val" id="p-gross">—</div></div>
         <div class="sc"><div class="sc-lbl">Opex Unit</div><div class="sc-val" id="p-opex">—</div><div class="sc-sub">Total ÷ 13 unit</div></div>
-        <div class="sc gd"><div class="sc-lbl">Gross Profit</div><div class="sc-val" id="p-gp">—</div></div>
+        <div class="sc gd"><div class="sc-lbl">Net Profit</div><div class="sc-val" id="p-gp">—</div></div>
       </div>
       <div class="card">
         <div class="ch"><div class="ct">Alur Bagi Hasil</div><div class="cs" id="p-periode">—</div></div>
@@ -324,8 +324,8 @@ async function loadBeranda() {
   }
   document.getElementById('s-owner').textContent = fmt(owner);
   document.getElementById('s-gross').textContent = fmt(report.gross_revenue||0);
-  document.getElementById('s-opex').textContent  = fmt(report.opex_per_unit||0);
-  document.getElementById('s-gp').textContent    = fmt(report.gross_profit||0);
+  document.getElementById('s-opex').textContent  = fmt((report.opex_per_unit||0) + (report.marketing_amount||0));
+  document.getElementById('s-gp').textContent    = fmt(report.net ?? report.gross_profit ?? 0);
 
   // Transactions
   const txEl = document.getElementById('tx-list');
@@ -348,21 +348,23 @@ async function loadBeranda() {
 
 async function loadPendapatan() {
   const report = await api(`/report?unit_id=${UNIT_ID}&periode=${bulan}`);
-  const g=report.gross_revenue||0, o=report.opex_per_unit||0, gp=report.gross_profit||0;
-  const ow=report.owner_amount||0, lo=report.loonars_amount||0;
+  const g=report.gross_revenue||0, o=report.opex_per_unit||0, mk=report.marketing_amount||0, gp=report.net??report.gross_profit??0;
+  const ow=report.owner_amount||0, lo=report.pengelola_amount??report.loonars_amount??0;
+  const mkPct=Math.round((report.marketing_pct||0)*100);
   document.getElementById('p-owner').textContent=fmt(ow);
   document.getElementById('p-gross').textContent=fmt(g);
-  document.getElementById('p-opex').textContent=fmt(o);
+  document.getElementById('p-opex').textContent=fmt(o+mk);
   document.getElementById('p-gp').textContent=fmt(gp);
   document.getElementById('p-periode').textContent=bulanLabel;
 
   const rows=[
     ['Pendapatan Unit '+UNIT_NOMOR,100,fmt(g),false,true],
     ['Opex dibagi rata (total ÷ 13)',Math.round((o/g||0)*100),`− ${fmt(o)}`,true],
-    ['Gross Profit',Math.round((gp/g||0)*100),fmt(gp),false,true],
-    ['Pemilik (70%)',70,fmt(ow),false,false,true],
-    ['Loonars (30%)',30,fmt(lo),false],
-    ['Transfer ke Pemilik — tgl 5',70,fmt(ow),false,false,true],
+    [`Marketing & Iklan (${mkPct}% omset kotor)`,Math.round((mk/g||0)*100),`− ${fmt(mk)}`,true],
+    ['Net Profit',Math.round((gp/g||0)*100),fmt(gp),false,true],
+    ['Investor (70%)',70,fmt(ow),false,false,true],
+    ['Pengelola (30%)',30,fmt(lo),false],
+    ['Transfer ke Investor — tgl 5',70,fmt(ow),false,false,true],
   ];
   document.getElementById('br-rows').innerHTML=rows.map(([lbl,pct,val,isCost,isTot,isGold])=>`
     <div class="br-row ${isTot?'tot':''}">
@@ -389,7 +391,7 @@ async function loadOpex() {
   const rows = data||[];
   if (rows.length===0) {
     // Default opex jika belum ada input
-    const defaults=[['⚡ Listrik PLN',3800000],['💧 Air PDAM',495000],['🌐 WiFi',450000],['👷 Staff',2200000],['🛏️ Housekeeping & Linen',1700000],['📣 Marketing',400000],['🔧 Perawatan',230000]];
+    const defaults=[['⚡ Listrik PLN',3800000],['💧 Air PDAM',495000],['🌐 WiFi',450000],['👷 Staff',2200000],['🛏️ Housekeeping & Linen',1700000],['🔧 Perawatan',230000]];
     const total=defaults.reduce((s,[,v])=>s+v,0);
     const perUnit=total/13;
     document.getElementById('opex-rows').innerHTML=
