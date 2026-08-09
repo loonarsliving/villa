@@ -55,6 +55,21 @@ button:hover{opacity:.88}
   <button onclick="setNewPassword()" id="np-btn">Simpan &amp; Lanjutkan</button>
   <div class="err" id="np-err">Password tidak cocok atau terlalu pendek.</div>
 </div>
+
+<div class="box" id="box-profile" style="display:none">
+  <div class="logo-wrap">
+    <div class="logo">Loonars Private Living</div>
+    <div class="tagline">Data <em>Investor</em><br>Unit <span id="pf-unit"></span></div>
+    <div class="divider"></div>
+  </div>
+  <div style="font-size:12px;color:rgba(255,255,255,.5);line-height:1.6;margin-bottom:24px">Lengkapi data Anda sebagai investor unit ini — tersimpan permanen sebagai arsip kepemilikan.</div>
+  <label>Nama Lengkap</label>
+  <input type="text" id="pf-nama" placeholder="Nama sesuai identitas">
+  <label>Nomor HP / WhatsApp</label>
+  <input type="text" id="pf-hp" placeholder="+62 8xx-xxxx-xxxx" onkeydown="if(event.key==='Enter')saveProfile()">
+  <button onclick="saveProfile()" id="pf-btn">Simpan &amp; Masuk Dashboard</button>
+  <div class="err" id="pf-err">Nama dan nomor HP wajib diisi.</div>
+</div>
 <div class="footer-logo">PT. Maha Karya Haluoleo</div>
 <script>
 const API = 'https://svcmybsziaelwwdrnzcv.supabase.co/functions/v1/villa-api';
@@ -103,6 +118,33 @@ async function setNewPassword() {
   if (!res.ok) { errEl.style.display='block'; return; }
   const user = JSON.parse(localStorage.getItem('villa_user'));
   user.must_change_password = false;
+  localStorage.setItem('villa_user', JSON.stringify(user));
+
+  if (user.role === 'owner') {
+    document.getElementById('box-newpass').style.display = 'none';
+    document.getElementById('pf-unit').textContent = user.unit_nomor || '';
+    document.getElementById('box-profile').style.display = '';
+    return;
+  }
+  location.href = destFor(user.role);
+}
+
+async function saveProfile() {
+  const nama = document.getElementById('pf-nama').value.trim();
+  const hp   = document.getElementById('pf-hp').value.trim();
+  const errEl = document.getElementById('pf-err');
+  errEl.style.display = 'none';
+  if (!nama || !hp) { errEl.style.display='block'; return; }
+  const token = localStorage.getItem('villa_token');
+  document.getElementById('pf-btn').textContent = '...';
+  const res = await fetch(API + '/me/investor-profile', {
+    method:'POST', headers:{'Content-Type':'application/json','x-villa-token':token},
+    body: JSON.stringify({ nama, hp })
+  });
+  document.getElementById('pf-btn').textContent = 'Simpan & Masuk Dashboard';
+  if (!res.ok) { errEl.style.display='block'; return; }
+  const user = JSON.parse(localStorage.getItem('villa_user'));
+  user.nama = nama; user.hp = hp;
   localStorage.setItem('villa_user', JSON.stringify(user));
   location.href = destFor(user.role);
 }

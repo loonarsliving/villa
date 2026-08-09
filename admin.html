@@ -129,6 +129,7 @@ select option{background:#1C1C1C;color:#fff}
     <button class="sb-item active" onclick="go('overview')"><span class="si">◈</span>Overview</button>
     <div class="sb-sec">Akses</div>
     <button class="sb-item" onclick="go('users')"><span class="si">◎</span>User Login</button>
+    <button class="sb-item" onclick="go('investors')"><span class="si">◈</span>Investor per Kamar</button>
     <button class="sb-item" onclick="go('staff')"><span class="si">◉</span>Staff (Security/CS/Greeter)</button>
     <div class="sb-sec">Integrasi</div>
     <button class="sb-item" onclick="go('cloudbeds')"><span class="si">☁</span>Cloudbeds</button>
@@ -166,6 +167,14 @@ select option{background:#1C1C1C;color:#fff}
       <div class="card">
         <div class="ch"><div><div class="ct">User Login</div><div class="cs">Investor per kamar, resepsionis, manajemen</div></div><div class="ca" onclick="openMo('mo-user')">+ Tambah User</div></div>
         <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Nama</th><th>Email</th><th>Role</th><th>Unit</th><th>Status</th><th>Password</th><th>Aksi</th></tr></thead><tbody id="users-table"></tbody></table></div>
+      </div>
+    </div>
+
+    <div id="pg-investors" style="display:none">
+      <div class="note">Arsip permanen: satu baris baru tersimpan setiap kali investor mengisi data ini (mis. setelah ganti password pertama kali). Baris terbaru per unit = data investor yang berlaku sekarang.</div>
+      <div class="card">
+        <div class="ch"><div class="ct">Arsip Data Investor</div></div>
+        <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Unit</th><th>Nama</th><th>No. HP</th><th>Diisi Tanggal</th></tr></thead><tbody id="investors-table"></tbody></table></div>
       </div>
     </div>
 
@@ -265,6 +274,7 @@ function toggleUnitField(){
 const pages = {
   overview: {title:'Overview', sub:'Ringkasan operasional & integrasi'},
   users:    {title:'User Login', sub:'Investor, resepsionis, manajemen'},
+  investors:{title:'Investor per Kamar', sub:'Arsip nama & kontak investor tiap unit'},
   staff:    {title:'Staff', sub:'Security, cleaning service, penyambut tamu'},
   cloudbeds:{title:'Cloudbeds', sub:'Pemetaan room & log event'},
   wa:       {title:'WhatsApp Log', sub:'Riwayat pengiriman'},
@@ -283,6 +293,7 @@ async function loadPage(name){
   try{
     if(name==='overview') await loadOverview();
     if(name==='users'){ await loadUnitOptions(); await loadUsers(); }
+    if(name==='investors') await loadInvestors();
     if(name==='staff') await loadStaff();
     if(name==='cloudbeds'){ await loadUnitOptions(); await loadCloudbeds(); }
     if(name==='wa') await loadWa();
@@ -342,6 +353,16 @@ async function resetPass(id){
 async function toggleActive(id,active){
   try{ await api('/admin/users',{method:'PATCH',body:JSON.stringify({id,is_active:active})}); loadUsers(); }
   catch(e){ toast('Error', e.message); }
+}
+
+async function loadInvestors(){
+  const rows = await api('/admin/investors');
+  document.getElementById('investors-table').innerHTML = rows.map(r=>`<tr>
+    <td style="color:var(--gold)">${r.units?`Unit ${r.units.nomor} (Blok ${r.units.blok})`:r.unit_nomor}</td>
+    <td style="font-weight:500">${r.nama}</td>
+    <td>${r.hp}</td>
+    <td>${new Date(r.created_at).toLocaleString('id-ID')}</td>
+  </tr>`).join('') || '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--w30)">Belum ada data investor</td></tr>';
 }
 
 async function loadStaff(){
