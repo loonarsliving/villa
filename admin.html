@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Dashboard Admin — Loonars Private Living</title>
+<title>Dashboard Manajemen — Loonars Private Living</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -80,7 +80,7 @@ select option{background:#1C1C1C;color:#fff}
     <label>Role</label>
     <select id="u-role" onchange="toggleUnitField()">
       <option value="owner">Investor (owner)</option>
-      <option value="receptionist">Pengelola</option>
+      <option value="receptionist">Resepsionis</option>
       <option value="admin">Admin</option>
     </select>
     <div id="u-unit-wrap"><label>Unit (untuk investor)</label><select id="u-unit"><option value="">Pilih unit</option></select></div>
@@ -122,7 +122,7 @@ select option{background:#1C1C1C;color:#fff}
 <aside class="sb">
   <div class="sb-logo">
     <div class="brand">Loonars Private Living</div>
-    <div class="brand-main">Dashboard <em>Admin</em></div>
+    <div class="brand-main">Dashboard <em>Manajemen</em></div>
   </div>
   <nav class="sb-nav">
     <div class="sb-sec">Ikhtisar</div>
@@ -137,7 +137,7 @@ select option{background:#1C1C1C;color:#fff}
   </nav>
   <div class="sb-foot">
     <div class="sb-av" id="sb-av">—</div>
-    <div><div class="sb-un" id="sb-un">—</div><div class="sb-ur">Admin</div></div>
+    <div><div class="sb-un" id="sb-un">—</div><div class="sb-ur">Manajemen</div></div>
     <div class="logout-btn" style="margin-left:auto;padding:4px 8px;font-size:9.5px" onclick="logout()">Keluar</div>
   </div>
 </aside>
@@ -164,7 +164,7 @@ select option{background:#1C1C1C;color:#fff}
 
     <div id="pg-users" style="display:none">
       <div class="card">
-        <div class="ch"><div><div class="ct">User Login</div><div class="cs">Investor per kamar, pengelola, admin</div></div><div class="ca" onclick="openMo('mo-user')">+ Tambah User</div></div>
+        <div class="ch"><div><div class="ct">User Login</div><div class="cs">Investor per kamar, resepsionis, manajemen</div></div><div class="ca" onclick="openMo('mo-user')">+ Tambah User</div></div>
         <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Nama</th><th>Email</th><th>Role</th><th>Unit</th><th>Status</th><th>Password</th><th>Aksi</th></tr></thead><tbody id="users-table"></tbody></table></div>
       </div>
     </div>
@@ -264,7 +264,7 @@ function toggleUnitField(){
 
 const pages = {
   overview: {title:'Overview', sub:'Ringkasan operasional & integrasi'},
-  users:    {title:'User Login', sub:'Investor, pengelola, admin'},
+  users:    {title:'User Login', sub:'Investor, resepsionis, manajemen'},
   staff:    {title:'Staff', sub:'Security, cleaning service, penyambut tamu'},
   cloudbeds:{title:'Cloudbeds', sub:'Pemetaan room & log event'},
   wa:       {title:'WhatsApp Log', sub:'Riwayat pengiriman'},
@@ -306,7 +306,7 @@ async function loadOverview(){
 
 async function loadUsers(){
   const rows = await api('/admin/users');
-  const roleLbl={owner:'Investor',receptionist:'Pengelola',admin:'Admin',security:'Security',cleaning_service:'Cleaning Service'};
+  const roleLbl={owner:'Investor',receptionist:'Resepsionis',admin:'Manajemen',security:'Security',cleaning_service:'Cleaning Service'};
   document.getElementById('users-table').innerHTML = rows.map(u=>`<tr>
     <td style="font-weight:500">${u.nama}</td>
     <td>${u.email}</td>
