@@ -21,6 +21,15 @@ export interface Unit {
   catatan: string | null;
 }
 
+export interface UnitAvailability {
+  id: string;
+  nomor: string;
+  blok: "A" | "B" | "C";
+  status: Unit["status"];
+  tersedia_untuk_tanggal: boolean;
+  dibooking_oleh: string | null;
+}
+
 export interface Booking {
   id: string;
   unit_id: string;

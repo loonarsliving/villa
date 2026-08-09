@@ -10,7 +10,7 @@ import { fmtDate, todayISO } from "@/lib/format";
 import { Card, CardHeader, Loading } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
-import type { Summary, Unit, Notification } from "@/lib/types";
+import type { Summary, Unit, UnitAvailability, Notification } from "@/lib/types";
 
 const statusColor: Record<string, string> = {
   available: "border-sage-500/30",
@@ -39,6 +39,8 @@ export default function FrontDeskPage() {
   const [coOpen, setCoOpen] = useState(false);
 
   const [ci, setCi] = useState({ nama: "", ktp: "", unit_id: "", tipe: "harian", checkin: todayISO(), checkout: todayISO(), src: "walk-in", hp: "", tarif: "" });
+  const [availUnits, setAvailUnits] = useState<UnitAvailability[] | null>(null);
+  const [availLoading, setAvailLoading] = useState(false);
   const [coUnitId, setCoUnitId] = useState("");
   const [coCond, setCoCond] = useState("Baik — tidak ada kerusakan");
   const [coNote, setCoNote] = useState("");
@@ -60,8 +62,30 @@ export default function FrontDeskPage() {
     load();
   }, []);
 
+  useEffect(() => {
+    if (!ciOpen || !ci.checkin) return;
+    let cancelled = false;
+    setAvailLoading(true);
+    const params = new URLSearchParams({ checkin: ci.checkin });
+    if (ci.checkout) params.set("checkout", ci.checkout);
+    api
+      .get<UnitAvailability[]>(`/availability?${params.toString()}`)
+      .then((res) => {
+        if (cancelled) return;
+        setAvailUnits(res || []);
+        setCi((prev) => (prev.unit_id && !res?.find((u) => u.id === prev.unit_id)?.tersedia_untuk_tanggal ? { ...prev, unit_id: "" } : prev));
+      })
+      .finally(() => {
+        if (!cancelled) setAvailLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ciOpen, ci.checkin, ci.checkout]);
+
   function openCheckin() {
     setCi({ nama: "", ktp: "", unit_id: "", tipe: "harian", checkin: todayISO(), checkout: todayISO(), src: "walk-in", hp: "", tarif: "" });
+    setAvailUnits(null);
     setCiOpen(true);
   }
   function openCheckout() {
@@ -76,33 +100,42 @@ export default function FrontDeskPage() {
       toast("⚠", "Lengkapi form", "Isi nama tamu dan pilih unit.", "ruby");
       return;
     }
+    const avail = availUnits?.find((u) => u.id === ci.unit_id);
+    if (avail && !avail.tersedia_untuk_tanggal) {
+      toast("⚠", "Unit Tidak Tersedia", `Unit ${unit.nomor} sudah dibooking ${avail.dibooking_oleh} untuk tanggal ini.`, "ruby");
+      return;
+    }
     const tarif = Number(ci.tarif) || (ci.tipe === "harian" ? 500000 : 8000000);
-    const bk = await api.post<{ id: string }>("/bookings", {
-      unit_id: unit.id,
-      unit_nomor: unit.nomor,
-      guest_nama: ci.nama,
-      tipe: ci.tipe,
-      sumber: ci.src,
-      tgl_checkin: ci.checkin,
-      tgl_checkout: ci.checkout,
-      tarif,
-      total_bayar: tarif,
-      guest_hp: ci.hp,
-      guest_ktp: ci.ktp,
-    });
-    await api.post("/checkin", {
-      booking_id: bk.id,
-      unit_id: unit.id,
-      unit_nomor: unit.nomor,
-      guest_nama: ci.nama,
-      tipe: ci.tipe,
-      total_bayar: tarif,
-      checkin_by: user?.nama || "Staff",
-    });
-    setCiOpen(false);
-    toast("🛎️", "Check-In Berhasil", `${ci.nama} — Unit ${unit.nomor} sudah check-in.`, "sage");
-    setTimeout(() => toast("📱", "Investor Unit Diberitahu", `Notifikasi terkirim ke dashboard investor Unit ${unit.nomor}.`, "gold"), 1000);
-    load();
+    try {
+      const bk = await api.post<{ id: string }>("/bookings", {
+        unit_id: unit.id,
+        unit_nomor: unit.nomor,
+        guest_nama: ci.nama,
+        tipe: ci.tipe,
+        sumber: ci.src,
+        tgl_checkin: ci.checkin,
+        tgl_checkout: ci.checkout,
+        tarif,
+        total_bayar: tarif,
+        guest_hp: ci.hp,
+        guest_ktp: ci.ktp,
+      });
+      await api.post("/checkin", {
+        booking_id: bk.id,
+        unit_id: unit.id,
+        unit_nomor: unit.nomor,
+        guest_nama: ci.nama,
+        tipe: ci.tipe,
+        total_bayar: tarif,
+        checkin_by: user?.nama || "Staff",
+      });
+      setCiOpen(false);
+      toast("🛎️", "Check-In Berhasil", `${ci.nama} — Unit ${unit.nomor} sudah check-in.`, "sage");
+      setTimeout(() => toast("📱", "Investor Unit Diberitahu", `Notifikasi terkirim ke dashboard investor Unit ${unit.nomor}.`, "gold"), 1000);
+      load();
+    } catch (e) {
+      toast("⚠", "Check-In Gagal", e instanceof Error ? e.message : "Terjadi kesalahan.", "ruby");
+    }
   }
 
   async function doCheckout() {
@@ -127,7 +160,6 @@ export default function FrontDeskPage() {
     load();
   }
 
-  const availableUnits = units.filter((u) => u.status === "available");
   const occupiedUnits = units.filter((u) => u.status === "occupied" || u.status === "checkout");
 
   const agenda: { title: string; sub: string; time: string; dot: string }[] = [];
@@ -243,11 +275,13 @@ export default function FrontDeskPage() {
         <Field label="Nama Tamu"><input className={inputCls} value={ci.nama} onChange={(e) => setCi({ ...ci, nama: e.target.value })} placeholder="Nama lengkap" /></Field>
         <Field label="No. KTP / Paspor"><input className={inputCls} value={ci.ktp} onChange={(e) => setCi({ ...ci, ktp: e.target.value })} placeholder="Nomor identitas" /></Field>
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Unit">
+          <Field label={`Unit${availLoading ? " — mengecek ketersediaan…" : ""}`}>
             <select className={inputCls} value={ci.unit_id} onChange={(e) => setCi({ ...ci, unit_id: e.target.value })}>
               <option value="">Pilih unit</option>
-              {availableUnits.map((u) => (
-                <option key={u.id} value={u.id}>Unit {u.nomor}</option>
+              {(availUnits ?? units.map((u) => ({ ...u, tersedia_untuk_tanggal: u.status === "available", dibooking_oleh: null }))).map((u) => (
+                <option key={u.id} value={u.id} disabled={!u.tersedia_untuk_tanggal}>
+                  Unit {u.nomor}{!u.tersedia_untuk_tanggal ? ` — dibooking (${u.dibooking_oleh ?? u.status})` : ""}
+                </option>
               ))}
             </select>
           </Field>
