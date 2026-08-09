@@ -1,0 +1,299 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { FrontDeskShell } from "./_shell";
+import { useAuth } from "@/lib/auth";
+import { api } from "@/lib/api";
+import { useToast } from "@/lib/toast";
+import { fmtDate, todayISO } from "@/lib/format";
+import { Card, CardHeader, Loading } from "@/components/Card";
+import { StatCard } from "@/components/StatCard";
+import { Modal, Field, inputCls, Btn } from "@/components/Modal";
+import type { Summary, Unit, Notification } from "@/lib/types";
+
+const statusColor: Record<string, string> = {
+  available: "border-sage-500/30",
+  occupied: "bg-base-700 border-gold-500/25",
+  checkout: "bg-gold-500/10 border-gold-500/40",
+  dirty: "border-dashed border-white/15",
+  maintenance: "bg-ruby-500/10 border-ruby-500/30",
+};
+const statusLabel: Record<string, string> = {
+  available: "Tersedia",
+  occupied: "Terisi",
+  checkout: "Checkout",
+  dirty: "Kotor",
+  maintenance: "Maintenance",
+};
+
+export default function FrontDeskPage() {
+  const { user } = useAuth();
+  const toast = useToast();
+  const router = useRouter();
+  const [sum, setSum] = useState<Summary | null>(null);
+  const [units, setUnits] = useState<Unit[]>([]);
+  const [notifs, setNotifs] = useState<Notification[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [ciOpen, setCiOpen] = useState(false);
+  const [coOpen, setCoOpen] = useState(false);
+
+  const [ci, setCi] = useState({ nama: "", ktp: "", unit_id: "", tipe: "harian", checkin: todayISO(), checkout: todayISO(), src: "walk-in", hp: "", tarif: "" });
+  const [coUnitId, setCoUnitId] = useState("");
+  const [coCond, setCoCond] = useState("Baik — tidak ada kerusakan");
+  const [coNote, setCoNote] = useState("");
+
+  async function load() {
+    setLoading(true);
+    const [s, u, n] = await Promise.all([
+      api.get<Summary>("/summary"),
+      api.get<Unit[]>("/units"),
+      api.get<Notification[]>("/notifications?role=all"),
+    ]);
+    setSum(s);
+    setUnits(u || []);
+    setNotifs(n || []);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  function openCheckin() {
+    setCi({ nama: "", ktp: "", unit_id: "", tipe: "harian", checkin: todayISO(), checkout: todayISO(), src: "walk-in", hp: "", tarif: "" });
+    setCiOpen(true);
+  }
+  function openCheckout() {
+    const occ = units.filter((u) => u.status === "occupied" || u.status === "checkout");
+    setCoUnitId(occ[0]?.id || "");
+    setCoOpen(true);
+  }
+
+  async function doCheckin() {
+    const unit = units.find((u) => u.id === ci.unit_id);
+    if (!ci.unit_id || !ci.nama.trim() || !unit) {
+      toast("⚠", "Lengkapi form", "Isi nama tamu dan pilih unit.", "ruby");
+      return;
+    }
+    const tarif = Number(ci.tarif) || (ci.tipe === "harian" ? 500000 : 8000000);
+    const bk = await api.post<{ id: string }>("/bookings", {
+      unit_id: unit.id,
+      unit_nomor: unit.nomor,
+      guest_nama: ci.nama,
+      tipe: ci.tipe,
+      sumber: ci.src,
+      tgl_checkin: ci.checkin,
+      tgl_checkout: ci.checkout,
+      tarif,
+      total_bayar: tarif,
+      guest_hp: ci.hp,
+      guest_ktp: ci.ktp,
+    });
+    await api.post("/checkin", {
+      booking_id: bk.id,
+      unit_id: unit.id,
+      unit_nomor: unit.nomor,
+      guest_nama: ci.nama,
+      tipe: ci.tipe,
+      total_bayar: tarif,
+      checkin_by: user?.nama || "Staff",
+    });
+    setCiOpen(false);
+    toast("🛎️", "Check-In Berhasil", `${ci.nama} — Unit ${unit.nomor} sudah check-in.`, "sage");
+    setTimeout(() => toast("📱", "Pemilik Unit Diberitahu", `Notifikasi terkirim ke dashboard investor Unit ${unit.nomor}.`, "gold"), 1000);
+    load();
+  }
+
+  async function doCheckout() {
+    const unit = units.find((u) => u.id === coUnitId);
+    if (!unit) return;
+    const bks = await api.get<{ id: string; guest_nama: string }[]>(`/bookings?unit_id=${unit.id}&status=checkin`);
+    const bk = bks?.[0];
+    if (!bk) {
+      toast("⚠", "Error", "Tidak ada booking aktif untuk unit ini.", "ruby");
+      return;
+    }
+    await api.post("/checkout", {
+      booking_id: bk.id,
+      unit_id: unit.id,
+      unit_nomor: unit.nomor,
+      guest_nama: bk.guest_nama,
+      kondisi: coCond,
+      checkout_by: user?.nama || "Staff",
+    });
+    setCoOpen(false);
+    toast("👋", "Checkout Diproses", `Unit ${unit.nomor} checkout. Housekeeping dijadwalkan.`, "gold");
+    load();
+  }
+
+  const availableUnits = units.filter((u) => u.status === "available");
+  const occupiedUnits = units.filter((u) => u.status === "occupied" || u.status === "checkout");
+
+  const agenda: { title: string; sub: string; time: string; dot: string }[] = [];
+  units.filter((u) => u.status === "checkout").forEach((u) => agenda.push({ title: `Checkout — Unit ${u.nomor}`, sub: "Hari ini", time: "12:00", dot: "bg-ruby-500" }));
+  if (sum && sum.checkin_today > 0) agenda.push({ title: `${sum.checkin_today} check-in terjadwal`, sub: "Siapkan unit", time: "14:00", dot: "bg-azure-500" });
+  if (sum && sum.dirty > 0) agenda.push({ title: `${sum.dirty} unit perlu dibersihkan`, sub: "Housekeeping", time: "Segera", dot: "bg-gold-500" });
+
+  return (
+    <FrontDeskShell
+      pageTitle="Front Desk"
+      pageSub={new Date().toLocaleDateString("id-ID", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })}
+      topBarExtra={
+        <>
+          <button onClick={openCheckin} className="text-[11px] bg-gold-500 text-base-950 font-semibold rounded px-3.5 py-2 whitespace-nowrap">
+            + Check-In
+          </button>
+          <button onClick={openCheckout} className="hidden sm:block text-[11px] text-white/80 bg-base-800 border border-white/10 rounded px-3.5 py-2 whitespace-nowrap">
+            Check-Out
+          </button>
+        </>
+      }
+    >
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 mb-3.5">
+        <StatCard label="Tersedia" value={String(sum?.available ?? "—")} accent="sage" />
+        <StatCard label="Terisi" value={String(sum?.occupied ?? "—")} sub="dari 13 unit" accent="gold" />
+        <StatCard label="Check-In Hari Ini" value={String(sum?.checkin_today ?? "—")} accent="azure" />
+        <StatCard label="Checkout Hari Ini" value={String(sum?.checkout_today ?? "—")} accent="ruby" />
+        <StatCard label="Perlu Dibersihkan" value={String(sum?.dirty ?? "—")} accent="ruby" onClick={() => router.push("/front-desk/housekeeping")} />
+      </div>
+
+      <div className="grid lg:grid-cols-[2fr_1fr] gap-3.5">
+        <div className="flex flex-col gap-3.5">
+          <Card>
+            <CardHeader title="Peta Unit — 13 Villa" action={<a href="/front-desk/siteplan" className="text-[10.5px] text-gold-500">Siteplan lengkap →</a>} />
+            <div className="p-4 sm:p-5">
+              {loading ? (
+                <Loading />
+              ) : (
+                <div className="flex gap-2 flex-wrap">
+                  {units.map((u) => (
+                    <div key={u.id} className={`border rounded px-2.5 py-2 min-w-[52px] text-center ${statusColor[u.status]}`}>
+                      <div className="font-serif text-base font-light text-white">{u.nomor}</div>
+                      <div className="text-[8.5px] text-white/30 mt-0.5">{statusLabel[u.status]}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </Card>
+          <Card>
+            <CardHeader title="Notifikasi Terbaru" action={<a href="/front-desk/notifikasi" className="text-[10.5px] text-gold-500">Semua →</a>} />
+            {notifs.length === 0 ? (
+              <Loading label="Tidak ada notifikasi" />
+            ) : (
+              notifs.slice(0, 4).map((n) => (
+                <div key={n.id} className="flex gap-2.5 px-4 sm:px-5 py-3 border-b border-white/[0.05] last:border-0 items-start">
+                  <div className="w-1.5 h-1.5 rounded-full bg-gold-500 shrink-0 mt-1.5" />
+                  <div>
+                    <div className="text-[11.5px] text-white/50 leading-relaxed">
+                      <b className="text-white">{n.judul}</b> — {n.pesan}
+                    </div>
+                    <div className="text-[9.5px] text-white/30 mt-0.5">{fmtDate(n.created_at)}</div>
+                  </div>
+                </div>
+              ))
+            )}
+          </Card>
+        </div>
+
+        <div className="flex flex-col gap-3.5">
+          <Card>
+            <CardHeader title="Aksi Cepat" />
+            <div className="p-4 grid grid-cols-2 gap-2">
+              <button onClick={openCheckin} className="flex flex-col items-center justify-center py-4 rounded bg-gold-500 text-base-950">
+                <span className="text-lg">🛎️</span>
+                <span className="text-[10.5px] font-semibold mt-1">Check-In</span>
+              </button>
+              <button onClick={openCheckout} className="flex flex-col items-center justify-center py-4 rounded bg-base-800 border border-white/10 text-white/50">
+                <span className="text-lg">👋</span>
+                <span className="text-[10.5px] font-medium mt-1">Check-Out</span>
+              </button>
+              <a href="/front-desk/housekeeping" className="flex flex-col items-center justify-center py-4 rounded bg-base-800 border border-white/10 text-white/50">
+                <span className="text-lg">🧹</span>
+                <span className="text-[10.5px] font-medium mt-1">Housekeeping</span>
+              </a>
+              <a href="/front-desk/booking" className="flex flex-col items-center justify-center py-4 rounded bg-base-800 border border-white/10 text-white/50">
+                <span className="text-lg">📅</span>
+                <span className="text-[10.5px] font-medium mt-1">Booking</span>
+              </a>
+            </div>
+          </Card>
+          <Card>
+            <CardHeader title="Agenda Hari Ini" />
+            {agenda.length === 0 ? (
+              <Loading label="Tidak ada agenda khusus" />
+            ) : (
+              agenda.map((a, i) => (
+                <div key={i} className="flex gap-3 px-4 sm:px-5 py-2.5 border-b border-white/[0.05] last:border-0 items-start">
+                  <div className={`w-1.5 h-1.5 rounded-full shrink-0 mt-1 ${a.dot}`} />
+                  <div className="flex-1">
+                    <div className="text-[11.5px] font-medium text-white/80">{a.title}</div>
+                    <div className="text-[10px] text-white/30">{a.sub}</div>
+                  </div>
+                  <div className="font-mono text-[9.5px] text-white/30 pt-0.5 shrink-0">{a.time}</div>
+                </div>
+              ))
+            )}
+          </Card>
+        </div>
+      </div>
+
+      <Modal open={ciOpen} title="Check-In Tamu" onClose={() => setCiOpen(false)} footer={<><Btn onClick={() => setCiOpen(false)}>Batal</Btn><Btn variant="primary" onClick={doCheckin}>Proses Check-In</Btn></>}>
+        <Field label="Nama Tamu"><input className={inputCls} value={ci.nama} onChange={(e) => setCi({ ...ci, nama: e.target.value })} placeholder="Nama lengkap" /></Field>
+        <Field label="No. KTP / Paspor"><input className={inputCls} value={ci.ktp} onChange={(e) => setCi({ ...ci, ktp: e.target.value })} placeholder="Nomor identitas" /></Field>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Unit">
+            <select className={inputCls} value={ci.unit_id} onChange={(e) => setCi({ ...ci, unit_id: e.target.value })}>
+              <option value="">Pilih unit</option>
+              {availableUnits.map((u) => (
+                <option key={u.id} value={u.id}>Unit {u.nomor}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Tipe">
+            <select className={inputCls} value={ci.tipe} onChange={(e) => setCi({ ...ci, tipe: e.target.value })}>
+              <option value="harian">Harian</option>
+              <option value="bulanan">Bulanan</option>
+            </select>
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Check-in"><input type="date" className={inputCls} value={ci.checkin} onChange={(e) => setCi({ ...ci, checkin: e.target.value })} /></Field>
+          <Field label="Check-out"><input type="date" className={inputCls} value={ci.checkout} onChange={(e) => setCi({ ...ci, checkout: e.target.value })} /></Field>
+        </div>
+        <Field label="Sumber Booking">
+          <select className={inputCls} value={ci.src} onChange={(e) => setCi({ ...ci, src: e.target.value })}>
+            <option value="walk-in">Walk-in</option>
+            <option value="airbnb">Airbnb</option>
+            <option value="tiket">Tiket.com</option>
+            <option value="agoda">Agoda</option>
+            <option value="website">Website Loonars</option>
+            <option value="whatsapp">WhatsApp</option>
+          </select>
+        </Field>
+        <Field label="No. HP Tamu"><input className={inputCls} value={ci.hp} onChange={(e) => setCi({ ...ci, hp: e.target.value })} placeholder="+62 8xx-xxxx-xxxx" /></Field>
+        <Field label="Tarif (Rp)"><input type="number" className={inputCls} value={ci.tarif} onChange={(e) => setCi({ ...ci, tarif: e.target.value })} placeholder="500000" /></Field>
+      </Modal>
+
+      <Modal open={coOpen} title="Check-Out Tamu" onClose={() => setCoOpen(false)} footer={<><Btn onClick={() => setCoOpen(false)}>Batal</Btn><Btn variant="primary" onClick={doCheckout}>Proses Check-Out</Btn></>}>
+        <Field label="Pilih Unit">
+          <select className={inputCls} value={coUnitId} onChange={(e) => setCoUnitId(e.target.value)}>
+            {occupiedUnits.length === 0 && <option value="">Tidak ada unit terisi</option>}
+            {occupiedUnits.map((u) => (
+              <option key={u.id} value={u.id}>Unit {u.nomor} ({u.status})</option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Kondisi Unit">
+          <select className={inputCls} value={coCond} onChange={(e) => setCoCond(e.target.value)}>
+            <option>Baik — tidak ada kerusakan</option>
+            <option>Ada kerusakan minor</option>
+            <option>Ada kerusakan signifikan</option>
+          </select>
+        </Field>
+        <Field label="Catatan"><input className={inputCls} value={coNote} onChange={(e) => setCoNote(e.target.value)} placeholder="Opsional..." /></Field>
+      </Modal>
+    </FrontDeskShell>
+  );
+}
