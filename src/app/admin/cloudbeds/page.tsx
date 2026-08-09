@@ -63,9 +63,8 @@ export default function AdminCloudbedsPage() {
   return (
     <AdminShell pageTitle="Cloudbeds" pageSub="Pemetaan room & log event">
       <div className="bg-gold-500/10 border-l-2 border-gold-500 rounded-r p-3.5 text-[11px] text-white/50 leading-relaxed mb-3.5">
-        Webhook Cloudbeds: arahkan ke{" "}
-        <code className="text-gold-400">https://svcmybsziaelwwdrnzcv.supabase.co/functions/v1/villa-api/webhook/cloudbeds</code> dengan header{" "}
-        <code className="text-gold-400">x-cloudbeds-secret</code> sesuai nilai di halaman Pengaturan Integrasi.
+        Webhook Cloudbeds: arahkan ke <code className="text-gold-400">https://living.haluoleo.id/api/webhooks/cloudbeds</code> dengan header{" "}
+        <code className="text-gold-400">x-cloudbeds-secret</code> sesuai nilai <code className="text-gold-400">CLOUDBEDS_WEBHOOK_SECRET</code> di Vercel env variable project ini. Ditangani langsung di sini — bukan lagi lewat Supabase.
       </div>
 
       <Card className="mb-3.5">
