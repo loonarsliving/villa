@@ -158,3 +158,19 @@ export interface IntegrationSetting {
   updated_by: string | null;
   value: Record<string, unknown>;
 }
+
+export interface CloudbedsMapping {
+  id: string;
+  cloudbeds_room_id: string;
+  cloudbeds_room_name: string | null;
+  unit_id: string;
+  units?: { nomor: string; blok: string };
+}
+
+export interface CloudbedsLogRow {
+  id: string;
+  reservation_id: string | null;
+  event_type: string;
+  matched: boolean;
+  created_at: string;
+}

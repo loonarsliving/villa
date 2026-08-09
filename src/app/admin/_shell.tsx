@@ -23,6 +23,7 @@ export function AdminShell({ pageTitle, pageSub, children }: { pageTitle: string
     {
       title: "Integrasi",
       items: [
+        { href: "/admin/cloudbeds", label: "Cloudbeds", icon: "☁" },
         { href: "/admin/settings", label: "Pengaturan Integrasi", icon: "⚙" },
         { href: "/admin/wa-log", label: "Log WhatsApp", icon: "◉" },
       ],

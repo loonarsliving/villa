@@ -75,10 +75,15 @@ export default function InvestorBerandaPage() {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3.5">
-        <StatCard label="Pendapatan Anda" value={fmtCurrency(owner)} sub="Bulan ini" accent="sage" />
+        <StatCard label="Pendapatan Anda" value={fmtCurrency(owner)} sub="Bulan ini (70%)" accent="sage" />
         <StatCard label="Gross Revenue" value={fmtCurrency(report?.gross_revenue)} sub="Unit ini" />
-        <StatCard label="Opex Unit" value={fmtCurrency(report?.opex_per_unit)} sub="25% dari omzet" accent="gold" />
-        <StatCard label="Gross Profit" value={fmtCurrency(report?.gross_profit)} sub="Setelah opex" />
+        <StatCard
+          label="Opex + Marketing"
+          value={fmtCurrency((report?.opex_per_unit || 0) + (report?.marketing_amount || 0))}
+          sub={`Opex ${Math.round((report?.opex_pct ?? 0.25) * 100)}% + iklan ${Math.round((report?.marketing_pct ?? 0.275) * 100)}%`}
+          accent="gold"
+        />
+        <StatCard label="Net Profit" value={fmtCurrency(report?.net ?? report?.gross_profit)} sub="Dasar bagi hasil 70/30" />
       </div>
 
       <div className="grid lg:grid-cols-[2fr_1fr] gap-3.5">

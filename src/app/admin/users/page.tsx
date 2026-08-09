@@ -17,6 +17,8 @@ export default function AdminUsersPage() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ nama: "", email: "", password: "", role: "owner" as Role, unit_id: "", hp: "" });
+  const [resetTarget, setResetTarget] = useState<VillaUserRow | null>(null);
+  const [resetPass, setResetPass] = useState("");
 
   async function load() {
     setLoading(true);
@@ -61,6 +63,22 @@ export default function AdminUsersPage() {
     load();
   }
 
+  async function doResetPassword() {
+    if (!resetTarget || resetPass.length < 6) {
+      toast("⚠", "Password terlalu pendek", "Minimal 6 karakter.", "ruby");
+      return;
+    }
+    try {
+      await api.patch("/admin/users", { id: resetTarget.id, new_password: resetPass });
+      toast("✓", "Password direset", `${resetTarget.nama} wajib ganti password di login berikutnya.`, "sage");
+      setResetTarget(null);
+      setResetPass("");
+      load();
+    } catch (e) {
+      toast("⚠", "Gagal", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby");
+    }
+  }
+
   return (
     <AdminShell pageTitle="Pengguna" pageSub="Semua akun sistem villa">
       <Card>
@@ -80,7 +98,7 @@ export default function AdminUsersPage() {
             <table className="w-full text-[11.5px] min-w-[600px]">
               <thead>
                 <tr className="bg-base-800">
-                  {["Nama", "Email", "Role", "Unit", "Status", "Aksi"].map((h) => (
+                  {["Nama", "Email", "Role", "Unit", "Status", "Password", "Aksi"].map((h) => (
                     <th key={h} className="text-left px-3.5 py-2 text-[8.5px] font-semibold tracking-wide uppercase text-white/30 border-b border-white/[0.08]">
                       {h}
                     </th>
@@ -98,6 +116,12 @@ export default function AdminUsersPage() {
                       <Badge tone={u.is_active ? "ok" : "danger"}>{u.is_active ? "Aktif" : "Nonaktif"}</Badge>
                     </td>
                     <td className="px-3.5 py-2.5 border-b border-white/[0.05]">
+                      <Badge tone={u.must_change_password ? "pending" : "ok"}>{u.must_change_password ? "Wajib ganti" : "OK"}</Badge>
+                    </td>
+                    <td className="px-3.5 py-2.5 border-b border-white/[0.05] whitespace-nowrap">
+                      <button onClick={() => setResetTarget(u)} className="text-[10.5px] font-semibold text-gold-500 mr-2.5">
+                        Reset Password
+                      </button>
                       <button onClick={() => toggleActive(u)} className="text-[10.5px] font-semibold text-gold-500">
                         {u.is_active ? "Nonaktifkan" : "Aktifkan"}
                       </button>
@@ -132,6 +156,20 @@ export default function AdminUsersPage() {
           </Field>
         )}
         <Field label="No. HP (opsional)"><input className={inputCls} value={form.hp} onChange={(e) => setForm({ ...form, hp: e.target.value })} /></Field>
+      </Modal>
+
+      <Modal
+        open={!!resetTarget}
+        title={`Reset Password — ${resetTarget?.nama || ""}`}
+        onClose={() => { setResetTarget(null); setResetPass(""); }}
+        footer={<><Btn onClick={() => { setResetTarget(null); setResetPass(""); }}>Batal</Btn><Btn variant="primary" onClick={doResetPassword}>Reset</Btn></>}
+      >
+        <Field label="Password Baru">
+          <input className={inputCls} value={resetPass} onChange={(e) => setResetPass(e.target.value)} placeholder="Minimal 6 karakter" />
+        </Field>
+        <div className="text-[10.5px] text-white/30 leading-relaxed">
+          Pengguna akan wajib ganti password ini saat login berikutnya.
+        </div>
       </Modal>
     </AdminShell>
   );

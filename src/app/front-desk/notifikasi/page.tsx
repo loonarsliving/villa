@@ -36,7 +36,7 @@ export default function FrontDeskNotifPage() {
         )}
       </Card>
       <div className="bg-gold-500/10 border-l-2 border-gold-500 rounded-r p-3.5 text-[11px] text-white/50 leading-relaxed mt-3.5">
-        Setiap check-in, checkout, dan booking baru otomatis terkirim ke dashboard investor masing-masing unit.
+        Booking dari OTA (Traveloka, Airbnb, dll) otomatis masuk lewat Cloudbeds. Check-in & checkout tetap diproses manual oleh resepsionis di sini. Setiap aksi otomatis terkirim ke dashboard investor masing-masing unit.
       </div>
     </FrontDeskShell>
   );

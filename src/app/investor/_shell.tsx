@@ -44,7 +44,7 @@ export function InvestorShell({
     <DashboardShell
       brandTitle="Dashboard"
       brandSub="Investor"
-      roleLabel={`Pemilik Unit ${user?.unit_nomor || ""}`}
+      roleLabel={`Investor Unit ${user?.unit_nomor || ""}`}
       sections={sections}
       pageTitle={pageTitle}
       pageSub={pageSub}

@@ -101,7 +101,7 @@ export default function FrontDeskPage() {
     });
     setCiOpen(false);
     toast("🛎️", "Check-In Berhasil", `${ci.nama} — Unit ${unit.nomor} sudah check-in.`, "sage");
-    setTimeout(() => toast("📱", "Pemilik Unit Diberitahu", `Notifikasi terkirim ke dashboard investor Unit ${unit.nomor}.`, "gold"), 1000);
+    setTimeout(() => toast("📱", "Investor Unit Diberitahu", `Notifikasi terkirim ke dashboard investor Unit ${unit.nomor}.`, "gold"), 1000);
     load();
   }
 

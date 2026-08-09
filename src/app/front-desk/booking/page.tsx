@@ -53,7 +53,9 @@ export default function BookingPage() {
                     <td className="px-3.5 py-2.5 border-b border-white/[0.05] text-gold-500">{b.unit_nomor}</td>
                     <td className="px-3.5 py-2.5 border-b border-white/[0.05] text-white/70">{fmtDate(b.tgl_checkin)}</td>
                     <td className="px-3.5 py-2.5 border-b border-white/[0.05] text-white/30 text-[9.5px]">{b.tipe}</td>
-                    <td className="px-3.5 py-2.5 border-b border-white/[0.05] text-white/30 text-[9.5px]">{b.sumber}</td>
+                    <td className={`px-3.5 py-2.5 border-b border-white/[0.05] text-[9.5px] ${b.sumber === "cloudbeds" ? "text-gold-500" : "text-white/30"}`}>
+                      {b.sumber === "cloudbeds" ? "☁ Cloudbeds" : b.sumber}
+                    </td>
                     <td className="px-3.5 py-2.5 border-b border-white/[0.05]">
                       <Badge tone={statusTone[b.status] || "pending"}>{statusText[b.status] || b.status}</Badge>
                     </td>

@@ -26,26 +26,30 @@ export default function PendapatanPage() {
 
   const g = report?.gross_revenue || 0;
   const o = report?.opex_per_unit || 0;
-  const gp = report?.gross_profit || 0;
+  const mk = report?.marketing_amount || 0;
+  const gp = report?.net ?? report?.gross_profit ?? 0;
   const ow = report?.owner_amount || 0;
-  const lo = report?.loonars_amount || 0;
+  const lo = report?.pengelola_amount ?? report?.loonars_amount ?? 0;
+  const opexPct = Math.round((report?.opex_pct ?? 0.25) * 100);
+  const mkPct = Math.round((report?.marketing_pct ?? 0.275) * 100);
 
   const rows: [string, number, string, boolean?, boolean?, boolean?][] = [
     [`Pendapatan Unit ${unitNomor}`, 100, fmtCurrency(g), false, true],
-    ["Opex (25% dari omzet)", Math.round((o / g || 0) * 100), `− ${fmtCurrency(o)}`, true],
-    ["Gross Profit", Math.round((gp / g || 0) * 100), fmtCurrency(gp), false, true],
-    ["Pemilik (70%)", 70, fmtCurrency(ow), false, false, true],
+    [`Opex (${opexPct}% dari omzet)`, Math.round((o / g || 0) * 100), `− ${fmtCurrency(o)}`, true],
+    [`Marketing (${mkPct}% dari omzet)`, Math.round((mk / g || 0) * 100), `− ${fmtCurrency(mk)}`, true],
+    ["Net Profit", Math.round((gp / g || 0) * 100), fmtCurrency(gp), false, true],
+    ["Investor (70%)", 70, fmtCurrency(ow), false, false, true],
     ["Loonars (30%)", 30, fmtCurrency(lo), false],
-    ["Transfer ke Pemilik — tgl 5", 70, fmtCurrency(ow), false, false, true],
+    ["Transfer ke Investor — tgl 5", 70, fmtCurrency(ow), false, false, true],
   ];
 
   return (
     <InvestorShell pageTitle="Pendapatan" pageSub="Alur bagi hasil unit Anda">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3.5">
-        <StatCard label="Pemilik (70%)" value={fmtCurrency(ow)} accent="sage" />
+        <StatCard label="Investor (70%)" value={fmtCurrency(ow)} accent="sage" />
         <StatCard label="Gross Revenue" value={fmtCurrency(g)} />
-        <StatCard label="Opex Unit" value={fmtCurrency(o)} sub="25% dari omzet" accent="gold" />
-        <StatCard label="Gross Profit" value={fmtCurrency(gp)} />
+        <StatCard label="Opex + Marketing" value={fmtCurrency(o + mk)} sub={`${opexPct}% + ${mkPct}%`} accent="gold" />
+        <StatCard label="Net Profit" value={fmtCurrency(gp)} />
       </div>
       <Card>
         <CardHeader title="Alur Bagi Hasil" subtitle={periodLabel()} />
