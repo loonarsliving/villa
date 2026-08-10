@@ -3,9 +3,18 @@
 import type { ReactNode } from "react";
 import { DashboardShell, type NavSection } from "@/components/DashboardShell";
 import { useAuth } from "@/lib/auth";
+import { CCTV_ALLOWED_USER_ID } from "@/lib/cctvConstants";
 
 export function AdminShell({ pageTitle, pageSub, children }: { pageTitle: string; pageSub?: string; children: ReactNode }) {
   const { user } = useAuth();
+
+  const integrasiItems = [
+    { href: "/admin/cloudbeds", label: "Cloudbeds", icon: "☁" },
+    { href: "/admin/wa-log", label: "Log WhatsApp", icon: "◉" },
+  ];
+  if (user?.id === CCTV_ALLOWED_USER_ID) {
+    integrasiItems.push({ href: "/admin/cctv", label: "AI CCTV", icon: "◍" });
+  }
 
   const sections: NavSection[] = [
     {
@@ -22,10 +31,7 @@ export function AdminShell({ pageTitle, pageSub, children }: { pageTitle: string
     },
     {
       title: "Integrasi",
-      items: [
-        { href: "/admin/cloudbeds", label: "Cloudbeds", icon: "☁" },
-        { href: "/admin/wa-log", label: "Log WhatsApp", icon: "◉" },
-      ],
+      items: integrasiItems,
     },
   ];
 

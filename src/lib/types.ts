@@ -183,3 +183,30 @@ export interface CloudbedsLogRow {
   matched: boolean;
   created_at: string;
 }
+
+export interface CctvCamera {
+  id: string;
+  nama: string;
+  zona: "security" | "front_desk" | "housekeeping";
+  unit_id: string | null;
+  deskripsi_titik: string | null;
+  ezviz_serial: string | null;
+  ezviz_channel_no: number;
+  ezviz_verification_code: string | null;
+  checkpoint_interval_minutes: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CctvCheckpointLog {
+  id: string;
+  camera_id: string;
+  captured_at: string;
+  snapshot_url: string | null;
+  person_detected: boolean | null;
+  ai_summary: string | null;
+  status: "ok" | "capture_failed" | "ai_failed";
+  error_detail: string | null;
+  created_at: string;
+}
