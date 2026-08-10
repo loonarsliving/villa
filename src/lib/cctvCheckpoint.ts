@@ -2,7 +2,7 @@ import "server-only";
 
 import { supabaseAdmin } from "./supabaseAdmin";
 import { captureSnapshot } from "./ezviz";
-import { detectPersonInZone } from "./gemini";
+import { detectPersonInZone } from "./aiBridge";
 import type { CctvCamera } from "./types";
 
 export interface CheckpointRunResult {
