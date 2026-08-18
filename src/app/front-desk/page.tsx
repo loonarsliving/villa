@@ -16,7 +16,7 @@ const statusColor: Record<string, string> = {
   available: "border-sage-500/30",
   occupied: "bg-base-700 border-gold-500/25",
   checkout: "bg-gold-500/10 border-gold-500/40",
-  dirty: "border-dashed border-white/15",
+  dirty: "border-dashed border-ink/15",
   maintenance: "bg-ruby-500/10 border-ruby-500/30",
 };
 const statusLabel: Record<string, string> = {
@@ -176,7 +176,7 @@ export default function FrontDeskPage() {
           <button onClick={openCheckin} className="text-[11px] bg-gold-500 text-base-950 font-semibold rounded px-3.5 py-2 whitespace-nowrap">
             + Check-In
           </button>
-          <button onClick={openCheckout} className="hidden sm:block text-[11px] text-white/80 bg-base-800 border border-white/10 rounded px-3.5 py-2 whitespace-nowrap">
+          <button onClick={openCheckout} className="hidden sm:block text-[11px] text-ink/80 bg-base-800 border border-ink/10 rounded px-3.5 py-2 whitespace-nowrap">
             Check-Out
           </button>
         </>
@@ -201,8 +201,8 @@ export default function FrontDeskPage() {
                 <div className="flex gap-2 flex-wrap">
                   {units.map((u) => (
                     <div key={u.id} className={`border rounded px-2.5 py-2 min-w-[52px] text-center ${statusColor[u.status]}`}>
-                      <div className="font-serif text-base font-light text-white">{u.nomor}</div>
-                      <div className="text-[8.5px] text-white/30 mt-0.5">{statusLabel[u.status]}</div>
+                      <div className="font-serif text-base font-light text-ink">{u.nomor}</div>
+                      <div className="text-[8.5px] text-ink/30 mt-0.5">{statusLabel[u.status]}</div>
                     </div>
                   ))}
                 </div>
@@ -215,13 +215,13 @@ export default function FrontDeskPage() {
               <Loading label="Tidak ada notifikasi" />
             ) : (
               notifs.slice(0, 4).map((n) => (
-                <div key={n.id} className="flex gap-2.5 px-4 sm:px-5 py-3 border-b border-white/[0.05] last:border-0 items-start">
+                <div key={n.id} className="flex gap-2.5 px-4 sm:px-5 py-3 border-b border-ink/[0.05] last:border-0 items-start">
                   <div className="w-1.5 h-1.5 rounded-full bg-gold-500 shrink-0 mt-1.5" />
                   <div>
-                    <div className="text-[11.5px] text-white/50 leading-relaxed">
-                      <b className="text-white">{n.judul}</b> — {n.pesan}
+                    <div className="text-[11.5px] text-ink/50 leading-relaxed">
+                      <b className="text-ink">{n.judul}</b> — {n.pesan}
                     </div>
-                    <div className="text-[9.5px] text-white/30 mt-0.5">{fmtDate(n.created_at)}</div>
+                    <div className="text-[9.5px] text-ink/30 mt-0.5">{fmtDate(n.created_at)}</div>
                   </div>
                 </div>
               ))
@@ -237,15 +237,15 @@ export default function FrontDeskPage() {
                 <span className="text-lg">🛎️</span>
                 <span className="text-[10.5px] font-semibold mt-1">Check-In</span>
               </button>
-              <button onClick={openCheckout} className="flex flex-col items-center justify-center py-4 rounded bg-base-800 border border-white/10 text-white/50">
+              <button onClick={openCheckout} className="flex flex-col items-center justify-center py-4 rounded bg-base-800 border border-ink/10 text-ink/50">
                 <span className="text-lg">👋</span>
                 <span className="text-[10.5px] font-medium mt-1">Check-Out</span>
               </button>
-              <a href="/front-desk/housekeeping" className="flex flex-col items-center justify-center py-4 rounded bg-base-800 border border-white/10 text-white/50">
+              <a href="/front-desk/housekeeping" className="flex flex-col items-center justify-center py-4 rounded bg-base-800 border border-ink/10 text-ink/50">
                 <span className="text-lg">🧹</span>
                 <span className="text-[10.5px] font-medium mt-1">Housekeeping</span>
               </a>
-              <a href="/front-desk/booking" className="flex flex-col items-center justify-center py-4 rounded bg-base-800 border border-white/10 text-white/50">
+              <a href="/front-desk/booking" className="flex flex-col items-center justify-center py-4 rounded bg-base-800 border border-ink/10 text-ink/50">
                 <span className="text-lg">📅</span>
                 <span className="text-[10.5px] font-medium mt-1">Booking</span>
               </a>
@@ -257,13 +257,13 @@ export default function FrontDeskPage() {
               <Loading label="Tidak ada agenda khusus" />
             ) : (
               agenda.map((a, i) => (
-                <div key={i} className="flex gap-3 px-4 sm:px-5 py-2.5 border-b border-white/[0.05] last:border-0 items-start">
+                <div key={i} className="flex gap-3 px-4 sm:px-5 py-2.5 border-b border-ink/[0.05] last:border-0 items-start">
                   <div className={`w-1.5 h-1.5 rounded-full shrink-0 mt-1 ${a.dot}`} />
                   <div className="flex-1">
-                    <div className="text-[11.5px] font-medium text-white/80">{a.title}</div>
-                    <div className="text-[10px] text-white/30">{a.sub}</div>
+                    <div className="text-[11.5px] font-medium text-ink/80">{a.title}</div>
+                    <div className="text-[10px] text-ink/30">{a.sub}</div>
                   </div>
-                  <div className="font-mono text-[9.5px] text-white/30 pt-0.5 shrink-0">{a.time}</div>
+                  <div className="font-mono text-[9.5px] text-ink/30 pt-0.5 shrink-0">{a.time}</div>
                 </div>
               ))
             )}

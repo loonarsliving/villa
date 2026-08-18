@@ -99,7 +99,7 @@ export default function AdminUsersPage() {
               <thead>
                 <tr className="bg-base-800">
                   {["Nama", "Email", "Role", "Unit", "Status", "Password", "Aksi"].map((h) => (
-                    <th key={h} className="text-left px-3.5 py-2 text-[8.5px] font-semibold tracking-wide uppercase text-white/30 border-b border-white/[0.08]">
+                    <th key={h} className="text-left px-3.5 py-2 text-[8.5px] font-semibold tracking-wide uppercase text-ink/30 border-b border-ink/[0.08]">
                       {h}
                     </th>
                   ))}
@@ -108,17 +108,17 @@ export default function AdminUsersPage() {
               <tbody>
                 {rows.map((u) => (
                   <tr key={u.id} className="hover:bg-base-800/50">
-                    <td className="px-3.5 py-2.5 border-b border-white/[0.05] font-medium text-white/80">{u.nama}</td>
-                    <td className="px-3.5 py-2.5 border-b border-white/[0.05] text-white/50">{u.email}</td>
-                    <td className="px-3.5 py-2.5 border-b border-white/[0.05] text-white/50">{roleLabel[u.role]}</td>
-                    <td className="px-3.5 py-2.5 border-b border-white/[0.05] text-gold-500">{u.unit_nomor || "—"}</td>
-                    <td className="px-3.5 py-2.5 border-b border-white/[0.05]">
+                    <td className="px-3.5 py-2.5 border-b border-ink/[0.05] font-medium text-ink/80">{u.nama}</td>
+                    <td className="px-3.5 py-2.5 border-b border-ink/[0.05] text-ink/50">{u.email}</td>
+                    <td className="px-3.5 py-2.5 border-b border-ink/[0.05] text-ink/50">{roleLabel[u.role]}</td>
+                    <td className="px-3.5 py-2.5 border-b border-ink/[0.05] text-gold-500">{u.unit_nomor || "—"}</td>
+                    <td className="px-3.5 py-2.5 border-b border-ink/[0.05]">
                       <Badge tone={u.is_active ? "ok" : "danger"}>{u.is_active ? "Aktif" : "Nonaktif"}</Badge>
                     </td>
-                    <td className="px-3.5 py-2.5 border-b border-white/[0.05]">
+                    <td className="px-3.5 py-2.5 border-b border-ink/[0.05]">
                       <Badge tone={u.must_change_password ? "pending" : "ok"}>{u.must_change_password ? "Wajib ganti" : "OK"}</Badge>
                     </td>
-                    <td className="px-3.5 py-2.5 border-b border-white/[0.05] whitespace-nowrap">
+                    <td className="px-3.5 py-2.5 border-b border-ink/[0.05] whitespace-nowrap">
                       <button onClick={() => setResetTarget(u)} className="text-[10.5px] font-semibold text-gold-500 mr-2.5">
                         Reset Password
                       </button>
@@ -167,7 +167,7 @@ export default function AdminUsersPage() {
         <Field label="Password Baru">
           <input className={inputCls} value={resetPass} onChange={(e) => setResetPass(e.target.value)} placeholder="Minimal 6 karakter" />
         </Field>
-        <div className="text-[10.5px] text-white/30 leading-relaxed">
+        <div className="text-[10.5px] text-ink/30 leading-relaxed">
           Pengguna akan wajib ganti password ini saat login berikutnya.
         </div>
       </Modal>

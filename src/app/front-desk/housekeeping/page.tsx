@@ -34,7 +34,7 @@ export default function HousekeepingPage() {
   return (
     <FrontDeskShell pageTitle="Housekeeping" pageSub="Checklist hari ini">
       <Card>
-        <CardHeader title="Housekeeping" subtitle="Checklist hari ini" action={<div className="text-[11px] text-white/30 shrink-0">{done} / {tasks.length} selesai</div>} />
+        <CardHeader title="Housekeeping" subtitle="Checklist hari ini" action={<div className="text-[11px] text-ink/30 shrink-0">{done} / {tasks.length} selesai</div>} />
         {loading ? (
           <Loading />
         ) : tasks.length === 0 ? (
@@ -44,13 +44,13 @@ export default function HousekeepingPage() {
             <div
               key={t.id}
               onClick={() => toggle(t)}
-              className="flex items-center gap-2.5 px-4 sm:px-5 py-2.5 border-b border-white/[0.05] last:border-0 cursor-pointer hover:bg-base-800"
+              className="flex items-center gap-2.5 px-4 sm:px-5 py-2.5 border-b border-ink/[0.05] last:border-0 cursor-pointer hover:bg-base-800"
             >
-              <div className={`w-4 h-4 rounded border shrink-0 flex items-center justify-center text-[10px] ${t.status === "done" ? "bg-sage-500 border-sage-500 text-white" : "border-white/15"}`}>
+              <div className={`w-4 h-4 rounded border shrink-0 flex items-center justify-center text-[10px] ${t.status === "done" ? "bg-sage-500 border-sage-500 text-ink" : "border-ink/15"}`}>
                 {t.status === "done" ? "✓" : ""}
               </div>
-              <div className={`text-[11.5px] flex-1 ${t.status === "done" ? "line-through text-white/30" : "text-white/50"}`}>{t.tugas}</div>
-              <div className="text-[9.5px] text-white/30 shrink-0">{t.unit_nomor || "Area umum"}</div>
+              <div className={`text-[11.5px] flex-1 ${t.status === "done" ? "line-through text-ink/30" : "text-ink/50"}`}>{t.tugas}</div>
+              <div className="text-[9.5px] text-ink/30 shrink-0">{t.unit_nomor || "Area umum"}</div>
             </div>
           ))
         )}

@@ -37,10 +37,10 @@ export default function AdminWaLogPage() {
           <Loading label="Belum ada log" />
         ) : (
           rows.map((r) => (
-            <div key={r.id} className="flex items-center gap-3 px-4 sm:px-5 py-2.5 border-b border-white/[0.05] last:border-0">
+            <div key={r.id} className="flex items-center gap-3 px-4 sm:px-5 py-2.5 border-b border-ink/[0.05] last:border-0">
               <div className="flex-1 min-w-0">
-                <div className="text-xs text-white/80 truncate">{r.message || "—"}</div>
-                <div className="text-[10px] text-white/30 mt-0.5">
+                <div className="text-xs text-ink/80 truncate">{r.message || "—"}</div>
+                <div className="text-[10px] text-ink/30 mt-0.5">
                   {r.phone || "tanpa nomor"} · {r.template_type || "—"} · {fmtDate(r.created_at, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
                 </div>
               </div>

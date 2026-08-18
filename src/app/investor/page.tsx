@@ -48,12 +48,12 @@ export default function InvestorBerandaPage() {
           <div className="text-[9px] text-gold-500 tracking-[0.2em] uppercase font-semibold mb-2">
             Jaminan Pendapatan Minimal
           </div>
-          <div className="font-serif text-xl sm:text-[22px] font-light text-white leading-snug">
+          <div className="font-serif text-xl sm:text-[22px] font-light text-ink leading-snug">
             Anda selalu dapat minimal
             <br />
             Rp 5.000.000 per bulan
           </div>
-          <div className="text-[11px] text-white/30 mt-2 leading-relaxed max-w-xs">
+          <div className="text-[11px] text-ink/30 mt-2 leading-relaxed max-w-xs">
             {loading
               ? "Memuat data..."
               : jaminanAktif
@@ -63,7 +63,7 @@ export default function InvestorBerandaPage() {
         </div>
         <div className="text-left sm:text-right">
           <div className="font-serif text-3xl sm:text-[38px] font-light text-gold-500 leading-none">{fmtCurrency(owner)}</div>
-          <div className="text-[9.5px] text-white/30 mt-1">Estimasi diterima bulan ini</div>
+          <div className="text-[9.5px] text-ink/30 mt-1">Estimasi diterima bulan ini</div>
           <div
             className={`inline-flex items-center gap-1.5 text-[9.5px] font-semibold px-2.5 py-1 rounded-full mt-2.5 ${
               jaminanAktif ? "bg-ruby-500/15 text-ruby-400" : "bg-sage-500/15 text-sage-400"
@@ -95,13 +95,13 @@ export default function InvestorBerandaPage() {
             <Loading label="Belum ada transaksi bulan ini" />
           ) : (
             txs.slice(0, 5).map((t) => (
-              <div key={t.id} className="flex items-center gap-3 px-4 sm:px-5 py-3 border-b border-white/[0.05] last:border-0">
+              <div key={t.id} className="flex items-center gap-3 px-4 sm:px-5 py-3 border-b border-ink/[0.05] last:border-0">
                 <div className={`w-8 h-8 rounded flex items-center justify-center text-sm shrink-0 ${t.tipe === "transfer_owner" ? "bg-gold-500/10" : "bg-sage-500/15"}`}>
                   {t.tipe === "transfer_owner" ? "🏦" : "💳"}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs font-medium text-white/80 truncate">{t.deskripsi}</div>
-                  <div className="text-[10px] text-white/30 mt-0.5">
+                  <div className="text-xs font-medium text-ink/80 truncate">{t.deskripsi}</div>
+                  <div className="text-[10px] text-ink/30 mt-0.5">
                     {fmtDate(t.created_at)} · {t.kategori || ""}
                   </div>
                 </div>
@@ -120,13 +120,13 @@ export default function InvestorBerandaPage() {
             <Loading label="Tidak ada notifikasi" />
           ) : (
             notifs.slice(0, 4).map((n) => (
-              <div key={n.id} className="flex gap-2.5 px-4 sm:px-5 py-3 border-b border-white/[0.05] last:border-0 items-start">
+              <div key={n.id} className="flex gap-2.5 px-4 sm:px-5 py-3 border-b border-ink/[0.05] last:border-0 items-start">
                 <div className="w-1.5 h-1.5 rounded-full bg-gold-500 shrink-0 mt-1.5" />
                 <div>
-                  <div className="text-[11.5px] text-white/50 leading-relaxed">
-                    <b className="text-white">{n.judul}</b> — {n.pesan}
+                  <div className="text-[11.5px] text-ink/50 leading-relaxed">
+                    <b className="text-ink">{n.judul}</b> — {n.pesan}
                   </div>
-                  <div className="text-[9.5px] text-white/30 mt-0.5">{fmtDate(n.created_at)}</div>
+                  <div className="text-[9.5px] text-ink/30 mt-0.5">{fmtDate(n.created_at)}</div>
                 </div>
               </div>
             ))

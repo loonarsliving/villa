@@ -11,14 +11,14 @@ const statusColor: Record<string, string> = {
   available: "border-sage-500/30",
   occupied: "bg-base-700 border-gold-500/25",
   checkout: "bg-gold-500/10 border-gold-500/40 border-dashed",
-  dirty: "border-dashed border-white/15",
+  dirty: "border-dashed border-ink/15",
   maintenance: "bg-ruby-500/10 border-ruby-500/30",
 };
 const numColor: Record<string, string> = {
   available: "text-sage-400",
   occupied: "text-gold-500",
   checkout: "text-gold-500",
-  dirty: "text-white/30",
+  dirty: "text-ink/30",
   maintenance: "text-ruby-400",
 };
 const statusLabel: Record<string, string> = {
@@ -54,10 +54,10 @@ export default function SiteplanPage() {
             const blokUnits = units.filter((u) => u.blok === blok);
             const terisi = blokUnits.filter((u) => u.status === "occupied").length;
             return (
-              <div key={blok} className="bg-base-800 border border-white/[0.08] rounded-md overflow-hidden">
-                <div className="px-4 py-2.5 bg-gold-500/10 border-b border-white/[0.08] flex items-center justify-between">
+              <div key={blok} className="bg-base-800 border border-ink/[0.08] rounded-md overflow-hidden">
+                <div className="px-4 py-2.5 bg-gold-500/10 border-b border-ink/[0.08] flex items-center justify-between">
                   <div className="font-serif text-base font-light text-gold-500 tracking-wide">Blok {blok}</div>
-                  <div className="text-[9.5px] text-white/30">{counts[blok]} unit · {terisi} terisi</div>
+                  <div className="text-[9.5px] text-ink/30">{counts[blok]} unit · {terisi} terisi</div>
                 </div>
                 <div className="flex gap-2 flex-wrap p-4">
                   {blokUnits.map((u) => (
@@ -67,8 +67,8 @@ export default function SiteplanPage() {
                       className={`bg-base-900 border rounded p-3.5 min-w-[88px] text-center hover:border-gold-500 transition-colors ${statusColor[u.status]}`}
                     >
                       <div className={`font-serif text-xl font-light ${numColor[u.status]}`}>{u.nomor}</div>
-                      <div className="text-[9px] text-white/30 mt-1">{statusLabel[u.status]}</div>
-                      {u.owner_nama && <div className="text-[8.5px] text-white/30 mt-1 truncate max-w-[80px]">{u.owner_nama}</div>}
+                      <div className="text-[9px] text-ink/30 mt-1">{statusLabel[u.status]}</div>
+                      {u.owner_nama && <div className="text-[8.5px] text-ink/30 mt-1 truncate max-w-[80px]">{u.owner_nama}</div>}
                     </button>
                   ))}
                 </div>

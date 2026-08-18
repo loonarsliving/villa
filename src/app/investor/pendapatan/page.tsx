@@ -57,9 +57,9 @@ export default function PendapatanPage() {
           <Loading />
         ) : (
           rows.map(([lbl, pct, val, isCost, isTot, isGold], i) => (
-            <div key={i} className={`flex items-center px-4 sm:px-5 py-2.5 border-b border-white/[0.05] last:border-0 text-xs ${isTot ? "bg-gold-500/10" : ""}`}>
-              <div className={`flex-1 ${isTot ? "text-white/80 font-medium" : "text-white/50"} ${isGold ? "text-gold-500" : ""}`}>{lbl}</div>
-              <div className="w-16 sm:w-20 mx-3 h-1 bg-white/[0.08] rounded-full shrink-0 hidden sm:block">
+            <div key={i} className={`flex items-center px-4 sm:px-5 py-2.5 border-b border-ink/[0.05] last:border-0 text-xs ${isTot ? "bg-gold-500/10" : ""}`}>
+              <div className={`flex-1 ${isTot ? "text-ink/80 font-medium" : "text-ink/50"} ${isGold ? "text-gold-500" : ""}`}>{lbl}</div>
+              <div className="w-16 sm:w-20 mx-3 h-1 bg-ink/[0.08] rounded-full shrink-0 hidden sm:block">
                 <div
                   className={`h-full rounded-full ${isCost ? "bg-ruby-500" : isGold ? "bg-gold-500" : "bg-sage-500"}`}
                   style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
@@ -67,7 +67,7 @@ export default function PendapatanPage() {
               </div>
               <div
                 className={`font-mono text-[11.5px] font-medium text-right min-w-[100px] ${
-                  isGold ? "text-gold-500" : isCost ? "text-ruby-400" : isTot ? "text-white/80" : "text-white/50"
+                  isGold ? "text-gold-500" : isCost ? "text-ruby-400" : isTot ? "text-ink/80" : "text-ink/50"
                 }`}
               >
                 {val}

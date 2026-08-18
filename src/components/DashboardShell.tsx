@@ -43,17 +43,20 @@ export function DashboardShell({
 
   if (!ready) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-white/30 text-xs tracking-wide">
+      <div className="min-h-screen flex items-center justify-center text-ink/30 text-xs tracking-wide">
         Memuat sesi...
       </div>
     );
   }
 
+  const flatItems = sections.flatMap((s) => s.items);
+  const bottomItems = flatItems.slice(0, 4);
+
   const navContent = (
     <>
-      <div className="px-5 py-5 border-b border-white/[0.08]">
+      <div className="px-5 py-5 border-b border-ink/[0.08]">
         <div className="text-[10px] font-medium text-gold-500 tracking-[0.25em] uppercase">Loonars Private Living</div>
-        <div className="font-serif text-lg font-light text-white leading-tight mt-1">
+        <div className="font-serif text-lg font-light text-ink leading-tight mt-1">
           {brandTitle}
           <br />
           <em className="italic text-gold-500">{brandSub}</em>
@@ -62,7 +65,7 @@ export function DashboardShell({
       <nav className="flex-1 overflow-y-auto px-2.5 py-4">
         {sections.map((sec) => (
           <div key={sec.title}>
-            <div className="text-[8.5px] font-semibold text-white/30 tracking-[0.18em] uppercase px-2 my-3.5">{sec.title}</div>
+            <div className="text-[8.5px] font-semibold text-ink/30 tracking-[0.18em] uppercase px-2 my-3.5">{sec.title}</div>
             {sec.items.map((item) => {
               const active = pathname === item.href;
               return (
@@ -73,13 +76,13 @@ export function DashboardShell({
                   className={`flex items-center gap-2.5 px-2.5 py-2.5 rounded text-[13px] mb-0.5 transition-colors ${
                     active
                       ? "bg-gold-500/10 text-gold-500 border-l-2 border-gold-500 pl-2"
-                      : "text-white/50 hover:bg-white/[0.06] hover:text-white/80"
+                      : "text-ink/50 hover:bg-ink/[0.06] hover:text-ink/80"
                   }`}
                 >
                   <span className="w-4 text-center text-sm shrink-0">{item.icon}</span>
                   <span className="truncate">{item.label}</span>
                   {!!item.badge && (
-                    <span className="ml-auto bg-ruby-500 text-white text-[8.5px] font-bold px-1.5 py-0.5 rounded-full">
+                    <span className="ml-auto bg-ruby-500 text-ink text-[8.5px] font-bold px-1.5 py-0.5 rounded-full">
                       {item.badge}
                     </span>
                   )}
@@ -89,17 +92,17 @@ export function DashboardShell({
           </div>
         ))}
       </nav>
-      <div className="p-3.5 border-t border-white/[0.08] flex items-center gap-2.5">
+      <div className="p-3.5 border-t border-ink/[0.08] flex items-center gap-2.5">
         <div className="w-7 h-7 bg-gold-500/10 border border-gold-500/25 rounded-full flex items-center justify-center text-[10px] font-semibold text-gold-500 shrink-0">
           {initials(user?.nama)}
         </div>
         <div className="min-w-0">
-          <div className="text-[11.5px] font-medium text-white truncate">{user?.nama || "—"}</div>
-          <div className="text-[9.5px] text-white/30">{roleLabel}</div>
+          <div className="text-[11.5px] font-medium text-ink truncate">{user?.nama || "—"}</div>
+          <div className="text-[9.5px] text-ink/30">{roleLabel}</div>
         </div>
         <button
           onClick={logout}
-          className="ml-auto text-[10px] text-white/30 hover:text-white/60 px-2 py-1 border border-white/10 rounded shrink-0"
+          className="ml-auto text-[10px] text-ink/30 hover:text-ink/60 px-2 py-1 border border-ink/10 rounded shrink-0"
         >
           Keluar
         </button>
@@ -110,7 +113,7 @@ export function DashboardShell({
   return (
     <div className="min-h-screen flex">
       {/* Desktop / tablet sidebar */}
-      <aside className="hidden md:flex md:w-[220px] md:min-w-[220px] h-screen bg-base-900 border-r border-white/[0.08] fixed top-0 left-0 flex-col z-40">
+      <aside className="hidden md:flex md:w-[220px] md:min-w-[220px] h-screen bg-base-900 border-r border-ink/[0.08] fixed top-0 left-0 flex-col z-40">
         {navContent}
       </aside>
 
@@ -118,31 +121,60 @@ export function DashboardShell({
       {drawerOpen && (
         <div className="md:hidden fixed inset-0 z-50 flex">
           <div className="absolute inset-0 bg-black/70" onClick={() => setDrawerOpen(false)} />
-          <aside className="relative w-[260px] max-w-[80vw] h-full bg-base-900 border-r border-white/[0.08] flex flex-col">
+          <aside className="relative w-[260px] max-w-[80vw] h-full bg-base-900 border-r border-ink/[0.08] flex flex-col">
             {navContent}
           </aside>
         </div>
       )}
 
       <div className="flex-1 flex flex-col md:ml-[220px]">
-        <header className="h-14 bg-base-900 border-b border-white/[0.08] flex items-center justify-between px-4 sm:px-7 sticky top-0 z-30">
+        <header className="h-14 bg-base-900 border-b border-ink/[0.08] flex items-center justify-between px-4 sm:px-7 sticky top-0 z-30">
           <div className="flex items-center gap-3 min-w-0">
             <button
               onClick={() => setDrawerOpen(true)}
-              className="md:hidden w-8 h-8 flex items-center justify-center text-white/60 shrink-0"
+              className="md:hidden w-8 h-8 flex items-center justify-center text-ink/60 shrink-0"
               aria-label="Buka menu"
             >
               ☰
             </button>
             <div className="min-w-0">
-              <div className="font-serif text-lg sm:text-xl font-light text-white truncate">{pageTitle}</div>
-              {pageSub && <div className="text-[10px] text-white/30 truncate hidden sm:block">{pageSub}</div>}
+              <div className="font-serif text-lg sm:text-xl font-light text-ink truncate">{pageTitle}</div>
+              {pageSub && <div className="text-[10px] text-ink/30 truncate hidden sm:block">{pageSub}</div>}
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">{topBarExtra}</div>
         </header>
-        <main className="p-4 sm:p-6 lg:p-7 flex-1">{children}</main>
+        <main className="p-4 sm:p-6 lg:p-7 flex-1 pb-24 md:pb-7">{children}</main>
       </div>
+
+      {/* Mobile bottom nav */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-base-900 border-t border-ink/[0.08] px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 flex items-stretch justify-between shadow-[0_-4px_20px_rgba(20,22,27,0.06)]">
+        {bottomItems.map((item) => {
+          const active = pathname === item.href;
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`relative flex-1 flex flex-col items-center justify-center gap-1 py-1.5 rounded-xl text-[9.5px] font-medium transition-colors ${
+                active ? "text-gold-600" : "text-ink/40"
+              }`}
+            >
+              <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm ${active ? "bg-gold-500/15" : ""}`}>
+                {item.icon}
+              </span>
+              <span className="truncate max-w-[64px]">{item.label}</span>
+              {!!item.badge && <span className="absolute top-0.5 right-3 w-1.5 h-1.5 rounded-full bg-ruby-500" />}
+            </Link>
+          );
+        })}
+        <button
+          onClick={() => setDrawerOpen(true)}
+          className="relative flex-1 flex flex-col items-center justify-center gap-1 py-1.5 rounded-xl text-[9.5px] font-medium text-ink/40"
+        >
+          <span className="w-8 h-8 rounded-full flex items-center justify-center text-sm">☰</span>
+          <span>Lainnya</span>
+        </button>
+      </nav>
     </div>
   );
 }
