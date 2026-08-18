@@ -41,12 +41,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           >
             <div className="text-base shrink-0 mt-0.5">{t.icon}</div>
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold text-white">{t.title}</div>
-              <div className="text-xs text-white/50 mt-0.5 leading-relaxed">{t.msg}</div>
+              <div className="text-sm font-semibold text-ink">{t.title}</div>
+              <div className="text-xs text-ink/50 mt-0.5 leading-relaxed">{t.msg}</div>
             </div>
             <button
               onClick={() => setItems((prev) => prev.filter((x) => x.id !== t.id))}
-              className="text-white/30 hover:text-white/60 text-xs shrink-0"
+              className="text-ink/30 hover:text-ink/60 text-xs shrink-0"
             >
               ✕
             </button>

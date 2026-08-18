@@ -62,7 +62,7 @@ export default function AdminCloudbedsPage() {
 
   return (
     <AdminShell pageTitle="Cloudbeds" pageSub="Pemetaan room & log event">
-      <div className="bg-gold-500/10 border-l-2 border-gold-500 rounded-r p-3.5 text-[11px] text-white/50 leading-relaxed mb-3.5">
+      <div className="bg-gold-500/10 border-l-2 border-gold-500 rounded-r p-3.5 text-[11px] text-ink/50 leading-relaxed mb-3.5">
         Webhook Cloudbeds: arahkan ke <code className="text-gold-400">https://living.haluoleo.id/api/webhooks/cloudbeds</code> dengan header{" "}
         <code className="text-gold-400">x-cloudbeds-secret</code> sesuai nilai <code className="text-gold-400">CLOUDBEDS_WEBHOOK_SECRET</code> di Vercel env variable project ini. Ditangani langsung di sini — bukan lagi lewat Supabase.
       </div>
@@ -82,10 +82,10 @@ export default function AdminCloudbedsPage() {
           <Loading label="Belum ada pemetaan" />
         ) : (
           mapping.map((m) => (
-            <div key={m.id} className="flex items-center gap-3 px-4 sm:px-5 py-2.5 border-b border-white/[0.05] last:border-0">
+            <div key={m.id} className="flex items-center gap-3 px-4 sm:px-5 py-2.5 border-b border-ink/[0.05] last:border-0">
               <div className="flex-1 min-w-0">
-                <div className="text-xs text-white/80">{m.cloudbeds_room_id}</div>
-                <div className="text-[10px] text-white/30 mt-0.5">{m.cloudbeds_room_name || "—"}</div>
+                <div className="text-xs text-ink/80">{m.cloudbeds_room_id}</div>
+                <div className="text-[10px] text-ink/30 mt-0.5">{m.cloudbeds_room_name || "—"}</div>
               </div>
               <div className="text-xs text-gold-500 shrink-0">{m.units ? `Unit ${m.units.nomor}` : "—"}</div>
               <button onClick={() => deleteMapping(m.id)} className="text-[10.5px] text-ruby-400 shrink-0">
@@ -102,10 +102,10 @@ export default function AdminCloudbedsPage() {
           <Loading label="Belum ada event" />
         ) : (
           log.map((l) => (
-            <div key={l.id} className="flex items-center gap-3 px-4 sm:px-5 py-2.5 border-b border-white/[0.05] last:border-0">
+            <div key={l.id} className="flex items-center gap-3 px-4 sm:px-5 py-2.5 border-b border-ink/[0.05] last:border-0">
               <div className="flex-1 min-w-0">
-                <div className="text-xs text-white/80">{l.event_type}</div>
-                <div className="text-[10px] text-white/30 mt-0.5">
+                <div className="text-xs text-ink/80">{l.event_type}</div>
+                <div className="text-[10px] text-ink/30 mt-0.5">
                   {l.reservation_id || "—"} · {fmtDate(l.created_at, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
                 </div>
               </div>

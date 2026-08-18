@@ -47,7 +47,7 @@ export function FrontDeskShell({
       topBarExtra={
         <>
           {topBarExtra}
-          <Link href="/front-desk/notifikasi" className="relative w-8 h-8 bg-base-800 border border-white/10 rounded flex items-center justify-center text-sm">
+          <Link href="/front-desk/notifikasi" className="relative w-8 h-8 bg-base-800 border border-ink/10 rounded flex items-center justify-center text-sm">
             🔔
             {unreadCount > 0 && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 bg-ruby-500 rounded-full border border-base-800" />}
           </Link>

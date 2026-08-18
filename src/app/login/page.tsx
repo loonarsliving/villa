@@ -8,10 +8,10 @@ import type { SessionUser } from "@/lib/types";
 
 type Step = "login" | "newpass" | "profile";
 
-const shellCls = "relative z-10 w-full max-w-[400px] p-8 sm:p-11 border border-white/10 rounded-lg bg-white/[0.02] backdrop-blur-xl";
-const labelCls = "block text-[10px] font-medium text-white/40 tracking-[0.15em] uppercase mb-2";
+const shellCls = "relative z-10 w-full max-w-[400px] p-8 sm:p-11 border border-ink/10 rounded-lg bg-ink/[0.02] backdrop-blur-xl";
+const labelCls = "block text-[10px] font-medium text-ink/40 tracking-[0.15em] uppercase mb-2";
 const inputCls =
-  "w-full py-3 border-0 border-b border-white/15 bg-transparent text-sm text-white outline-none focus:border-gold-500 transition-colors mb-6 placeholder:text-white/20";
+  "w-full py-3 border-0 border-b border-ink/15 bg-transparent text-sm text-ink outline-none focus:border-gold-500 transition-colors mb-6 placeholder:text-ink/20";
 const btnCls =
   "w-full py-3.5 bg-gold-500 hover:opacity-90 disabled:opacity-60 text-base-950 rounded font-semibold text-[11.5px] tracking-[0.08em] uppercase transition-opacity";
 
@@ -104,10 +104,10 @@ export default function LoginPage() {
       {step === "login" && (
         <div className={shellCls}>
           <div className="mb-9">
-            <div className="font-serif text-[11px] font-normal text-white/40 tracking-[0.35em] uppercase mb-2.5">
+            <div className="font-serif text-[11px] font-normal text-ink/40 tracking-[0.35em] uppercase mb-2.5">
               Loonars Private Living
             </div>
-            <div className="font-serif text-3xl font-light text-white leading-tight">
+            <div className="font-serif text-3xl font-light text-ink leading-tight">
               Portal <em className="not-italic text-gold-500 italic">Investor</em>, Manajemen
               <br />& Resepsionis
             </div>
@@ -134,16 +134,16 @@ export default function LoginPage() {
       {step === "newpass" && (
         <div className={shellCls}>
           <div className="mb-9">
-            <div className="font-serif text-[11px] font-normal text-white/40 tracking-[0.35em] uppercase mb-2.5">
+            <div className="font-serif text-[11px] font-normal text-ink/40 tracking-[0.35em] uppercase mb-2.5">
               Loonars Private Living
             </div>
-            <div className="font-serif text-3xl font-light text-white leading-tight">
+            <div className="font-serif text-3xl font-light text-ink leading-tight">
               Buat <em className="not-italic text-gold-500 italic">Password</em>
               <br />Baru
             </div>
             <div className="w-8 h-px bg-gold-500 my-5" />
           </div>
-          <div className="text-xs text-white/50 leading-relaxed mb-6">
+          <div className="text-xs text-ink/50 leading-relaxed mb-6">
             Ini login pertama Anda. Buat password baru sebelum melanjutkan ke dashboard.
           </div>
           <form
@@ -167,16 +167,16 @@ export default function LoginPage() {
       {step === "profile" && (
         <div className={shellCls}>
           <div className="mb-9">
-            <div className="font-serif text-[11px] font-normal text-white/40 tracking-[0.35em] uppercase mb-2.5">
+            <div className="font-serif text-[11px] font-normal text-ink/40 tracking-[0.35em] uppercase mb-2.5">
               Loonars Private Living
             </div>
-            <div className="font-serif text-3xl font-light text-white leading-tight">
+            <div className="font-serif text-3xl font-light text-ink leading-tight">
               Data <em className="not-italic text-gold-500 italic">Investor</em>
               <br />Unit {user?.unit_nomor}
             </div>
             <div className="w-8 h-px bg-gold-500 my-5" />
           </div>
-          <div className="text-xs text-white/50 leading-relaxed mb-6">
+          <div className="text-xs text-ink/50 leading-relaxed mb-6">
             Lengkapi data Anda sebagai investor unit ini — tersimpan permanen sebagai arsip kepemilikan.
           </div>
           <form
@@ -197,7 +197,7 @@ export default function LoginPage() {
         </div>
       )}
 
-      <div className="absolute bottom-6 right-6 font-serif text-[10px] text-white/15 tracking-[0.2em] uppercase hidden sm:block">
+      <div className="absolute bottom-6 right-6 font-serif text-[10px] text-ink/15 tracking-[0.2em] uppercase hidden sm:block">
         PT. Maha Karya Haluoleo
       </div>
     </div>
