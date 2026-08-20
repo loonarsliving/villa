@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { login, api, ApiError } from "@/lib/api";
-import { roleHome } from "@/lib/auth";
+import { roleHome, setRoleCookie } from "@/lib/auth";
 import type { SessionUser } from "@/lib/types";
 
 type Step = "login" | "newpass" | "profile";
@@ -30,6 +30,9 @@ export default function LoginPage() {
 
   function finish(u: SessionUser) {
     localStorage.setItem("villa_user", JSON.stringify(u));
+    // Lets proxy.ts recognize the session and gate routes server-side
+    // before the page shell renders. See src/lib/auth.tsx for caveats.
+    setRoleCookie(u.role);
     router.replace(roleHome(u.role));
   }
 
@@ -56,8 +59,8 @@ export default function LoginPage() {
 
   async function handleNewPassword() {
     setError("");
-    if (np1.length < 6 || np1 !== np2) {
-      setError("Password tidak cocok atau terlalu pendek (minimal 6 karakter).");
+    if (np1.length < 12 || np1 !== np2) {
+      setError("Password tidak cocok atau terlalu pendek (minimal 12 karakter).");
       return;
     }
     setLoading(true);
@@ -153,7 +156,7 @@ export default function LoginPage() {
             }}
           >
             <label className={labelCls}>Password Baru</label>
-            <input type="password" value={np1} onChange={(e) => setNp1(e.target.value)} placeholder="Minimal 6 karakter" className={inputCls} />
+            <input type="password" value={np1} onChange={(e) => setNp1(e.target.value)} placeholder="Minimal 12 karakter" className={inputCls} />
             <label className={labelCls}>Ulangi Password Baru</label>
             <input type="password" value={np2} onChange={(e) => setNp2(e.target.value)} placeholder="••••••••" className={`${inputCls} mb-7`} />
             <button type="submit" disabled={loading} className={btnCls}>
