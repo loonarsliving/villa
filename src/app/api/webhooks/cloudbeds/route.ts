@@ -45,6 +45,72 @@ interface CloudbedsReservation {
   total?: number;
 }
 
+const MAX_NAME_LEN = 200;
+const MAX_PHONE_LEN = 32;
+// Loose but useful: digits, spaces and the common phone punctuation, 6-32 chars.
+const PHONE_RE = /^[0-9+()\-.\s]{6,32}$/;
+
+/**
+ * Manual schema validation for the reservation payload before anything is
+ * written to Supabase. `zod` is not a dependency of this project (see
+ * package.json), so this is written by hand rather than pulling in a new
+ * package for one file. Returns a list of human-readable problems; an empty
+ * list means the payload is safe to write.
+ */
+function validateReservation(reservation: CloudbedsReservation): string[] {
+  const problems: string[] = [];
+
+  const guestName = reservation.guestName ?? reservation.guest_name;
+  if (guestName !== undefined) {
+    if (typeof guestName !== "string" || !guestName.trim()) {
+      problems.push("guestName/guest_name must be a non-empty string");
+    } else if (guestName.length > MAX_NAME_LEN) {
+      problems.push(`guestName/guest_name exceeds ${MAX_NAME_LEN} characters`);
+    }
+  }
+
+  const guestPhone = reservation.guestPhone ?? reservation.guest_phone;
+  if (guestPhone !== undefined && guestPhone !== null) {
+    if (typeof guestPhone !== "string" || guestPhone.length > MAX_PHONE_LEN || !PHONE_RE.test(guestPhone)) {
+      problems.push("guestPhone/guest_phone has an invalid format");
+    }
+  }
+
+  if (reservation.total !== undefined) {
+    if (typeof reservation.total !== "number" || !Number.isFinite(reservation.total) || reservation.total < 0) {
+      problems.push("total must be a non-negative number");
+    }
+  }
+
+  const checkIn = reservation.checkInDate ?? reservation.checkin_date;
+  const checkOut = reservation.checkOutDate ?? reservation.checkout_date;
+  const checkInDate = checkIn !== undefined ? new Date(checkIn) : null;
+  const checkOutDate = checkOut !== undefined ? new Date(checkOut) : null;
+
+  // Required: the booking row we're about to write needs both dates.
+  if (checkIn === undefined) {
+    problems.push("checkInDate/checkin_date is required");
+  } else if (typeof checkIn !== "string" || Number.isNaN(checkInDate?.getTime())) {
+    problems.push("checkInDate/checkin_date must be a valid ISO date string");
+  }
+  if (checkOut === undefined) {
+    problems.push("checkOutDate/checkout_date is required");
+  } else if (typeof checkOut !== "string" || Number.isNaN(checkOutDate?.getTime())) {
+    problems.push("checkOutDate/checkout_date must be a valid ISO date string");
+  }
+  if (
+    checkInDate &&
+    checkOutDate &&
+    !Number.isNaN(checkInDate.getTime()) &&
+    !Number.isNaN(checkOutDate.getTime()) &&
+    checkOutDate.getTime() <= checkInDate.getTime()
+  ) {
+    problems.push("checkOutDate/checkout_date must be after checkInDate/checkin_date");
+  }
+
+  return problems;
+}
+
 export async function POST(request: Request) {
   const expected = (process.env.CLOUDBEDS_WEBHOOK_SECRET ?? "").trim();
   if (!expected) {
@@ -81,6 +147,23 @@ export async function POST(request: Request) {
         .maybeSingle<{ unit_id: string; units: { nomor: string } | null }>();
 
       if (mapping?.unit_id) {
+        const problems = validateReservation(reservation);
+        if (problems.length > 0) {
+          console.warn("[cloudbeds webhook] rejected malformed reservation payload:", problems, {
+            eventType,
+            reservationId,
+            cloudbedsRoomId,
+          });
+          await supabase.from("cloudbeds_events_log").insert({
+            reservation_id: reservationId,
+            event_type: eventType,
+            payload,
+            matched: false,
+            error: `validation failed: ${problems.join("; ")}`,
+          });
+          return NextResponse.json({ error: "invalid reservation payload", details: problems }, { status: 400 });
+        }
+
         matched = true;
         unitId = mapping.unit_id;
         unitNomor = mapping.units?.nomor ?? null;
