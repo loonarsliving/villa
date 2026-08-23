@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { AdminShell } from "../_shell";
+import { api, ApiError } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { fmtCurrencyFull, fmtDate } from "@/lib/format";
 import { Card, CardHeader, CardBody, Loading, Badge } from "@/components/Card";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
 import { StatCard } from "@/components/StatCard";
 import type { WalkinKategori, WalkinPayment, WalkinStatus } from "@/lib/types";
-import { loadWalkinPayments, saveWalkinPayments, loadQrisImage, saveQrisImage, clearQrisImage, newWalkinId } from "@/lib/walkin";
+import { loadQrisImage, saveQrisImage, clearQrisImage } from "@/lib/walkin";
 import { isSuperAdminEmail, getVerifiedFlag, setVerifiedFlag } from "@/lib/superAdmin";
 
 const kategoriLabel: Record<WalkinKategori, string> = { cafe: "Cafe", spa: "Spa", lainnya: "Lainnya" };
@@ -82,11 +83,20 @@ export default function PaymentGatewayPage() {
     jumlah: "" as string,
   });
 
+  function load() {
+    api
+      .get<WalkinPayment[]>("/admin/walkin-payments")
+      .then((r) => setRows(r || []))
+      .catch((e) => toast("⚠", "Gagal memuat", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby"));
+  }
+
   useEffect(() => {
-    setVerified(getVerifiedFlag());
+    const ok = getVerifiedFlag();
+    setVerified(ok);
     setChecking(false);
-    setRows(loadWalkinPayments());
     setQris(loadQrisImage());
+    if (ok) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const filteredRows = useMemo(
@@ -101,11 +111,6 @@ export default function PaymentGatewayPage() {
   const pendingCount = rows.filter((r) => r.status === "pending").length;
   const cafeTotal = todayLunas.filter((r) => r.kategori === "cafe").reduce((s, r) => s + r.jumlah, 0);
   const spaTotal = todayLunas.filter((r) => r.kategori === "spa").reduce((s, r) => s + r.jumlah, 0);
-
-  function persist(next: WalkinPayment[]) {
-    setRows(next);
-    saveWalkinPayments(next);
-  }
 
   function onUploadQris(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -125,7 +130,7 @@ export default function PaymentGatewayPage() {
     setQris(null);
   }
 
-  function createPayment() {
+  async function createPayment() {
     const jumlahNum = Number(form.jumlah.replace(/[^0-9]/g, ""));
     if (!form.guest_nama.trim()) {
       toast("⚠", "Lengkapi form", "Nama tamu wajib diisi.", "ruby");
@@ -135,27 +140,31 @@ export default function PaymentGatewayPage() {
       toast("⚠", "Lengkapi form", "Nominal pembayaran harus lebih dari 0.", "ruby");
       return;
     }
-    const payment: WalkinPayment = {
-      id: newWalkinId(),
-      guest_nama: form.guest_nama.trim(),
-      guest_hp: form.guest_hp.trim() || null,
-      kategori: form.kategori,
-      deskripsi: form.deskripsi.trim() || kategoriLabel[form.kategori],
-      jumlah: jumlahNum,
-      status: "pending",
-      created_at: new Date().toISOString(),
-      paid_at: null,
-    };
-    persist([payment, ...rows]);
-    setActivePayment(payment);
-    setForm({ guest_nama: "", guest_hp: "", kategori: form.kategori, deskripsi: "", jumlah: "" });
+    try {
+      const payment = await api.post<WalkinPayment>("/admin/walkin-payments", {
+        guest_nama: form.guest_nama.trim(),
+        guest_hp: form.guest_hp.trim() || null,
+        kategori: form.kategori,
+        deskripsi: form.deskripsi.trim() || kategoriLabel[form.kategori],
+        jumlah: jumlahNum,
+      });
+      setRows((prev) => [payment, ...prev]);
+      setActivePayment(payment);
+      setForm({ guest_nama: "", guest_hp: "", kategori: form.kategori, deskripsi: "", jumlah: "" });
+    } catch (e) {
+      toast("⚠", "Gagal", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby");
+    }
   }
 
-  function setStatus(id: string, status: WalkinStatus) {
-    const next = rows.map((r) => (r.id === id ? { ...r, status, paid_at: status === "lunas" ? new Date().toISOString() : r.paid_at } : r));
-    persist(next);
-    setActivePayment((cur) => (cur && cur.id === id ? { ...cur, status } : cur));
-    if (status === "lunas") toast("✓", "Pembayaran lunas", "Transaksi walk-in berhasil dicatat sebagai lunas.", "sage");
+  async function setStatus(id: string, status: WalkinStatus) {
+    try {
+      const updated = await api.patch<WalkinPayment>("/admin/walkin-payments", { id, status });
+      setRows((prev) => prev.map((r) => (r.id === id ? updated : r)));
+      setActivePayment((cur) => (cur && cur.id === id ? updated : cur));
+      if (status === "lunas") toast("✓", "Pembayaran lunas", "Transaksi walk-in berhasil dicatat sebagai lunas.", "sage");
+    } catch (e) {
+      toast("⚠", "Gagal", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby");
+    }
   }
 
   if (checking) {
@@ -169,7 +178,12 @@ export default function PaymentGatewayPage() {
   if (!verified) {
     return (
       <AdminShell pageTitle="Payment Gateway" pageSub="Akses terbatas — super admin">
-        <AccessGate onVerified={() => setVerified(true)} />
+        <AccessGate
+          onVerified={() => {
+            setVerified(true);
+            load();
+          }}
+        />
       </AdminShell>
     );
   }

@@ -34,3 +34,10 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## This audit
 - `claude/project-memory-audit-af4m1t` — added `/docs/project-memory/` and `/CLAUDE.md` (this documentation set). Audit-only; no source code, database, or deployment changes made.
+
+### 2026-08-23 — `claude/payment-gateway-admin-module-2t1mq9`
+- Added Payment Gateway module (`admin/payment-gateway/page.tsx`) — admin-only walk-in cafe/spa cashier with an extra email-whitelist gate, static-QRIS display, and transaction history.
+- Resolved the `villa-api` source-location mystery: confirmed live only as a deployed Supabase Edge Function (not in this repo, not in `mkhsistem`), read/redeployed directly via Supabase MCP.
+- Confirmed the shared Supabase project relationship with `mkhsistem` (MK Connect) described in PROJECT_CONTEXT.md/CURRENT_STATE.md as previously unconfirmed.
+- Added `walkin_payments` table (migration `add_walkin_payments_table`) and three new `villa-api` endpoints (`GET/POST/PATCH /admin/walkin-payments`, deployed as villa-api v14) — first production DB schema change and first `villa-api` redeploy made from this repo's git history.
+- Surfaced (not remediated) a pre-existing, unrelated security advisory: 2 tables in the shared project have RLS fully disabled (`istri_daily_tips`, `contractor_fund_request_pending`).

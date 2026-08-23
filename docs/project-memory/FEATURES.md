@@ -24,6 +24,7 @@ Status tags: DONE (UI + call site implemented and wired, though server behavior 
 - **Operational staff management** (security/cleaning/greeter roster) — DONE. `admin/staff/page.tsx`, `GET/POST/PATCH /admin/staff`.
 - **Cloudbeds room-mapping management + event log viewer** — DONE. `admin/cloudbeds/page.tsx`, `GET/POST/DELETE /admin/cloudbeds/mapping`, `GET /admin/cloudbeds/log`.
 - **WhatsApp send log viewer** — DONE (viewer only; actual sending is not implemented in this repo). `admin/wa-log/page.tsx`, `GET /admin/wa/log`.
+- **Payment Gateway — walk-in cafe/spa cashier** — DONE, added 2026-08-23. `admin/payment-gateway/page.tsx`. Extra email-whitelist gate on top of the `admin` role (system has no separate "super admin" role); walk-in guest data entry → static-QRIS display with nominal overlay → manual lunas/batal marking. Backed by real `villa-api` endpoints `GET/POST/PATCH /admin/walkin-payments` and a new `walkin_payments` table (see DATABASE.md) — not folded into investor revenue-sharing reports by design. QRIS image itself is stored client-side (localStorage), not in the database.
 
 ## Investor (`/investor`)
 - **Monthly report** (gross revenue, opex, marketing %, net, owner/loonars/pengelola split, deposit/jaminan) — DONE. `investor/page.tsx`, `investor/laporan/page.tsx`, `GET /report`.
