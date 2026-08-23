@@ -1,16 +1,19 @@
-const QRIS_IMAGE_KEY = "villa_qris_image";
+import { api } from "./api";
+import type { IntegrationSetting } from "./types";
 
-export function loadQrisImage(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem(QRIS_IMAGE_KEY);
+const QRIS_SETTING_KEY = "walkin_qris";
+
+export async function loadQrisImage(): Promise<string | null> {
+  const rows = await api.get<IntegrationSetting[]>("/admin/settings");
+  const row = rows.find((r) => r.key === QRIS_SETTING_KEY);
+  const dataUrl = (row?.value as { data_url?: string } | undefined)?.data_url;
+  return dataUrl || null;
 }
 
-export function saveQrisImage(dataUrl: string) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(QRIS_IMAGE_KEY, dataUrl);
+export async function saveQrisImage(dataUrl: string) {
+  await api.post("/admin/settings", { key: QRIS_SETTING_KEY, value: { data_url: dataUrl } });
 }
 
-export function clearQrisImage() {
-  if (typeof window === "undefined") return;
-  localStorage.removeItem(QRIS_IMAGE_KEY);
+export async function clearQrisImage() {
+  await api.post("/admin/settings", { key: QRIS_SETTING_KEY, value: { data_url: null } });
 }

@@ -86,6 +86,32 @@ export default function InvestorBerandaPage() {
         <StatCard label="Net Profit" value={fmtCurrency(report?.net ?? report?.gross_profit)} sub="Dasar bagi hasil 70/30" />
       </div>
 
+      {!loading && report?.walkin_income && (
+        <Card className="mb-3.5">
+          <CardHeader
+            title="Pemasukan Cafe & Spa (Walk-in)"
+            subtitle="Info seluruh properti — belum termasuk bagi hasil 70/30 di atas"
+          />
+          <div className="grid grid-cols-3 gap-3 p-4 sm:p-5">
+            <div>
+              <div className="text-[10px] text-ink/40 mb-1">☕ Cafe</div>
+              <div className="font-serif text-base font-medium text-ink">{fmtCurrency(report.walkin_income.cafe)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-ink/40 mb-1">💆 Spa</div>
+              <div className="font-serif text-base font-medium text-ink">{fmtCurrency(report.walkin_income.spa)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-ink/40 mb-1">Total</div>
+              <div className="font-serif text-base font-medium text-gold-500">{fmtCurrency(report.walkin_income.total)}</div>
+            </div>
+          </div>
+          <div className="px-4 sm:px-5 pb-4 sm:pb-5 -mt-1 text-[10px] text-ink/30 leading-relaxed">
+            Pemasukan ini di luar sewa unit dan belum dibagikan ke investor — ditampilkan untuk transparansi karena rencananya akan ikut dibagi dari pendapatan bersih ke depannya.
+          </div>
+        </Card>
+      )}
+
       <div className="grid lg:grid-cols-[2fr_1fr] gap-3.5">
         <Card>
           <CardHeader title="Transaksi Terbaru" action={<Link href="/investor/pendapatan" className="text-[10.5px] text-gold-500">Lihat semua →</Link>} />

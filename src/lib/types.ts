@@ -95,6 +95,7 @@ export interface Report {
   pengelola_amount: number;
   jaminan_aktif: boolean;
   jaminan_topup: number;
+  walkin_income?: { cafe: number; spa: number; lainnya: number; total: number };
 }
 
 export interface Summary {

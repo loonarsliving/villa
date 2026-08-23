@@ -94,8 +94,12 @@ export default function PaymentGatewayPage() {
     const ok = getVerifiedFlag();
     setVerified(ok);
     setChecking(false);
-    setQris(loadQrisImage());
-    if (ok) load();
+    if (ok) {
+      load();
+      loadQrisImage()
+        .then(setQris)
+        .catch((e) => toast("⚠", "Gagal memuat QRIS", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby"));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -115,19 +119,31 @@ export default function PaymentGatewayPage() {
   function onUploadQris(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > 1.5 * 1024 * 1024) {
+      toast("⚠", "Gambar terlalu besar", "Ukuran maksimal 1.5MB — kompres/perkecil gambar QRIS dulu.", "ruby");
+      return;
+    }
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       const dataUrl = reader.result as string;
-      saveQrisImage(dataUrl);
-      setQris(dataUrl);
-      toast("✓", "QRIS disimpan", "Gambar QRIS statis berhasil diunggah.", "sage");
+      try {
+        await saveQrisImage(dataUrl);
+        setQris(dataUrl);
+        toast("✓", "QRIS disimpan", "Gambar QRIS statis berhasil diunggah.", "sage");
+      } catch (e) {
+        toast("⚠", "Gagal menyimpan QRIS", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby");
+      }
     };
     reader.readAsDataURL(file);
   }
 
-  function removeQris() {
-    clearQrisImage();
-    setQris(null);
+  async function removeQris() {
+    try {
+      await clearQrisImage();
+      setQris(null);
+    } catch (e) {
+      toast("⚠", "Gagal menghapus QRIS", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby");
+    }
   }
 
   async function createPayment() {
