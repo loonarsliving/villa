@@ -12,7 +12,6 @@ import { Modal, Field, inputCls, Btn } from "@/components/Modal";
 import { StatCard } from "@/components/StatCard";
 import type { Booking, Unit, UnitAvailability, WalkinKategori, WalkinPayment, WalkinStatus } from "@/lib/types";
 import { loadQrisImage, saveQrisImage, clearQrisImage } from "@/lib/walkin";
-import { isSuperAdminEmail, getVerifiedFlag, setVerifiedFlag } from "@/lib/superAdmin";
 
 type KasirKategori = WalkinKategori | "villa";
 
@@ -75,58 +74,9 @@ function bookingToDisplay(b: Booking): DisplayPayment {
   };
 }
 
-function AccessGate({ onVerified }: { onVerified: () => void }) {
-  const toast = useToast();
-  const [email, setEmail] = useState("");
-
-  function verify() {
-    if (!email.trim()) {
-      toast("⚠", "Lengkapi form", "Masukkan email akun Anda.", "ruby");
-      return;
-    }
-    if (!isSuperAdminEmail(email)) {
-      toast("⛔", "Akses ditolak", "Email ini tidak terdaftar sebagai super admin untuk modul Payment Gateway.", "ruby");
-      return;
-    }
-    setVerifiedFlag();
-    toast("✓", "Akses diverifikasi", "Selamat datang di modul Payment Gateway.", "sage");
-    onVerified();
-  }
-
-  return (
-    <div className="max-w-md mx-auto mt-6 sm:mt-12">
-      <Card>
-        <CardHeader title="Verifikasi Akses" subtitle="Modul ini khusus super admin" />
-        <CardBody>
-          <div className="text-5xl text-center mb-4">🔐</div>
-          <p className="text-xs text-ink/50 leading-relaxed mb-5 text-center">
-            Payment Gateway menyimpan data transaksi tamu walk-in. Masukkan email akun super admin Anda untuk melanjutkan.
-          </p>
-          <Field label="Email Akun">
-            <input
-              className={inputCls}
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && verify()}
-              placeholder="nama@email.com"
-              autoFocus
-            />
-          </Field>
-          <button onClick={verify} className="w-full mt-2 bg-gold-500 text-base-950 rounded-lg py-2.5 text-[12px] font-semibold tracking-wide hover:opacity-90 transition">
-            Verifikasi &amp; Lanjutkan
-          </button>
-        </CardBody>
-      </Card>
-    </div>
-  );
-}
-
 export default function PaymentGatewayPage() {
   const { user } = useAuth();
   const toast = useToast();
-  const [verified, setVerified] = useState(false);
-  const [checking, setChecking] = useState(true);
   const [rows, setRows] = useState<WalkinPayment[]>([]);
   const [villaBookings, setVillaBookings] = useState<Booking[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
@@ -167,18 +117,10 @@ export default function PaymentGatewayPage() {
 
   useEffect(() => {
     if (!user) return;
-    // Receptionist pakai Payment Gateway ini sebagai alat kerja harian --
-    // tanpa gerbang verifikasi email super admin. Gerbang itu tetap berlaku
-    // khusus untuk admin (lihat AccessGate).
-    const ok = user.role === "receptionist" || getVerifiedFlag();
-    setVerified(ok);
-    setChecking(false);
-    if (ok) {
-      load();
-      loadQrisImage()
-        .then(setQris)
-        .catch((e) => toast("⚠", "Gagal memuat QRIS", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby"));
-    }
+    load();
+    loadQrisImage()
+      .then(setQris)
+      .catch((e) => toast("⚠", "Gagal memuat QRIS", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role]);
 
@@ -358,23 +300,10 @@ export default function PaymentGatewayPage() {
 
   const Shell = user?.role === "admin" ? AdminShell : FrontDeskShell;
 
-  if (checking) {
+  if (!user) {
     return (
       <Shell pageTitle="Payment Gateway">
         <Loading />
-      </Shell>
-    );
-  }
-
-  if (!verified) {
-    return (
-      <Shell pageTitle="Payment Gateway" pageSub="Akses terbatas — super admin">
-        <AccessGate
-          onVerified={() => {
-            setVerified(true);
-            load();
-          }}
-        />
       </Shell>
     );
   }
