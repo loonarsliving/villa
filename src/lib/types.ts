@@ -183,3 +183,18 @@ export interface CloudbedsLogRow {
   matched: boolean;
   created_at: string;
 }
+
+export type WalkinKategori = "cafe" | "spa" | "lainnya";
+export type WalkinStatus = "pending" | "lunas" | "batal";
+
+export interface WalkinPayment {
+  id: string;
+  guest_nama: string;
+  guest_hp: string | null;
+  kategori: WalkinKategori;
+  deskripsi: string;
+  jumlah: number;
+  status: WalkinStatus;
+  created_at: string;
+  paid_at: string | null;
+}
