@@ -43,5 +43,8 @@ Isolated table for the admin-only walk-in cafe/spa cashier module (`/admin/payme
 ## `walkin_qris` setting (added 2026-08-23)
 The static QRIS image for the walk-in cashier is stored as a row in the existing `integration_settings` table (`key='walkin_qris'`, `value={data_url: "data:image/...;base64,..."}`), read/written via the existing `GET/POST /admin/settings` endpoints — not a new table, and no longer in browser localStorage. Client-side upload is capped at 1.5MB before base64 encoding to keep the JSON payload/jsonb column reasonable.
 
+## Villa walk-in bookings via Payment Gateway (added 2026-08-23)
+The Payment Gateway's "Villa" kategori (for guests who book directly, not via OTA/Cloudbeds) does **not** write to `walkin_payments` — it calls the real booking pipeline instead: `POST /bookings` when the QRIS is generated (status `terjadwal`, `sumber:'walk-in'`, same double-booking check as Front Desk), then `POST /checkin` on "Tandai Lunas & Check-In" (sets the unit `occupied`, inserts the `transactions` income row that feeds `computeReport`'s 70/30 split, sends the door-PIN WhatsApp message) — identical effects to the existing Front Desk Check-In flow, just initiated from this screen. Added `PATCH /bookings` (`{id, status}`, villa-api v16) so an unpaid walk-in booking can be cancelled (`status:'batal'`) without leaving a phantom hold on the unit's date range.
+
 ## Direct DB access pattern
 Only the Cloudbeds webhook route (in this repo) touches Postgres directly (via `@supabase/supabase-js` with the service-role key, which bypasses RLS). All other reads/writes go through `villa-api`, which also uses the service-role key (confirmed above).
