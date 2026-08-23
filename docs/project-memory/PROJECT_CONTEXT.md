@@ -16,6 +16,11 @@ Source of truth: `src/lib/types.ts` — `export type Role = "owner" | "reception
 
 Note: the UI copy at login says "Portal Investor, Manajemen & Resepsionis" (Investor, Management & Receptionist), consistent with the three roles above.
 
+### Role capability map (confirmed against code + owner instruction, 2026-08-23)
+- **`receptionist`** — Front Desk operations only: check-in/checkout (with double-booking-safe unit picking), view OTA (Cloudbeds) + all bookings, housekeeping, siteplan, notifications, and the Payment Gateway walk-in cashier (`/front-desk/payment-gateway` — one shared feature with admin, not a duplicate; no super-admin email gate for this role).
+- **`admin`** (labelled "Business Owner" in UI) — sees everything implemented in this repo: overview, all revenue/reports, investor management, user/staff management, Cloudbeds integration, WhatsApp log, and Payment Gateway (behind the super-admin email gate). **Gap:** the owner also wants CCTV visibility for this role — **NOT implemented on `main`**; only exists on the unmerged, not-yet-audited `claude/frigate-ai-cctv-module-eqwuri` branch (see FEATURES.md/AI_AND_AGENTS.md). Treat "admin sees CCTV" as PLANNED, not DONE, until that branch is reviewed and merged.
+- **`owner`** (labelled "Investor" in UI) — per explicit 2026-08-23 instruction, sees **collective/villa-wide** data, not per-unit: overall income (rental + cafe/spa breakdown), the bagi-hasil pool, and their own equal share (`per_investor_amount`). A unit (e.g. "Unit A2") is only a stay-rights token (12 nights/year outside high season) — it is NOT the basis for revenue-share proportion. See DATABASE.md / FEATURES.md for the `villa-api` v17/v18 changes that implement this (removed `unit_id` scoping on `/report`, `/transactions`, `/notifications` for this role; added `investor_count` and `per_investor_amount` to `computeReport()`).
+
 ## Main functions (as evidenced by pages/components)
 - Front desk: unit status board (siteplan), booking list, housekeeping task checklist, real-time notifications, double-booking-by-date prevention (commit `346ab86`).
 - Admin: business overview KPIs, investor management, user management (create/deactivate/reset password), operational staff management, Cloudbeds room-mapping and event log, WhatsApp send log.

@@ -12,7 +12,6 @@ import type { Report } from "@/lib/types";
 export default function PendapatanPage() {
   const { user } = useAuth();
   const unitId = user?.unit_id || "";
-  const unitNomor = user?.unit_nomor || "—";
   const [report, setReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -30,29 +29,31 @@ export default function PendapatanPage() {
   const gp = report?.net ?? report?.gross_profit ?? 0;
   const ow = report?.owner_amount || 0;
   const lo = report?.pengelola_amount ?? report?.loonars_amount ?? 0;
+  const perInvestor = report?.per_investor_amount ?? 0;
+  const investorCount = report?.investor_count ?? 0;
   const opexPct = Math.round((report?.opex_pct ?? 0.25) * 100);
   const mkPct = Math.round((report?.marketing_pct ?? 0.275) * 100);
 
   const rows: [string, number, string, boolean?, boolean?, boolean?][] = [
-    [`Pendapatan Unit ${unitNomor}`, 100, fmtCurrency(g), false, true],
+    ["Pendapatan Seluruh Villa", 100, fmtCurrency(g), false, true],
     [`Opex (${opexPct}% dari omzet)`, Math.round((o / g || 0) * 100), `− ${fmtCurrency(o)}`, true],
     [`Marketing (${mkPct}% dari omzet)`, Math.round((mk / g || 0) * 100), `− ${fmtCurrency(mk)}`, true],
     ["Net Profit", Math.round((gp / g || 0) * 100), fmtCurrency(gp), false, true],
-    ["Investor (70%)", 70, fmtCurrency(ow), false, false, true],
+    ["Pool Investor (70%)", 70, fmtCurrency(ow), false, false, true],
     ["Loonars (30%)", 30, fmtCurrency(lo), false],
-    ["Transfer ke Investor — tgl 5", 70, fmtCurrency(ow), false, false, true],
+    [`Bagian Anda (1 dari ${investorCount || "?"} investor, dibagi rata)`, 70, fmtCurrency(perInvestor), false, false, true],
   ];
 
   return (
-    <InvestorShell pageTitle="Pendapatan" pageSub="Alur bagi hasil unit Anda">
+    <InvestorShell pageTitle="Pendapatan" pageSub="Alur bagi hasil kolektif seluruh villa">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3.5">
-        <StatCard label="Investor (70%)" value={fmtCurrency(ow)} accent="sage" />
-        <StatCard label="Gross Revenue" value={fmtCurrency(g)} />
+        <StatCard label="Bagian Anda" value={fmtCurrency(perInvestor)} accent="sage" />
+        <StatCard label="Gross Revenue" value={fmtCurrency(g)} sub="Seluruh villa" />
         <StatCard label="Opex + Marketing" value={fmtCurrency(o + mk)} sub={`${opexPct}% + ${mkPct}%`} accent="gold" />
         <StatCard label="Net Profit" value={fmtCurrency(gp)} />
       </div>
       <Card>
-        <CardHeader title="Alur Bagi Hasil" subtitle={periodLabel()} />
+        <CardHeader title="Alur Bagi Hasil" subtitle={`${periodLabel()} — kolektif, dibagi rata ke semua investor`} />
         {loading ? (
           <Loading />
         ) : (

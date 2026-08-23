@@ -39,7 +39,7 @@ export default function InvestorBerandaPage() {
   const jaminanAktif = report?.jaminan_aktif;
 
   return (
-    <InvestorShell pageTitle="Beranda" pageSub={`Unit ${unitNomor} · ${periodLabel()}`}>
+    <InvestorShell pageTitle="Beranda" pageSub={`Poin menginap Unit ${unitNomor} · ${periodLabel()}`}>
       <div
         className="relative bg-gradient-to-br from-base-800 to-base-900 border border-gold-500/25 rounded-md p-5 sm:p-7 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5 mb-3.5 overflow-hidden"
       >
@@ -57,13 +57,15 @@ export default function InvestorBerandaPage() {
             {loading
               ? "Memuat data..."
               : jaminanAktif
-                ? `Pendapatan rendah bulan ini — Loonars menambah ${fmtCurrency(report?.jaminan_topup)} agar Anda tetap terima Rp 5 juta.`
-                : `Unit ${unitNomor} berjalan normal — jaminan tidak aktif, bagi hasil penuh untuk Anda.`}
+                ? `Bagian Anda rendah bulan ini — Loonars menambah ${fmtCurrency(report?.jaminan_topup)} per investor agar Anda tetap terima Rp 5 juta.`
+                : `Villa berjalan normal — jaminan tidak aktif, bagi hasil penuh untuk Anda.`}
           </div>
         </div>
         <div className="text-left sm:text-right">
-          <div className="font-serif text-3xl sm:text-[38px] font-light text-gold-500 leading-none">{fmtCurrency(owner)}</div>
-          <div className="text-[9.5px] text-ink/30 mt-1">Estimasi diterima bulan ini</div>
+          <div className="font-serif text-3xl sm:text-[38px] font-light text-gold-500 leading-none">{fmtCurrency(report?.per_investor_amount ?? owner)}</div>
+          <div className="text-[9.5px] text-ink/30 mt-1">
+            Bagian Anda bulan ini{report?.investor_count ? ` (1 dari ${report.investor_count} investor)` : ""}
+          </div>
           <div
             className={`inline-flex items-center gap-1.5 text-[9.5px] font-semibold px-2.5 py-1 rounded-full mt-2.5 ${
               jaminanAktif ? "bg-ruby-500/15 text-ruby-400" : "bg-sage-500/15 text-sage-400"
@@ -75,14 +77,9 @@ export default function InvestorBerandaPage() {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3.5">
-        <StatCard label="Pendapatan Anda" value={fmtCurrency(owner)} sub="Bulan ini (70%)" accent="sage" />
-        <StatCard label="Gross Revenue" value={fmtCurrency(report?.gross_revenue)} sub="Unit ini" />
-        <StatCard
-          label="Opex + Marketing"
-          value={fmtCurrency((report?.opex_per_unit || 0) + (report?.marketing_amount || 0))}
-          sub={`Opex ${Math.round((report?.opex_pct ?? 0.25) * 100)}% + iklan ${Math.round((report?.marketing_pct ?? 0.275) * 100)}%`}
-          accent="gold"
-        />
+        <StatCard label="Bagian Anda" value={fmtCurrency(report?.per_investor_amount ?? owner)} sub="Bulan ini (dibagi rata)" accent="sage" />
+        <StatCard label="Pool Investor (70%)" value={fmtCurrency(owner)} sub="Seluruh villa, sebelum dibagi" />
+        <StatCard label="Gross Revenue" value={fmtCurrency(report?.gross_revenue)} sub="Seluruh villa" />
         <StatCard label="Net Profit" value={fmtCurrency(report?.net ?? report?.gross_profit)} sub="Dasar bagi hasil 70/30" />
       </div>
 

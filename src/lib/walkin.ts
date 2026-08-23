@@ -1,19 +1,14 @@
 import { api } from "./api";
-import type { IntegrationSetting } from "./types";
-
-const QRIS_SETTING_KEY = "walkin_qris";
 
 export async function loadQrisImage(): Promise<string | null> {
-  const rows = await api.get<IntegrationSetting[]>("/admin/settings");
-  const row = rows.find((r) => r.key === QRIS_SETTING_KEY);
-  const dataUrl = (row?.value as { data_url?: string } | undefined)?.data_url;
-  return dataUrl || null;
+  const res = await api.get<{ data_url: string | null }>("/walkin-qris");
+  return res?.data_url ?? null;
 }
 
 export async function saveQrisImage(dataUrl: string) {
-  await api.post("/admin/settings", { key: QRIS_SETTING_KEY, value: { data_url: dataUrl } });
+  await api.post("/walkin-qris", { data_url: dataUrl });
 }
 
 export async function clearQrisImage() {
-  await api.post("/admin/settings", { key: QRIS_SETTING_KEY, value: { data_url: null } });
+  await api.post("/walkin-qris", { data_url: null });
 }

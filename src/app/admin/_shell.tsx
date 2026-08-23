@@ -22,7 +22,7 @@ export function AdminShell({ pageTitle, pageSub, children }: { pageTitle: string
     },
     {
       title: "Kasir",
-      items: [{ href: "/admin/payment-gateway", label: "Payment Gateway", icon: "◍" }],
+      items: [{ href: "/front-desk/payment-gateway", label: "Payment Gateway", icon: "◍" }],
     },
     {
       title: "Integrasi",

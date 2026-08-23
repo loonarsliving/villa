@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
-import { AdminShell } from "../_shell";
+import { AdminShell } from "../../admin/_shell";
+import { FrontDeskShell } from "../_shell";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
@@ -151,7 +152,7 @@ export default function PaymentGatewayPage() {
 
   function load() {
     api
-      .get<WalkinPayment[]>("/admin/walkin-payments")
+      .get<WalkinPayment[]>("/walkin-payments")
       .then((r) => setRows(r || []))
       .catch((e) => toast("⚠", "Gagal memuat", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby"));
     api
@@ -165,7 +166,11 @@ export default function PaymentGatewayPage() {
   }
 
   useEffect(() => {
-    const ok = getVerifiedFlag();
+    if (!user) return;
+    // Receptionist pakai Payment Gateway ini sebagai alat kerja harian --
+    // tanpa gerbang verifikasi email super admin. Gerbang itu tetap berlaku
+    // khusus untuk admin (lihat AccessGate).
+    const ok = user.role === "receptionist" || getVerifiedFlag();
     setVerified(ok);
     setChecking(false);
     if (ok) {
@@ -175,7 +180,7 @@ export default function PaymentGatewayPage() {
         .catch((e) => toast("⚠", "Gagal memuat QRIS", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby"));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [user?.role]);
 
   useEffect(() => {
     if (form.kategori !== "villa" || !form.checkin) return;
@@ -267,7 +272,7 @@ export default function PaymentGatewayPage() {
       return;
     }
     try {
-      const payment = await api.post<WalkinPayment>("/admin/walkin-payments", {
+      const payment = await api.post<WalkinPayment>("/walkin-payments", {
         guest_nama: form.guest_nama.trim(),
         guest_hp: form.guest_hp.trim() || null,
         kategori: form.kategori as WalkinKategori,
@@ -323,7 +328,7 @@ export default function PaymentGatewayPage() {
   async function setStatus(payment: DisplayPayment, status: WalkinStatus) {
     try {
       if (payment.source === "walkin") {
-        const updated = await api.patch<WalkinPayment>("/admin/walkin-payments", { id: payment.id, status });
+        const updated = await api.patch<WalkinPayment>("/walkin-payments", { id: payment.id, status });
         setRows((prev) => prev.map((r) => (r.id === payment.id ? updated : r)));
         setActivePayment(toDisplay(updated));
         if (status === "lunas") toast("✓", "Pembayaran lunas", "Transaksi walk-in berhasil dicatat sebagai lunas.", "sage");
@@ -351,31 +356,33 @@ export default function PaymentGatewayPage() {
     }
   }
 
+  const Shell = user?.role === "admin" ? AdminShell : FrontDeskShell;
+
   if (checking) {
     return (
-      <AdminShell pageTitle="Payment Gateway">
+      <Shell pageTitle="Payment Gateway">
         <Loading />
-      </AdminShell>
+      </Shell>
     );
   }
 
   if (!verified) {
     return (
-      <AdminShell pageTitle="Payment Gateway" pageSub="Akses terbatas — super admin">
+      <Shell pageTitle="Payment Gateway" pageSub="Akses terbatas — super admin">
         <AccessGate
           onVerified={() => {
             setVerified(true);
             load();
           }}
         />
-      </AdminShell>
+      </Shell>
     );
   }
 
   const availOptions = availUnits ?? units.map((u) => ({ ...u, tersedia_untuk_tanggal: u.status === "available", dibooking_oleh: null }));
 
   return (
-    <AdminShell pageTitle="Payment Gateway" pageSub="Kasir walk-in — Villa, Cafe & Spa">
+    <Shell pageTitle="Payment Gateway" pageSub="Kasir walk-in — Villa, Cafe & Spa">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
         <StatCard label="Pemasukan Hari Ini" value={fmtCurrencyFull(totalHariIni)} sub={`${todayLunas.length} transaksi lunas · cafe/spa`} accent="sage" icon="✓" />
         <StatCard label="Menunggu Bayar" value={String(pendingCount)} accent={pendingCount ? "gold" : "neutral"} icon="⏳" />
@@ -630,6 +637,6 @@ export default function PaymentGatewayPage() {
           </div>
         )}
       </Modal>
-    </AdminShell>
+    </Shell>
   );
 }

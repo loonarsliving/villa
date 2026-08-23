@@ -28,6 +28,7 @@ export function FrontDeskShell({
         { href: "/front-desk/siteplan", label: "Siteplan Villa", icon: "▤" },
         { href: "/front-desk/booking", label: "Booking", icon: "◎" },
         { href: "/front-desk/housekeeping", label: "Housekeeping", icon: "◉" },
+        { href: "/front-desk/payment-gateway", label: "Payment Gateway", icon: "◍" },
       ],
     },
     {
