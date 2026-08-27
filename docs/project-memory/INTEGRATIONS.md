@@ -14,12 +14,14 @@ No secrets, keys, tokens, or credentials are recorded below — purpose/location
 
 ## Cloudbeds (channel manager / OTA distribution)
 - **Purpose**: Syncs external booking-channel (OTA) reservations and room availability into the app as a "channel manager" only — no smart-lock/physical access trigger.
-- **Location in code**: `src/app/api/webhooks/cloudbeds/route.ts` (inbound webhook receiver); `src/app/admin/cloudbeds/page.tsx` (room-mapping admin UI + event log viewer).
-- **Data IN**: webhook JSON payload (`event`/`eventType`, `reservation`/`data` with roomId, reservationId, guest name/phone, dates, total, length-of-stay).
-- **Data OUT**: writes to `bookings`, `guests`, `notifications`, `cloudbeds_events_log` tables.
-- **Authentication method**: shared secret in `x-cloudbeds-secret` header, compared with `crypto.timingSafeEqual` against `CLOUDBEDS_WEBHOOK_SECRET` env var.
-- **Status**: ACTIVE on `main` (moved here from a DB-backed/Edge-Function pattern per commit `2ddcff5`). Payload validation hardening exists only on unmerged branch `claude/security-3-repos-tj69ek` — NOT yet on `main`.
-- **Dependencies**: `@supabase/supabase-js`, Node `crypto`.
+- **Location in code**: `src/app/api/webhooks/cloudbeds/route.ts` (inbound webhook receiver); `src/lib/cloudbedsApi.ts` + `src/app/api/admin/cloudbeds/rooms/route.ts` (outbound Cloudbeds API client, read-only `getRooms` proxy — added 2026-08-27); `src/app/admin/cloudbeds/page.tsx` (room-mapping admin UI, now with a live room picker sourced from the outbound client, falling back to manual Room ID entry when the key is unset or the call fails + event log viewer).
+- **Data IN (webhook)**: webhook JSON payload (`event`/`eventType`, `reservation`/`data` with roomId, reservationId, guest name/phone, dates, total, length-of-stay).
+- **Data OUT (webhook)**: writes to `bookings`, `guests`, `notifications`, `cloudbeds_events_log` tables.
+- **Data IN/OUT (outbound API)**: calls Cloudbeds' `GET /api/v1.2/getRooms`; returns room id/name/room-type to the admin mapping UI only — writes nothing.
+- **Authentication method**: Webhook: shared secret in `x-cloudbeds-secret` header, compared with `crypto.timingSafeEqual` against `CLOUDBEDS_WEBHOOK_SECRET` env var. Outbound API: Cloudbeds self-service property-level API key sent as `x-api-key` header (`CLOUDBEDS_API_KEY` env var; per Cloudbeds' own docs this key is long-lived, no OAuth refresh needed).
+- **Status**: Webhook receiver ACTIVE on `main` (moved here from a DB-backed/Edge-Function pattern per commit `2ddcff5`). Payload validation hardening exists only on unmerged branch `claude/security-3-repos-tj69ek` — NOT yet on `main`. Outbound API client/live room picker: code is in place and builds clean, but **inert until the owner sets `CLOUDBEDS_API_KEY` in Vercel** — not yet exercised against a real Cloudbeds account from this repo.
+- **Room-mapping storage**: unchanged — `POST/GET/DELETE /admin/cloudbeds/mapping` still goes through the external `villa-api` Edge Function (not this repo); the live picker only changes where the Room ID/Name values in that form come from.
+- **Dependencies**: `@supabase/supabase-js`, Node `crypto`, native `fetch` (no new npm package added for the Cloudbeds API client).
 
 ## Vercel
 - **Purpose**: Hosting/deployment platform for the Next.js app.

@@ -9,6 +9,12 @@ import { Card, CardHeader, CardBody, Loading, Badge } from "@/components/Card";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
 import type { CloudbedsMapping, CloudbedsLogRow, Unit } from "@/lib/types";
 
+interface LiveCloudbedsRoom {
+  roomID: string;
+  roomName: string;
+  roomTypeName?: string;
+}
+
 export default function AdminCloudbedsPage() {
   const toast = useToast();
   const [mapping, setMapping] = useState<CloudbedsMapping[]>([]);
@@ -17,6 +23,9 @@ export default function AdminCloudbedsPage() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ room_id: "", room_name: "", unit_id: "" });
+  const [liveRooms, setLiveRooms] = useState<LiveCloudbedsRoom[]>([]);
+  const [liveRoomsError, setLiveRoomsError] = useState<string | null>(null);
+  const [manualEntry, setManualEntry] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -31,8 +40,26 @@ export default function AdminCloudbedsPage() {
     setLoading(false);
   }
 
+  async function loadLiveRooms() {
+    try {
+      const res = await fetch("/api/admin/cloudbeds/rooms");
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        setLiveRoomsError((body && body.error) || `HTTP ${res.status}`);
+        setLiveRooms([]);
+        return;
+      }
+      setLiveRooms(body?.rooms || []);
+      setLiveRoomsError(null);
+    } catch (e) {
+      setLiveRoomsError(e instanceof Error ? e.message : "Gagal memuat daftar room Cloudbeds");
+      setLiveRooms([]);
+    }
+  }
+
   useEffect(() => {
     load();
+    loadLiveRooms();
   }, []);
 
   async function createMapping() {
@@ -67,11 +94,28 @@ export default function AdminCloudbedsPage() {
         <code className="text-gold-400">x-cloudbeds-secret</code> sesuai nilai <code className="text-gold-400">CLOUDBEDS_WEBHOOK_SECRET</code> di Vercel env variable project ini. Ditangani langsung di sini — bukan lagi lewat Supabase.
       </div>
 
+      <div className={`rounded-r border-l-2 p-3.5 text-[11px] leading-relaxed mb-3.5 ${liveRoomsError ? "bg-ruby-500/10 border-ruby-500 text-ink/50" : "bg-sage-500/10 border-sage-500 text-ink/50"}`}>
+        {liveRoomsError ? (
+          <>
+            Daftar room live Cloudbeds belum tersedia ({liveRoomsError}). Set <code className="text-gold-400">CLOUDBEDS_API_KEY</code> (dan{" "}
+            <code className="text-gold-400">CLOUDBEDS_PROPERTY_ID</code> jika perlu) di Vercel env variable — pemetaan manual di bawah tetap bisa dipakai sementara.
+          </>
+        ) : (
+          <>Terhubung ke Cloudbeds API — {liveRooms.length} room tersedia untuk dipetakan langsung dari daftar live.</>
+        )}
+      </div>
+
       <Card className="mb-3.5">
         <CardHeader
           title="Pemetaan Room → Unit"
           action={
-            <button onClick={() => setOpen(true)} className="text-[10.5px] font-semibold text-gold-500 border border-gold-500/25 rounded px-3 py-1.5 shrink-0">
+            <button
+              onClick={() => {
+                setManualEntry(liveRoomsError !== null || liveRooms.length === 0);
+                setOpen(true);
+              }}
+              className="text-[10.5px] font-semibold text-gold-500 border border-gold-500/25 rounded px-3 py-1.5 shrink-0"
+            >
               + Petakan Room
             </button>
           }
@@ -116,8 +160,40 @@ export default function AdminCloudbedsPage() {
       </Card>
 
       <Modal open={open} title="Petakan Room Cloudbeds" onClose={() => setOpen(false)} footer={<><Btn onClick={() => setOpen(false)}>Batal</Btn><Btn variant="primary" onClick={createMapping}>Simpan</Btn></>}>
-        <Field label="Cloudbeds Room ID"><input className={inputCls} value={form.room_id} onChange={(e) => setForm({ ...form, room_id: e.target.value })} placeholder="ID room dari Cloudbeds" /></Field>
-        <Field label="Nama Room di Cloudbeds (opsional)"><input className={inputCls} value={form.room_name} onChange={(e) => setForm({ ...form, room_name: e.target.value })} /></Field>
+        {!liveRoomsError && liveRooms.length > 0 && !manualEntry ? (
+          <>
+            <Field label="Room Cloudbeds (live)">
+              <select
+                className={inputCls}
+                value={form.room_id}
+                onChange={(e) => {
+                  const room = liveRooms.find((r) => r.roomID === e.target.value);
+                  setForm({ ...form, room_id: e.target.value, room_name: room?.roomName || "" });
+                }}
+              >
+                <option value="">Pilih room</option>
+                {liveRooms.map((r) => (
+                  <option key={r.roomID} value={r.roomID}>
+                    {r.roomName} {r.roomTypeName ? `— ${r.roomTypeName}` : ""} ({r.roomID})
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <button type="button" onClick={() => setManualEntry(true)} className="text-[10.5px] text-gold-500 mb-3">
+              Input manual sebagai gantinya
+            </button>
+          </>
+        ) : (
+          <>
+            <Field label="Cloudbeds Room ID"><input className={inputCls} value={form.room_id} onChange={(e) => setForm({ ...form, room_id: e.target.value })} placeholder="ID room dari Cloudbeds" /></Field>
+            <Field label="Nama Room di Cloudbeds (opsional)"><input className={inputCls} value={form.room_name} onChange={(e) => setForm({ ...form, room_name: e.target.value })} /></Field>
+            {!liveRoomsError && liveRooms.length > 0 && (
+              <button type="button" onClick={() => setManualEntry(false)} className="text-[10.5px] text-gold-500 mb-3">
+                Pilih dari daftar live sebagai gantinya
+              </button>
+            )}
+          </>
+        )}
         <Field label="Unit Villa">
           <select className={inputCls} value={form.unit_id} onChange={(e) => setForm({ ...form, unit_id: e.target.value })}>
             <option value="">Pilih unit</option>

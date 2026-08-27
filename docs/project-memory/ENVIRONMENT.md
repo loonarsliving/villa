@@ -8,6 +8,10 @@ All env var names found by grepping `process.env.` and `import.meta.env.` across
 |---|---|---|---|---|
 | `CLOUDBEDS_WEBHOOK_SECRET` | Shared secret to authenticate inbound Cloudbeds webhook requests (compared via timing-safe equality against the `x-cloudbeds-secret` request header). Route returns HTTP 503 if unset. | Required (for the webhook to function; app still builds/runs without it, but the endpoint refuses all requests) | Production (server-side only, Vercel env var per code comment) | `src/app/api/webhooks/cloudbeds/route.ts` |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service-role key, used to write directly to Postgres (bypassing RLS) from the Cloudbeds webhook route. Route returns HTTP 503 if unset. | Required (for the webhook to function) | Production (server-side only, Vercel env var per code comment) | `src/app/api/webhooks/cloudbeds/route.ts` |
+| `CLOUDBEDS_API_KEY` | Outbound Cloudbeds API key (self-service, property-level, `x-api-key` header per Cloudbeds' own docs) used to fetch the live room list for the admin Cloudbeds mapping page. `/api/admin/cloudbeds/rooms` returns 503 if unset. | Optional (mapping page falls back to manual Room ID entry if unset) | Production (server-side only, Vercel env var) | `src/lib/cloudbedsApi.ts`, `src/app/api/admin/cloudbeds/rooms/route.ts` |
+| `CLOUDBEDS_PROPERTY_ID` | Only needed if `CLOUDBEDS_API_KEY` is scoped to a group/multi-property Cloudbeds account rather than a single property; passed as the `propertyID` query param to `getRooms`. | Optional | Production (server-side only, Vercel env var) | `src/lib/cloudbedsApi.ts` |
+
+Added 2026-08-27: `.env.example` now exists at repo root listing all four of the above (no values) — see DEVELOPMENT_WORKFLOW.md, this was previously a documented gap.
 
 No `NEXT_PUBLIC_*` (client-exposed) environment variables are used anywhere. The Supabase project URL (`https://svcmybsziaelwwdrnzcv.supabase.co`) and the `villa-api` Edge Function base path are **hardcoded string literals** in `src/lib/api.ts`, not environment-driven — so there is currently no way to point this frontend at a different Supabase/API environment (e.g. staging) via env vars alone.
 
