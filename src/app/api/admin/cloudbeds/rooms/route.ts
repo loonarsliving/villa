@@ -1,23 +1,9 @@
 import { NextResponse } from "next/server";
 import { getCloudbedsRooms, CloudbedsApiError } from "@/lib/cloudbedsApi";
+import { isAdminToken } from "@/lib/villaApiAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const VILLA_API_BASE = "https://svcmybsziaelwwdrnzcv.supabase.co/functions/v1/villa-api";
-
-/**
- * Confirms the caller is a logged-in admin by forwarding their x-villa-token
- * to villa-api's own admin-only /admin/overview -- reuses villa-api's real
- * session verification + role check instead of re-implementing token
- * parsing here (this app never holds VILLA_SESSION_SECRET).
- */
-async function isAdminToken(token: string): Promise<boolean> {
-  const res = await fetch(`${VILLA_API_BASE}/admin/overview`, {
-    headers: { "x-villa-token": token },
-  });
-  return res.ok;
-}
 
 /**
  * Proxies Cloudbeds' /getRooms to the admin mapping UI so it can offer a

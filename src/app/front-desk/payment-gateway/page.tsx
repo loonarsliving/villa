@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { AdminShell } from "../../admin/_shell";
 import { FrontDeskShell } from "../_shell";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, getToken } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
 import { fmtCurrencyFull, fmtDate, todayISO } from "@/lib/format";
@@ -86,6 +86,11 @@ export default function PaymentGatewayPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [activePayment, setActivePayment] = useState<DisplayPayment | null>(null);
   const [filterStatus, setFilterStatus] = useState<"all" | WalkinStatus>("all");
+  const [dynamicQr, setDynamicQr] = useState<string | null>(null);
+  const [qrLoading, setQrLoading] = useState(false);
+  const [qrError, setQrError] = useState<string | null>(null);
+  const [liveStatus, setLiveStatus] = useState<{ paid: boolean; statusRaw: string | null } | null>(null);
+  const [checkingStatus, setCheckingStatus] = useState(false);
 
   const [form, setForm] = useState({
     guest_nama: "",
@@ -143,6 +148,69 @@ export default function PaymentGatewayPage() {
       cancelled = true;
     };
   }, [form.kategori, form.checkin, form.checkout]);
+
+  useEffect(() => {
+    setDynamicQr(null);
+    setQrError(null);
+    setLiveStatus(null);
+    if (!activePayment || activePayment.status !== "pending") return;
+    let cancelled = false;
+    setQrLoading(true);
+    const token = getToken();
+    fetch("/api/payment-gateway/qris", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(token ? { "x-villa-token": token } : {}) },
+      body: JSON.stringify({
+        kind: activePayment.source,
+        refId: activePayment.id,
+        amount: activePayment.jumlah,
+        guestName: activePayment.guest_nama,
+        guestPhone: activePayment.guest_hp,
+        product: activePayment.deskripsi,
+      }),
+    })
+      .then(async (res) => {
+        const body = await res.json().catch(() => null);
+        if (cancelled) return;
+        if (!res.ok) {
+          setQrError((body && body.error) || `HTTP ${res.status}`);
+          return;
+        }
+        setDynamicQr(body?.qrImageDataUrl ?? null);
+      })
+      .catch((e) => {
+        if (!cancelled) setQrError(e instanceof Error ? e.message : "Gagal memuat QRIS dinamis");
+      })
+      .finally(() => {
+        if (!cancelled) setQrLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activePayment?.id, activePayment?.source, activePayment?.status]);
+
+  async function checkLiveStatus() {
+    if (!activePayment) return;
+    setCheckingStatus(true);
+    try {
+      const token = getToken();
+      const res = await fetch("/api/payment-gateway/qris/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { "x-villa-token": token } : {}) },
+        body: JSON.stringify({ kind: activePayment.source, refId: activePayment.id }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast("⚠", "Gagal cek status", (body && body.error) || `HTTP ${res.status}`, "ruby");
+        return;
+      }
+      setLiveStatus({ paid: !!body?.paid, statusRaw: body?.statusRaw ?? null });
+    } catch (e) {
+      toast("⚠", "Gagal cek status", e instanceof Error ? e.message : "Terjadi kesalahan.", "ruby");
+    } finally {
+      setCheckingStatus(false);
+    }
+  }
 
   const filteredRows = useMemo(
     () => (filterStatus === "all" ? rows : rows.filter((r) => r.status === filterStatus)),
@@ -532,6 +600,7 @@ export default function PaymentGatewayPage() {
           activePayment && activePayment.status === "pending" ? (
             <>
               <Btn onClick={() => activePayment && setStatus(activePayment, "batal")}>Batalkan</Btn>
+              <Btn onClick={checkLiveStatus}>{checkingStatus ? "Mengecek…" : "Cek Status"}</Btn>
               <Btn variant="primary" onClick={() => activePayment && setStatus(activePayment, "lunas")}>
                 {activePayment.source === "villa" ? "Tandai Lunas & Check-In" : "Tandai Lunas"}
               </Btn>
@@ -546,12 +615,25 @@ export default function PaymentGatewayPage() {
         {activePayment && (
           <div className="text-center">
             <Badge tone={statusTone[activePayment.status]}>{statusLabel[activePayment.status]}</Badge>
+            {liveStatus && (
+              <div className="mt-2">
+                <Badge tone={liveStatus.paid ? "ok" : "pending"}>
+                  {liveStatus.paid ? "iPaymu: sudah dibayar" : `iPaymu: belum dibayar${liveStatus.statusRaw ? ` (${liveStatus.statusRaw})` : ""}`}
+                </Badge>
+              </div>
+            )}
             <div className="mt-4 mb-2 flex justify-center">
-              {qris ? (
+              {qrLoading ? (
+                <div className="w-56 h-56 rounded-lg border border-dashed border-ink/15 flex items-center justify-center text-[11px] text-ink/30 px-4 text-center">
+                  Membuat QRIS…
+                </div>
+              ) : dynamicQr ? (
+                <img src={dynamicQr} alt="QRIS" className="w-56 h-56 rounded-lg object-contain border border-ink/10 bg-white p-2" />
+              ) : qris ? (
                 <img src={qris} alt="QRIS" className="w-56 h-56 rounded-lg object-contain border border-ink/10 bg-white p-2" />
               ) : (
                 <div className="w-56 h-56 rounded-lg border border-dashed border-ink/15 flex items-center justify-center text-[11px] text-ink/30 px-4 text-center">
-                  QRIS belum diunggah. Buka pengaturan ⚙ QRIS untuk mengunggah gambar QRIS statis villa.
+                  {qrError ? `QRIS dinamis gagal dibuat (${qrError}).` : ""} QRIS belum diunggah. Buka pengaturan ⚙ QRIS untuk mengunggah gambar QRIS statis villa.
                 </div>
               )}
             </div>

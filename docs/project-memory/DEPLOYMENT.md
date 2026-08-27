@@ -62,3 +62,12 @@ The repo is ready to receive it with no further code changes. Steps for whoever 
 4. Redeploy (Vercel redeploys automatically on env var changes for the next deploy, or trigger one manually).
 5. Verify as an admin: open `/admin/cloudbeds`, confirm the green "Terhubung ke Cloudbeds API — N room tersedia" banner replaces the amber "belum tersedia" one, and that "+ Petakan Room" shows a live dropdown instead of manual fields.
 6. `/api/admin/cloudbeds/rooms` requires a valid admin session token (hardened 2026-08-27) — if you get 401 while testing, confirm you're logged in as `admin` role, not just hitting the URL directly.
+
+### ADDING IPAYMU_VA / IPAYMU_API_KEY (prepared 2026-08-27, QRIS for Payment Gateway)
+Unlike the Cloudbeds work, this one has a real unknown to close before trusting it in production: **iPaymu's actual `/payment/direct` response shape was never confirmed** (their docs site was unreachable from the dev environment that built this) — `src/lib/ipaymuApi.ts` parses it defensively but has not been exercised against a live call.
+1. Get `IPAYMU_VA` and `IPAYMU_API_KEY` from the iPaymu dashboard (sandbox account is enough to start — no need to wait for production approval).
+2. Set `IPAYMU_VA`, `IPAYMU_API_KEY` in Vercel env vars, and leave `IPAYMU_ENV` unset or `sandbox` — do NOT set it to `production` yet.
+3. **Test on sandbox first**: as staff, open Payment Gateway, create a cafe/spa/lainnya transaction, and confirm a real scannable QR renders in the modal (not the "QRIS dinamis gagal dibuat" fallback message). If it fails, the response field names in `parsePaymentResponse` (`src/lib/ipaymuApi.ts`) likely need correcting against the real response — the route returns iPaymu's raw response body in its error JSON specifically to make this diagnosable.
+4. Use iPaymu's sandbox payment simulator to complete a test payment, and confirm the transaction in Payment Gateway's history flips to "Lunas" on its own within a few seconds (proves the webhook → `checkTransactionStatus` → DB update path works end to end).
+5. Only after that, switch `IPAYMU_ENV` to `production` and swap in production credentials.
+6. Reminder of the deliberate scope limit: villa bookings paid via QRIS still need a staff click on "Tandai Lunas & Check-In" — only cafe/spa/lainnya auto-flip to Lunas. This is intentional (see INTEGRATIONS.md), not a bug.
