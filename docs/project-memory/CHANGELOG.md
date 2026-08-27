@@ -54,3 +54,7 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 - Upgraded the admin Cloudbeds mapping page (`src/app/admin/cloudbeds/page.tsx`) with a live room picker sourced from that route, falling back to the existing manual Room ID/Name inputs when `CLOUDBEDS_API_KEY` is unset or the call errors.
 - Added `.env.example` documenting all four Cloudbeds/Supabase env vars (no values) — closes a previously documented gap.
 - No database schema change, no change to the external `villa-api` Edge Function, no change to how mappings are stored.
+
+### 2026-08-27 (same session) — traced `villa-api` source directly via Supabase MCP, at owner's prompt to verify before continuing
+- Read the live deployed `villa-api` v18 source (`get_edge_function`) and confirmed several previously "UNKNOWN"/inferred facts: real server-side session auth + role authorization exists in `villa-api` (not just client-side gating); `villa-api` has its own second, currently-unconfigured Cloudbeds webhook (`POST /webhook/cloudbeds`, DB-stored secret, no `integration_settings` row exists for it — dead code path, this repo's own env-var-based webhook is the live one); WhatsApp sending is not "WhaCenter" but a proxy (`sendWa()` → `integration_settings.vercel_bridge`) to the sibling Mkhsistem system's `/api/wa/send` — confirmed `vercel_bridge.base_url = https://mkh.haluoleo.id` by direct query.
+- Updated ARCHITECTURE.md, INTEGRATIONS.md, PROJECT_CONTEXT.md, CURRENT_STATE.md to record these as confirmed, not inferred. No code changes in this step — documentation only.
