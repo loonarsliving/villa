@@ -53,3 +53,12 @@ Reconstructed to match the actual (lightweight, CI-less) workflow evidenced by t
 11. Check Vercel function logs for runtime errors post-deploy (no in-repo logging/monitoring integration was found beyond default Vercel logs).
 
 This checklist is a best-effort reconstruction given the absence of any documented deployment process in the repository — treat items 3–6 and 9–11 as recommended manual discipline rather than an enforced pipeline.
+
+### ADDING CLOUDBEDS_API_KEY (prepared 2026-08-27, for when the owner gets the key)
+The repo is ready to receive it with no further code changes. Steps for whoever adds it:
+1. In Cloudbeds: Account → Apps & Marketplace → API Credentials → Create. **Select only the scopes actually needed (read rooms)** — do not grant reservation-write/booking-creation scopes to a key only meant to power the room picker. Copy the key immediately; Cloudbeds will not show it again.
+2. In Vercel: this project's Settings → Environment Variables → add `CLOUDBEDS_API_KEY` (Production, and Preview if you want to test on a preview deploy first). Only set `CLOUDBEDS_PROPERTY_ID` too if the key is scoped to a multi-property/group account — leave blank for a single property.
+3. Never paste the key into a commit, a `docs/project-memory/*.md` file, a PR description, or any client-side code — server-side Vercel env var only (see `src/lib/cloudbedsApi.ts`, which is never imported from a `"use client"` file).
+4. Redeploy (Vercel redeploys automatically on env var changes for the next deploy, or trigger one manually).
+5. Verify as an admin: open `/admin/cloudbeds`, confirm the green "Terhubung ke Cloudbeds API — N room tersedia" banner replaces the amber "belum tersedia" one, and that "+ Petakan Room" shows a live dropdown instead of manual fields.
+6. `/api/admin/cloudbeds/rooms` requires a valid admin session token (hardened 2026-08-27) — if you get 401 while testing, confirm you're logged in as `admin` role, not just hitting the URL directly.
