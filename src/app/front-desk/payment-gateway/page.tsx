@@ -93,7 +93,22 @@ export default function PaymentGatewayPage() {
   const [liveStatus, setLiveStatus] = useState<{ paid: boolean; statusRaw: string | null } | null>(null);
   const [checkingStatus, setCheckingStatus] = useState(false);
   const [checkinCardOpen, setCheckinCardOpen] = useState(false);
+  // "new": KTP+TTD captured BEFORE the booking exists yet -- confirming
+  // creates the booking, then shows QRIS. "existing": fallback for when a
+  // pending villa booking is marked lunas but the captured KTP+TTD data
+  // was lost (e.g. page refresh) -- re-prompts and checks in directly.
+  const [checkinCardMode, setCheckinCardMode] = useState<"new" | "existing" | null>(null);
+  const [pendingVillaForm, setPendingVillaForm] = useState<{
+    unit: Unit;
+    guest_nama: string;
+    guest_hp: string;
+    tipe: Booking["tipe"];
+    checkin: string;
+    checkout: string;
+    tarif: number;
+  } | null>(null);
   const [pendingCheckin, setPendingCheckin] = useState<DisplayPayment | null>(null);
+  const [capturedKtpSig, setCapturedKtpSig] = useState<{ ktpPhotoPath: string; signatureDataUrl: string } | null>(null);
 
   const [form, setForm] = useState({
     guest_nama: "",
@@ -311,7 +326,11 @@ export default function PaymentGatewayPage() {
     }
   }
 
-  async function createVillaBooking() {
+  // Villa walk-in: KTP photo + digital signature must be captured BEFORE
+  // payment, per owner instruction -- so this only validates the form and
+  // opens the Check-In Card. The booking itself (and the QRIS that follows)
+  // is only created once that capture is confirmed, in handleCheckinCardConfirm.
+  function startVillaCheckin() {
     const unit = units.find((u) => u.id === form.unit_id);
     if (!form.guest_nama.trim() || !unit) {
       toast("⚠", "Lengkapi form", "Isi nama tamu dan pilih unit.", "ruby");
@@ -326,30 +345,21 @@ export default function PaymentGatewayPage() {
       toast("⚠", "Tarif Belum Diatur", `Unit ${unit.nomor} belum punya tarif ${form.tipe} yang dikonfigurasi. Hubungi admin.`, "ruby");
       return;
     }
-    const tarif = villaTarif;
-    try {
-      const booking = await api.post<Booking>("/bookings", {
-        unit_id: unit.id,
-        unit_nomor: unit.nomor,
-        guest_nama: form.guest_nama.trim(),
-        tipe: form.tipe,
-        sumber: "walk-in",
-        tgl_checkin: form.checkin,
-        tgl_checkout: form.checkout,
-        tarif,
-        total_bayar: tarif,
-        guest_hp: form.guest_hp.trim() || undefined,
-      });
-      setVillaBookings((prev) => [booking, ...prev]);
-      setActivePayment(bookingToDisplay(booking));
-      resetForm("villa");
-    } catch (e) {
-      toast("⚠", "Gagal", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby");
-    }
+    setPendingVillaForm({
+      unit,
+      guest_nama: form.guest_nama.trim(),
+      guest_hp: form.guest_hp.trim(),
+      tipe: form.tipe,
+      checkin: form.checkin,
+      checkout: form.checkout,
+      tarif: villaTarif,
+    });
+    setCheckinCardMode("new");
+    setCheckinCardOpen(true);
   }
 
   async function createPayment() {
-    if (form.kategori === "villa") return createVillaBooking();
+    if (form.kategori === "villa") return startVillaCheckin();
     return createWalkinPayment();
   }
 
@@ -361,43 +371,98 @@ export default function PaymentGatewayPage() {
         setActivePayment(toDisplay(updated));
         if (status === "lunas") toast("✓", "Pembayaran lunas", "Transaksi walk-in berhasil dicatat sebagai lunas.", "sage");
       } else if (status === "lunas") {
-        // Show the check-in card (KTP photo + digital signature) before
-        // actually committing check-in -- see finalizeVillaCheckin.
-        setPendingCheckin(payment);
-        setActivePayment(null);
-        setCheckinCardOpen(true);
+        if (capturedKtpSig) {
+          // Happy path: KTP+TTD were already captured before this booking
+          // was created (startVillaCheckin -> handleCheckinCardConfirm), so
+          // check-in can commit immediately without asking again.
+          try {
+            await api.post("/checkin", {
+              booking_id: payment.id,
+              unit_id: payment.unit_id,
+              unit_nomor: payment.unit_nomor,
+              guest_nama: payment.guest_nama,
+              guest_hp: payment.guest_hp,
+              tipe: payment.tipe,
+              total_bayar: payment.jumlah,
+              checkin_by: user?.nama || "Admin",
+              ktp_photo_path: capturedKtpSig.ktpPhotoPath,
+              signature_data_url: capturedKtpSig.signatureDataUrl,
+            });
+            setVillaBookings((prev) => prev.map((b) => (b.id === payment.id ? { ...b, status: "checkin" } : b)));
+            toast("🛎️", "Check-In Berhasil", `${payment.guest_nama} — Unit ${payment.unit_nomor} sudah check-in. PIN pintu terkirim via WA.`, "sage");
+            setActivePayment(null);
+            setCapturedKtpSig(null);
+          } catch (e) {
+            toast("⚠", "Gagal", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby");
+          }
+        } else {
+          // Fallback: captured data isn't in memory anymore (e.g. page was
+          // refreshed between capture and payment) -- prompt again instead
+          // of silently checking in without KTP/signature on file.
+          setPendingCheckin(payment);
+          setCheckinCardMode("existing");
+          setActivePayment(null);
+          setCheckinCardOpen(true);
+        }
       } else {
         await api.patch("/bookings", { id: payment.id, status: "batal" });
         setVillaBookings((prev) => prev.map((b) => (b.id === payment.id ? { ...b, status: "batal" } : b)));
         setActivePayment({ ...payment, status: "batal" });
+        setCapturedKtpSig(null);
       }
     } catch (e) {
       toast("⚠", "Gagal", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby");
     }
   }
 
-  async function finalizeVillaCheckin(data: { ktpPhotoPath: string; signatureDataUrl: string }) {
-    if (!pendingCheckin) return;
-    try {
-      await api.post("/checkin", {
-        booking_id: pendingCheckin.id,
-        unit_id: pendingCheckin.unit_id,
-        unit_nomor: pendingCheckin.unit_nomor,
-        guest_nama: pendingCheckin.guest_nama,
-        guest_hp: pendingCheckin.guest_hp,
-        tipe: pendingCheckin.tipe,
-        total_bayar: pendingCheckin.jumlah,
-        checkin_by: user?.nama || "Admin",
-        ktp_photo_path: data.ktpPhotoPath,
-        signature_data_url: data.signatureDataUrl,
-      });
-      setVillaBookings((prev) => prev.map((b) => (b.id === pendingCheckin.id ? { ...b, status: "checkin" } : b)));
-      toast("🛎️", "Check-In Berhasil", `${pendingCheckin.guest_nama} — Unit ${pendingCheckin.unit_nomor} sudah check-in. PIN pintu terkirim via WA.`, "sage");
-      setCheckinCardOpen(false);
-      setPendingCheckin(null);
-    } catch (e) {
-      toast("⚠", "Gagal", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby");
+  async function handleCheckinCardConfirm(data: { ktpPhotoPath: string; signatureDataUrl: string }) {
+    if (checkinCardMode === "new" && pendingVillaForm) {
+      try {
+        const booking = await api.post<Booking>("/bookings", {
+          unit_id: pendingVillaForm.unit.id,
+          unit_nomor: pendingVillaForm.unit.nomor,
+          guest_nama: pendingVillaForm.guest_nama,
+          tipe: pendingVillaForm.tipe,
+          sumber: "walk-in",
+          tgl_checkin: pendingVillaForm.checkin,
+          tgl_checkout: pendingVillaForm.checkout,
+          tarif: pendingVillaForm.tarif,
+          total_bayar: pendingVillaForm.tarif,
+          guest_hp: pendingVillaForm.guest_hp || undefined,
+        });
+        setVillaBookings((prev) => [booking, ...prev]);
+        setCapturedKtpSig(data);
+        setActivePayment(bookingToDisplay(booking));
+        resetForm("villa");
+      } catch (e) {
+        toast("⚠", "Gagal Membuat Booking", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby");
+        return;
+      }
+    } else if (checkinCardMode === "existing" && pendingCheckin) {
+      try {
+        await api.post("/checkin", {
+          booking_id: pendingCheckin.id,
+          unit_id: pendingCheckin.unit_id,
+          unit_nomor: pendingCheckin.unit_nomor,
+          guest_nama: pendingCheckin.guest_nama,
+          guest_hp: pendingCheckin.guest_hp,
+          tipe: pendingCheckin.tipe,
+          total_bayar: pendingCheckin.jumlah,
+          checkin_by: user?.nama || "Admin",
+          ktp_photo_path: data.ktpPhotoPath,
+          signature_data_url: data.signatureDataUrl,
+        });
+        setVillaBookings((prev) => prev.map((b) => (b.id === pendingCheckin.id ? { ...b, status: "checkin" } : b)));
+        toast("🛎️", "Check-In Berhasil", `${pendingCheckin.guest_nama} — Unit ${pendingCheckin.unit_nomor} sudah check-in. PIN pintu terkirim via WA.`, "sage");
+      } catch (e) {
+        toast("⚠", "Gagal", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby");
+        return;
+      }
     }
+    setCheckinCardOpen(false);
+    setCheckinCardMode(null);
+    setPendingVillaForm(null);
+    setPendingCheckin(null);
   }
 
   const Shell = user?.role === "admin" ? AdminShell : FrontDeskShell;
@@ -479,7 +544,9 @@ export default function PaymentGatewayPage() {
               {form.kategori === "villa" ? (
                 <>
                   <div className="text-[10px] text-ink/40 -mt-1 mb-4 leading-relaxed">
-                    Untuk tamu yang datang langsung (bukan lewat OTA/Cloudbeds). Setelah lunas, otomatis jadi booking + check-in dan tercatat sebagai pendapatan sewa (masuk bagi hasil 70/30 investor) — beda dari cafe/spa.
+                    Untuk tamu yang datang langsung (bukan lewat OTA/Cloudbeds). Alurnya: isi data di bawah → foto KTP &amp; tanda tangan digital → baru
+                    lanjut bayar via QRIS. Booking + check-in baru tercatat sebagai pendapatan sewa (masuk bagi hasil 70/30 investor) setelah lunas — beda
+                    dari cafe/spa.
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <Field label={`Unit${availLoading ? " — mengecek…" : ""}`}>
@@ -543,7 +610,7 @@ export default function PaymentGatewayPage() {
               )}
 
               <button onClick={createPayment} className="w-full mt-1 bg-gold-500 text-base-950 rounded-lg py-3 text-[12.5px] font-semibold tracking-wide hover:opacity-90 active:scale-[0.99] transition">
-                {form.kategori === "villa" ? "Buat Booking & QRIS Pembayaran" : "Buat QRIS Pembayaran"}
+                {form.kategori === "villa" ? "Lanjut: Foto KTP & Tanda Tangan →" : "Buat QRIS Pembayaran"}
               </button>
             </CardBody>
           </Card>
@@ -683,21 +750,31 @@ export default function PaymentGatewayPage() {
       <CheckinCard
         open={checkinCardOpen}
         guest={
-          pendingCheckin
+          checkinCardMode === "new" && pendingVillaForm
             ? {
-                guestName: pendingCheckin.guest_nama,
-                unitNomor: pendingCheckin.unit_nomor ?? "",
-                tipe: pendingCheckin.tipe ?? "harian",
-                checkinDate: todayISO(),
-                checkoutDate: null,
+                guestName: pendingVillaForm.guest_nama,
+                unitNomor: pendingVillaForm.unit.nomor,
+                tipe: pendingVillaForm.tipe,
+                checkinDate: pendingVillaForm.checkin,
+                checkoutDate: pendingVillaForm.checkout || null,
               }
-            : null
+            : pendingCheckin
+              ? {
+                  guestName: pendingCheckin.guest_nama,
+                  unitNomor: pendingCheckin.unit_nomor ?? "",
+                  tipe: pendingCheckin.tipe ?? "harian",
+                  checkinDate: todayISO(),
+                  checkoutDate: null,
+                }
+              : null
         }
         onClose={() => {
           setCheckinCardOpen(false);
+          setCheckinCardMode(null);
+          setPendingVillaForm(null);
           setPendingCheckin(null);
         }}
-        onConfirm={finalizeVillaCheckin}
+        onConfirm={handleCheckinCardConfirm}
       />
     </Shell>
   );

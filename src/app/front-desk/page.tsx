@@ -11,7 +11,7 @@ import { Card, CardHeader, Loading } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
 import { CheckinCard, type CheckinCardGuest } from "@/components/CheckinCard";
-import type { Booking, Summary, Unit, UnitAvailability, Notification } from "@/lib/types";
+import type { Booking, Summary, Unit, Notification } from "@/lib/types";
 
 const statusColor: Record<string, string> = {
   available: "border-sage-500/30",
@@ -39,9 +39,6 @@ export default function FrontDeskPage() {
   const [ciOpen, setCiOpen] = useState(false);
   const [coOpen, setCoOpen] = useState(false);
 
-  const [ci, setCi] = useState({ nama: "", ktp: "", unit_id: "", tipe: "harian", checkin: todayISO(), checkout: todayISO(), src: "walk-in", hp: "", tarif: "" });
-  const [availUnits, setAvailUnits] = useState<UnitAvailability[] | null>(null);
-  const [availLoading, setAvailLoading] = useState(false);
   const [ciTab, setCiTab] = useState<"existing" | "new">("existing");
   const [scheduledBookings, setScheduledBookings] = useState<Booking[]>([]);
   const [selectedBookingId, setSelectedBookingId] = useState("");
@@ -78,30 +75,7 @@ export default function FrontDeskPage() {
     load();
   }, []);
 
-  useEffect(() => {
-    if (!ciOpen || !ci.checkin) return;
-    let cancelled = false;
-    setAvailLoading(true);
-    const params = new URLSearchParams({ checkin: ci.checkin });
-    if (ci.checkout) params.set("checkout", ci.checkout);
-    api
-      .get<UnitAvailability[]>(`/availability?${params.toString()}`)
-      .then((res) => {
-        if (cancelled) return;
-        setAvailUnits(res || []);
-        setCi((prev) => (prev.unit_id && !res?.find((u) => u.id === prev.unit_id)?.tersedia_untuk_tanggal ? { ...prev, unit_id: "" } : prev));
-      })
-      .finally(() => {
-        if (!cancelled) setAvailLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [ciOpen, ci.checkin, ci.checkout]);
-
   function openCheckin() {
-    setCi({ nama: "", ktp: "", unit_id: "", tipe: "harian", checkin: todayISO(), checkout: todayISO(), src: "walk-in", hp: "", tarif: "" });
-    setAvailUnits(null);
     setSelectedBookingId("");
     setCiTab("existing");
     setCiOpen(true);
@@ -166,64 +140,15 @@ export default function FrontDeskPage() {
     }
   }
 
-  // A guest with no booking in the system yet. Walk-in (villa's own direct
-  // sale) must be paid via QRIS first -- handled entirely by Payment
-  // Gateway, so we just hand off there instead of duplicating that flow.
-  // Any other source here means staff is manually logging a booking made
-  // through that channel (already paid there) -- same immediate
-  // create+checkin as before, tarif entered manually since that's the
-  // external channel's own price, not villa's base rate.
-  async function doCheckinNew() {
-    if (ci.src === "walk-in") {
-      setCiOpen(false);
-      router.push("/front-desk/payment-gateway?kategori=villa");
-      return;
-    }
-    const unit = units.find((u) => u.id === ci.unit_id);
-    if (!ci.unit_id || !ci.nama.trim() || !unit) {
-      toast("⚠", "Lengkapi form", "Isi nama tamu dan pilih unit.", "ruby");
-      return;
-    }
-    const avail = availUnits?.find((u) => u.id === ci.unit_id);
-    if (avail && !avail.tersedia_untuk_tanggal) {
-      toast("⚠", "Unit Tidak Tersedia", `Unit ${unit.nomor} sudah dibooking ${avail.dibooking_oleh} untuk tanggal ini.`, "ruby");
-      return;
-    }
-    const tarif = Number(ci.tarif);
-    if (!tarif || tarif <= 0) {
-      toast("⚠", "Lengkapi form", "Isi tarif sesuai harga dari sumber booking.", "ruby");
-      return;
-    }
-    try {
-      const bk = await api.post<{ id: string }>("/bookings", {
-        unit_id: unit.id,
-        unit_nomor: unit.nomor,
-        guest_nama: ci.nama,
-        tipe: ci.tipe,
-        sumber: ci.src,
-        tgl_checkin: ci.checkin,
-        tgl_checkout: ci.checkout,
-        tarif,
-        total_bayar: tarif,
-        guest_hp: ci.hp,
-        guest_ktp: ci.ktp,
-      });
-      setPendingCheckin({
-        booking_id: bk.id,
-        unit_id: unit.id,
-        unit_nomor: unit.nomor,
-        guest_nama: ci.nama,
-        guest_hp: ci.hp || null,
-        tipe: ci.tipe,
-        total_bayar: tarif,
-        checkinDate: ci.checkin,
-        checkoutDate: ci.checkout || null,
-      });
-      setCiOpen(false);
-      setCheckinCardOpen(true);
-    } catch (e) {
-      toast("⚠", "Gagal Membuat Booking", e instanceof Error ? e.message : "Terjadi kesalahan.", "ruby");
-    }
+  // A guest with no booking in the system yet is always walk-in -- no
+  // source picker anymore, per owner instruction (removed the manual
+  // log-a-booking-from-another-channel path entirely). Walk-in must be
+  // paid via QRIS, and KTP photo + digital signature must be captured
+  // before payment -- both handled entirely by Payment Gateway, so we
+  // just hand off there instead of duplicating that flow here.
+  function doCheckinNew() {
+    setCiOpen(false);
+    router.push("/front-desk/payment-gateway?kategori=villa");
   }
 
   async function doCheckout() {
@@ -367,7 +292,7 @@ export default function FrontDeskPage() {
           <>
             <Btn onClick={() => setCiOpen(false)}>Batal</Btn>
             <Btn variant="primary" onClick={ciTab === "existing" ? doCheckinExisting : doCheckinNew}>
-              {ciTab === "new" && ci.src === "walk-in" ? "Lanjut ke Payment Gateway →" : "Proses Check-In"}
+              {ciTab === "new" ? "Lanjut ke Payment Gateway →" : "Proses Check-In"}
             </Btn>
           </>
         }
@@ -421,54 +346,14 @@ export default function FrontDeskPage() {
             )}
           </div>
         ) : (
-          <>
-            <Field label="Sumber Booking">
-              <select className={inputCls} value={ci.src} onChange={(e) => setCi({ ...ci, src: e.target.value })}>
-                <option value="walk-in">Walk-in (bayar sekarang via QRIS)</option>
-                <option value="airbnb">Airbnb</option>
-                <option value="tiket">Tiket.com</option>
-                <option value="agoda">Agoda</option>
-                <option value="website">Website Loonars</option>
-                <option value="whatsapp">WhatsApp</option>
-              </select>
-            </Field>
-            {ci.src === "walk-in" ? (
-              <div className="text-[10px] text-ink/40 mb-1 leading-relaxed">
-                Tamu walk-in dibuatkan bookingnya dan ditagih via QRIS dulu di Payment Gateway — data check-in baru masuk setelah pembayaran dikonfirmasi lunas.
-              </div>
-            ) : (
-              <>
-                <Field label="Nama Tamu"><input className={inputCls} value={ci.nama} onChange={(e) => setCi({ ...ci, nama: e.target.value })} placeholder="Nama lengkap" /></Field>
-                <Field label="No. KTP / Paspor"><input className={inputCls} value={ci.ktp} onChange={(e) => setCi({ ...ci, ktp: e.target.value })} placeholder="Nomor identitas" /></Field>
-                <div className="grid grid-cols-2 gap-4">
-                  <Field label={`Unit${availLoading ? " — mengecek ketersediaan…" : ""}`}>
-                    <select className={inputCls} value={ci.unit_id} onChange={(e) => setCi({ ...ci, unit_id: e.target.value })}>
-                      <option value="">Pilih unit</option>
-                      {(availUnits ?? units.map((u) => ({ ...u, tersedia_untuk_tanggal: u.status === "available", dibooking_oleh: null }))).map((u) => (
-                        <option key={u.id} value={u.id} disabled={!u.tersedia_untuk_tanggal}>
-                          Unit {u.nomor}{!u.tersedia_untuk_tanggal ? ` — dibooking (${u.dibooking_oleh ?? u.status})` : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="Tipe">
-                    <select className={inputCls} value={ci.tipe} onChange={(e) => setCi({ ...ci, tipe: e.target.value })}>
-                      <option value="harian">Harian</option>
-                      <option value="bulanan">Bulanan</option>
-                    </select>
-                  </Field>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <Field label="Check-in"><input type="date" className={inputCls} value={ci.checkin} onChange={(e) => setCi({ ...ci, checkin: e.target.value })} /></Field>
-                  <Field label="Check-out"><input type="date" className={inputCls} value={ci.checkout} onChange={(e) => setCi({ ...ci, checkout: e.target.value })} /></Field>
-                </div>
-                <Field label="No. HP Tamu"><input className={inputCls} value={ci.hp} onChange={(e) => setCi({ ...ci, hp: e.target.value })} placeholder="+62 8xx-xxxx-xxxx" /></Field>
-                <Field label="Tarif (Rp) — sesuai harga dari channel ini">
-                  <input type="number" className={inputCls} value={ci.tarif} onChange={(e) => setCi({ ...ci, tarif: e.target.value })} placeholder="0" />
-                </Field>
-              </>
-            )}
-          </>
+          <div className="text-center py-8">
+            <div className="text-2xl mb-2">🏡</div>
+            <div className="text-[12px] text-ink/70 font-medium mb-1.5">Tamu Baru = Walk-in</div>
+            <div className="text-[10.5px] text-ink/40 leading-relaxed max-w-[280px] mx-auto">
+              Lanjut ke Payment Gateway untuk isi data tamu &amp; pilih unit. Di sana tamu foto KTP dan tanda tangan digital dulu, baru lanjut bayar via
+              QRIS — data check-in baru masuk setelah pembayaran dikonfirmasi lunas.
+            </div>
+          </div>
         )}
       </Modal>
 
