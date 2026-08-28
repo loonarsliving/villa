@@ -23,6 +23,9 @@ UNKNOWN — NEEDS CONFIRMATION. No prioritized "next up" list exists in the repo
 ## PLANNED
 UNKNOWN — NEEDS CONFIRMATION. A handful of other `claude/*` branches exist (`file-hub-repo-integration`, `repo-overview`, `security-audit-repos`, `tampilan-design-request`, `villa-system-no-receptionist`) whose branch names suggest topics (file hub, another repo-overview/audit, additional security review, a design request, and a "no receptionist" system variant) but whose content was outside this audit's deep-dive scope. Their existence is evidence of exploratory/candidate work, not a confirmed plan.
 
+## PLANNED (explicit, from owner, 2026-08-27)
+- **KTP OCR + Filemanager (Ultron) integration** — Tahap 2/3 of the Check-In Card work. Tahap 1 (photo capture + digital signature, stored in villa's own private `guest-documents` Supabase bucket) is DONE. Not yet built: (a) an AI OCR endpoint on Mkhsistem (their existing Gemini client, no such endpoint exists there yet — confirmed by reading Mkhsistem's `app/api` tree 2026-08-27) that reads a KTP photo and returns structured guest data; (b) routing the KTP photo into the separate "Filemanager"/"Ultron" app (`filemanager.haluoleo.id`, repo `loonarsliving/Filemanager`, not in villa's or this audit's repo access) for permanent storage instead of villa's own bucket. Owner's framing: "sebenarnya semua fitur itu sudah ada, nanti kita benahi" (these capabilities basically already exist elsewhere, we'll wire them up later) — but as of 2026-08-27 no such KTP-OCR or villa-facing Filemanager bridge endpoint was found to exist yet on Mkhsistem's side; this needs re-confirming directly with the owner or by reading the Filemanager repo before building, not assumed.
+
 ## UNKNOWN
 - Whether the `villa-api` Supabase Edge Function (unaudited, not in this repo) has its own separate roadmap/backlog.
 - Whether "Mkhsistem" is an actively developed sibling system with its own roadmap that this app's AI/WhatsApp features depend on.

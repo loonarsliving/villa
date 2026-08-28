@@ -10,6 +10,7 @@ import { fmtCurrencyFull, fmtDate, todayISO } from "@/lib/format";
 import { Card, CardHeader, CardBody, Loading, Badge } from "@/components/Card";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
 import { StatCard } from "@/components/StatCard";
+import { CheckinCard } from "@/components/CheckinCard";
 import type { Booking, Unit, UnitAvailability, WalkinKategori, WalkinPayment, WalkinStatus } from "@/lib/types";
 import { loadQrisImage, saveQrisImage, clearQrisImage } from "@/lib/walkin";
 
@@ -91,6 +92,8 @@ export default function PaymentGatewayPage() {
   const [qrError, setQrError] = useState<string | null>(null);
   const [liveStatus, setLiveStatus] = useState<{ paid: boolean; statusRaw: string | null } | null>(null);
   const [checkingStatus, setCheckingStatus] = useState(false);
+  const [checkinCardOpen, setCheckinCardOpen] = useState(false);
+  const [pendingCheckin, setPendingCheckin] = useState<DisplayPayment | null>(null);
 
   const [form, setForm] = useState({
     guest_nama: "",
@@ -358,24 +361,40 @@ export default function PaymentGatewayPage() {
         setActivePayment(toDisplay(updated));
         if (status === "lunas") toast("✓", "Pembayaran lunas", "Transaksi walk-in berhasil dicatat sebagai lunas.", "sage");
       } else if (status === "lunas") {
-        await api.post("/checkin", {
-          booking_id: payment.id,
-          unit_id: payment.unit_id,
-          unit_nomor: payment.unit_nomor,
-          guest_nama: payment.guest_nama,
-          guest_hp: payment.guest_hp,
-          tipe: payment.tipe,
-          total_bayar: payment.jumlah,
-          checkin_by: user?.nama || "Admin",
-        });
-        setVillaBookings((prev) => prev.map((b) => (b.id === payment.id ? { ...b, status: "checkin" } : b)));
-        setActivePayment({ ...payment, status: "lunas" });
-        toast("🛎️", "Check-In Berhasil", `${payment.guest_nama} — Unit ${payment.unit_nomor} sudah check-in. PIN pintu terkirim via WA.`, "sage");
+        // Show the check-in card (KTP photo + digital signature) before
+        // actually committing check-in -- see finalizeVillaCheckin.
+        setPendingCheckin(payment);
+        setActivePayment(null);
+        setCheckinCardOpen(true);
       } else {
         await api.patch("/bookings", { id: payment.id, status: "batal" });
         setVillaBookings((prev) => prev.map((b) => (b.id === payment.id ? { ...b, status: "batal" } : b)));
         setActivePayment({ ...payment, status: "batal" });
       }
+    } catch (e) {
+      toast("⚠", "Gagal", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby");
+    }
+  }
+
+  async function finalizeVillaCheckin(data: { ktpPhotoPath: string; signatureDataUrl: string }) {
+    if (!pendingCheckin) return;
+    try {
+      await api.post("/checkin", {
+        booking_id: pendingCheckin.id,
+        unit_id: pendingCheckin.unit_id,
+        unit_nomor: pendingCheckin.unit_nomor,
+        guest_nama: pendingCheckin.guest_nama,
+        guest_hp: pendingCheckin.guest_hp,
+        tipe: pendingCheckin.tipe,
+        total_bayar: pendingCheckin.jumlah,
+        checkin_by: user?.nama || "Admin",
+        ktp_photo_path: data.ktpPhotoPath,
+        signature_data_url: data.signatureDataUrl,
+      });
+      setVillaBookings((prev) => prev.map((b) => (b.id === pendingCheckin.id ? { ...b, status: "checkin" } : b)));
+      toast("🛎️", "Check-In Berhasil", `${pendingCheckin.guest_nama} — Unit ${pendingCheckin.unit_nomor} sudah check-in. PIN pintu terkirim via WA.`, "sage");
+      setCheckinCardOpen(false);
+      setPendingCheckin(null);
     } catch (e) {
       toast("⚠", "Gagal", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby");
     }
@@ -660,6 +679,26 @@ export default function PaymentGatewayPage() {
           </div>
         )}
       </Modal>
+
+      <CheckinCard
+        open={checkinCardOpen}
+        guest={
+          pendingCheckin
+            ? {
+                guestName: pendingCheckin.guest_nama,
+                unitNomor: pendingCheckin.unit_nomor ?? "",
+                tipe: pendingCheckin.tipe ?? "harian",
+                checkinDate: todayISO(),
+                checkoutDate: null,
+              }
+            : null
+        }
+        onClose={() => {
+          setCheckinCardOpen(false);
+          setPendingCheckin(null);
+        }}
+        onConfirm={finalizeVillaCheckin}
+      />
     </Shell>
   );
 }

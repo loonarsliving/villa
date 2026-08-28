@@ -10,6 +10,7 @@ import { fmtCurrencyFull, fmtDate, todayISO } from "@/lib/format";
 import { Card, CardHeader, Loading } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
+import { CheckinCard, type CheckinCardGuest } from "@/components/CheckinCard";
 import type { Booking, Summary, Unit, UnitAvailability, Notification } from "@/lib/types";
 
 const statusColor: Record<string, string> = {
@@ -47,6 +48,18 @@ export default function FrontDeskPage() {
   const [coUnitId, setCoUnitId] = useState("");
   const [coCond, setCoCond] = useState("Baik — tidak ada kerusakan");
   const [coNote, setCoNote] = useState("");
+  const [checkinCardOpen, setCheckinCardOpen] = useState(false);
+  const [pendingCheckin, setPendingCheckin] = useState<{
+    booking_id: string;
+    unit_id: string;
+    unit_nomor: string;
+    guest_nama: string;
+    guest_hp?: string | null;
+    tipe: string;
+    total_bayar: number;
+    checkinDate: string;
+    checkoutDate: string | null;
+  } | null>(null);
 
   async function load() {
     setLoading(true);
@@ -113,20 +126,40 @@ export default function FrontDeskPage() {
       toast("⚠", "Pilih booking", "Pilih salah satu booking terjadwal untuk di-check-in.", "ruby");
       return;
     }
+    setPendingCheckin({
+      booking_id: bk.id,
+      unit_id: bk.unit_id,
+      unit_nomor: bk.unit_nomor,
+      guest_nama: bk.guest_nama,
+      guest_hp: bk.guest_hp,
+      tipe: bk.tipe,
+      total_bayar: bk.total_bayar ?? bk.tarif,
+      checkinDate: bk.tgl_checkin,
+      checkoutDate: bk.tgl_checkout,
+    });
+    setCiOpen(false);
+    setCheckinCardOpen(true);
+  }
+
+  async function finalizeCheckin(data: { ktpPhotoPath: string; signatureDataUrl: string }) {
+    if (!pendingCheckin) return;
     try {
       await api.post("/checkin", {
-        booking_id: bk.id,
-        unit_id: bk.unit_id,
-        unit_nomor: bk.unit_nomor,
-        guest_nama: bk.guest_nama,
-        guest_hp: bk.guest_hp,
-        tipe: bk.tipe,
-        total_bayar: bk.total_bayar ?? bk.tarif,
+        booking_id: pendingCheckin.booking_id,
+        unit_id: pendingCheckin.unit_id,
+        unit_nomor: pendingCheckin.unit_nomor,
+        guest_nama: pendingCheckin.guest_nama,
+        guest_hp: pendingCheckin.guest_hp,
+        tipe: pendingCheckin.tipe,
+        total_bayar: pendingCheckin.total_bayar,
         checkin_by: user?.nama || "Staff",
+        ktp_photo_path: data.ktpPhotoPath,
+        signature_data_url: data.signatureDataUrl,
       });
-      setCiOpen(false);
-      toast("🛎️", "Check-In Berhasil", `${bk.guest_nama} — Unit ${bk.unit_nomor} sudah check-in.`, "sage");
-      setTimeout(() => toast("📱", "Investor Unit Diberitahu", `Notifikasi terkirim ke dashboard investor Unit ${bk.unit_nomor}.`, "gold"), 1000);
+      toast("🛎️", "Check-In Berhasil", `${pendingCheckin.guest_nama} — Unit ${pendingCheckin.unit_nomor} sudah check-in.`, "sage");
+      setTimeout(() => toast("📱", "Investor Unit Diberitahu", `Notifikasi terkirim ke dashboard investor Unit ${pendingCheckin.unit_nomor}.`, "gold"), 1000);
+      setCheckinCardOpen(false);
+      setPendingCheckin(null);
       load();
     } catch (e) {
       toast("⚠", "Check-In Gagal", e instanceof Error ? e.message : "Terjadi kesalahan.", "ruby");
@@ -175,21 +208,21 @@ export default function FrontDeskPage() {
         guest_hp: ci.hp,
         guest_ktp: ci.ktp,
       });
-      await api.post("/checkin", {
+      setPendingCheckin({
         booking_id: bk.id,
         unit_id: unit.id,
         unit_nomor: unit.nomor,
         guest_nama: ci.nama,
+        guest_hp: ci.hp || null,
         tipe: ci.tipe,
         total_bayar: tarif,
-        checkin_by: user?.nama || "Staff",
+        checkinDate: ci.checkin,
+        checkoutDate: ci.checkout || null,
       });
       setCiOpen(false);
-      toast("🛎️", "Check-In Berhasil", `${ci.nama} — Unit ${unit.nomor} sudah check-in.`, "sage");
-      setTimeout(() => toast("📱", "Investor Unit Diberitahu", `Notifikasi terkirim ke dashboard investor Unit ${unit.nomor}.`, "gold"), 1000);
-      load();
+      setCheckinCardOpen(true);
     } catch (e) {
-      toast("⚠", "Check-In Gagal", e instanceof Error ? e.message : "Terjadi kesalahan.", "ruby");
+      toast("⚠", "Gagal Membuat Booking", e instanceof Error ? e.message : "Terjadi kesalahan.", "ruby");
     }
   }
 
@@ -457,6 +490,26 @@ export default function FrontDeskPage() {
         </Field>
         <Field label="Catatan"><input className={inputCls} value={coNote} onChange={(e) => setCoNote(e.target.value)} placeholder="Opsional..." /></Field>
       </Modal>
+
+      <CheckinCard
+        open={checkinCardOpen}
+        guest={
+          pendingCheckin
+            ? ({
+                guestName: pendingCheckin.guest_nama,
+                unitNomor: pendingCheckin.unit_nomor,
+                tipe: pendingCheckin.tipe,
+                checkinDate: pendingCheckin.checkinDate,
+                checkoutDate: pendingCheckin.checkoutDate,
+              } satisfies CheckinCardGuest)
+            : null
+        }
+        onClose={() => {
+          setCheckinCardOpen(false);
+          setPendingCheckin(null);
+        }}
+        onConfirm={finalizeCheckin}
+      />
     </FrontDeskShell>
   );
 }

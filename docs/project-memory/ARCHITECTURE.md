@@ -38,6 +38,8 @@ Cloudbeds (external SaaS) --webhook--> /api/webhooks/cloudbeds (Next.js Route Ha
 - No AI/Gemini call exists anywhere in the currently deployed `villa-api` v18 — consistent with AI_AND_AGENTS.md's existing note that AI (also routed through Mkhsistem, per the unmerged CCTV branch) is not live on `main`.
 - There IS a cron endpoint: `POST /cron/cleaning-calls` (secret via `integration_settings.cron.secret`, header `x-cron-secret`) — dispatches a WA message (via the Mkhsistem bridge above) to active cleaning-service staff ~3h before a scheduled check-in. Not previously documented in this file.
 
+### `villa-api` v21 (2026-08-27, owner-approved): `POST /checkin` now accepts and persists `ktp_photo_path`/`signature_data_url` onto the `bookings` row (see DATABASE.md's Check-In Card entry). Purely additive — omitting both fields behaves exactly as before.
+
 ### `villa-api` v20 (2026-08-27, owner-approved): `GET /bookings` gained optional `date_from`/`date_to` params for the new booking calendar (see FEATURES.md) — returns every booking whose stay overlaps that range (via the existing `datesOverlap()` helper) instead of the latest 50 by `created_at`. Omitting both params keeps the exact old behavior; nothing else changed.
 
 ### Confirmed `villa-api` route surface (read directly from deployed v19, 2026-08-27 — supersedes the older "inferred from client call sites" list; `POST /webhook/cloudbeds` removed same day, see above; `GET /bookings` gained date_from/date_to in v20, see directly above)
