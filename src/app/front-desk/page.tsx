@@ -6,11 +6,11 @@ import { FrontDeskShell } from "./_shell";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { useToast } from "@/lib/toast";
-import { fmtDate, todayISO } from "@/lib/format";
+import { fmtCurrencyFull, fmtDate, todayISO } from "@/lib/format";
 import { Card, CardHeader, Loading } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
-import type { Summary, Unit, UnitAvailability, Notification } from "@/lib/types";
+import type { Booking, Summary, Unit, UnitAvailability, Notification } from "@/lib/types";
 
 const statusColor: Record<string, string> = {
   available: "border-sage-500/30",
@@ -41,6 +41,9 @@ export default function FrontDeskPage() {
   const [ci, setCi] = useState({ nama: "", ktp: "", unit_id: "", tipe: "harian", checkin: todayISO(), checkout: todayISO(), src: "walk-in", hp: "", tarif: "" });
   const [availUnits, setAvailUnits] = useState<UnitAvailability[] | null>(null);
   const [availLoading, setAvailLoading] = useState(false);
+  const [ciTab, setCiTab] = useState<"existing" | "new">("existing");
+  const [scheduledBookings, setScheduledBookings] = useState<Booking[]>([]);
+  const [selectedBookingId, setSelectedBookingId] = useState("");
   const [coUnitId, setCoUnitId] = useState("");
   const [coCond, setCoCond] = useState("Baik — tidak ada kerusakan");
   const [coNote, setCoNote] = useState("");
@@ -86,7 +89,13 @@ export default function FrontDeskPage() {
   function openCheckin() {
     setCi({ nama: "", ktp: "", unit_id: "", tipe: "harian", checkin: todayISO(), checkout: todayISO(), src: "walk-in", hp: "", tarif: "" });
     setAvailUnits(null);
+    setSelectedBookingId("");
+    setCiTab("existing");
     setCiOpen(true);
+    api
+      .get<Booking[]>("/bookings?status=terjadwal")
+      .then((b) => setScheduledBookings(b || []))
+      .catch(() => setScheduledBookings([]));
   }
   function openCheckout() {
     const occ = units.filter((u) => u.status === "occupied" || u.status === "checkout");
@@ -94,7 +103,49 @@ export default function FrontDeskPage() {
     setCoOpen(true);
   }
 
-  async function doCheckin() {
+  // Check-in a booking that already exists (Cloudbeds/OTA-synced or logged
+  // earlier) -- never creates a new booking, since that already conflicts
+  // (409) against the existing one. Already paid via its own channel, so
+  // no payment step here.
+  async function doCheckinExisting() {
+    const bk = scheduledBookings.find((b) => b.id === selectedBookingId);
+    if (!bk) {
+      toast("⚠", "Pilih booking", "Pilih salah satu booking terjadwal untuk di-check-in.", "ruby");
+      return;
+    }
+    try {
+      await api.post("/checkin", {
+        booking_id: bk.id,
+        unit_id: bk.unit_id,
+        unit_nomor: bk.unit_nomor,
+        guest_nama: bk.guest_nama,
+        guest_hp: bk.guest_hp,
+        tipe: bk.tipe,
+        total_bayar: bk.total_bayar ?? bk.tarif,
+        checkin_by: user?.nama || "Staff",
+      });
+      setCiOpen(false);
+      toast("🛎️", "Check-In Berhasil", `${bk.guest_nama} — Unit ${bk.unit_nomor} sudah check-in.`, "sage");
+      setTimeout(() => toast("📱", "Investor Unit Diberitahu", `Notifikasi terkirim ke dashboard investor Unit ${bk.unit_nomor}.`, "gold"), 1000);
+      load();
+    } catch (e) {
+      toast("⚠", "Check-In Gagal", e instanceof Error ? e.message : "Terjadi kesalahan.", "ruby");
+    }
+  }
+
+  // A guest with no booking in the system yet. Walk-in (villa's own direct
+  // sale) must be paid via QRIS first -- handled entirely by Payment
+  // Gateway, so we just hand off there instead of duplicating that flow.
+  // Any other source here means staff is manually logging a booking made
+  // through that channel (already paid there) -- same immediate
+  // create+checkin as before, tarif entered manually since that's the
+  // external channel's own price, not villa's base rate.
+  async function doCheckinNew() {
+    if (ci.src === "walk-in") {
+      setCiOpen(false);
+      router.push("/front-desk/payment-gateway?kategori=villa");
+      return;
+    }
     const unit = units.find((u) => u.id === ci.unit_id);
     if (!ci.unit_id || !ci.nama.trim() || !unit) {
       toast("⚠", "Lengkapi form", "Isi nama tamu dan pilih unit.", "ruby");
@@ -105,7 +156,11 @@ export default function FrontDeskPage() {
       toast("⚠", "Unit Tidak Tersedia", `Unit ${unit.nomor} sudah dibooking ${avail.dibooking_oleh} untuk tanggal ini.`, "ruby");
       return;
     }
-    const tarif = Number(ci.tarif) || (ci.tipe === "harian" ? 500000 : 8000000);
+    const tarif = Number(ci.tarif);
+    if (!tarif || tarif <= 0) {
+      toast("⚠", "Lengkapi form", "Isi tarif sesuai harga dari sumber booking.", "ruby");
+      return;
+    }
     try {
       const bk = await api.post<{ id: string }>("/bookings", {
         unit_id: unit.id,
@@ -271,43 +326,117 @@ export default function FrontDeskPage() {
         </div>
       </div>
 
-      <Modal open={ciOpen} title="Check-In Tamu" onClose={() => setCiOpen(false)} footer={<><Btn onClick={() => setCiOpen(false)}>Batal</Btn><Btn variant="primary" onClick={doCheckin}>Proses Check-In</Btn></>}>
-        <Field label="Nama Tamu"><input className={inputCls} value={ci.nama} onChange={(e) => setCi({ ...ci, nama: e.target.value })} placeholder="Nama lengkap" /></Field>
-        <Field label="No. KTP / Paspor"><input className={inputCls} value={ci.ktp} onChange={(e) => setCi({ ...ci, ktp: e.target.value })} placeholder="Nomor identitas" /></Field>
-        <div className="grid grid-cols-2 gap-4">
-          <Field label={`Unit${availLoading ? " — mengecek ketersediaan…" : ""}`}>
-            <select className={inputCls} value={ci.unit_id} onChange={(e) => setCi({ ...ci, unit_id: e.target.value })}>
-              <option value="">Pilih unit</option>
-              {(availUnits ?? units.map((u) => ({ ...u, tersedia_untuk_tanggal: u.status === "available", dibooking_oleh: null }))).map((u) => (
-                <option key={u.id} value={u.id} disabled={!u.tersedia_untuk_tanggal}>
-                  Unit {u.nomor}{!u.tersedia_untuk_tanggal ? ` — dibooking (${u.dibooking_oleh ?? u.status})` : ""}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Tipe">
-            <select className={inputCls} value={ci.tipe} onChange={(e) => setCi({ ...ci, tipe: e.target.value })}>
-              <option value="harian">Harian</option>
-              <option value="bulanan">Bulanan</option>
-            </select>
-          </Field>
+      <Modal
+        open={ciOpen}
+        title="Check-In Tamu"
+        onClose={() => setCiOpen(false)}
+        footer={
+          <>
+            <Btn onClick={() => setCiOpen(false)}>Batal</Btn>
+            <Btn variant="primary" onClick={ciTab === "existing" ? doCheckinExisting : doCheckinNew}>
+              {ciTab === "new" && ci.src === "walk-in" ? "Lanjut ke Payment Gateway →" : "Proses Check-In"}
+            </Btn>
+          </>
+        }
+      >
+        <div className="flex gap-2 mb-4">
+          <button
+            onClick={() => setCiTab("existing")}
+            className={`flex-1 py-2 rounded-lg text-[11.5px] font-semibold transition ${
+              ciTab === "existing" ? "bg-gold-500 text-base-950" : "bg-base-800 text-ink/50 border border-ink/10"
+            }`}
+          >
+            Booking Terjadwal
+          </button>
+          <button
+            onClick={() => setCiTab("new")}
+            className={`flex-1 py-2 rounded-lg text-[11.5px] font-semibold transition ${
+              ciTab === "new" ? "bg-gold-500 text-base-950" : "bg-base-800 text-ink/50 border border-ink/10"
+            }`}
+          >
+            Tamu Baru
+          </button>
         </div>
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="Check-in"><input type="date" className={inputCls} value={ci.checkin} onChange={(e) => setCi({ ...ci, checkin: e.target.value })} /></Field>
-          <Field label="Check-out"><input type="date" className={inputCls} value={ci.checkout} onChange={(e) => setCi({ ...ci, checkout: e.target.value })} /></Field>
-        </div>
-        <Field label="Sumber Booking">
-          <select className={inputCls} value={ci.src} onChange={(e) => setCi({ ...ci, src: e.target.value })}>
-            <option value="walk-in">Walk-in</option>
-            <option value="airbnb">Airbnb</option>
-            <option value="tiket">Tiket.com</option>
-            <option value="agoda">Agoda</option>
-            <option value="website">Website Loonars</option>
-            <option value="whatsapp">WhatsApp</option>
-          </select>
-        </Field>
-        <Field label="No. HP Tamu"><input className={inputCls} value={ci.hp} onChange={(e) => setCi({ ...ci, hp: e.target.value })} placeholder="+62 8xx-xxxx-xxxx" /></Field>
-        <Field label="Tarif (Rp)"><input type="number" className={inputCls} value={ci.tarif} onChange={(e) => setCi({ ...ci, tarif: e.target.value })} placeholder="500000" /></Field>
+
+        {ciTab === "existing" ? (
+          <div>
+            <div className="text-[10px] text-ink/40 mb-3 leading-relaxed">
+              Untuk tamu yang bookingnya sudah ada di sistem (termasuk OTA/Cloudbeds yang masuk otomatis) — sudah dibayar lewat channel-nya, tinggal check-in.
+            </div>
+            {scheduledBookings.length === 0 ? (
+              <div className="text-[11px] text-ink/30 text-center py-6">Tidak ada booking terjadwal. Pakai tab &quot;Tamu Baru&quot; untuk tamu yang belum ada bookingnya.</div>
+            ) : (
+              <div className="max-h-[280px] overflow-y-auto -mx-1 space-y-1.5">
+                {scheduledBookings.map((bk) => (
+                  <button
+                    key={bk.id}
+                    onClick={() => setSelectedBookingId(bk.id)}
+                    className={`w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg border transition ${
+                      selectedBookingId === bk.id ? "border-gold-500 bg-gold-500/10" : "border-ink/10 hover:border-ink/20"
+                    }`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[11.5px] font-medium text-ink/80 truncate">{bk.guest_nama}</div>
+                      <div className="text-[9.5px] text-ink/30 mt-0.5">
+                        Unit {bk.unit_nomor} · {fmtDate(bk.tgl_checkin)} · {bk.sumber === "cloudbeds" ? "☁ Cloudbeds" : bk.sumber}
+                      </div>
+                    </div>
+                    <div className="text-[10.5px] text-ink/50 shrink-0">{fmtCurrencyFull(bk.total_bayar ?? bk.tarif)}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            <Field label="Sumber Booking">
+              <select className={inputCls} value={ci.src} onChange={(e) => setCi({ ...ci, src: e.target.value })}>
+                <option value="walk-in">Walk-in (bayar sekarang via QRIS)</option>
+                <option value="airbnb">Airbnb</option>
+                <option value="tiket">Tiket.com</option>
+                <option value="agoda">Agoda</option>
+                <option value="website">Website Loonars</option>
+                <option value="whatsapp">WhatsApp</option>
+              </select>
+            </Field>
+            {ci.src === "walk-in" ? (
+              <div className="text-[10px] text-ink/40 mb-1 leading-relaxed">
+                Tamu walk-in dibuatkan bookingnya dan ditagih via QRIS dulu di Payment Gateway — data check-in baru masuk setelah pembayaran dikonfirmasi lunas.
+              </div>
+            ) : (
+              <>
+                <Field label="Nama Tamu"><input className={inputCls} value={ci.nama} onChange={(e) => setCi({ ...ci, nama: e.target.value })} placeholder="Nama lengkap" /></Field>
+                <Field label="No. KTP / Paspor"><input className={inputCls} value={ci.ktp} onChange={(e) => setCi({ ...ci, ktp: e.target.value })} placeholder="Nomor identitas" /></Field>
+                <div className="grid grid-cols-2 gap-4">
+                  <Field label={`Unit${availLoading ? " — mengecek ketersediaan…" : ""}`}>
+                    <select className={inputCls} value={ci.unit_id} onChange={(e) => setCi({ ...ci, unit_id: e.target.value })}>
+                      <option value="">Pilih unit</option>
+                      {(availUnits ?? units.map((u) => ({ ...u, tersedia_untuk_tanggal: u.status === "available", dibooking_oleh: null }))).map((u) => (
+                        <option key={u.id} value={u.id} disabled={!u.tersedia_untuk_tanggal}>
+                          Unit {u.nomor}{!u.tersedia_untuk_tanggal ? ` — dibooking (${u.dibooking_oleh ?? u.status})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Tipe">
+                    <select className={inputCls} value={ci.tipe} onChange={(e) => setCi({ ...ci, tipe: e.target.value })}>
+                      <option value="harian">Harian</option>
+                      <option value="bulanan">Bulanan</option>
+                    </select>
+                  </Field>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <Field label="Check-in"><input type="date" className={inputCls} value={ci.checkin} onChange={(e) => setCi({ ...ci, checkin: e.target.value })} /></Field>
+                  <Field label="Check-out"><input type="date" className={inputCls} value={ci.checkout} onChange={(e) => setCi({ ...ci, checkout: e.target.value })} /></Field>
+                </div>
+                <Field label="No. HP Tamu"><input className={inputCls} value={ci.hp} onChange={(e) => setCi({ ...ci, hp: e.target.value })} placeholder="+62 8xx-xxxx-xxxx" /></Field>
+                <Field label="Tarif (Rp) — sesuai harga dari channel ini">
+                  <input type="number" className={inputCls} value={ci.tarif} onChange={(e) => setCi({ ...ci, tarif: e.target.value })} placeholder="0" />
+                </Field>
+              </>
+            )}
+          </>
+        )}
       </Modal>
 
       <Modal open={coOpen} title="Check-Out Tamu" onClose={() => setCoOpen(false)} footer={<><Btn onClick={() => setCoOpen(false)}>Batal</Btn><Btn variant="primary" onClick={doCheckout}>Proses Check-Out</Btn></>}>

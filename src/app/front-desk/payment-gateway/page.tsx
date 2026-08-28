@@ -102,8 +102,20 @@ export default function PaymentGatewayPage() {
     tipe: "harian" as Booking["tipe"],
     checkin: todayISO(),
     checkout: todayISO(),
-    tarif: "" as string,
   });
+
+  // Villa walk-in tarif is never staff-editable -- it must match the unit's
+  // own listed rate (same tarif_harian/tarif_bulanan the unit is configured
+  // with), not a number the cashier types in.
+  const selectedUnit = units.find((u) => u.id === form.unit_id);
+  const villaTarif = selectedUnit ? (form.tipe === "harian" ? selectedUnit.tarif_harian : selectedUnit.tarif_bulanan) : 0;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (new URLSearchParams(window.location.search).get("kategori") === "villa") {
+      setForm((f) => ({ ...f, kategori: "villa" }));
+    }
+  }, []);
 
   function load() {
     api
@@ -266,7 +278,6 @@ export default function PaymentGatewayPage() {
       tipe: "harian",
       checkin: todayISO(),
       checkout: todayISO(),
-      tarif: "",
     });
     setAvailUnits(null);
   }
@@ -308,7 +319,11 @@ export default function PaymentGatewayPage() {
       toast("⚠", "Unit Tidak Tersedia", `Unit ${unit.nomor} sudah dibooking ${avail.dibooking_oleh} untuk tanggal ini.`, "ruby");
       return;
     }
-    const tarif = Number(form.tarif) || (form.tipe === "harian" ? 500000 : 8000000);
+    if (!villaTarif) {
+      toast("⚠", "Tarif Belum Diatur", `Unit ${unit.nomor} belum punya tarif ${form.tipe} yang dikonfigurasi. Hubungi admin.`, "ruby");
+      return;
+    }
+    const tarif = villaTarif;
     try {
       const booking = await api.post<Booking>("/bookings", {
         unit_id: unit.id,
@@ -474,13 +489,10 @@ export default function PaymentGatewayPage() {
                     </Field>
                   </div>
                   <Field label="Tarif (Rp)">
-                    <input
-                      type="number"
-                      className={inputCls}
-                      value={form.tarif}
-                      onChange={(e) => setForm({ ...form, tarif: e.target.value })}
-                      placeholder={form.tipe === "harian" ? "500000" : "8000000"}
-                    />
+                    <div className={`${inputCls} flex items-center justify-between text-ink/70`}>
+                      <span>{selectedUnit ? fmtCurrencyFull(villaTarif) : "Pilih unit dulu"}</span>
+                      {selectedUnit && <span className="text-[9px] text-ink/30">Tarif {form.tipe} Unit {selectedUnit.nomor} — tidak bisa diubah</span>}
+                    </div>
                   </Field>
                 </>
               ) : (

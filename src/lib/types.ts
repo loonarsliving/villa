@@ -19,6 +19,8 @@ export interface Unit {
   owner_nama: string | null;
   owner_hp: string | null;
   catatan: string | null;
+  tarif_harian: number;
+  tarif_bulanan: number;
 }
 
 export interface UnitAvailability {
