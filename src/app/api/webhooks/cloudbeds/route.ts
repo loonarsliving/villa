@@ -120,6 +120,20 @@ export async function POST(request: Request) {
             pesan: `${guestNama} — cek Front Desk untuk proses check-in.`,
             ref_id: reservationId ?? null,
           });
+
+          // Tugas housekeeping "lengkapi amenities" untuk booking OTA ini --
+          // muncul di checklist Housekeeping (front-desk/housekeeping) di
+          // samping tugas "bersih" biasa. jenis='amenities' membuat
+          // villa-api's /housekeeping/done otomatis mengurangi stock sesuai
+          // kit standar saat tugas ini ditandai selesai, tanpa mengubah
+          // status unit (itu tetap urusan tugas bersih-bersih checkout).
+          await supabase.from("housekeeping").insert({
+            unit_id: unitId,
+            unit_nomor: unitNomor,
+            jenis: "amenities",
+            tugas: `Lengkapi amenities kamar untuk tamu OTA (${guestNama})`,
+            tgl: reservation.checkInDate ?? reservation.checkin_date ?? new Date().toISOString().split("T")[0],
+          });
         }
       }
     }

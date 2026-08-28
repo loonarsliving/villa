@@ -49,7 +49,10 @@ export default function HousekeepingPage() {
               <div className={`w-4 h-4 rounded border shrink-0 flex items-center justify-center text-[10px] ${t.status === "done" ? "bg-sage-500 border-sage-500 text-ink" : "border-ink/15"}`}>
                 {t.status === "done" ? "✓" : ""}
               </div>
-              <div className={`text-[11.5px] flex-1 ${t.status === "done" ? "line-through text-ink/30" : "text-ink/50"}`}>{t.tugas}</div>
+              <div className={`text-[11.5px] flex-1 ${t.status === "done" ? "line-through text-ink/30" : "text-ink/50"}`}>
+                {t.jenis === "amenities" && <span className="mr-1">🧴</span>}
+                {t.tugas}
+              </div>
               <div className="text-[9.5px] text-ink/30 shrink-0">{t.unit_nomor || "Area umum"}</div>
             </div>
           ))

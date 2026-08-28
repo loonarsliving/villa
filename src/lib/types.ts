@@ -81,6 +81,34 @@ export interface HousekeepingTask {
   tugas: string;
   status: "pending" | "done";
   tgl: string;
+  jenis: "bersih" | "amenities";
+}
+
+export interface AmenityItem {
+  id: string;
+  nama: string;
+  satuan: string;
+  stock: number;
+  stock_minimum: number;
+  updated_at: string;
+}
+
+export interface AmenityKitItem {
+  id: string;
+  amenity_id: string;
+  qty: number;
+  amenities?: { nama: string; satuan: string; stock: number } | null;
+}
+
+export interface AmenityUsageLog {
+  id: string;
+  unit_id: string | null;
+  unit_nomor: string | null;
+  amenity_id: string | null;
+  amenity_nama: string | null;
+  qty: number;
+  created_at: string;
+  created_by: string | null;
 }
 
 export interface Report {

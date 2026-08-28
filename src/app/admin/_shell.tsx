@@ -22,6 +22,7 @@ export function AdminShell({ pageTitle, pageSub, children }: { pageTitle: string
         { href: "/admin/investors", label: "Investor", icon: "◎" },
         { href: "/admin/users", label: "Pengguna", icon: "◉" },
         { href: "/admin/staff", label: "Staff Operasional", icon: "▤" },
+        { href: "/admin/amenities", label: "Amenities", icon: "▧" },
       ],
     },
     {
