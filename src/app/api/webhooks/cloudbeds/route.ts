@@ -28,6 +28,44 @@ function secretsMatch(provided: string, expected: string): boolean {
   return timingSafeEqual(a, b);
 }
 
+/**
+ * Mirrors villa-api's own sendWa() contract exactly (integration_settings
+ * key 'vercel_bridge' -> POST {base_url}/api/wa/send with x-internal-secret,
+ * logged to wa_messages_log) -- duplicated here rather than shared because
+ * this route runs on Vercel/Node and villa-api is a separate Supabase Edge
+ * Function (Deno), different runtimes that can't share source.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function sendWaBridge(supabase: any, phone: string | null, message: string, meta: Record<string, unknown>) {
+  if (!phone) {
+    await supabase.from("wa_messages_log").insert({ ...meta, phone: null, message, status: "skipped_no_phone" });
+    return;
+  }
+  const { data: setting } = await supabase.from("integration_settings").select("value").eq("key", "vercel_bridge").maybeSingle();
+  const bridge = (setting?.value as { base_url?: string; secret?: string } | null) ?? {};
+  if (!bridge.base_url || !bridge.secret) {
+    await supabase.from("wa_messages_log").insert({ ...meta, phone, message, status: "skipped_not_configured" });
+    return;
+  }
+  try {
+    const r = await fetch(`${bridge.base_url.replace(/\/+$/, "")}/api/wa/send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-internal-secret": bridge.secret },
+      body: JSON.stringify({ phone, message, ...meta }),
+    });
+    const result = await r.json().catch(() => null);
+    await supabase.from("wa_messages_log").insert({
+      ...meta,
+      phone,
+      message,
+      status: r.ok && result?.success ? "sent" : "failed",
+      response: result ?? { http_status: r.status },
+    });
+  } catch (e) {
+    await supabase.from("wa_messages_log").insert({ ...meta, phone, message, status: "error", response: { error: String(e) } });
+  }
+}
+
 interface CloudbedsReservation {
   roomId?: string;
   room_id?: string;
@@ -134,6 +172,42 @@ export async function POST(request: Request) {
             tugas: `Lengkapi amenities kamar untuk tamu OTA (${guestNama})`,
             tgl: reservation.checkInDate ?? reservation.checkin_date ?? new Date().toISOString().split("T")[0],
           });
+
+          const checkinTgl = reservation.checkInDate ?? reservation.checkin_date ?? "-";
+          const waMeta = { booking_id: null, unit_id: unitId, template_type: "ota_booking_alert" };
+
+          // Housekeeping: nomor HP diambil dari data karyawan Mkhsistem (bukan
+          // villa_staff sendiri) -- karyawan yang di-assign ke Division
+          // "Housekeeping Villa" di Mkhsistem, per keputusan owner supaya data
+          // karyawan tetap satu sumber (Mkhsistem HR), bukan didupilkasi di
+          // villa. employment_status='active' (bukan cuma is_active) karena
+          // itu field yang benar-benar berarti "masih bekerja" di skema ini.
+          const { data: housekeepingStaff } = await supabase
+            .from("employees")
+            .select("phone, full_name, divisions!inner(name)")
+            .ilike("divisions.name", "Housekeeping Villa")
+            .eq("employment_status", "active")
+            .is("deleted_at", null);
+          for (const staff of (housekeepingStaff as { phone: string | null; full_name: string }[] | null) ?? []) {
+            await sendWaBridge(
+              supabase,
+              staff.phone,
+              `Halo ${staff.full_name}, ada booking OTA baru masuk — Unit ${unitNomor} (${guestNama}), checkin ${checkinTgl}. Tolong siapkan amenities kamar sesuai checklist Housekeeping.`,
+              waMeta,
+            );
+          }
+
+          // Reception: nomor HP dari villa_users sendiri (role receptionist,
+          // aktif) -- data ini sudah ada di villa, tidak perlu ke Mkhsistem.
+          const { data: receptionists } = await supabase.from("villa_users").select("hp, nama").eq("role", "receptionist").eq("is_active", true);
+          for (const r of (receptionists as { hp: string | null; nama: string }[] | null) ?? []) {
+            await sendWaBridge(
+              supabase,
+              r.hp,
+              `Halo ${r.nama}, ada booking OTA baru — Unit ${unitNomor} (${guestNama}), checkin ${checkinTgl}. Siapkan penyambutan tamu.`,
+              waMeta,
+            );
+          }
         }
       }
     }
