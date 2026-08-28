@@ -26,6 +26,8 @@ export default function AdminCloudbedsPage() {
   const [liveRooms, setLiveRooms] = useState<LiveCloudbedsRoom[]>([]);
   const [liveRoomsError, setLiveRoomsError] = useState<string | null>(null);
   const [manualEntry, setManualEntry] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [lastChecked, setLastChecked] = useState<Date | null>(null);
 
   async function load() {
     setLoading(true);
@@ -41,6 +43,7 @@ export default function AdminCloudbedsPage() {
   }
 
   async function loadLiveRooms() {
+    setTesting(true);
     try {
       const token = getToken();
       const res = await fetch("/api/admin/cloudbeds/rooms", {
@@ -57,6 +60,9 @@ export default function AdminCloudbedsPage() {
     } catch (e) {
       setLiveRoomsError(e instanceof Error ? e.message : "Gagal memuat daftar room Cloudbeds");
       setLiveRooms([]);
+    } finally {
+      setTesting(false);
+      setLastChecked(new Date());
     }
   }
 
@@ -97,16 +103,47 @@ export default function AdminCloudbedsPage() {
         <code className="text-gold-400">x-cloudbeds-secret</code> sesuai nilai <code className="text-gold-400">CLOUDBEDS_WEBHOOK_SECRET</code> di Vercel env variable project ini. Ditangani langsung di sini — bukan lagi lewat Supabase.
       </div>
 
-      <div className={`rounded-r border-l-2 p-3.5 text-[11px] leading-relaxed mb-3.5 ${liveRoomsError ? "bg-ruby-500/10 border-ruby-500 text-ink/50" : "bg-sage-500/10 border-sage-500 text-ink/50"}`}>
-        {liveRoomsError ? (
-          <>
-            Daftar room live Cloudbeds belum tersedia ({liveRoomsError}). Set <code className="text-gold-400">CLOUDBEDS_API_KEY</code> (dan{" "}
-            <code className="text-gold-400">CLOUDBEDS_PROPERTY_ID</code> jika perlu) di Vercel env variable — pemetaan manual di bawah tetap bisa dipakai sementara.
-          </>
-        ) : (
-          <>Terhubung ke Cloudbeds API — {liveRooms.length} room tersedia untuk dipetakan langsung dari daftar live.</>
-        )}
-      </div>
+      <Card className="mb-3.5">
+        <CardHeader
+          title="Tes Koneksi Cloudbeds"
+          action={
+            <button
+              onClick={loadLiveRooms}
+              disabled={testing}
+              className="text-[10.5px] font-semibold text-gold-500 border border-gold-500/25 rounded px-3 py-1.5 shrink-0 disabled:opacity-50"
+            >
+              {testing ? "Menguji…" : "Tes Ulang"}
+            </button>
+          }
+        />
+        <div className="px-4 sm:px-5 py-3.5">
+          <div className="flex items-center gap-2 mb-1.5">
+            <Badge tone={testing ? "pending" : liveRoomsError ? "danger" : "ok"}>
+              {testing ? "Menguji…" : liveRoomsError ? "Tidak terhubung" : "Terhubung"}
+            </Badge>
+            {lastChecked && (
+              <span className="text-[10px] text-ink/30">
+                Dicek {fmtDate(lastChecked.toISOString(), { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+              </span>
+            )}
+          </div>
+          {liveRoomsError ? (
+            <div className="text-[11px] text-ink/50 leading-relaxed">
+              Gagal menghubungi Cloudbeds API: <code className="text-ruby-400">{liveRoomsError}</code>
+              <br />
+              Kemungkinan penyebab: <code className="text-gold-400">CLOUDBEDS_API_KEY</code> belum diset (atau salah nama) di Vercel env
+              variable project villa, key sudah dihapus/kedaluwarsa di sisi Cloudbeds, atau{" "}
+              <code className="text-gold-400">CLOUDBEDS_PROPERTY_ID</code> perlu diisi karena akun ini mengelola lebih dari satu properti.
+              Pemetaan manual di bawah tetap bisa dipakai sementara.
+            </div>
+          ) : (
+            <div className="text-[11px] text-ink/50 leading-relaxed">
+              Endpoint <code className="text-gold-400">GET /getRooms</code> merespons normal — {liveRooms.length} room tersedia untuk dipetakan
+              langsung dari daftar live di bawah.
+            </div>
+          )}
+        </div>
+      </Card>
 
       <Card className="mb-3.5">
         <CardHeader
