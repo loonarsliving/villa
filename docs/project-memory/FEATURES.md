@@ -12,7 +12,7 @@ Status tags: DONE (UI + call site implemented and wired, though server behavior 
 ## Front desk (`/front-desk`)
 - **Unit status dashboard / today's summary** — DONE. `front-desk/page.tsx` (`Summary`, `Unit`, `UnitAvailability` types; calls unaudited summary/units endpoints).
 - **Siteplan (visual unit grid by block/status)** — DONE. `front-desk/siteplan/page.tsx`.
-- **Booking list** — DONE. `front-desk/booking/page.tsx`, `GET /bookings`.
+- **Booking calendar** — DONE, replaced the old flat "50 latest bookings" list 2026-08-27. `front-desk/booking/page.tsx` (shared with Admin nav, read-only for now — no drag-drop reassignment yet, per explicit owner scope decision), unit rows × date columns, bars for each booking including Cloudbeds/OTA ones (already synced in realtime via the existing webhook, no extra sync work needed). Required a new `date_from`/`date_to` query param on `GET /bookings` (villa-api v20, backward-compatible — old behavior unchanged when the params are omitted), reusing the existing `datesOverlap()` helper rather than new range logic.
 - **Double-booking prevention by date** — DONE per commit message. Commit `346ab86` "Cegah double-booking berbasis tanggal di Front Desk". Actual validation logic is presumably server-side in `villa-api` — UNKNOWN — NEEDS CONFIRMATION on exact enforcement, since it's not visible in this repo's code.
 - **Housekeeping checklist (mark task done)** — DONE. `front-desk/housekeeping/page.tsx`, `GET /housekeeping`, `PATCH /housekeeping/done`.
 - **Real-time-ish notifications (30s poll)** — DONE. `front-desk/notifikasi/page.tsx` + `src/lib/hooks.ts:useNotifPoll`.
@@ -35,7 +35,9 @@ Status tags: DONE (UI + call site implemented and wired, though server behavior 
 
 ## Integrations-as-features
 - **Cloudbeds OTA sync via webhook** — DONE (this repo's side). `src/app/api/webhooks/cloudbeds/route.ts`. Payload validation hardening exists on an unmerged branch (`claude/security-3-repos-tj69ek`, commit `a6c853b`) — not in `main`, so treat as PLANNED/IN_PROGRESS relative to `main`.
-- **WhatsApp notifications ("WhaCenter")** — PARTIAL/UNKNOWN on `main`. Referenced by git history (commits `71552b2`, `01bcad3`, `32d6ff5`) and by the `admin/wa-log` viewer, but no WhaCenter client/API code exists anywhere in this repository's current tree — sending logic, if it exists, lives entirely inside the unaudited `villa-api` Edge Function. Cannot confirm it is currently functional.
+- **Cloudbeds live room picker for mapping** — DONE, code-complete but inert until `CLOUDBEDS_API_KEY` is set (added 2026-08-27). `src/lib/cloudbedsApi.ts`, `/api/admin/cloudbeds/rooms`, `admin/cloudbeds/page.tsx`. See INTEGRATIONS.md/DEPLOYMENT.md.
+- **Dynamic QRIS for Payment Gateway (iPaymu)** — DONE, code-complete but inert until `IPAYMU_VA`/`IPAYMU_API_KEY` are set (added 2026-08-27). `src/lib/ipaymuApi.ts`, `/api/payment-gateway/qris`, `/api/payment-gateway/qris/status`, `/api/webhooks/ipaymu`. Response shape from iPaymu not yet verified live — see DEPLOYMENT.md's activation checklist before trusting in production.
+- **WhatsApp notifications** — CONFIRMED ACTIVE 2026-08-27 (previously PARTIAL/UNKNOWN). Not "WhaCenter" — `villa-api`'s `sendWa()` proxies to the sibling Mkhsistem system's `/api/wa/send`. See INTEGRATIONS.md.
 - **AI CCTV / presence detection via Gemini Vision (EZVIZ snapshots)** — PLANNED / IN_PROGRESS, NOT on `main`. Exists only on unmerged branch `claude/frigate-ai-cctv-module-eqwuri` (commits `db248d5`, `b2fa553`). See AI_AND_AGENTS.md.
 - **Next.js 15→16 security upgrade** — IN_PROGRESS, NOT on `main`. Branch `claude/security-3-repos-tj69ek`, commit `341ac2f`.
 - **Server-side role-gating hardening proxy** — IN_PROGRESS, NOT on `main`. Same branch, commit `1657dfb`.
