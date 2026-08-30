@@ -1,11 +1,21 @@
 import "server-only";
 
 /**
- * EZVIZ Open Platform client (https://open.ezvizlife.com) -- cloud path,
- * used because the villa cameras are reached over the internet, not a
- * shared LAN with wherever Vercel runs this. Contract verified against
- * EZVIZ's own Open Platform docs before writing this (token/get response
- * shape, form-encoded POST body) -- see docs/project-memory/INTEGRATIONS.md.
+ * EZVIZ Open Platform client -- cloud path, used because the villa cameras
+ * are reached over the internet, not a shared LAN with wherever Vercel runs
+ * this. Contract verified against EZVIZ's own official token/get docs
+ * (pasted in by the owner directly from their EZVIZ developer console) --
+ * see docs/project-memory/INTEGRATIONS.md.
+ *
+ * IMPORTANT per that doc: token/get itself is always called against the
+ * global entry point https://open.ezvizlife.com, regardless of the
+ * developer's account region -- EZVIZ_API_BASE should normally stay unset.
+ * The response's `areaDomain` field is the user's actual regional API
+ * domain, and *that* (not EZVIZ_API_BASE) is what every other call --
+ * including the EZUIKit live-view player's `env.domain` -- must use. Mixing
+ * these up (pointing token/get itself at a regional domain) is exactly what
+ * caused the "appKey does not exist" / fetch failures while getting this
+ * working.
  *
  * Requires a developer account at open.ezvizlife.com (EZVIZ_APP_KEY /
  * EZVIZ_APP_SECRET, account-level) plus, per camera, its serial number and
@@ -13,21 +23,23 @@ import "server-only";
  * or visible in the EZVIZ app.
  */
 
-const API_BASE = process.env.EZVIZ_API_BASE || "https://open.ezvizlife.com";
+const TOKEN_ENDPOINT_BASE = process.env.EZVIZ_API_BASE || "https://open.ezvizlife.com";
 
-let cachedToken: { token: string; expiresAt: number } | null = null;
+let cachedToken: { token: string; expiresAt: number; areaDomain: string } | null = null;
 
 /**
- * Account-level access token, cached in-process. Live-view (EZUIKit) needs
- * this token in the browser to authenticate the stream -- that's how
- * EZVIZ's own web SDK is designed, not a shortcut taken here. Only admin
- * sessions can reach the route that hands this out (see
+ * Account-level access token + the caller's regional areaDomain, cached
+ * in-process together since both come from the same token/get response.
+ * Live-view (EZUIKit) needs the token in the browser to authenticate the
+ * stream, and areaDomain to know which regional API to talk to -- that's
+ * how EZVIZ's own web SDK is designed, not a shortcut taken here. Only
+ * admin sessions can reach the route that hands these out (see
  * /api/cctv/token/route.ts), and EZVIZ_APP_KEY/SECRET themselves never
  * leave this server.
  */
-export async function getAccessToken(): Promise<string> {
+export async function getAccessToken(): Promise<{ accessToken: string; areaDomain: string }> {
   if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) {
-    return cachedToken.token;
+    return { accessToken: cachedToken.token, areaDomain: cachedToken.areaDomain };
   }
   const appKey = process.env.EZVIZ_APP_KEY;
   const appSecret = process.env.EZVIZ_APP_SECRET;
@@ -35,7 +47,7 @@ export async function getAccessToken(): Promise<string> {
     throw new Error("EZVIZ_APP_KEY / EZVIZ_APP_SECRET is not configured");
   }
 
-  const res = await fetch(`${API_BASE}/api/lapp/token/get`, {
+  const res = await fetch(`${TOKEN_ENDPOINT_BASE}/api/lapp/token/get`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ appKey, appSecret }),
@@ -44,6 +56,11 @@ export async function getAccessToken(): Promise<string> {
   if (!res.ok || !data || data.code !== "200" || !data.data?.accessToken) {
     throw new Error(`EZVIZ token/get failed: ${data?.msg || res.status}`);
   }
-  cachedToken = { token: data.data.accessToken, expiresAt: Number(data.data.expireTime) || Date.now() + 6 * 3600_000 };
-  return cachedToken.token;
+  const areaDomain: string = data.data.areaDomain || TOKEN_ENDPOINT_BASE;
+  cachedToken = {
+    token: data.data.accessToken,
+    expiresAt: Number(data.data.expireTime) || Date.now() + 6 * 3600_000,
+    areaDomain,
+  };
+  return { accessToken: cachedToken.token, areaDomain: cachedToken.areaDomain };
 }
