@@ -23,7 +23,7 @@ import "server-only";
  * or visible in the EZVIZ app.
  */
 
-const TOKEN_ENDPOINT_BASE = process.env.EZVIZ_API_BASE || "https://open.ezvizlife.com";
+const TOKEN_ENDPOINT_BASE = (process.env.EZVIZ_API_BASE || "https://open.ezvizlife.com").trim();
 
 let cachedToken: { token: string; expiresAt: number; areaDomain: string } | null = null;
 
@@ -41,8 +41,12 @@ export async function getAccessToken(): Promise<{ accessToken: string; areaDomai
   if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) {
     return { accessToken: cachedToken.token, areaDomain: cachedToken.areaDomain };
   }
-  const appKey = process.env.EZVIZ_APP_KEY;
-  const appSecret = process.env.EZVIZ_APP_SECRET;
+  // Trimmed defensively -- proven during setup that copy-pasting into
+  // Vercel's env var UI (or a terminal) can silently carry a trailing
+  // newline/space/stray quote along with the real value, which breaks an
+  // exact-match check like EZVIZ's without ever showing up visibly.
+  const appKey = process.env.EZVIZ_APP_KEY?.trim();
+  const appSecret = process.env.EZVIZ_APP_SECRET?.trim();
   if (!appKey || !appSecret) {
     throw new Error("EZVIZ_APP_KEY / EZVIZ_APP_SECRET is not configured");
   }
@@ -54,7 +58,11 @@ export async function getAccessToken(): Promise<{ accessToken: string; areaDomai
   });
   const data = await res.json().catch(() => null);
   if (!res.ok || !data || data.code !== "200" || !data.data?.accessToken) {
-    throw new Error(`EZVIZ token/get failed: ${data?.msg || res.status}`);
+    // appKey.length is safe to expose (not the value itself) -- lets us
+    // confirm from the error message alone whether a stray character got
+    // carried into the env var, without needing another round of
+    // Vercel/terminal screenshots.
+    throw new Error(`EZVIZ token/get failed: ${data?.msg || res.status} (appKey.length=${appKey.length})`);
   }
   const areaDomain: string = data.data.areaDomain || TOKEN_ENDPOINT_BASE;
   cachedToken = {
