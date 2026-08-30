@@ -153,8 +153,8 @@ export default function AdminCctvPage() {
           accessToken: body.accessToken,
           url,
           template: "security",
-          width: 640,
-          height: 400,
+          width: 800,
+          height: 480,
           env: { domain: body.domain },
         });
         playerRef.current = player as unknown as { stop: () => void };
@@ -261,6 +261,7 @@ export default function AdminCctvPage() {
         open={watching !== null}
         title={`Live-view — ${watching?.nama || ""}`}
         onClose={closeWatch}
+        wide
         footer={
           <Btn variant="primary" onClick={closeWatch}>
             Tutup

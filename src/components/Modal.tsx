@@ -8,12 +8,14 @@ export function Modal({
   onClose,
   children,
   footer,
+  wide,
 }: {
   open: boolean;
   title: string;
   onClose: () => void;
   children: ReactNode;
   footer: ReactNode;
+  wide?: boolean;
 }) {
   if (!open) return null;
   return (
@@ -23,7 +25,9 @@ export function Modal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-base-900 border border-ink/10 rounded-md w-full max-w-[440px] max-h-[90vh] overflow-y-auto shadow-2xl">
+      <div
+        className={`bg-base-900 border border-ink/10 rounded-md w-full ${wide ? "max-w-[860px]" : "max-w-[440px]"} max-h-[90vh] overflow-y-auto shadow-2xl`}
+      >
         <div className="px-5 py-4 border-b border-ink/10 flex items-center justify-between">
           <div className="font-serif text-lg font-light text-ink">{title}</div>
           <button
