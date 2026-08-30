@@ -100,6 +100,18 @@ export interface AmenityKitItem {
   amenities?: { nama: string; satuan: string; stock: number } | null;
 }
 
+export interface CctvCamera {
+  id: string;
+  nama: string;
+  deskripsi: string | null;
+  ezviz_serial: string;
+  ezviz_channel_no: number;
+  ezviz_verification_code: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AmenityUsageLog {
   id: string;
   unit_id: string | null;
