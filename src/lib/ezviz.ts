@@ -3,27 +3,20 @@ import "server-only";
 /**
  * EZVIZ Open Platform client -- cloud path, used because the villa cameras
  * are reached over the internet, not a shared LAN with wherever Vercel runs
- * this. Contract verified against EZVIZ's own official token/get docs
- * (pasted in by the owner directly from their EZVIZ developer console) --
- * see docs/project-memory/INTEGRATIONS.md.
+ * this.
  *
- * IMPORTANT per that doc: token/get itself is always called against the
- * global entry point https://open.ezvizlife.com, regardless of the
- * developer's account region -- EZVIZ_API_BASE should normally stay unset.
- * The response's `areaDomain` field is the user's actual regional API
- * domain, and *that* (not EZVIZ_API_BASE) is what every other call --
- * including the EZUIKit live-view player's `env.domain` -- must use. Mixing
- * these up (pointing token/get itself at a regional domain) is exactly what
- * caused the "appKey does not exist" / fetch failures while getting this
- * working.
+ * token/get is called directly against this account's own regional domain,
+ * isgpopen.ezvizlife.com (the areaDomain EZVIZ's global entry point itself
+ * returned for this AppKey) -- not the global open.ezvizlife.com entry
+ * point. EZVIZ_API_BASE is no longer read; there is no fallback.
  *
- * Requires a developer account at open.ezvizlife.com (EZVIZ_APP_KEY /
- * EZVIZ_APP_SECRET, account-level) plus, per camera, its serial number and
- * (if the stream is encrypted) verification code -- printed on the device
- * or visible in the EZVIZ app.
+ * Requires a developer account (EZVIZ_APP_KEY / EZVIZ_APP_SECRET,
+ * account-level) plus, per camera, its serial number and (if the stream is
+ * encrypted) verification code -- printed on the device or visible in the
+ * EZVIZ app.
  */
 
-const TOKEN_ENDPOINT_BASE = (process.env.EZVIZ_API_BASE || "https://open.ezvizlife.com").trim();
+const TOKEN_ENDPOINT_BASE = "https://isgpopen.ezvizlife.com";
 
 let cachedToken: { token: string; expiresAt: number; areaDomain: string } | null = null;
 
