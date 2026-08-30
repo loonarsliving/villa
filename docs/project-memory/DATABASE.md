@@ -66,5 +66,8 @@ Migration `add_amenities_stock_and_kit`: three new tables plus one column on `ho
 
 **Access**: `GET /amenities`, `/amenities/kit`, `/amenities/usage-log` are `isStaff`-gated (admin + receptionist can view — Reception's `front-desk/amenities` page is read-only). `POST/PATCH/DELETE /amenities` and `/amenities/kit` are `isAdmin`-only (owner's explicit choice: stock only changes via Admin's `admin/amenities` page or automatically through the housekeeping completion flow, never a manual Reception edit).
 
+## `cctv_cameras` (CCTV live-view, added 2026-08-28)
+`id, nama, deskripsi, ezviz_serial, ezviz_channel_no (default 1), ezviz_verification_code, is_active (default true), created_at, updated_at`. Metadata only — no EZVIZ secrets (`EZVIZ_APP_KEY`/`EZVIZ_APP_SECRET` live only as Vercel env vars). Managed via villa-api v23 `/admin/cctv/cameras` (admin-only). **Note**: this table already existed (empty) from an earlier session's work on the unmerged AI-detection branch (`claude/frigate-ai-cctv-module-eqwuri`), with columns `zona text NOT NULL` and `deskripsi_titik` instead of `deskripsi` — reconciled via migration `fix_cctv_cameras_schema_for_liveview` (`deskripsi_titik`→`deskripsi` rename, `zona` dropped to nullable) rather than creating a second table. `zona`, `unit_id`, and `checkpoint_interval_minutes` columns remain (unused by live-view, harmless) in case that AI-checkpoint feature is picked up later.
+
 ## Direct DB access pattern
 Only the Cloudbeds webhook route (in this repo) touches Postgres directly (via `@supabase/supabase-js` with the service-role key, which bypasses RLS). All other reads/writes go through `villa-api`, which also uses the service-role key (confirmed above).
