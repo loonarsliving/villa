@@ -79,3 +79,34 @@ export async function getAccessToken(): Promise<{ accessToken: string; areaDomai
   };
   return { accessToken: cachedToken.token, areaDomain: cachedToken.areaDomain };
 }
+
+/**
+ * HLS live-stream URL for one camera, via EZVIZ's v2/live/address/get
+ * (protocol=2 = HLS -- for a plain <video>+hls.js player, unlike the
+ * ezopen:// URL the EZUIKit player on /admin/cctv uses). The URL EZVIZ
+ * returns embeds its own short-lived expiry (expireTime param below asks
+ * for 1 hour) -- callers must re-fetch a fresh one on expiry/playback
+ * error rather than reusing an old URL.
+ */
+export async function getLiveAddress(
+  deviceSerial: string,
+  channelNo: number
+): Promise<{ url: string; expireTime: string }> {
+  const { accessToken } = await getAccessToken();
+  const res = await fetch(`${TOKEN_ENDPOINT_BASE}/api/lapp/v2/live/address/get`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      accessToken,
+      deviceSerial,
+      channelNo: String(channelNo),
+      protocol: "2",
+      expireTime: "3600",
+    }),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data || data.code !== "200" || !data.data?.url) {
+    throw new Error(`EZVIZ live/address/get failed: ${data?.msg || res.status}`);
+  }
+  return { url: data.data.url, expireTime: data.data.expireTime };
+}
