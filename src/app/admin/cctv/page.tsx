@@ -141,9 +141,12 @@ export default function AdminCctvPage() {
         if (cancelled) return;
 
         const cam = watching!;
+        // open.ezviz.com, not open.ys7.com -- confirmed against the owner's own
+        // account "Address test" tool in the EZVIZ console, which generated
+        // ezopen://open.ezviz.com/{serial}/{channel}.hd.live for this exact device.
         const url = cam.ezviz_verification_code
-          ? `ezopen://${cam.ezviz_verification_code}@open.ys7.com/${cam.ezviz_serial}/${cam.ezviz_channel_no}.live`
-          : `ezopen://open.ys7.com/${cam.ezviz_serial}/${cam.ezviz_channel_no}.live`;
+          ? `ezopen://${cam.ezviz_verification_code}@open.ezviz.com/${cam.ezviz_serial}/${cam.ezviz_channel_no}.live`
+          : `ezopen://open.ezviz.com/${cam.ezviz_serial}/${cam.ezviz_channel_no}.live`;
 
         const player = new EZUIKitPlayer({
           id: "cctv-player-container",
