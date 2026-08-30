@@ -67,9 +67,15 @@ export async function getAccessToken(): Promise<{ accessToken: string; areaDomai
     // error text without another round of screenshots.
     const isCleanAlnum = /^[a-zA-Z0-9]+$/.test(appKey);
     const preview = appKey.length >= 8 ? `${appKey.slice(0, 4)}...${appKey.slice(-4)}` : "(too short)";
+    // appSecret's length only, never its value or a preview -- appKey is
+    // already known non-sensitive (visible in the EZVIZ console UI), but
+    // appSecret is a real credential. Length alone still rules "unset" /
+    // "obviously truncated" in or out without exposing anything.
+    const secretLen = appSecret.length;
     throw new Error(
       `EZVIZ token/get failed: ${data?.msg || res.status} ` +
-        `(appKey.length=${appKey.length}, appKey=${preview}, cleanAlnum=${isCleanAlnum}, base=${TOKEN_ENDPOINT_BASE})`
+        `(appKey.length=${appKey.length}, appKey=${preview}, cleanAlnum=${isCleanAlnum}, ` +
+        `appSecret.length=${secretLen}, base=${TOKEN_ENDPOINT_BASE})`
     );
   }
   const areaDomain: string = data.data.areaDomain || TOKEN_ENDPOINT_BASE;
