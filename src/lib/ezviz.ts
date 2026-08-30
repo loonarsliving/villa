@@ -58,11 +58,19 @@ export async function getAccessToken(): Promise<{ accessToken: string; areaDomai
   });
   const data = await res.json().catch(() => null);
   if (!res.ok || !data || data.code !== "200" || !data.data?.accessToken) {
-    // appKey.length is safe to expose (not the value itself) -- lets us
-    // confirm from the error message alone whether a stray character got
-    // carried into the env var, without needing another round of
-    // Vercel/terminal screenshots.
-    throw new Error(`EZVIZ token/get failed: ${data?.msg || res.status} (appKey.length=${appKey.length})`);
+    // A same-length-but-still-failing appKey means trim() alone isn't the
+    // full story -- it only strips whitespace, not e.g. an invisible
+    // zero-width character that can survive a copy from some UIs. None of
+    // this is sensitive: length, first/last 4 chars, and "is it clean
+    // alphanumeric" are all things already visible in the Vercel dashboard
+    // screenshot itself, just re-derived here so a mismatch shows up in the
+    // error text without another round of screenshots.
+    const isCleanAlnum = /^[a-zA-Z0-9]+$/.test(appKey);
+    const preview = appKey.length >= 8 ? `${appKey.slice(0, 4)}...${appKey.slice(-4)}` : "(too short)";
+    throw new Error(
+      `EZVIZ token/get failed: ${data?.msg || res.status} ` +
+        `(appKey.length=${appKey.length}, appKey=${preview}, cleanAlnum=${isCleanAlnum}, base=${TOKEN_ENDPOINT_BASE})`
+    );
   }
   const areaDomain: string = data.data.areaDomain || TOKEN_ENDPOINT_BASE;
   cachedToken = {
