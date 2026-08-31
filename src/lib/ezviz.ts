@@ -110,3 +110,50 @@ export async function getLiveAddress(
   }
   return { url: data.data.url, expireTime: data.data.expireTime };
 }
+
+export interface EzvizSnapshot {
+  picUrl: string;
+  imageBase64: string;
+  mimeType: string;
+}
+
+/**
+ * Captures a fresh still image from a camera (EZVIZ's device/capture --  a
+ * real-time snapshot, not a cached thumbnail) and downloads it as base64 so
+ * it can go straight into an AI vision call. Used by the checkpoint module
+ * (src/lib/cctvCheckpoint.ts), not the live-view player.
+ */
+export async function captureSnapshot(
+  deviceSerial: string,
+  channelNo: number,
+  verificationCode?: string | null
+): Promise<EzvizSnapshot> {
+  const { accessToken } = await getAccessToken();
+
+  const res = await fetch(`${TOKEN_ENDPOINT_BASE}/api/lapp/device/capture`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      accessToken,
+      deviceSerial,
+      channelNo: String(channelNo || 1),
+    }),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data || data.code !== "200" || !data.data?.picUrl) {
+    throw new Error(`EZVIZ device/capture failed for ${deviceSerial}: ${data?.msg || res.status}`);
+  }
+
+  let picUrl: string = data.data.picUrl;
+  if (verificationCode) {
+    picUrl += (picUrl.includes("?") ? "&" : "?") + `verificationCode=${encodeURIComponent(verificationCode)}`;
+  }
+
+  const imgRes = await fetch(picUrl);
+  if (!imgRes.ok) {
+    throw new Error(`Failed to download EZVIZ snapshot image: HTTP ${imgRes.status}`);
+  }
+  const mimeType = imgRes.headers.get("content-type") || "image/jpeg";
+  const buffer = Buffer.from(await imgRes.arrayBuffer());
+  return { picUrl: data.data.picUrl, imageBase64: buffer.toString("base64"), mimeType };
+}

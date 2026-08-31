@@ -103,13 +103,44 @@ export interface AmenityKitItem {
 export interface CctvCamera {
   id: string;
   nama: string;
+  zona: "satpam" | "resepsionis" | null;
   deskripsi: string | null;
   ezviz_serial: string;
   ezviz_channel_no: number;
   ezviz_verification_code: string | null;
+  checkpoint_interval_minutes: number;
   is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface CctvCheckpointLog {
+  id: string;
+  camera_id: string;
+  captured_at: string;
+  status: "ok" | "capture_failed" | "ai_failed";
+  person_detected: boolean | null;
+  snapshot_url: string | null;
+  ai_summary: string | null;
+  error_detail: string | null;
+  created_at: string;
+}
+
+export interface CctvDisciplinaryReport {
+  id: string;
+  camera_id: string;
+  period_start: string;
+  period_end: string;
+  total_checkpoints: number;
+  total_present: number;
+  total_absent: number;
+  absence_details: { captured_at: string; ai_summary: string | null }[];
+  status: "pending_review" | "confirmed" | "dismissed";
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  review_note: string | null;
+  generated_at: string;
+  cctv_cameras?: { nama: string; zona: string | null } | null;
 }
 
 export interface AmenityUsageLog {
