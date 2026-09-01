@@ -216,8 +216,38 @@ export interface InvestorProfile {
   user_id: string;
   nama: string;
   hp: string;
+  bank_nama?: string | null;
+  no_rekening?: string | null;
+  nama_pemilik_rekening?: string | null;
   created_at: string;
   units?: { nomor: string; blok: string };
+}
+
+export interface MyInvestorProfile {
+  nama: string;
+  hp: string;
+  bank_nama: string | null;
+  no_rekening: string | null;
+  nama_pemilik_rekening: string | null;
+}
+
+export interface DividendListRow {
+  id: string;
+  nama: string;
+  hp: string | null;
+  unit_nomor: string | null;
+  bank_nama: string | null;
+  no_rekening: string | null;
+  nama_pemilik_rekening: string | null;
+  jumlah: number;
+  rekening_lengkap: boolean;
+}
+
+export interface DividendList {
+  periode: string;
+  per_investor_amount: number;
+  investor_count: number;
+  investors: DividendListRow[];
 }
 
 export interface StaffMember {

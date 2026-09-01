@@ -36,7 +36,10 @@ export function InvestorShell({
     },
     {
       title: "Lainnya",
-      items: [{ href: "/investor/notifikasi", label: "Notifikasi", icon: "◉", badge: unreadCount }],
+      items: [
+        { href: "/investor/notifikasi", label: "Notifikasi", icon: "◉", badge: unreadCount },
+        { href: "/investor/profil", label: "Profil & Rekening", icon: "🏦" },
+      ],
     },
   ];
 

@@ -31,7 +31,7 @@ export default function AdminInvestorsPage() {
             <table className="w-full text-[11.5px] min-w-[500px]">
               <thead>
                 <tr className="bg-base-800">
-                  {["Nama", "Unit", "No. HP", "Terdaftar"].map((h) => (
+                  {["Nama", "Unit", "No. HP", "Rekening Dividen", "Terdaftar"].map((h) => (
                     <th key={h} className="text-left px-3.5 py-2 text-[8.5px] font-semibold tracking-wide uppercase text-ink/30 border-b border-ink/[0.08]">
                       {h}
                     </th>
@@ -44,6 +44,13 @@ export default function AdminInvestorsPage() {
                     <td className="px-3.5 py-2.5 border-b border-ink/[0.05] font-medium text-ink/80">{r.nama}</td>
                     <td className="px-3.5 py-2.5 border-b border-ink/[0.05] text-gold-500">{r.unit_nomor}</td>
                     <td className="px-3.5 py-2.5 border-b border-ink/[0.05] text-ink/70">{r.hp}</td>
+                    <td className="px-3.5 py-2.5 border-b border-ink/[0.05] text-ink/70">
+                      {r.bank_nama && r.no_rekening ? (
+                        `${r.bank_nama} ${r.no_rekening}${r.nama_pemilik_rekening ? ` a.n ${r.nama_pemilik_rekening}` : ""}`
+                      ) : (
+                        <span className="text-ruby-400/70">Belum diisi</span>
+                      )}
+                    </td>
                     <td className="px-3.5 py-2.5 border-b border-ink/[0.05] text-ink/30 text-[10px]">
                       {fmtDate(r.created_at, { day: "2-digit", month: "short", year: "numeric" })}
                     </td>
