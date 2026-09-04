@@ -57,7 +57,7 @@ const REASON_LABELS: Record<string, string> = {
   high_occupancy: "Okupansi tinggi",
   low_occupancy: "Okupansi rendah",
   recent_pickup: "Pickup baru-baru ini",
-  weekend: "Akhir pekan (+Rp100.000)",
+  weekend: "Malam Jumat & Sabtu (+Rp100.000)",
   high_season: "High season",
   competitor_market_rate: "Menyesuaikan harga kompetitor sekitar",
 };

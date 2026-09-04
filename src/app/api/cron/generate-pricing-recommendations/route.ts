@@ -33,7 +33,8 @@ export const maxDuration = 30;
  * villa_pricing_settings before anything else is applied.
  *
  * On top of that (owner request 2026-09-04):
- *   - Weekend (Sat/Sun): flat +Rp100.000 per room type ("weekend").
+ *   - Weekend (Fri/Sat night, i.e. "malam Jumat & Sabtu"): flat
+ *     +Rp100.000 per room type ("weekend").
  *   - High season (target_date falls inside an active
  *     villa_high_season_periods row): rate is floored at
  *     current_rate * (1 + period.suggested_adjustment_pct)
@@ -60,8 +61,10 @@ function isWeekendJakarta(dateStr: string): boolean {
   // dateStr is already a Jakarta-local calendar date (YYYY-MM-DD from
   // fmtDateJakarta/addDays), so a plain UTC-midnight parse gives the
   // correct day-of-week without a second timezone conversion.
+  // "Weekend" here means the malam Jumat & Sabtu (Fri/Sat night)
+  // check-in dates, per owner's explicit instruction -- not Sat/Sun.
   const dow = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
-  return dow === 0 || dow === 6; // Sabtu/Minggu
+  return dow === 5 || dow === 6; // Jumat/Sabtu
 }
 
 function fmtDateJakarta(d: Date): string {
