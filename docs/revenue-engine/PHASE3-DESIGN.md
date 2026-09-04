@@ -1,12 +1,15 @@
 # Phase 3 — Room Type / Channel / Rate Plan / Rate History
 
-Status: **schema designed and written, NOT applied.**
+Status: **APPLIED to production 2026-09-04 (owner-approved)**, with one
+follow-up still pending (see "Pending follow-up" below).
 `supabase/migrations/20260904000003_room_types_channels_rate_plans.sql`.
 
 ## What it adds
 
-- `villa_room_types` — empty catalog table. No rows seeded (see "Open
-  question" below).
+- `villa_room_types` — seeded with 2 rows per explicit owner instruction
+  (2026-09-04): `standard` ("Standard") and `sawah_view` ("Sawah View" —
+  rice-field view, **+Rp100,000/hari** over Standard). These are the
+  owner's own category names and premium amount, not invented.
 - `units.room_type_id` — new nullable FK, no backfill.
 - `villa_channels` — seeded with exactly the two values already found in
   live `bookings.sumber` (`cloudbeds`, `walk-in`) — nothing invented.
@@ -21,24 +24,26 @@ Status: **schema designed and written, NOT applied.**
   whatever application code writes rates later (Phase 6's Revenue
   Engine, or a manual admin UI).
 
-## Open question — blocks meaningfully populating this schema
+## Pending follow-up — one piece of data still needed
 
-**Room types**: Loonars' 13 units have no room-type dimension today —
-confirmed directly from `units`' actual columns (`nomor`, `blok`, status,
-owner fields, `tarif_harian`/`tarif_bulanan` — no category/type column
-at all). Per the gap audit's §15 ("Requirements requiring business-owner
-decisions"), this needs an explicit answer before it's useful:
+**Room types are now decided** (2 categories, per owner instruction
+2026-09-04): Standard and Sawah View (+Rp100,000/hari). What's still
+missing: **which 3 of the 13 units** (`A1`–`A5`, `B1`–`B4`, `C1`–`C4`)
+are the Sawah View ones. Until that's named, `units.room_type_id` stays
+NULL for all 13 units and no unit's `tarif_harian` has been changed —
+**this program will not guess which units have the view**, per the
+mandate's own rule against inventing business data.
 
-- Does the owner want to define **real room types** now (e.g. "Deluxe",
-  "Standard", grouped by block or by actual amenity/size differences)?
-- Or should Phase 3 proceed with a **single placeholder room type**
-  covering all 13 units, revisited later once real categories are
-  decided?
-
-Nothing in this migration forces either answer — `room_type_id` is
-nullable and every unit currently has none. **This program will not
-guess at real room-type names or groupings**, per the mandate's own rule
-against inventing business data.
+Once named, the follow-up migration does exactly two things, both
+trivial and fully reversible:
+1. `UPDATE units SET room_type_id = (sawah_view id) WHERE nomor IN (...)`
+   and the rest default to `standard`.
+2. `UPDATE units SET tarif_harian = tarif_harian + 100000 WHERE nomor IN
+   (...)` — a real, guest-facing price change (it feeds directly into
+   `POST /bookings`' server-side price computation, live since v26), so
+   this step specifically should be double-confirmed with the owner
+   right before running, not bundled silently into the room-type
+   assignment.
 
 **Channel granularity**: the current Cloudbeds webhook payload (per
 `src/app/api/webhooks/cloudbeds/route.ts`) does not capture a specific

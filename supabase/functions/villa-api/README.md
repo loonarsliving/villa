@@ -15,10 +15,20 @@ It is **not automatically deployed** by any build step in this repository —
 |---|---|
 | Supabase project | `svcmybsziaelwwdrnzcv` (`loonars-private-living`, shared with Mkhsistem) |
 | Function slug | `villa-api` |
-| Deployed version at capture time | **v25** (`verify_jwt: false`) |
+| Deployed version at capture time | **v26** (`verify_jwt: false`) |
 | Captured via | Supabase MCP `get_edge_function` (read-only) |
 | Captured on | 2026-09-04, this session |
-| `ezbr_sha256` at capture | `1b77d7b6ccf05da60521c9256d49900f1f1331ca89447ef3a6558ef87c395309` |
+| `ezbr_sha256` at capture | `c1184511bf252121de5b4a1efda4a22effd698ec1343b07a0d0d3f71c2722895` |
+
+**v26 deployed 2026-09-04** (owner-approved): atomic check-in/checkout via
+new RPCs, server-side pricing for new walk-in/direct bookings,
+constant-time auth signature comparison, live role/active-state
+revalidation, date validation, minimum 8-char admin-set passwords. Full
+change-by-change rationale in `phase1-draft/CHANGES.md` (kept as the
+historical record of what changed and why — the code itself has been
+merged into this file). Deployed source was re-fetched and diffed
+against the reviewed draft after deploy; they matched exactly
+(`ezbr_sha256` above).
 
 This function is **not** deployed from a GitHub Actions workflow or any CI
 in this repo. Historically, schema/function changes have been applied

@@ -159,11 +159,28 @@ No values are recorded here or anywhere in this repository.
   against production: **0 conflicts found** (see commit message / session
   record). No code deployed, no schema changed, no secrets touched.
 - **2026-09-04** — Phase 1 design + draft code complete (see
-  `PHASE1-DESIGN.md`): booking-exclusion-constraint migration, atomic
-  check-in/checkout RPC migration, and a full proposed `villa-api` v26
-  draft (server-side pricing for new bookings, date validation,
-  constant-time auth comparison, live role/active-state revalidation,
-  minimum password length for admin-created accounts). **All written,
-  reviewed for internal consistency, and committed — none applied or
-  deployed.** `computeReport()` and every frozen financial constant in
-  §2 above are untouched by this draft.
+  `PHASE1-DESIGN.md`).
+- **2026-09-04** — Owner approved applying Phase 1/3/4 to production and
+  named the Phase 3 room-type decision (2 categories: Standard, Sawah
+  View +Rp100,000/hari). Executed same day:
+  - Applied `20260904000001_booking_exclusion_constraint.sql`,
+    `20260904000002_atomic_checkin_checkout_rpc.sql`,
+    `20260904000003_room_types_channels_rate_plans.sql` (room types
+    seeded per owner instruction; unit assignment still pending — see
+    `PHASE3-DESIGN.md`), `20260904000004_daily_inventory_snapshot.sql`.
+  - Deployed `villa-api` v26 (server-side pricing for new bookings, date
+    validation, constant-time auth comparison, live role/active-state
+    revalidation, minimum password length for admin-created accounts).
+    Re-fetched and diff-verified against the reviewed source — exact
+    match. `computeReport()` and every frozen financial constant in §2
+    above are untouched.
+  - Not verified: a live functional smoke test (network egress to
+    Supabase blocked from this session) — recommend the owner/staff
+    confirm one real login + check-in before relying on this fully.
+  - Daily-inventory-snapshot cron route (Phase 4) is written but not
+    yet live — it ships in this repo's Next.js code, reaches production
+    only once this branch merges to `main`.
+  - Still pending: which 3 of the 13 units are Sawah View (needed to
+    finish Phase 3's unit assignment + the tarif_harian premium), and
+    the §16 Cloudbeds API capability confirmation (unrelated to this
+    round, tracked separately).

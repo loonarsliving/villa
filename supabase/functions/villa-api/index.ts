@@ -1,5 +1,6 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { timingSafeEqual } from 'node:crypto';
 
 const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
@@ -33,22 +34,34 @@ async function makeToken(payload){
   const sig = await hmac(body);
   return `${body}.${sig}`;
 }
+
 async function verifyToken(token){
   const parts = token.split('.');
   if(parts.length!==2) return null;
   const [body,sig] = parts;
   const expected = await hmac(body);
-  if(expected!==sig) return null;
+  const expectedBytes = new TextEncoder().encode(expected);
+  const sigBytes = new TextEncoder().encode(sig);
+  if(expectedBytes.length !== sigBytes.length) return null;
+  if(!timingSafeEqual(expectedBytes, sigBytes)) return null;
   try {
     const payload = JSON.parse(new TextDecoder().decode(b64urlToBytes(body)));
     if(!payload.exp || payload.exp < Date.now()) return null;
     return payload;
   } catch { return null; }
 }
+
 async function requireAuth(req){
   const token = req.headers.get('x-villa-token');
   if(!token) return null;
-  return await verifyToken(token);
+  const payload = await verifyToken(token);
+  if(!payload) return null;
+  const {data:u} = await supabase.from('villa_users')
+    .select('role,is_active,unit_id,unit_nomor')
+    .eq('id', payload.uid)
+    .maybeSingle();
+  if(!u || !u.is_active) return null;
+  return {...payload, role:u.role, unit_id:u.unit_id, unit_nomor:u.unit_nomor};
 }
 function forbidden(){ return err('Forbidden untuk role ini',403); }
 
@@ -127,6 +140,13 @@ function findConflicts(bookings, checkin, checkout){
   return map;
 }
 
+function isValidDateStr(s){
+  if(typeof s !== 'string') return false;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(s + 'T00:00:00Z');
+  return !Number.isNaN(d.getTime());
+}
+
 async function computeWalkinIncome(periode){
   const [y,mo] = periode.split('-').map(Number);
   const start = new Date(Date.UTC(y, mo-1, 1)).toISOString();
@@ -143,6 +163,8 @@ async function countActiveInvestors(){
   return count ?? 0;
 }
 
+// FROZEN per docs/revenue-engine/PHASE0-BASELINE.md §2. Do not modify
+// without a separate, explicit, owner-approved change.
 async function computeReport(unit_id, periode){
   let q=supabase.from('transactions').select('tipe,jumlah').eq('periode_bulan',periode).eq('tipe','income');
   if(unit_id) q=q.eq('unit_id',unit_id);
@@ -410,6 +432,7 @@ Deno.serve(async (req)=>{
     if(b.satuan!==undefined) patch.satuan = b.satuan;
     if(b.stock_minimum!==undefined) patch.stock_minimum = Number(b.stock_minimum);
     if(b.restock_qty){
+      if(Number(b.restock_qty) <= 0) return err('restock_qty harus lebih dari 0');
       const {data:current} = await supabase.from('amenities').select('stock').eq('id',b.id).single();
       patch.stock = (current?.stock ?? 0) + Number(b.restock_qty);
     }
@@ -486,6 +509,7 @@ Deno.serve(async (req)=>{
   if(path==='/admin/users' && m==='POST'){
     const b = await req.json();
     if(!b.nama||!b.email||!b.password||!b.role) return err('nama, email, password, role wajib diisi');
+    if(String(b.password).length < 8) return err('Password minimal 8 karakter');
     const {data,error} = await supabase.rpc('villa_create_user',{
       p_nama:b.nama, p_email:b.email, p_password:b.password, p_role:b.role,
       p_unit_id:b.unit_id??null, p_unit_nomor:b.unit_nomor??null, p_hp:b.hp??null,
@@ -501,6 +525,7 @@ Deno.serve(async (req)=>{
     const b = await req.json();
     if(!b.id) return err('id wajib diisi');
     if(b.new_password){
+      if(String(b.new_password).length < 8) return err('Password minimal 8 karakter');
       const {error} = await supabase.rpc('villa_set_password',{p_user_id:b.id, p_password:b.new_password});
       if(error) return err(error.message);
       await supabase.from('villa_users').update({must_change_password:b.force_password_change!==false}).eq('id',b.id);
@@ -741,6 +766,8 @@ Deno.serve(async (req)=>{
     const checkin = url.searchParams.get('checkin');
     const checkout = url.searchParams.get('checkout');
     if(!checkin) return err('checkin wajib diisi');
+    if(!isValidDateStr(checkin)) return err('checkin tidak valid');
+    if(checkout && !isValidDateStr(checkout)) return err('checkout tidak valid');
     const {data:units} = await supabase.from('units').select('id,nomor,blok,status');
     const {data:bookings} = await supabase.from('bookings').select('unit_id,tgl_checkin,tgl_checkout,guest_nama').in('status',['terjadwal','checkin']);
     const conflicts = findConflicts(bookings??[], checkin, checkout||null);
@@ -755,6 +782,9 @@ Deno.serve(async (req)=>{
     if(!isStaff) return forbidden();
     const b=await req.json();
     if(!b.unit_id || !b.tgl_checkin) return err('unit_id dan tgl_checkin wajib diisi');
+    if(!isValidDateStr(b.tgl_checkin)) return err('tgl_checkin tidak valid');
+    if(b.tgl_checkout != null && !isValidDateStr(b.tgl_checkout)) return err('tgl_checkout tidak valid');
+    if(!['harian','bulanan'].includes(b.tipe)) return err('tipe tidak valid (harus harian atau bulanan)');
 
     const {data:existing} = await supabase.from('bookings')
       .select('id,guest_nama,tgl_checkin,tgl_checkout')
@@ -764,6 +794,21 @@ Deno.serve(async (req)=>{
     if(conflict){
       return err(`Unit ${b.unit_nomor??''} sudah dibooking ${conflict.guest_nama} (${conflict.tgl_checkin}${conflict.tgl_checkout?' s/d '+conflict.tgl_checkout:' — belum ada tanggal keluar'}) -- bentrok dengan tanggal yang dipilih`, 409);
     }
+
+    const {data:unit, error:unitErr} = await supabase.from('units')
+      .select('tarif_harian,tarif_bulanan').eq('id', b.unit_id).single();
+    if(unitErr || !unit) return err('Unit tidak ditemukan', 404);
+
+    let computedTarif;
+    if(b.tipe === 'bulanan'){
+      computedTarif = Number(unit.tarif_bulanan ?? 0);
+    } else {
+      const nights = b.tgl_checkout
+        ? Math.max(1, Math.round((new Date(b.tgl_checkout).getTime() - new Date(b.tgl_checkin).getTime()) / 86400000))
+        : 1;
+      computedTarif = Number(unit.tarif_harian ?? 0) * nights;
+    }
+    if(computedTarif <= 0) return err('Tarif unit belum diatur — hubungi admin', 409);
 
     let guest_id=b.guest_id??null;
     if(!guest_id && b.guest_nama){
@@ -775,9 +820,12 @@ Deno.serve(async (req)=>{
       tipe:b.tipe, sumber:b.sumber??'walk-in', tgl_checkin:b.tgl_checkin,
       tgl_checkout:b.tgl_checkout??null, durasi_malam:b.durasi_malam??null,
       checkin_time:b.checkin_time??'14:00:00',
-      tarif:b.tarif, total_bayar:b.total_bayar??null, status:'terjadwal',
+      tarif:computedTarif, total_bayar:computedTarif, status:'terjadwal',
     }).select().single();
-    if(error) return err(error.message);
+    if(error){
+      if(error.code === '23P01') return err(`Unit ${b.unit_nomor??''} sudah dibooking untuk tanggal yang bentrok`, 409);
+      return err(error.message);
+    }
     await notif(b.unit_id,'all','booking',`Booking baru — Unit ${b.unit_nomor}`,`${b.guest_nama} · ${b.tipe} · ${b.sumber}`,data.id);
     return json(data,201);
   }
@@ -794,44 +842,56 @@ Deno.serve(async (req)=>{
   if(path==='/checkin' && m==='POST'){
     if(!isStaff) return forbidden();
     const b=await req.json();
-    const now=new Date().toISOString();
-    const pin = String(Math.floor(1000+Math.random()*9000));
-    await supabase.from('bookings').update({
-      status:'checkin', checkin_at:now, checkin_by:b.checkin_by, pin_kode:pin,
-      ktp_photo_path: b.ktp_photo_path ?? null,
-      signature_data_url: b.signature_data_url ?? null,
-    }).eq('id',b.booking_id);
-    await supabase.from('units').update({status:'occupied'}).eq('id',b.unit_id);
-    await supabase.from('transactions').insert({
-      unit_id:b.unit_id, booking_id:b.booking_id, tipe:'income', kategori:b.tipe,
-      deskripsi:`Check-in ${b.guest_nama} — Unit ${b.unit_nomor}`,
-      jumlah:b.total_bayar, periode_bulan:new Date().toISOString().slice(0,7), dicatat_oleh:b.checkin_by,
+    if(!b.booking_id) return err('booking_id wajib diisi');
+
+    const {data, error} = await supabase.rpc('villa_commit_checkin', {
+      p_booking_id: b.booking_id,
+      p_checkin_by: b.checkin_by ?? session.email ?? session.uid,
+      p_ktp_photo_path: b.ktp_photo_path ?? null,
+      p_signature_data_url: b.signature_data_url ?? null,
     });
-    await notif(b.unit_id,'all','checkin',`Check-in — Unit ${b.unit_nomor}`,`${b.guest_nama} · ${b.tipe}`,b.booking_id);
+    if(error){
+      const msg = error.message ?? '';
+      if(msg.includes('already_checked_in')) return err('Booking ini sudah check-in', 409);
+      if(msg.includes('booking_not_found')) return err('Booking tidak ditemukan', 404);
+      if(msg.includes('invalid_booking_status')) return err('Booking tidak dalam status yang bisa di-checkin', 409);
+      if(msg.includes('booking_missing_total_bayar')) return err('Booking ini belum punya nominal pembayaran — tidak bisa check-in', 409);
+      return err(msg, 500);
+    }
+
+    await notif(data.unit_id,'all','checkin',`Check-in — Unit ${data.unit_nomor}`,`${data.guest_nama}`,b.booking_id);
 
     let guestPhone = b.guest_hp ?? null;
-    if(!guestPhone){
-      const {data:bk} = await supabase.from('bookings').select('guest_id').eq('id',b.booking_id).single();
-      if(bk?.guest_id){
-        const {data:g} = await supabase.from('guests').select('hp').eq('id',bk.guest_id).single();
-        guestPhone = g?.hp ?? null;
-      }
+    if(!guestPhone && data.guest_id){
+      const {data:g} = await supabase.from('guests').select('hp').eq('id',data.guest_id).single();
+      guestPhone = g?.hp ?? null;
     }
     await sendWa(guestPhone,
-      `Halo ${b.guest_nama}, selamat datang di Loonars Private Living Unit ${b.unit_nomor}!\nKode PIN pintu Anda: *${pin}*\nMohon jaga kerahasiaan kode ini selama menginap. Terima kasih.`,
-      {booking_id:b.booking_id, unit_id:b.unit_id, template_type:'pin_checkin'});
+      `Halo ${data.guest_nama}, selamat datang di Loonars Private Living Unit ${data.unit_nomor}!\nKode PIN pintu Anda: *${data.pin_kode}*\nMohon jaga kerahasiaan kode ini selama menginap. Terima kasih.`,
+      {booking_id:b.booking_id, unit_id:data.unit_id, template_type:'pin_checkin'});
 
-    return json({success:true, pin_kode:pin});
+    return json({success:true, pin_kode:data.pin_kode});
   }
 
   if(path==='/checkout' && m==='POST'){
     if(!isStaff) return forbidden();
     const b=await req.json();
-    const now=new Date().toISOString();
-    await supabase.from('bookings').update({status:'checkout',checkout_at:now,checkout_by:b.checkout_by,catatan:b.kondisi}).eq('id',b.booking_id);
-    await supabase.from('units').update({status:'dirty'}).eq('id',b.unit_id);
-    await supabase.from('housekeeping').insert({unit_id:b.unit_id,unit_nomor:b.unit_nomor,tugas:`Bersihkan unit setelah checkout ${b.guest_nama}`,tgl:new Date().toISOString().split('T')[0]});
-    await notif(b.unit_id,'all','checkout',`Checkout — Unit ${b.unit_nomor}`,`${b.guest_nama} sudah checkout. Housekeeping dijadwalkan.`,b.booking_id);
+    if(!b.booking_id) return err('booking_id wajib diisi');
+
+    const {data, error} = await supabase.rpc('villa_commit_checkout', {
+      p_booking_id: b.booking_id,
+      p_checkout_by: b.checkout_by ?? session.email ?? session.uid,
+      p_kondisi: b.kondisi ?? null,
+    });
+    if(error){
+      const msg = error.message ?? '';
+      if(msg.includes('already_checked_out')) return err('Booking ini sudah checkout', 409);
+      if(msg.includes('booking_not_found')) return err('Booking tidak ditemukan', 404);
+      if(msg.includes('invalid_booking_status')) return err('Booking belum check-in, tidak bisa checkout', 409);
+      return err(msg, 500);
+    }
+
+    await notif(data.unit_id,'all','checkout',`Checkout — Unit ${data.unit_nomor}`,`${data.guest_nama} sudah checkout. Housekeeping dijadwalkan.`,b.booking_id);
     return json({success:true});
   }
 

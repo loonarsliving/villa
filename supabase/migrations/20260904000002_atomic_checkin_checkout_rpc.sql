@@ -1,7 +1,8 @@
 -- Phase 1 (§6.2/§6.3 of the revenue-engine program): atomic check-in and
 -- check-out.
 --
--- NOT YET APPLIED to the live project. Written for review. These two
+-- APPLIED 2026-09-04 (owner-approved), and villa-api v26 (deployed same
+-- day) now calls both RPCs from /checkin and /checkout. These two
 -- functions replace villa-api's current sequential, unchecked multi-table
 -- writes for /checkin and /checkout with a single-transaction Postgres
 -- function: either every write succeeds, or none do, and a booking can

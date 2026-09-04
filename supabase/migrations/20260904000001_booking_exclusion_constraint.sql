@@ -1,13 +1,11 @@
 -- Phase 1 (§6.1 of the revenue-engine program): DB-level double-booking
 -- protection for `bookings`.
 --
--- NOT YET APPLIED to the live project. This file is written for review.
--- Apply only after explicit owner sign-off, via:
---   Supabase MCP apply_migration (project svcmybsziaelwwdrnzcv)
--- immediately preceded by a fresh run of the read-only conflict scan in
--- docs/revenue-engine/PHASE0-BASELINE.md's changelog (0 conflicts found
--- at 2026-09-04; re-check before applying if time has passed and real
--- booking volume exists by then).
+-- APPLIED 2026-09-04 (owner-approved). Re-ran the read-only conflict
+-- scan immediately before applying: 0 overlapping active bookings found
+-- both times (Phase 0 baseline check and this immediate pre-apply
+-- check), so the constraint was added with no conflicting data to
+-- resolve.
 --
 -- Schema assumptions verified directly against the live table (read-only
 -- information_schema query, 2026-09-04): bookings.unit_id is uuid NOT

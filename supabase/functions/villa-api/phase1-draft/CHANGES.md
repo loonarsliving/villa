@@ -1,8 +1,13 @@
-# Phase 1 draft changes to `villa-api` (v25 → proposed v26)
+# Phase 1 changes to `villa-api` (v25 → v26)
 
-**Status: DRAFT. Not deployed.** `supabase/functions/villa-api/index.ts`
-still reflects the live v25 source — it is not touched by this draft.
-Deploying this requires: (1) the two migrations in
+**Status: DEPLOYED 2026-09-04 (owner-approved).** This is now the historical
+record of what changed and why — the code itself has been merged into
+`supabase/functions/villa-api/index.ts` (the live snapshot), and the
+`index.ts` draft that used to live in this directory has been removed to
+avoid two copies drifting apart. Both migrations below were applied
+first, then this function was deployed as v26 and verified via
+`get_edge_function` to match exactly. What follows was written before
+deploy — kept as-is: (1) the two migrations in
 `supabase/migrations/2026090400000{1,2}_*.sql` applied first, (2) explicit
 owner sign-off, (3) re-running `npm test`/`tsc` equivalents for this
 function (see "Testing" below), (4) deploy via `deploy_edge_function`,

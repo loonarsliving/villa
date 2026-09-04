@@ -1,11 +1,16 @@
 -- Phase 3 (revenue-engine program): normalized revenue data model --
 -- room types, channels, rate plans, daily rates, rate history.
 --
--- NOT YET APPLIED. Written for review. Strictly additive: no existing
--- column is dropped, renamed, or has its meaning changed. `units.sumber`
--- semantics on `bookings` are untouched -- `bookings.sumber` (the
--- existing free-text column) is preserved exactly as-is; `channel_id`
--- is a new, nullable, parallel column.
+-- APPLIED 2026-09-04 (owner-approved) with two room types seeded per
+-- explicit owner instruction: 'standard' and 'sawah_view' (+Rp100,000/
+-- hari premium for the 3 units with a rice-field view). Unit assignment
+-- (units.room_type_id) and the Sawah View units' tarif_harian bump are
+-- a FOLLOW-UP migration, pending the owner naming which 3 of the 13
+-- units those are -- not guessed, see PHASE3-DESIGN.md. Strictly
+-- additive: no existing column is dropped, renamed, or has its meaning
+-- changed. `bookings.sumber` (the existing free-text column) is
+-- preserved exactly as-is; `channel_id` is a new, nullable, parallel
+-- column.
 
 -- ============================================================
 -- 1. Room types
@@ -21,15 +26,25 @@ create table if not exists public.villa_room_types (
   updated_at timestamptz not null default now()
 );
 
+-- Seeded per explicit owner instruction (2026-09-04): two room types --
+-- Standard, and Sawah View (rice-field view) at +Rp100,000/hari over
+-- Standard. Nothing else was invented -- the owner named these two
+-- categories and the premium amount directly.
+insert into public.villa_room_types (code, name, description)
+values
+  ('standard', 'Standard', 'Unit villa standar, tanpa view sawah.'),
+  ('sawah_view', 'Sawah View', 'Unit villa dengan pemandangan sawah -- premium +Rp100.000/hari dari tarif standard.')
+on conflict (code) do nothing;
+
 alter table public.units
   add column if not exists room_type_id uuid references public.villa_room_types(id);
 
--- No backfill of units.room_type_id is performed here. Loonars' 13
--- existing units have no room-type concept today (confirmed: `units`
--- has no category/type column, only nomor/blok/tarif fields) -- inventing
--- a mapping would be fabricating business data. This column stays NULL
--- until the owner defines real room types (see PHASE3-DESIGN.md's open
--- question) and a follow-up migration/admin action assigns each unit.
+-- No backfill of units.room_type_id is performed here. The owner named
+-- the two categories and the premium amount, but not yet WHICH 3 of the
+-- 13 units are Sawah View -- this column stays NULL until that's known
+-- (see PHASE3-DESIGN.md's follow-up section), rather than guessing.
+-- Same reasoning applies to NOT bumping those units' tarif_harian by
+-- +Rp100,000 yet.
 
 -- ============================================================
 -- 2. Channels

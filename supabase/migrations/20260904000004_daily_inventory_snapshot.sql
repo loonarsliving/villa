@@ -4,10 +4,11 @@
 -- collecting as early as possible, independent of when the rest of
 -- Phase 3/4's schema work lands.
 --
--- NOT YET APPLIED. One row per (snapshot_date, unit_id), append-only in
--- practice (the unique constraint makes a same-day re-run of the cron an
--- idempotent upsert, not a duplicate -- see the corresponding cron route
--- in src/app/api/cron/daily-inventory-snapshot/route.ts).
+-- APPLIED 2026-09-04 (owner-approved). One row per (snapshot_date,
+-- unit_id), append-only in practice (the unique constraint makes a
+-- same-day re-run of the cron an idempotent upsert, not a duplicate --
+-- see the corresponding cron route in
+-- src/app/api/cron/daily-inventory-snapshot/route.ts).
 
 create table if not exists public.villa_daily_inventory_snapshot (
   id uuid primary key default gen_random_uuid(),

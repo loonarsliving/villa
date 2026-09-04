@@ -1,11 +1,15 @@
 # Phase 4 (partial) — Daily Inventory Snapshot
 
-Status: **implemented directly** (Next.js cron route + migration, same
-"this branch doesn't deploy to production by itself" reasoning as Phase
-2). This is the one item the program explicitly calls out as "harus
-dimulai sedini mungkin" (§7 / §27) since the data clock cannot be
-backfilled — implemented now rather than waiting for the rest of Phase
-3/4's schema and booking-normalization work.
+Status: **migration APPLIED to production 2026-09-04** (table exists
+live now); **cron route not yet live** — it ships in this repo's Next.js
+code, which only reaches production once this branch merges to `main`
+(Vercel deploys from `main` only, per this repo's existing flow). So the
+table is ready to receive rows, but nothing writes to it until merge.
+This is the one item the program explicitly calls out as "harus dimulai
+sedini mungkin" (§7 / §27) since the data clock cannot be backfilled —
+**recommend merging this branch (or at least this cron route) to `main`
+soon** so snapshot collection actually starts, rather than waiting for
+every other phase to also be ready.
 
 ## What's included
 

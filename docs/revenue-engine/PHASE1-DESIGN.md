@@ -1,22 +1,20 @@
-# Phase 1 — Security + Data Integrity (design, drafted; NOT applied to production)
+# Phase 1 — Security + Data Integrity
 
-Status: **design + draft code complete, written for review. Nothing in
-this phase has been applied to the live database or deployed to
-`villa-api`.** Applying/deploying requires explicit owner confirmation
-per the program's production-safety rules — this phase touches booking
-creation, check-in, and check-out, the paths that serve real guests.
+Status: **APPLIED / DEPLOYED to production 2026-09-04 (owner-approved),
+except §6.7 (RLS).** Migrations applied, `villa-api` redeployed as v26,
+deployed source re-fetched and diff-verified to match exactly.
 
 ## What's in this phase
 
 | Item | File(s) | Status |
 |---|---|---|
-| §6.1 Double-booking DB protection | `supabase/migrations/20260904000001_booking_exclusion_constraint.sql` | Written, not applied |
-| §6.1 Read-only conflict scan (prerequisite) | — (query run directly, see PHASE0 changelog) | **Done**: 0 conflicts found |
-| §6.2/§6.3 Atomic check-in/checkout RPCs | `supabase/migrations/20260904000002_atomic_checkin_checkout_rpc.sql` | Written, not applied |
-| §6.4 Server-side pricing for new bookings | `supabase/functions/villa-api/phase1-draft/index.ts` (`POST /bookings`) | Drafted, not deployed |
-| §6.5 Date/enum validation | Same file, `isValidDateStr()` + enum checks | Drafted, not deployed |
-| §6.6 Constant-time auth comparison | Same file, `verifyToken()` | Drafted, not deployed |
-| §6.6 Live role/active-state revalidation | Same file, `requireAuth()` | Drafted, not deployed |
+| §6.1 Double-booking DB protection | `supabase/migrations/20260904000001_booking_exclusion_constraint.sql` | **Applied** |
+| §6.1 Read-only conflict scan (prerequisite) | — (query run twice: Phase 0 baseline, and immediately pre-apply) | **Done**: 0 conflicts found both times |
+| §6.2/§6.3 Atomic check-in/checkout RPCs | `supabase/migrations/20260904000002_atomic_checkin_checkout_rpc.sql` | **Applied** |
+| §6.4 Server-side pricing for new bookings | `supabase/functions/villa-api/index.ts` (`POST /bookings`) | **Deployed** (v26) |
+| §6.5 Date/enum validation | Same file, `isValidDateStr()` + enum checks | **Deployed** (v26) |
+| §6.6 Constant-time auth comparison | Same file, `verifyToken()` | **Deployed** (v26) |
+| §6.6 Live role/active-state revalidation | Same file, `requireAuth()` | **Deployed** (v26) |
 | §6.7 RLS on 4 disabled villa tables | — | **Not started** — see "RLS" below |
 
 Every change is documented function-by-function in
@@ -51,24 +49,33 @@ tables). This is real, separate design work — proposed as the tail end
 of Phase 1 once the migrations above are reviewed, not bundled into this
 first pass.
 
-## Deployment sequencing (once approved)
+## Deployment sequencing — completed 2026-09-04
 
-1. Apply `20260904000001_booking_exclusion_constraint.sql` — re-run the
-   read-only conflict scan immediately before, since time will have
-   passed since the 2026-09-04 baseline.
-2. Apply `20260904000002_atomic_checkin_checkout_rpc.sql`.
-3. Verify both via `list_migrations` / a direct `select` against
-   `pg_constraint`/`pg_proc` — confirm they're live before touching
-   `villa-api`.
-4. Deploy `supabase/functions/villa-api/phase1-draft/index.ts` as v26 via
-   `deploy_edge_function`.
-5. Re-fetch via `get_edge_function`, diff against the reviewed draft,
-   confirm they match exactly.
-6. Run the manual verification checklist in `phase1-draft/CHANGES.md`.
-7. Replace `supabase/functions/villa-api/index.ts` (the "deployed
-   snapshot") with the now-live v26 source, update its README's "current
-   version" line, commit.
-8. Update `PHASE0-BASELINE.md`'s changelog.
+1. ✅ Re-ran the read-only conflict scan immediately before applying — 0
+   conflicts (same as the Phase 0 baseline check).
+2. ✅ Applied `20260904000001_booking_exclusion_constraint.sql`.
+3. ✅ Applied `20260904000002_atomic_checkin_checkout_rpc.sql`.
+4. ✅ Verified both via `list_migrations`.
+5. ✅ Deployed `villa-api` as v26 via `deploy_edge_function`
+   (`verify_jwt: false` preserved — confirmed explicitly, since the
+   default is `true` and would have broken every request had it been
+   left unset).
+6. ✅ Re-fetched via `get_edge_function`, diffed against the reviewed
+   source — matched exactly (`ezbr_sha256`
+   `c1184511bf252121de5b4a1efda4a22effd698ec1343b07a0d0d3f71c2722895`).
+7. ⚠️ **Not done**: a live functional smoke test (e.g. an actual
+   `/login` call) — this session's network egress to
+   `*.supabase.co` is blocked by the environment's proxy policy, so no
+   HTTP call could be made from here. The deploy is verified
+   structurally (source matches, function is ACTIVE, config preserved)
+   but **not yet verified behaviorally**. Recommend the owner/staff do
+   one real login + one real check-in on a test booking before treating
+   this as fully confirmed working.
+8. ✅ Replaced `supabase/functions/villa-api/index.ts` with the live v26
+   source; updated its README; `phase1-draft/index.ts` removed
+   (superseded), `phase1-draft/CHANGES.md` kept as the historical
+   rationale record.
+9. ✅ Updated `PHASE0-BASELINE.md`'s changelog.
 
 ## Explicitly out of scope for this phase
 
