@@ -158,3 +158,12 @@ No values are recorded here or anywhere in this repository.
   captured and committed. §6.1 read-only double-booking conflict scan run
   against production: **0 conflicts found** (see commit message / session
   record). No code deployed, no schema changed, no secrets touched.
+- **2026-09-04** — Phase 1 design + draft code complete (see
+  `PHASE1-DESIGN.md`): booking-exclusion-constraint migration, atomic
+  check-in/checkout RPC migration, and a full proposed `villa-api` v26
+  draft (server-side pricing for new bookings, date validation,
+  constant-time auth comparison, live role/active-state revalidation,
+  minimum password length for admin-created accounts). **All written,
+  reviewed for internal consistency, and committed — none applied or
+  deployed.** `computeReport()` and every frozen financial constant in
+  §2 above are untouched by this draft.
