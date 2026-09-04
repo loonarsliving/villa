@@ -93,3 +93,48 @@ export async function explainPricingRecommendation(input: PricingInsightInput): 
   }
   return typeof data.insight === "string" ? data.insight : "";
 }
+
+export interface CompetitorRateInput {
+  location_label: string;
+  room_type_name: string;
+  room_type_description: string;
+}
+
+export interface CompetitorRateResult {
+  competitor_name: string;
+  competitor_type: "hotel" | "villa" | "other";
+  price: number;
+  source_note: string;
+}
+
+/**
+ * High-season market research (owner request 2026-09-04): asks
+ * Mkhsistem's AI Service to research nearby hotel/villa prices for a
+ * given location using Gemini's Google Search grounding (public,
+ * non-confidential listing pages only), so the deterministic Revenue
+ * Engine can factor real nearby market prices into its high-season
+ * floor. This is explicitly a RESEARCH step, not a decision -- results
+ * land in villa_competitor_rates as source='ai_research' rows for an
+ * admin to review/delete, exactly like a manual entry would; nothing
+ * here writes to villa_rates or changes a live price by itself.
+ */
+export async function researchCompetitorRates(input: CompetitorRateInput): Promise<CompetitorRateResult[]> {
+  const { data: setting, error } = await supabaseAdmin().from("integration_settings").select("value").eq("key", "vercel_bridge").maybeSingle();
+  if (error) throw new Error(`Failed to load vercel_bridge setting: ${error.message}`);
+  const baseUrl = setting?.value?.base_url as string | undefined;
+  const secret = setting?.value?.secret as string | undefined;
+  if (!baseUrl || !secret) {
+    throw new Error("integration_settings.vercel_bridge (base_url/secret) is not configured");
+  }
+
+  const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/api/villa/ai/competitor-pricing`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-internal-secret": secret },
+    body: JSON.stringify(input),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data || data.success !== true) {
+    throw new Error(`AI bridge failed: ${data?.error || res.status}`);
+  }
+  return Array.isArray(data.results) ? data.results : [];
+}

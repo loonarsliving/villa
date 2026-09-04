@@ -57,6 +57,9 @@ const REASON_LABELS: Record<string, string> = {
   high_occupancy: "Okupansi tinggi",
   low_occupancy: "Okupansi rendah",
   recent_pickup: "Pickup baru-baru ini",
+  weekend: "Akhir pekan (+Rp100.000)",
+  high_season: "High season",
+  competitor_market_rate: "Menyesuaikan harga kompetitor sekitar",
 };
 
 const CONFIDENCE_TONE: Record<string, "ok" | "pending" | "danger"> = { high: "ok", medium: "pending", low: "danger" };
@@ -233,8 +236,8 @@ export default function PricingRecommendationsPage() {
               {reviewTarget.rec.villa_room_types?.name} · {fmtDate(reviewTarget.rec.target_date)} —{" "}
               {reviewTarget.action === "approved" ? (
                 <>
-                  tarif akan dicatat sebagai <strong>{fmtCurrency(reviewTarget.rec.recommended_rate)}</strong> untuk tanggal ini di kalender
-                  harga internal (belum otomatis mengubah harga booking langsung — lihat catatan di dokumentasi).
+                  tarif akan dicatat sebagai <strong>{fmtCurrency(reviewTarget.rec.recommended_rate)}</strong> untuk tanggal ini, dan akan langsung
+                  dipakai sebagai harga booking harian mulai sekarang untuk tanggal tersebut (booking yang sudah ada tidak berubah).
                 </>
               ) : (
                 "rekomendasi ini tidak akan diterapkan."

@@ -28,13 +28,41 @@ export const maxDuration = 30;
  *     -> recommend +high_occupancy_adjustment_pct
  *   occupancy(room_type, date) <= low_occupancy_threshold_pct
  *     -> recommend low_occupancy_adjustment_pct (negative)
- *   otherwise -> no recommendation generated (nothing to review)
- * Always clamped to the room type's min_rate/max_rate and to
- * max_daily_movement_pct from villa_pricing_settings.
+ *   otherwise -> no occupancy-based adjustment for this date
+ * The occupancy-based delta is clamped to max_daily_movement_pct from
+ * villa_pricing_settings before anything else is applied.
+ *
+ * On top of that (owner request 2026-09-04):
+ *   - Weekend (Sat/Sun): flat +Rp100.000 per room type ("weekend").
+ *   - High season (target_date falls inside an active
+ *     villa_high_season_periods row): rate is floored at
+ *     current_rate * (1 + period.suggested_adjustment_pct)
+ *     ("high_season"), then if villa_competitor_rates has recent
+ *     (<=90 days) observations for this room type, the rate is floored
+ *     again at the observed competitor average ("competitor_market_rate")
+ *     -- this only ever pulls the recommendation UP toward what nearby
+ *     hotels/villas are actually charging, never down, and only within
+ *     an admin-declared high-season window. Competitor data itself is
+ *     never fetched live here (no model call in this cron, per the
+ *     deterministic-engine mandate above) -- it's whatever an admin
+ *     entered manually or approved via the AI research bridge
+ *     beforehand (/api/admin/competitor-rates/research).
+ * Every path (occupancy, weekend, high season) is still clamped to the
+ * room type's min_rate/max_rate at the end.
  */
 
 const JAKARTA_TZ = "Asia/Jakarta";
 const WINDOW_DAYS = 14;
+const WEEKEND_SURCHARGE = 100000;
+const COMPETITOR_LOOKBACK_DAYS = 90;
+
+function isWeekendJakarta(dateStr: string): boolean {
+  // dateStr is already a Jakarta-local calendar date (YYYY-MM-DD from
+  // fmtDateJakarta/addDays), so a plain UTC-midnight parse gives the
+  // correct day-of-week without a second timezone conversion.
+  const dow = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
+  return dow === 0 || dow === 6; // Sabtu/Minggu
+}
 
 function fmtDateJakarta(d: Date): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: JAKARTA_TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
@@ -85,6 +113,29 @@ export async function GET(request: Request) {
       .select("unit_id, tgl_checkin, tgl_checkout, status, created_at")
       .neq("status", "batal");
 
+    const toDate = addDays(today, WINDOW_DAYS - 1);
+    const { data: highSeasonPeriods } = await supabase
+      .from("villa_high_season_periods")
+      .select("start_date, end_date, suggested_adjustment_pct")
+      .eq("active", true)
+      .lte("start_date", toDate)
+      .gte("end_date", today);
+
+    const competitorSince = new Date(Date.now() - COMPETITOR_LOOKBACK_DAYS * 86400000).toISOString().slice(0, 10);
+    const { data: competitorRates } = await supabase
+      .from("villa_competitor_rates")
+      .select("room_type_id, price, observed_at")
+      .gte("observed_at", competitorSince);
+
+    function highSeasonPeriodFor(dateStr: string) {
+      return (highSeasonPeriods ?? []).find((p) => p.start_date <= dateStr && p.end_date >= dateStr) ?? null;
+    }
+    function competitorAvgFor(roomTypeId: string): number | null {
+      const rows = (competitorRates ?? []).filter((r) => r.room_type_id === roomTypeId);
+      if (rows.length === 0) return null;
+      return rows.reduce((sum, r) => sum + Number(r.price), 0) / rows.length;
+    }
+
     const totalBookingsObserved = (allBookings ?? []).length;
     const confidence = computeConfidence(totalBookingsObserved);
 
@@ -123,10 +174,8 @@ export async function GET(request: Request) {
         } else if (occupancyPct <= Number(settings.low_occupancy_threshold_pct)) {
           deltaPct = Number(settings.low_occupancy_adjustment_pct);
           reasonCodes.push("low_occupancy");
-        } else {
-          continue; // nothing actionable for this date -- no recommendation row
         }
-        if (pickup3d > 0) reasonCodes.push("recent_pickup");
+        if (pickup3d > 0 && reasonCodes.length > 0) reasonCodes.push("recent_pickup");
 
         const maxMovement = Number(settings.max_daily_movement_pct);
         let clampedDelta = deltaPct;
@@ -137,6 +186,29 @@ export async function GET(request: Request) {
         }
 
         let recommendedRate = Math.round(currentRate * (1 + clampedDelta));
+
+        if (isWeekendJakarta(targetDate)) {
+          recommendedRate += WEEKEND_SURCHARGE;
+          reasonCodes.push("weekend");
+        }
+
+        const highSeasonPeriod = highSeasonPeriodFor(targetDate);
+        if (highSeasonPeriod) {
+          const highSeasonFloor = Math.round(currentRate * (1 + Number(highSeasonPeriod.suggested_adjustment_pct)));
+          if (highSeasonFloor > recommendedRate) {
+            recommendedRate = highSeasonFloor;
+          }
+          reasonCodes.push("high_season");
+
+          const competitorAvg = competitorAvgFor(rt.id);
+          if (competitorAvg !== null && Math.round(competitorAvg) > recommendedRate) {
+            recommendedRate = Math.round(competitorAvg);
+            reasonCodes.push("competitor_market_rate");
+          }
+        }
+
+        if (reasonCodes.length === 0) continue; // nothing actionable for this date -- no recommendation row
+
         const minRate = rt.min_rate !== null ? Number(rt.min_rate) : null;
         const maxRate = rt.max_rate !== null ? Number(rt.max_rate) : null;
         if (minRate !== null && recommendedRate < minRate) {

@@ -708,10 +708,12 @@ Deno.serve(async (req)=>{
     }
 
     // approved -> record the rate in villa_rates (our own internal
-    // calendar-rate table, full history via its existing trigger).
-    // Deliberately does NOT touch units.tarif_harian -- POST /bookings
-    // still prices off the flat tarif_harian only, not villa_rates, in
-    // this round (see phase6-draft/CHANGES.md "Scope note").
+    // calendar-rate table, full history via its existing trigger). Since
+    // 2026-09-04, POST /bookings reads villa_rates per-night for
+    // 'harian' bookings (falling back to tarif_harian when no rate is
+    // planned for a given date), so this now DOES change what a guest is
+    // charged for that room_type+date going forward. Never touches
+    // units.tarif_harian itself or any already-created booking.
     const {error: rateErr} = await supabase.from('villa_rates').upsert({
       room_type_id: rec.room_type_id, rate_plan_id: null, date: rec.target_date,
       rate: rec.recommended_rate, source: 'rule_engine', reason: b.review_note ?? null, updated_by: session.email,
@@ -845,7 +847,7 @@ Deno.serve(async (req)=>{
     }
 
     const {data:unit, error:unitErr} = await supabase.from('units')
-      .select('tarif_harian,tarif_bulanan').eq('id', b.unit_id).single();
+      .select('tarif_harian,tarif_bulanan,room_type_id').eq('id', b.unit_id).single();
     if(unitErr || !unit) return err('Unit tidak ditemukan', 404);
 
     let computedTarif;
@@ -855,7 +857,40 @@ Deno.serve(async (req)=>{
       const nights = b.tgl_checkout
         ? Math.max(1, Math.round((new Date(b.tgl_checkout).getTime() - new Date(b.tgl_checkin).getTime()) / 86400000))
         : 1;
-      computedTarif = Number(unit.tarif_harian ?? 0) * nights;
+      const flatTarif = Number(unit.tarif_harian ?? 0);
+
+      // Revenue Engine (owner request 2026-09-04): price each night off
+      // villa_rates when a rate is planned for that room_type+date
+      // (weekend surcharge, high-season, or an approved rule-engine
+      // recommendation), falling back to the flat tarif_harian for any
+      // night with no planned rate. Only applies to 'harian' bookings --
+      // villa_rates is a per-day table, monthly stays keep tarif_bulanan.
+      let plannedByDate = new Map();
+      if(unit.room_type_id){
+        const nightDates = [];
+        for(let i=0;i<nights;i++){
+          const d = new Date(`${b.tgl_checkin}T00:00:00Z`);
+          d.setUTCDate(d.getUTCDate()+i);
+          nightDates.push(d.toISOString().slice(0,10));
+        }
+        const {data:plannedRates} = await supabase.from('villa_rates')
+          .select('date,rate')
+          .eq('room_type_id', unit.room_type_id)
+          .in('date', nightDates);
+        for(const r of (plannedRates??[])) plannedByDate.set(r.date, Number(r.rate));
+      }
+
+      if(plannedByDate.size > 0){
+        computedTarif = 0;
+        for(let i=0;i<nights;i++){
+          const d = new Date(`${b.tgl_checkin}T00:00:00Z`);
+          d.setUTCDate(d.getUTCDate()+i);
+          const dateStr = d.toISOString().slice(0,10);
+          computedTarif += plannedByDate.has(dateStr) ? plannedByDate.get(dateStr) : flatTarif;
+        }
+      } else {
+        computedTarif = flatTarif * nights;
+      }
     }
     if(computedTarif <= 0) return err('Tarif unit belum diatur — hubungi admin', 409);
 

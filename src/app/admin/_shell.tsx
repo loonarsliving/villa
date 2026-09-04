@@ -15,6 +15,7 @@ export function AdminShell({ pageTitle, pageSub, children }: { pageTitle: string
         { href: "/admin/revenue", label: "Revenue", icon: "◇" },
         { href: "/admin/pricing-calendar", label: "Kalender Harga", icon: "▦" },
         { href: "/admin/pricing-recommendations", label: "Rekomendasi Harga", icon: "◆" },
+        { href: "/admin/pricing-competitor", label: "High Season & Kompetitor", icon: "✦" },
         { href: "/admin/occupancy-forecast", label: "Perkiraan Okupansi", icon: "◒" },
       ],
     },
