@@ -63,14 +63,23 @@ first pass.
 6. ✅ Re-fetched via `get_edge_function`, diffed against the reviewed
    source — matched exactly (`ezbr_sha256`
    `c1184511bf252121de5b4a1efda4a22effd698ec1343b07a0d0d3f71c2722895`).
-7. ⚠️ **Not done**: a live functional smoke test (e.g. an actual
-   `/login` call) — this session's network egress to
-   `*.supabase.co` is blocked by the environment's proxy policy, so no
-   HTTP call could be made from here. The deploy is verified
-   structurally (source matches, function is ACTIVE, config preserved)
-   but **not yet verified behaviorally**. Recommend the owner/staff do
-   one real login + one real check-in on a test booking before treating
-   this as fully confirmed working.
+7. ✅ **Functional confirmation found** — this session's own `curl` to
+   `*.supabase.co` is blocked by the environment's proxy policy (403 at
+   the egress gateway, confirmed via `/__agentproxy/status`; not a typo
+   or wrong URL — the same host/path was used successfully all session
+   via the Supabase MCP tools, which go through a different channel).
+   Instead, queried Supabase's own function logs directly
+   (`query_logs`, `function_edge_logs` / `function_logs` sources):
+   `POST /cron/cleaning-calls` returned **HTTP 200** at 08:45:04 and
+   09:00:01 (both after the v26 deploy at ~08:44), and `function_logs`
+   shows clean `booted` → `shutdown` cycles with no boot/crash errors.
+   This is real evidence from a live external caller that v26 is
+   running correctly in production, not just structurally identical to
+   what was reviewed. Still recommend one real staff login + check-in
+   as a full end-to-end check of the newly-changed paths specifically
+   (booking creation pricing, atomic check-in/checkout), since the
+   cron logs only prove the function boots and serves *some* routes
+   correctly, not those specific ones.
 8. ✅ Replaced `supabase/functions/villa-api/index.ts` with the live v26
    source; updated its README; `phase1-draft/index.ts` removed
    (superseded), `phase1-draft/CHANGES.md` kept as the historical

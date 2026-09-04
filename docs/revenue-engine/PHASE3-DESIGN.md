@@ -24,26 +24,19 @@ follow-up still pending (see "Pending follow-up" below).
   whatever application code writes rates later (Phase 6's Revenue
   Engine, or a manual admin UI).
 
-## Pending follow-up — one piece of data still needed
+## Unit assignment — RESOLVED 2026-09-04
 
-**Room types are now decided** (2 categories, per owner instruction
-2026-09-04): Standard and Sawah View (+Rp100,000/hari). What's still
-missing: **which 3 of the 13 units** (`A1`–`A5`, `B1`–`B4`, `C1`–`C4`)
-are the Sawah View ones. Until that's named, `units.room_type_id` stays
-NULL for all 13 units and no unit's `tarif_harian` has been changed —
-**this program will not guess which units have the view**, per the
-mandate's own rule against inventing business data.
+Owner named the 3 Sawah View units directly: **A5, B4, C4**. Applied via
+`20260904000005_assign_sawah_view_units.sql`:
+- A5, B4, C4 → `sawah_view`, `tarif_harian` bumped Rp500,000 → Rp600,000.
+- The remaining 10 units (A1–A4, B1–B3, C1–C3) → `standard`, unchanged
+  at Rp500,000.
 
-Once named, the follow-up migration does exactly two things, both
-trivial and fully reversible:
-1. `UPDATE units SET room_type_id = (sawah_view id) WHERE nomor IN (...)`
-   and the rest default to `standard`.
-2. `UPDATE units SET tarif_harian = tarif_harian + 100000 WHERE nomor IN
-   (...)` — a real, guest-facing price change (it feeds directly into
-   `POST /bookings`' server-side price computation, live since v26), so
-   this step specifically should be double-confirmed with the owner
-   right before running, not bundled silently into the room-type
-   assignment.
+Verified post-apply via direct query — matches exactly. This price
+change is live now: villa-api v26's `POST /bookings` reads
+`units.tarif_harian` directly for server-side pricing, so any new
+walk-in/direct booking for A5/B4/C4 already uses Rp600,000 without any
+further deploy.
 
 **Channel granularity**: the current Cloudbeds webhook payload (per
 `src/app/api/webhooks/cloudbeds/route.ts`) does not capture a specific

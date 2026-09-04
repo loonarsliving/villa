@@ -1,13 +1,16 @@
 # Phase 4 (partial) — Daily Inventory Snapshot
 
 Status: **migration APPLIED to production 2026-09-04** (table exists
-live now); **cron route not yet live** — it ships in this repo's Next.js
-code, which only reaches production once this branch merges to `main`
-(Vercel deploys from `main` only, per this repo's existing flow). So the
-table is ready to receive rows, but nothing writes to it until merge.
-This is the one item the program explicitly calls out as "harus dimulai
-sedini mungkin" (§7 / §27) since the data clock cannot be backfilled —
-**recommend merging this branch (or at least this cron route) to `main`
+live now); **cron route not yet live** — confirmed directly via Vercel
+(`list_deployments` on the `villa` project): every commit on
+`claude/villa-admin-audit-z18jek` so far has deployed only to a preview
+URL (`target: null`); the project's actual production deployment
+(domain `living.haluoleo.id`) still points at the old `main` branch tip
+(commit `f1d7e88`, predates this entire program). So the table is ready
+to receive rows, but nothing writes to it until this branch — or at
+least this cron route — merges to `main`. This is the one item the
+program explicitly calls out as "harus dimulai sedini mungkin" (§7 /
+§27) since the data clock cannot be backfilled — **recommend merging
 soon** so snapshot collection actually starts, rather than waiting for
 every other phase to also be ready.
 

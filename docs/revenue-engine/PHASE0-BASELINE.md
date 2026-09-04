@@ -174,13 +174,25 @@ No values are recorded here or anywhere in this repository.
     Re-fetched and diff-verified against the reviewed source — exact
     match. `computeReport()` and every frozen financial constant in §2
     above are untouched.
-  - Not verified: a live functional smoke test (network egress to
-    Supabase blocked from this session) — recommend the owner/staff
-    confirm one real login + check-in before relying on this fully.
-  - Daily-inventory-snapshot cron route (Phase 4) is written but not
-    yet live — it ships in this repo's Next.js code, reaches production
-    only once this branch merges to `main`.
-  - Still pending: which 3 of the 13 units are Sawah View (needed to
-    finish Phase 3's unit assignment + the tarif_harian premium), and
-    the §16 Cloudbeds API capability confirmation (unrelated to this
-    round, tracked separately).
+  - Live functional confirmation found via Supabase's own function
+    logs (`query_logs`) since direct `curl` from this session is
+    blocked by the environment's egress proxy policy: `POST
+    /cron/cleaning-calls` returned real HTTP 200 responses at 08:45
+    and 09:00, both after the v26 deploy, and `function_logs` shows
+    clean boot/shutdown cycles with no errors. Real evidence, not just
+    a structural check. Still recommend one real staff login +
+    check-in to specifically exercise the newly-changed booking/
+    check-in/checkout paths.
+  - Confirmed via Vercel (`list_deployments`) that the Phase 4 cron
+    route is not yet live: every commit on this branch has deployed to
+    preview only (`target: null`); production (`living.haluoleo.id`)
+    still points at the pre-program `main` tip. Recommend merging soon.
+
+- **2026-09-04** — Owner named the 3 Sawah View units directly: A5, B4,
+  C4. Applied `20260904000005_assign_sawah_view_units.sql`: those 3 →
+  `sawah_view` room type, `tarif_harian` Rp500,000 → Rp600,000 (live
+  now — new bookings for these units already use the new rate via
+  villa-api v26's server-side pricing). The other 10 units → `standard`,
+  unchanged. Verified post-apply via direct query.
+  Still pending: the §16 Cloudbeds API capability confirmation
+  (unrelated to this round, tracked separately).
