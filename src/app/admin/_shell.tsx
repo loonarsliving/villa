@@ -10,7 +10,10 @@ export function AdminShell({ pageTitle, pageSub, children }: { pageTitle: string
   const sections: NavSection[] = [
     {
       title: "Ikhtisar",
-      items: [{ href: "/admin", label: "Overview", icon: "◈" }],
+      items: [
+        { href: "/admin", label: "Overview", icon: "◈" },
+        { href: "/admin/revenue", label: "Revenue", icon: "◇" },
+      ],
     },
     {
       title: "Operasional",
