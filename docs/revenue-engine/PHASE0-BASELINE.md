@@ -196,3 +196,16 @@ No values are recorded here or anywhere in this repository.
   unchanged. Verified post-apply via direct query.
   Still pending: the §16 Cloudbeds API capability confirmation
   (unrelated to this round, tracked separately).
+
+- **2026-09-04** — Owner provided a fuller pricing structure before
+  merge: base/min/max guardrail per room type (confirmed interpretation
+  via `AskUserQuestion` first, since 3 numbers per category was
+  ambiguous and this changes real guest pricing). Applied
+  `20260904000006_room_type_price_guardrails.sql`: Standard
+  min/base/max = Rp600,000/650,000/1,000,000; Sawah View =
+  Rp700,000/750,000/1,100,000. `units.tarif_harian` now live at the new
+  base rate (was 500k/600k after the previous migration, now 650k/750k)
+  — supersedes that earlier flat +100k bump. `min_rate`/`max_rate` are
+  new guardrail columns on `villa_room_types`, stored for Phase 6's
+  Revenue Engine but not enforced by anything yet. `tarif_bulanan` not
+  touched. Verified post-apply via direct query.

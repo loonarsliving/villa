@@ -27,16 +27,36 @@ follow-up still pending (see "Pending follow-up" below).
 ## Unit assignment — RESOLVED 2026-09-04
 
 Owner named the 3 Sawah View units directly: **A5, B4, C4**. Applied via
-`20260904000005_assign_sawah_view_units.sql`:
-- A5, B4, C4 → `sawah_view`, `tarif_harian` bumped Rp500,000 → Rp600,000.
-- The remaining 10 units (A1–A4, B1–B3, C1–C3) → `standard`, unchanged
-  at Rp500,000.
+`20260904000005_assign_sawah_view_units.sql`.
 
-Verified post-apply via direct query — matches exactly. This price
-change is live now: villa-api v26's `POST /bookings` reads
-`units.tarif_harian` directly for server-side pricing, so any new
-walk-in/direct booking for A5/B4/C4 already uses Rp600,000 without any
-further deploy.
+## Pricing structure — RESOLVED 2026-09-04 (updated same day)
+
+Owner then provided a fuller base/min/max guardrail structure (confirmed
+via `AskUserQuestion` before applying, since it directly changes real
+guest-facing pricing). Applied via
+`20260904000006_room_type_price_guardrails.sql`, **superseding** the
+flat +Rp100,000 bump from the migration above:
+
+| Room type | Minimum | Base (current `tarif_harian`) | Maximum |
+|---|---|---|---|
+| Standard (10 units) | Rp600,000 | **Rp650,000** | Rp1,000,000 |
+| Sawah View (A5, B4, C4) | Rp700,000 | **Rp750,000** | Rp1,100,000 |
+
+- `units.tarif_harian` is live at the **base** rate now (650k/750k) —
+  villa-api v26's `POST /bookings` reads this directly, so new walk-in/
+  direct bookings already use it.
+- `villa_room_types.min_rate`/`max_rate` are new columns holding the
+  guardrail — **not enforced by anything yet**. They exist for Phase
+  6's Revenue Engine to read once it's built (§14/§35 of the master
+  mandate: a pricing recommendation must never go below `min_rate` or
+  above `max_rate`). Until Phase 6 exists, nothing currently prevents a
+  price outside this range — the guardrail is stored, not yet wired to
+  anything that could violate it.
+- `tarif_bulanan` (monthly rate) was **not** touched — the owner's
+  figures were daily-rate numbers; do not assume a proportional monthly
+  adjustment without asking first.
+
+Verified post-apply via direct query — matches exactly.
 
 **Channel granularity**: the current Cloudbeds webhook payload (per
 `src/app/api/webhooks/cloudbeds/route.ts`) does not capture a specific
