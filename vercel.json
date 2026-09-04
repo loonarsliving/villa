@@ -12,6 +12,10 @@
     {
       "path": "/api/cron/dividend-list",
       "schedule": "0 1 25 * *"
+    },
+    {
+      "path": "/api/cron/daily-inventory-snapshot",
+      "schedule": "55 15 * * *"
     }
   ]
 }
