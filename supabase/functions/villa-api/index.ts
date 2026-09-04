@@ -677,6 +677,55 @@ Deno.serve(async (req)=>{
     return json(data);
   }
 
+  // Phase 6: deterministic Revenue Engine recommendations (see
+  // supabase/functions/villa-api/phase6-draft/CHANGES.md).
+  if(path==='/admin/pricing-recommendations' && m==='GET'){
+    const status = url.searchParams.get('status');
+    let q = supabase.from('villa_pricing_recommendations')
+      .select('*, villa_room_types(code,name)')
+      .order('target_date', {ascending:true});
+    if(status) q = q.eq('status', status);
+    const {data,error} = await q;
+    if(error) return err(error.message);
+    return json(data);
+  }
+  if(path==='/admin/pricing-recommendations' && m==='PATCH'){
+    const b = await req.json();
+    if(!b.id || !b.status) return err('id dan status wajib diisi');
+    if(!['approved','rejected'].includes(b.status)) return err('status tidak valid (harus approved atau rejected)');
+
+    const {data:rec, error:recErr} = await supabase.from('villa_pricing_recommendations')
+      .select('*').eq('id', b.id).single();
+    if(recErr || !rec) return err('Rekomendasi tidak ditemukan', 404);
+    if(rec.status !== 'pending_review') return err('Rekomendasi ini sudah direview', 409);
+
+    if(b.status === 'rejected'){
+      const {data,error} = await supabase.from('villa_pricing_recommendations').update({
+        status:'rejected', reviewed_by:session.email, reviewed_at:new Date().toISOString(), review_note:b.review_note??null,
+      }).eq('id', b.id).select().single();
+      if(error) return err(error.message);
+      return json(data);
+    }
+
+    // approved -> record the rate in villa_rates (our own internal
+    // calendar-rate table, full history via its existing trigger).
+    // Deliberately does NOT touch units.tarif_harian -- POST /bookings
+    // still prices off the flat tarif_harian only, not villa_rates, in
+    // this round (see phase6-draft/CHANGES.md "Scope note").
+    const {error: rateErr} = await supabase.from('villa_rates').upsert({
+      room_type_id: rec.room_type_id, rate_plan_id: null, date: rec.target_date,
+      rate: rec.recommended_rate, source: 'rule_engine', reason: b.review_note ?? null, updated_by: session.email,
+    }, {onConflict: 'room_type_id,rate_plan_id,date'});
+    if(rateErr) return err(rateErr.message);
+
+    const {data,error} = await supabase.from('villa_pricing_recommendations').update({
+      status:'executed', reviewed_by:session.email, reviewed_at:new Date().toISOString(),
+      review_note:b.review_note??null, executed_at:new Date().toISOString(),
+    }).eq('id', b.id).select().single();
+    if(error) return err(error.message);
+    return json(data);
+  }
+
   if(path==='/admin/overview' && m==='GET'){
     const bulan = new Date().toISOString().slice(0,7);
     const {data:units} = await supabase.from('units').select('status');

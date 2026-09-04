@@ -13,6 +13,8 @@ export function AdminShell({ pageTitle, pageSub, children }: { pageTitle: string
       items: [
         { href: "/admin", label: "Overview", icon: "◈" },
         { href: "/admin/revenue", label: "Revenue", icon: "◇" },
+        { href: "/admin/pricing-calendar", label: "Kalender Harga", icon: "▦" },
+        { href: "/admin/pricing-recommendations", label: "Rekomendasi Harga", icon: "◆" },
       ],
     },
     {

@@ -16,6 +16,10 @@
     {
       "path": "/api/cron/daily-inventory-snapshot",
       "schedule": "55 15 * * *"
+    },
+    {
+      "path": "/api/cron/generate-pricing-recommendations",
+      "schedule": "10 16 * * *"
     }
   ]
 }
