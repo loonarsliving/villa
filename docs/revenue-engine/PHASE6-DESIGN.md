@@ -1,9 +1,11 @@
 # Phase 6 — Revenue Engine foundation (deterministic rule engine)
 
-Status: **built this round, pending apply/deploy confirmation** —
-`supabase/migrations/20260904000007_revenue_engine_foundation.sql`,
-`src/app/api/cron/generate-pricing-recommendations/route.ts`,
-`supabase/functions/villa-api/phase6-draft/CHANGES.md`.
+Status: **APPLIED/DEPLOYED to production 2026-09-04** —
+`supabase/migrations/20260904000007_revenue_engine_foundation.sql`
+(applied), `src/app/api/cron/generate-pricing-recommendations/route.ts`
+(shipped in this branch's merge to `main`),
+`supabase/functions/villa-api/phase6-draft/CHANGES.md` (villa-api
+deployed as v28).
 
 Built per the owner's explicit instruction to lay the foundation for
 every remaining phase now, ahead of real booking volume, so structure is

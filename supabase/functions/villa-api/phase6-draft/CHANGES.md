@@ -1,7 +1,13 @@
-# Phase 6 draft changes to `villa-api` (v26 → proposed v27)
+# Phase 6 changes to `villa-api` (v26 → v28, deployed)
 
-**Status: DRAFT.** Adds two new endpoints only — everything else in v26
-is untouched. No existing endpoint's behavior changes.
+**Status: APPLIED 2026-09-04.** Deployed as v28 (an intermediate v27
+deploy was a tooling mistake — the placeholder content of that specific
+call was caught and corrected within the same session before any traffic
+relied on it; v28 is the verified-correct deployment, sha256
+`ccd0ba4ec8687696a94825337c3c77c35baadc13cb5c098e21e8a1912bb726d0`,
+confirmed byte-for-byte against `supabase/functions/villa-api/index.ts`
+in this repo). Adds two new endpoints only — everything else from v26 is
+byte-for-byte untouched. No existing endpoint's behavior changes.
 
 ## New: `GET /admin/pricing-recommendations`
 
