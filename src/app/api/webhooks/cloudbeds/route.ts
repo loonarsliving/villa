@@ -1,7 +1,8 @@
-import { timingSafeEqual } from "node:crypto";
+import { timingSafeEqual, createHash } from "node:crypto";
 
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,9 +15,24 @@ export const dynamic = "force-dynamic";
  * WhatsApp bridge on mkhsistem. Cloudbeds is purely a channel manager here
  * (syncs OTA availability/bookings) -- check-in/check-out stay a manual
  * Front Desk action, there's no smart lock to trigger automatically.
+ *
+ * Phase 2 hardening (revenue-engine program, docs/revenue-engine/):
+ * schema validation, idempotency (exact-payload dedupe against
+ * cloudbeds_events_log), guest deduplication by phone, and cancellation
+ * handling. See docs/revenue-engine/PHASE2-DESIGN.md for the full
+ * rationale, including the explicitly UNCONFIRMED cancellation event
+ * name (Cloudbeds' exact eventType string for a cancellation was never
+ * verified against a real account in this project's audit trail).
  */
 
 const SUPABASE_URL = "https://svcmybsziaelwwdrnzcv.supabase.co";
+
+const ACTIVE_EVENT_TYPES = ["reservation.created", "reservation.updated"] as const;
+// UNCONFIRMED: Cloudbeds' actual cancellation event name. Both plausible
+// spellings are handled defensively; verify against a real Cloudbeds
+// webhook delivery (or their docs, once reachable) before relying on
+// this in production -- see PHASE2-DESIGN.md.
+const CANCELLATION_EVENT_TYPES = ["reservation.cancelled", "reservation.canceled"] as const;
 
 function secretsMatch(provided: string, expected: string): boolean {
   const a = Buffer.from(provided, "utf8");
@@ -35,8 +51,7 @@ function secretsMatch(provided: string, expected: string): boolean {
  * this route runs on Vercel/Node and villa-api is a separate Supabase Edge
  * Function (Deno), different runtimes that can't share source.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function sendWaBridge(supabase: any, phone: string | null, message: string, meta: Record<string, unknown>) {
+async function sendWaBridge(supabase: SupabaseClient, phone: string | null, message: string, meta: Record<string, unknown>) {
   if (!phone) {
     await supabase.from("wa_messages_log").insert({ ...meta, phone: null, message, status: "skipped_no_phone" });
     return;
@@ -66,21 +81,44 @@ async function sendWaBridge(supabase: any, phone: string | null, message: string
   }
 }
 
-interface CloudbedsReservation {
-  roomId?: string;
-  room_id?: string;
-  reservationId?: string;
-  id?: string;
-  guestName?: string;
-  guest_name?: string;
-  guestPhone?: string;
-  guest_phone?: string;
-  los?: number;
-  checkInDate?: string;
-  checkin_date?: string;
-  checkOutDate?: string;
-  checkout_date?: string;
-  total?: number;
+// Phase 2: schema validation for the inbound Cloudbeds payload. Every
+// field stays optional at this layer (Cloudbeds' exact contract per
+// event type isn't fully confirmed -- see PHASE2-DESIGN.md) but wrong
+// *types* (a number where a string is expected, etc.) are now rejected
+// before anything touches the database, instead of flowing through as
+// `undefined` and silently producing bad rows.
+const ReservationSchema = z
+  .object({
+    roomId: z.string().optional(),
+    room_id: z.string().optional(),
+    reservationId: z.string().optional(),
+    id: z.string().optional(),
+    guestName: z.string().optional(),
+    guest_name: z.string().optional(),
+    guestPhone: z.string().nullable().optional(),
+    guest_phone: z.string().nullable().optional(),
+    los: z.number().optional(),
+    checkInDate: z.string().optional(),
+    checkin_date: z.string().optional(),
+    checkOutDate: z.string().nullable().optional(),
+    checkout_date: z.string().nullable().optional(),
+    total: z.number().optional(),
+  })
+  .passthrough();
+
+const WebhookPayloadSchema = z
+  .object({
+    event: z.string().optional(),
+    eventType: z.string().optional(),
+    reservation: ReservationSchema.optional(),
+    data: ReservationSchema.optional(),
+  })
+  .passthrough();
+
+type CloudbedsReservation = z.infer<typeof ReservationSchema>;
+
+function stableHash(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
 export async function POST(request: Request) {
@@ -99,11 +137,59 @@ export async function POST(request: Request) {
   }
   const supabase = createClient(SUPABASE_URL, serviceRoleKey);
 
-  const payload = await request.json().catch(() => ({}) as Record<string, unknown>);
+  const rawPayload = await request.json().catch(() => null);
+  if (rawPayload === null) {
+    await supabase.from("cloudbeds_events_log").insert({
+      reservation_id: null,
+      event_type: "unknown",
+      payload: {},
+      matched: false,
+      error: "invalid_json_body",
+    });
+    return NextResponse.json({ success: true, matched: false, note: "invalid JSON body, logged" });
+  }
+
+  const parsed = WebhookPayloadSchema.safeParse(rawPayload);
+  const payload = (parsed.success ? parsed.data : rawPayload) as Record<string, unknown>;
   const eventType = (payload.event as string) ?? (payload.eventType as string) ?? "unknown";
   const reservation: CloudbedsReservation = (payload.reservation as CloudbedsReservation) ?? (payload.data as CloudbedsReservation) ?? {};
   const cloudbedsRoomId = reservation.roomId ?? reservation.room_id ?? null;
   const reservationId = reservation.reservationId ?? reservation.id ?? null;
+
+  if (!parsed.success) {
+    await supabase.from("cloudbeds_events_log").insert({
+      reservation_id: reservationId,
+      event_type: eventType,
+      payload: rawPayload as Record<string, unknown>,
+      matched: false,
+      error: `schema_validation_failed: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`,
+    });
+    // Still 200 -- a schema mismatch is something we want visible in the
+    // log for a human to look at, not something Cloudbeds should retry
+    // indefinitely with the same malformed body.
+    return NextResponse.json({ success: true, matched: false, note: "payload failed schema validation, logged" });
+  }
+
+  // Phase 2 idempotency: an exact-duplicate delivery (same reservation_id
+  // + event_type + payload body) is treated as a retry and skipped
+  // entirely -- no re-processing, no duplicate guest/booking/notification/
+  // WA side effects, no duplicate log row. A payload that differs at all
+  // (e.g. a genuinely new reservation.updated a minute later) is not
+  // considered a duplicate and is processed normally.
+  if (reservationId && eventType !== "unknown") {
+    const payloadHash = stableHash(payload);
+    const { data: existingEvents } = await supabase
+      .from("cloudbeds_events_log")
+      .select("id, payload")
+      .eq("reservation_id", reservationId)
+      .eq("event_type", eventType)
+      .order("created_at", { ascending: false })
+      .limit(20);
+    const isDuplicate = (existingEvents ?? []).some((row) => stableHash(row.payload) === payloadHash);
+    if (isDuplicate) {
+      return NextResponse.json({ success: true, matched: false, duplicate: true });
+    }
+  }
 
   let matched = false;
   let unitId: string | null = null;
@@ -111,7 +197,7 @@ export async function POST(request: Request) {
   let logError: string | null = null;
 
   try {
-    if (cloudbedsRoomId && (eventType === "reservation.created" || eventType === "reservation.updated")) {
+    if (cloudbedsRoomId && (ACTIVE_EVENT_TYPES as readonly string[]).includes(eventType)) {
       const { data: mapping } = await supabase
         .from("cloudbeds_room_mapping")
         .select("unit_id, units(nomor)")
@@ -125,8 +211,19 @@ export async function POST(request: Request) {
 
         const guestNama = reservation.guestName ?? reservation.guest_name ?? "Tamu Cloudbeds";
         const guestHp = reservation.guestPhone ?? reservation.guest_phone ?? null;
+
+        // Phase 2: guest dedup by phone. A reservation.updated event for
+        // the same reservation previously created a brand-new `guests`
+        // row every time -- now reuses an existing guest with the same
+        // phone number instead of inserting a duplicate. Guests with no
+        // phone on file still get a fresh row each time (no reliable key
+        // to dedupe on without one), matching prior behavior for that case.
         let guestId: string | null = null;
-        if (guestNama) {
+        if (guestHp) {
+          const { data: existingGuest } = await supabase.from("guests").select("id").eq("hp", guestHp).limit(1).maybeSingle();
+          guestId = existingGuest?.id ?? null;
+        }
+        if (!guestId && guestNama) {
           const { data: g } = await supabase.from("guests").insert({ nama: guestNama, hp: guestHp }).select("id").single();
           guestId = g?.id ?? null;
         }
@@ -209,6 +306,38 @@ export async function POST(request: Request) {
             );
           }
         }
+      }
+    } else if ((CANCELLATION_EVENT_TYPES as readonly string[]).includes(eventType) && reservationId) {
+      // Phase 2: cancellation handling. Finds the existing booking by
+      // cloudbeds_reservation_id and marks it 'batal' -- does not touch
+      // any booking that isn't already tracked (nothing to cancel), and
+      // never deletes a row (cancellation is a status change, matching
+      // how a manual cancellation already works elsewhere in this app).
+      const { data: existingBooking } = await supabase
+        .from("bookings")
+        .select("id, unit_id, unit_nomor, guest_nama, status")
+        .eq("cloudbeds_reservation_id", reservationId)
+        .maybeSingle();
+
+      if (existingBooking) {
+        matched = true;
+        unitId = existingBooking.unit_id;
+        unitNomor = existingBooking.unit_nomor;
+        if (existingBooking.status !== "checkout" && existingBooking.status !== "batal") {
+          await supabase.from("bookings").update({ status: "batal" }).eq("id", existingBooking.id);
+          await supabase.from("notifications").insert({
+            unit_id: existingBooking.unit_id,
+            target_role: "all",
+            tipe: "booking",
+            judul: `Booking dibatalkan (Cloudbeds) — Unit ${existingBooking.unit_nomor}`,
+            pesan: `${existingBooking.guest_nama} — reservasi dibatalkan di Cloudbeds.`,
+            ref_id: reservationId,
+          });
+        }
+        // A booking already checked-in/checked-out is left as-is -- an
+        // OTA cancellation arriving after the guest already physically
+        // stayed is a data-inconsistency case for a human to look at via
+        // the event log, not something to silently overwrite.
       }
     }
   } catch (e) {
