@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AdminShell } from "../_shell";
-import { api } from "@/lib/api";
+import { api, getToken } from "@/lib/api";
 import { fmtCurrency, fmtDate } from "@/lib/format";
 import { Loading, Card, CardHeader, Badge, Empty } from "@/components/Card";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
@@ -19,6 +19,12 @@ import { Modal, Field, inputCls, Btn } from "@/components/Modal";
  * Reuses the same pending_review -> reviewed_by/reviewed_at pattern
  * already proven by the CCTV disciplinary-reports module elsewhere in
  * this admin panel.
+ *
+ * Phase 8: the optional "AI Insight" button calls
+ * /api/admin/pricing-insight, which asks Mkhsistem's AI Service to
+ * phrase a plain-language explanation of the numbers already computed
+ * above -- it never changes the recommendation and is fetched only on
+ * click, not automatically for every row.
  */
 
 interface Recommendation {
@@ -62,6 +68,24 @@ export default function PricingRecommendationsPage() {
   const [reviewTarget, setReviewTarget] = useState<{ rec: Recommendation; action: "approved" | "rejected" } | null>(null);
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [insights, setInsights] = useState<Record<string, { loading: boolean; text?: string; error?: string }>>({});
+
+  async function loadInsight(id: string) {
+    setInsights((s) => ({ ...s, [id]: { loading: true } }));
+    try {
+      const token = getToken();
+      const res = await fetch("/api/admin/pricing-insight", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { "x-villa-token": token } : {}) },
+        body: JSON.stringify({ id }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`);
+      setInsights((s) => ({ ...s, [id]: { loading: false, text: body.insight } }));
+    } catch (e) {
+      setInsights((s) => ({ ...s, [id]: { loading: false, error: e instanceof Error ? e.message : String(e) } }));
+    }
+  }
 
   function load() {
     setLoading(true);
@@ -151,6 +175,25 @@ export default function PricingRecommendationsPage() {
                 <div className="text-[10.5px] text-ink/40 mb-3">
                   Okupansi tanggal ini: {r.occupancy_pct ?? "—"}% · Booking baru (3 hari terakhir): {r.pickup_bookings_3d ?? 0}
                 </div>
+
+                {!insights[r.id] && (
+                  <button
+                    onClick={() => loadInsight(r.id)}
+                    className="text-[10.5px] font-semibold text-ink/50 hover:text-ink/80 underline decoration-dotted mb-3"
+                  >
+                    ✨ Tampilkan AI Insight (penjelasan, bukan keputusan)
+                  </button>
+                )}
+                {insights[r.id]?.loading && <div className="text-[10.5px] text-ink/40 mb-3 italic">Meminta penjelasan AI…</div>}
+                {insights[r.id]?.error && (
+                  <div className="text-[10.5px] text-ruby-500 mb-3">AI Insight gagal: {insights[r.id].error}</div>
+                )}
+                {insights[r.id]?.text && (
+                  <div className="text-[11px] text-ink/70 bg-ink/[0.03] rounded-lg p-2.5 mb-3 italic">
+                    ✨ {insights[r.id].text}
+                  </div>
+                )}
+
                 {r.status !== "pending_review" && (
                   <div className="text-[10.5px] text-ink/40 border-t border-ink/[0.06] pt-2.5">
                     {r.status === "executed" ? "Disetujui" : "Ditolak"} oleh {r.reviewed_by} · {fmtDate(r.reviewed_at)}

@@ -50,3 +50,46 @@ export async function detectPersonInZone(imageBase64: string, mimeType: string, 
     description: typeof data.description === "string" ? data.description : "",
   };
 }
+
+export interface PricingInsightInput {
+  room_type_name: string;
+  target_date: string;
+  current_rate: number;
+  recommended_rate: number;
+  delta_pct: number;
+  reason_codes: string[];
+  guardrail_status: string;
+  occupancy_pct: number | null;
+  pickup_bookings_3d: number | null;
+  confidence: "low" | "medium" | "high";
+}
+
+/**
+ * Phase 8 (revenue-engine program): asks Mkhsistem's AI Service for a
+ * plain-language EXPLANATION of a pricing recommendation the
+ * deterministic rule engine (Phase 6) already computed -- reuses the
+ * same bridge mechanism/secret as detectPersonInZone. Explanation only:
+ * the model cannot change the rate and its text is never written into
+ * villa_pricing_recommendations, only shown to the admin on demand
+ * before they approve/reject.
+ */
+export async function explainPricingRecommendation(input: PricingInsightInput): Promise<string> {
+  const { data: setting, error } = await supabaseAdmin().from("integration_settings").select("value").eq("key", "vercel_bridge").maybeSingle();
+  if (error) throw new Error(`Failed to load vercel_bridge setting: ${error.message}`);
+  const baseUrl = setting?.value?.base_url as string | undefined;
+  const secret = setting?.value?.secret as string | undefined;
+  if (!baseUrl || !secret) {
+    throw new Error("integration_settings.vercel_bridge (base_url/secret) is not configured");
+  }
+
+  const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/api/villa/ai/pricing-insight`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-internal-secret": secret },
+    body: JSON.stringify(input),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data || data.success !== true) {
+    throw new Error(`AI bridge failed: ${data?.error || res.status}`);
+  }
+  return typeof data.insight === "string" ? data.insight : "";
+}
