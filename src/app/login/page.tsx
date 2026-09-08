@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { login, api, ApiError } from "@/lib/api";
 import { roleHome } from "@/lib/auth";
@@ -27,6 +27,15 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [user, setUser] = useState<SessionUser | null>(null);
+  const [sessionEnded, setSessionEnded] = useState(false);
+
+  // Set by endSession()/AuthProvider when a 7-day session token ran out. Read
+  // from location rather than useSearchParams so this page needs no Suspense
+  // boundary.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    setSessionEnded(q.has("expired") || q.has("unauthorized"));
+  }, []);
 
   function finish(u: SessionUser) {
     localStorage.setItem("villa_user", JSON.stringify(u));
@@ -113,6 +122,11 @@ export default function LoginPage() {
             </div>
             <div className="w-8 h-px bg-gold-500 my-5" />
           </div>
+          {sessionEnded && (
+            <div className="text-[11px] text-gold-500 border border-gold-500/30 rounded-lg px-3.5 py-2.5 mb-6 leading-relaxed">
+              Sesi Anda telah berakhir. Silakan masuk kembali untuk melanjutkan.
+            </div>
+          )}
           <form
             onSubmit={(e) => {
               e.preventDefault();

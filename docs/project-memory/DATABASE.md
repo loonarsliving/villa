@@ -79,3 +79,17 @@ Additive-only: `bank_nama text`, `no_rekening text`, `nama_pemilik_rekening text
 
 ## Direct DB access pattern
 Only the Cloudbeds webhook route (in this repo) touches Postgres directly (via `@supabase/supabase-js` with the service-role key, which bypasses RLS). All other reads/writes go through `villa-api`, which also uses the service-role key (confirmed above).
+
+## RLS gap on 14 villa tables (found 2026-09-08) — OPEN until migration is applied
+Audit via Supabase advisor + `information_schema.role_table_grants` found 14 villa-owned tables with **RLS disabled while `anon` and `authenticated` still hold full SELECT/INSERT/UPDATE/DELETE/TRUNCATE**. The anon key is public by design (it ships in client bundles), so this means anyone could read *and modify* these tables directly through PostgREST, bypassing `villa-api`'s token/role checks entirely:
+- Revenue engine (10): `villa_room_types`, `villa_channels`, `villa_rate_plans`, `villa_rates`, `villa_rate_history`, `villa_daily_inventory_snapshot`, `villa_pricing_settings`, `villa_pricing_recommendations`, `villa_high_season_periods`, `villa_competitor_rates`.
+- Amenities (3): `amenities`, `amenity_kit_items`, `amenity_usage_log`.
+- CCTV (1): `cctv_disciplinary_reports`.
+
+Cause: the migrations that created these tables (`20260904000003/4/7`, `20260904150000`, `add_amenities_stock_and_kit`, `cctv_checkpoint_log_index_and_disciplinary_reports`) each omitted the `enable row level security` line that `20260806070012_enable_rls_villa_service_role_only` established as this project's convention. Every other villa table has `rls_enabled: true`.
+
+Fix written as `supabase/migrations/20260908000001_enable_rls_on_exposed_villa_tables.sql` — RLS ON, no policies, the same service-role-only pattern as `walkin_payments`/`sync_config`/`automation_config`. Confirmed non-breaking before writing it: villa's frontend creates no anon-key Supabase client anywhere (`src/lib/supabaseAdmin.ts` service-role is the only client), all `villa_*` reads/writes come from server routes or `villa-api` (both service-role, which bypasses RLS), and `Mkhsistem` never references any of these tables.
+
+**STATUS: NOT YET APPLIED to the live project** — pending owner approval. Reversible with `disable row level security` if anything unexpected breaks.
+
+**Separately, still open and NOT villa's to fix** (belong to Mkhsistem/other business lines in this shared project, flagged only): `istri_daily_tips`, `contractor_fund_request_pending`, `pending_expense_approval_notifications`, `pengajuan_verification_reminders` also have RLS disabled.

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AdminShell } from "../_shell";
-import { getToken } from "@/lib/api";
+import { localApi } from "@/lib/api";
 import { fmtCurrency, fmtDate } from "@/lib/format";
 import { Card, CardHeader, CardBody, Loading, Empty, Badge } from "@/components/Card";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
@@ -47,18 +47,6 @@ interface CompetitorRate {
   villa_room_types?: { code: string; name: string } | null;
 }
 
-function authHeaders(): Record<string, string> {
-  const token = getToken();
-  return { "Content-Type": "application/json", ...(token ? { "x-villa-token": token } : {}) };
-}
-
-async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(path, { ...options, headers: { ...authHeaders(), ...(options.headers || {}) } });
-  const data = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
-  return data as T;
-}
-
 export default function PricingCompetitorPage() {
   const [periods, setPeriods] = useState<HighSeasonPeriod[] | null>(null);
   const [rates, setRates] = useState<CompetitorRate[] | null>(null);
@@ -81,11 +69,10 @@ export default function PricingCompetitorPage() {
   function load() {
     setLoading(true);
     Promise.all([
-      apiFetch<HighSeasonPeriod[]>("/api/admin/high-season-periods").catch(() => []),
-      apiFetch<CompetitorRate[]>("/api/admin/competitor-rates").catch(() => []),
-      fetch("/api/admin/pricing-calendar", { headers: authHeaders() })
-        .then((r) => r.json())
-        .then((d) => (d.room_types ?? []).map((rt: { room_type_id: string; code: string; name: string }) => ({ id: rt.room_type_id, code: rt.code, name: rt.name })))
+      localApi<HighSeasonPeriod[]>("/api/admin/high-season-periods").catch(() => []),
+      localApi<CompetitorRate[]>("/api/admin/competitor-rates").catch(() => []),
+      localApi<{ room_types?: { room_type_id: string; code: string; name: string }[] }>("/api/admin/pricing-calendar")
+        .then((d) => (d.room_types ?? []).map((rt) => ({ id: rt.room_type_id, code: rt.code, name: rt.name })))
         .catch(() => []),
     ])
       .then(([p, r, rt]) => {
@@ -100,7 +87,7 @@ export default function PricingCompetitorPage() {
   async function submitPeriod() {
     setSavingPeriod(true);
     try {
-      await apiFetch("/api/admin/high-season-periods", {
+      await localApi("/api/admin/high-season-periods", {
         method: "POST",
         body: JSON.stringify({
           label: periodForm.label,
@@ -120,19 +107,19 @@ export default function PricingCompetitorPage() {
   }
 
   async function togglePeriod(p: HighSeasonPeriod) {
-    await apiFetch("/api/admin/high-season-periods", { method: "PATCH", body: JSON.stringify({ id: p.id, active: !p.active }) });
+    await localApi("/api/admin/high-season-periods", { method: "PATCH", body: JSON.stringify({ id: p.id, active: !p.active }) });
     load();
   }
   async function deletePeriod(id: string) {
     if (!confirm("Hapus periode high season ini?")) return;
-    await apiFetch(`/api/admin/high-season-periods?id=${id}`, { method: "DELETE" });
+    await localApi(`/api/admin/high-season-periods?id=${id}`, { method: "DELETE" });
     load();
   }
 
   async function submitRate() {
     setSavingRate(true);
     try {
-      await apiFetch("/api/admin/competitor-rates", {
+      await localApi("/api/admin/competitor-rates", {
         method: "POST",
         body: JSON.stringify({
           room_type_id: rateForm.room_type_id || null,
@@ -153,7 +140,7 @@ export default function PricingCompetitorPage() {
   }
   async function deleteRate(id: string) {
     if (!confirm("Hapus data kompetitor ini?")) return;
-    await apiFetch(`/api/admin/competitor-rates?id=${id}`, { method: "DELETE" });
+    await localApi(`/api/admin/competitor-rates?id=${id}`, { method: "DELETE" });
     load();
   }
 
@@ -161,7 +148,7 @@ export default function PricingCompetitorPage() {
     setResearching(true);
     setResearchError(null);
     try {
-      await apiFetch("/api/admin/competitor-rates/research", {
+      await localApi("/api/admin/competitor-rates/research", {
         method: "POST",
         body: JSON.stringify({ room_type_id: researchForm.room_type_id, location_label: researchForm.location_label }),
       });

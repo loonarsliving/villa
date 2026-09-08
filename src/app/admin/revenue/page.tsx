@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AdminShell } from "../_shell";
-import { getToken } from "@/lib/api";
+import { localApi } from "@/lib/api";
 import { fmtCurrency } from "@/lib/format";
 import { Loading, Card, CardHeader } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
@@ -74,17 +74,9 @@ export default function RevenueDashboardPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const token = getToken();
     setLoading(true);
     setError(null);
-    fetch(`/api/admin/revenue-metrics?period=${period}`, {
-      headers: token ? { "x-villa-token": token } : {},
-    })
-      .then(async (res) => {
-        const body = await res.json().catch(() => null);
-        if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`);
-        return body as MetricsResponse;
-      })
+    localApi<MetricsResponse>(`/api/admin/revenue-metrics?period=${period}`)
       .then(setData)
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));

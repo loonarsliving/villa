@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { AdminShell } from "../../admin/_shell";
 import { FrontDeskShell } from "../_shell";
-import { api, ApiError, getToken } from "@/lib/api";
+import { api, ApiError, localApi } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
 import { fmtCurrencyFull, fmtDate, todayISO } from "@/lib/format";
@@ -186,10 +186,8 @@ export default function PaymentGatewayPage() {
     if (!activePayment || activePayment.status !== "pending") return;
     let cancelled = false;
     setQrLoading(true);
-    const token = getToken();
-    fetch("/api/payment-gateway/qris", {
+    localApi<{ qrImageDataUrl?: string }>("/api/payment-gateway/qris", {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...(token ? { "x-villa-token": token } : {}) },
       body: JSON.stringify({
         kind: activePayment.source,
         refId: activePayment.id,
@@ -199,13 +197,8 @@ export default function PaymentGatewayPage() {
         product: activePayment.deskripsi,
       }),
     })
-      .then(async (res) => {
-        const body = await res.json().catch(() => null);
+      .then((body) => {
         if (cancelled) return;
-        if (!res.ok) {
-          setQrError((body && body.error) || `HTTP ${res.status}`);
-          return;
-        }
         setDynamicQr(body?.qrImageDataUrl ?? null);
       })
       .catch((e) => {
@@ -223,17 +216,10 @@ export default function PaymentGatewayPage() {
     if (!activePayment) return;
     setCheckingStatus(true);
     try {
-      const token = getToken();
-      const res = await fetch("/api/payment-gateway/qris/status", {
+      const body = await localApi<{ paid?: boolean; statusRaw?: string | null }>("/api/payment-gateway/qris/status", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...(token ? { "x-villa-token": token } : {}) },
         body: JSON.stringify({ kind: activePayment.source, refId: activePayment.id }),
       });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) {
-        toast("⚠", "Gagal cek status", (body && body.error) || `HTTP ${res.status}`, "ruby");
-        return;
-      }
       setLiveStatus({ paid: !!body?.paid, statusRaw: body?.statusRaw ?? null });
     } catch (e) {
       toast("⚠", "Gagal cek status", e instanceof Error ? e.message : "Terjadi kesalahan.", "ruby");

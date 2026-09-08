@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Modal, Btn } from "./Modal";
 import { fmtDate } from "@/lib/format";
-import { getToken } from "@/lib/api";
+import { localApi } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 
 export interface CheckinCardGuest {
@@ -117,18 +117,11 @@ export function CheckinCard({
     }
     setSubmitting(true);
     try {
-      const token = getToken();
       const dataUrl = await dataUrlFromFile();
-      const res = await fetch("/api/checkin/upload-ktp", {
+      const body = await localApi<{ path: string }>("/api/checkin/upload-ktp", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...(token ? { "x-villa-token": token } : {}) },
         body: JSON.stringify({ dataUrl }),
       });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) {
-        toast("⚠", "Gagal unggah KTP", (body && body.error) || `HTTP ${res.status}`, "ruby");
-        return;
-      }
       const signatureDataUrl = canvasRef.current?.toDataURL("image/png") ?? "";
       await onConfirm({ ktpPhotoPath: body.path, signatureDataUrl });
     } catch (e) {

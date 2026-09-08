@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AdminShell } from "../_shell";
-import { api, getToken } from "@/lib/api";
+import { api, localApi } from "@/lib/api";
 import { fmtCurrency, fmtDate } from "@/lib/format";
 import { Loading, Card, CardHeader, Badge, Empty } from "@/components/Card";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
@@ -76,14 +76,10 @@ export default function PricingRecommendationsPage() {
   async function loadInsight(id: string) {
     setInsights((s) => ({ ...s, [id]: { loading: true } }));
     try {
-      const token = getToken();
-      const res = await fetch("/api/admin/pricing-insight", {
+      const body = await localApi<{ insight: string }>("/api/admin/pricing-insight", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...(token ? { "x-villa-token": token } : {}) },
         body: JSON.stringify({ id }),
       });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`);
       setInsights((s) => ({ ...s, [id]: { loading: false, text: body.insight } }));
     } catch (e) {
       setInsights((s) => ({ ...s, [id]: { loading: false, error: e instanceof Error ? e.message : String(e) } }));

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AdminShell } from "../_shell";
-import { api, ApiError, getToken } from "@/lib/api";
+import { api, ApiError, localApi } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { Card, CardHeader, Loading, Badge } from "@/components/Card";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
@@ -165,13 +165,9 @@ export default function AdminCctvPage() {
   async function runNow(cam: CctvCamera) {
     setRunningNow(cam.id);
     try {
-      const token = getToken();
-      const res = await fetch(`/api/cctv/run-now/${cam.id}`, {
+      const body = await localApi<{ status: string; person_detected?: boolean; error?: string }>(`/api/cctv/run-now/${cam.id}`, {
         method: "POST",
-        headers: token ? { "x-villa-token": token } : {},
       });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) throw new Error((body && body.error) || `HTTP ${res.status}`);
       if (body.status === "ok") {
         toast("✓", "Checkpoint selesai", body.person_detected ? "Terdeteksi ada orang." : "Tidak terdeteksi orang di frame.", body.person_detected ? "sage" : "gold");
       } else {
@@ -224,12 +220,7 @@ export default function AdminCctvPage() {
 
     async function start() {
       try {
-        const token = getToken();
-        const res = await fetch("/api/cctv/token", {
-          headers: token ? { "x-villa-token": token } : {},
-        });
-        const body = await res.json().catch(() => null);
-        if (!res.ok) throw new Error((body && body.error) || `HTTP ${res.status}`);
+        const body = await localApi<{ accessToken: string; domain: string }>("/api/cctv/token");
         if (cancelled) return;
 
         const { EZUIKitPlayer } = await import("ezuikit-js");

@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import type { Role, SessionUser } from "./types";
+import { isTokenExpired } from "./api";
 
 interface AuthState {
   user: SessionUser | null;
@@ -25,6 +26,14 @@ export function AuthProvider({ children, requireRole }: { children: ReactNode; r
     const u = raw ? (JSON.parse(raw) as SessionUser) : null;
     if (!t || !u) {
       router.replace("/login");
+      return;
+    }
+    // A token past its 7-day exp would render the whole shell and then 401 on
+    // every request; bounce to login with an explanation instead.
+    if (isTokenExpired(t)) {
+      localStorage.removeItem("villa_token");
+      localStorage.removeItem("villa_user");
+      router.replace("/login?expired=1");
       return;
     }
     if (requireRole && !requireRole.includes(u.role)) {

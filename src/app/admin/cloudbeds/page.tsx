@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AdminShell } from "../_shell";
-import { api, ApiError, getToken } from "@/lib/api";
+import { api, ApiError, localApi } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { fmtDate } from "@/lib/format";
 import { Card, CardHeader, CardBody, Loading, Badge } from "@/components/Card";
@@ -45,16 +45,7 @@ export default function AdminCloudbedsPage() {
   async function loadLiveRooms() {
     setTesting(true);
     try {
-      const token = getToken();
-      const res = await fetch("/api/admin/cloudbeds/rooms", {
-        headers: token ? { "x-villa-token": token } : {},
-      });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) {
-        setLiveRoomsError((body && body.error) || `HTTP ${res.status}`);
-        setLiveRooms([]);
-        return;
-      }
+      const body = await localApi<{ rooms?: LiveCloudbedsRoom[] }>("/api/admin/cloudbeds/rooms");
       setLiveRooms(body?.rooms || []);
       setLiveRoomsError(null);
     } catch (e) {
