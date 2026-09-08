@@ -90,6 +90,6 @@ Cause: the migrations that created these tables (`20260904000003/4/7`, `20260904
 
 Fix written as `supabase/migrations/20260908000001_enable_rls_on_exposed_villa_tables.sql` — RLS ON, no policies, the same service-role-only pattern as `walkin_payments`/`sync_config`/`automation_config`. Confirmed non-breaking before writing it: villa's frontend creates no anon-key Supabase client anywhere (`src/lib/supabaseAdmin.ts` service-role is the only client), all `villa_*` reads/writes come from server routes or `villa-api` (both service-role, which bypasses RLS), and `Mkhsistem` never references any of these tables.
 
-**STATUS: NOT YET APPLIED to the live project** — pending owner approval. Reversible with `disable row level security` if anything unexpected breaks.
+**STATUS: APPLIED 2026-09-08** (owner-approved). Verified after applying: all 14 tables report `relrowsecurity = true` with 0 policies, and service-role reads still return their data intact (`villa_rates` 72, `villa_daily_inventory_snapshot` 52, `villa_pricing_recommendations` 33, `villa_room_types` 2). Reversible with `disable row level security` if anything unexpected breaks.
 
 **Separately, still open and NOT villa's to fix** (belong to Mkhsistem/other business lines in this shared project, flagged only): `istri_daily_tips`, `contractor_fund_request_pending`, `pending_expense_approval_notifications`, `pengajuan_verification_reminders` also have RLS disabled.
