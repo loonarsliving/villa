@@ -647,6 +647,33 @@ Deno.serve(async (req)=>{
     return json({success:true, dispatched});
   }
 
+  // Reminder WA to every active investor to fill/confirm their dividend
+  // bank account, added 2026-09-10 (owner request). Runs a few days
+  // before the dividend-list cron (25th) so accounts are ready in time.
+  // Sent to ALL active investors regardless of payment status -- the
+  // message text itself explains the eligibility rule (paid off last
+  // month -> dividend this month; still paying this month -> dividend on
+  // the 25th of the month after), since villa has no record of Loonars'
+  // separate unit-purchase payment status to filter on automatically.
+  if(path==='/cron/investor-bank-reminder' && m==='POST'){
+    const cron = await getSetting('cron');
+    const provided = req.headers.get('x-cron-secret') ?? '';
+    if(!cron.secret) return err('Cron belum dikonfigurasi (integration_settings.cron.secret)',503);
+    if(!await secretsMatch(provided, cron.secret)) return err('Unauthorized',401);
+
+    const {data:investors} = await supabase.from('villa_users')
+      .select('nama,hp,bank_nama,no_rekening').eq('role','owner').eq('is_active',true);
+
+    let sent=0;
+    for(const inv of investors ?? []){
+      const rekeningLengkap = !!(inv.bank_nama && inv.no_rekening);
+      const message = `Halo ${inv.nama}, mohon ${rekeningLengkap ? 'konfirmasi/perbarui' : 'lengkapi'} nomor rekening Anda untuk pencairan dividen bulan ini di aplikasi Loonars Private Living (menu Profil).\n\nInfo: dividen bulan ini berlaku untuk investor yang sudah melunasi pembayaran bulan lalu. Investor yang baru melunasi pembayaran bulan ini akan menerima dividen pada tanggal 25 bulan depan.\n\nTerima kasih.`;
+      await sendWa(inv.hp, message, {template_type:'investor_bank_reminder'});
+      sent++;
+    }
+    return json({success:true, sent});
+  }
+
   if(path==='/cron/dividend-list' && m==='POST'){
     const cron = await getSetting('cron');
     const provided = req.headers.get('x-cron-secret') ?? '';
@@ -902,7 +929,17 @@ Deno.serve(async (req)=>{
   }
 
   if(path==='/admin/investors' && m==='GET'){
-    const {data,error} = await supabase.from('investor_profiles').select('*, units(nomor,blok)').order('created_at',{ascending:false});
+    // Switched 2026-09-10 (owner request: complete "daftar rekening"
+    // module) from investor_profiles -- which only has a row once an
+    // investor has submitted the onboarding form at least once, so a
+    // never-touched account was invisible here -- to villa_users itself,
+    // which every active investor account has regardless of whether
+    // they've filled anything in. Same shape (id/unit_nomor/nama/hp/
+    // bank_nama/no_rekening/nama_pemilik_rekening/created_at) the
+    // frontend already expects.
+    const {data,error} = await supabase.from('villa_users')
+      .select('id,unit_id,unit_nomor,nama,hp,bank_nama,no_rekening,nama_pemilik_rekening,created_at')
+      .eq('role','owner').order('unit_nomor');
     if(error) return err(error.message);
     return json(data);
   }
