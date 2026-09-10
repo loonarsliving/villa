@@ -1,0 +1,32 @@
+name: Deploy villa-api Edge Function
+
+# Makes supabase/functions/villa-api/index.ts on `main` the single source of
+# truth for the live Edge Function -- once this is active, villa-api should
+# no longer be edited directly in the Supabase dashboard, only through this
+# repo. See supabase/functions/villa-api/README.md for the full procedure
+# and why the manual snapshot alone kept drifting out of sync.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "supabase/functions/villa-api/**"
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Deploy villa-api
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          supabase functions deploy villa-api \
+            --project-ref svcmybsziaelwwdrnzcv \
+            --no-verify-jwt

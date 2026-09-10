@@ -2,12 +2,21 @@
 
 ## What this is
 
-This directory is a **read-only snapshot** of the `villa-api` Supabase Edge
-Function's deployed source, captured for review/version-control purposes.
-It is **not automatically deployed** by any build step in this repository —
-`index.ts` here has no effect on production until someone explicitly runs
-`supabase functions deploy villa-api` (or the equivalent MCP
-`deploy_edge_function` call) against project `svcmybsziaelwwdrnzcv`.
+**2026-09-10 update: this is no longer a read-only snapshot.** A GitHub
+Actions workflow (`.github/workflows/deploy-villa-api.yml`) now deploys
+`index.ts` in this directory to the live `villa-api` Edge Function
+automatically whenever this directory changes on `main`. **This directory
+is now the source of truth — do not edit `villa-api` directly in the
+Supabase dashboard anymore.** A dashboard edit will silently get
+overwritten the next time anything in this directory is pushed to `main`
+(and will otherwise cause exactly the drift documented below, again).
+
+One-time setup still required (not done by this commit): add a
+`SUPABASE_ACCESS_TOKEN` secret in this GitHub repo's Settings → Secrets and
+variables → Actions, containing a Supabase personal access token with
+deploy rights on project `svcmybsziaelwwdrnzcv`. Until that secret exists,
+the workflow will fail (visible in the Actions tab) rather than deploying
+nothing silently.
 
 ## Provenance
 
@@ -59,33 +68,26 @@ Supabase. This snapshot is Phase 0 of the roadmap in
 `docs/revenue-engine/PHASE0-BASELINE.md`: it does not change any behavior,
 it only makes the existing behavior reviewable in git going forward.
 
-## Keeping this snapshot current
+## Deploying a change (current process, since the 2026-09-10 CI workflow)
 
-Whenever `villa-api` is redeployed (a new version), re-run:
-
-```
-mcp: Supabase.get_edge_function(project_id="svcmybsziaelwwdrnzcv", function_slug="villa-api")
-```
-
-and commit the updated `index.ts` **in the same commit/PR** as the change
-description, so the deployed version and the tracked source never drift
-silently out of sync. Bump the "Deployed version at capture time" line
-above and note the new `ezbr_sha256`.
-
-## Deploying a future change
-
-1. Edit `index.ts` in this directory.
+1. Edit `index.ts` in this directory, on a branch.
 2. Get explicit sign-off per this repo's `docs/revenue-engine/` production
    safety rules — this function serves live bookings and real investor
    payout calculations.
-3. Deploy via Supabase MCP `deploy_edge_function` (or `supabase functions
-   deploy villa-api` with the CLI) pointing at project
-   `svcmybsziaelwwdrnzcv`.
-4. Immediately re-fetch via `get_edge_function` and diff against what was
-   just deployed, to confirm the deployed artifact matches the reviewed
-   source exactly.
+3. Merge/push to `main`. `.github/workflows/deploy-villa-api.yml` deploys
+   it to project `svcmybsziaelwwdrnzcv` automatically — no manual
+   `supabase functions deploy` or MCP `deploy_edge_function` call needed
+   (and none should be run directly against Supabase outside this flow,
+   or the repo and the live function will drift again).
+4. Check the workflow run in the GitHub Actions tab to confirm it
+   succeeded. If it's red, `villa-api` was **not** updated in production —
+   treat that the same as a failed Vercel build, not a soft failure.
 5. Record the change in `docs/revenue-engine/PHASE0-BASELINE.md`'s
    changelog section (or a dedicated CHANGELOG once one exists).
+
+If you ever suspect drift anyway (e.g. someone bypassed this and deployed
+by hand), re-fetch via Supabase MCP `get_edge_function` and diff against
+this file before trusting either one.
 
 ## Runtime environment variables (names only — no values, never commit values)
 

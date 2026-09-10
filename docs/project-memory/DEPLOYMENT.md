@@ -19,8 +19,9 @@ Name/ID: UNKNOWN — NEEDS CONFIRMATION (not stored in-repo; Vercel project link
 ## Deployment workflow (inferred)
 1. Change is made on a `claude/*` (or other) branch.
 2. Branch is pushed to `origin` on GitHub.
-3. If/when merged to `main`, Vercel's GitHub integration (implied by `vercel.json` + the "fix Vercel project framework setting" commit) triggers a production build+deploy.
-4. No `.github/workflows` CI exists, so there is **no automated lint/typecheck/test gate before merge or before Vercel deploys** — Vercel's own build step (`next build`, which does run TypeScript type-checking by default) is the only automated gate.
+3. If/when merged to `main`, Vercel's GitHub integration (implied by `vercel.json` + the "fix Vercel project framework setting" commit) triggers a production build+deploy for the Next.js app.
+4. **Since 2026-09-10, `main` also drives a second, independent deploy path**: `.github/workflows/deploy-villa-api.yml` deploys `supabase/functions/villa-api/index.ts` to the `villa-api` Supabase Edge Function whenever that directory changes on `main`. This is the *only* sanctioned way to change `villa-api` now — direct edits in the Supabase dashboard are no longer the process and will be overwritten by the next deploy from this repo. Requires a `SUPABASE_ACCESS_TOKEN` repo secret (one-time setup, not automated).
+5. No lint/typecheck/test gate exists for either path before merge — Vercel's own build step (`next build`, which does run TypeScript type-checking by default) is the only automated gate for the frontend, and the villa-api workflow has no test step at all (there are none to run — see Technical debt in CURRENT_STATE.md).
 
 ## Build command / install command / output
 - Install: `npm install` (uses `package-lock.json`, so `npm ci` is the reproducible equivalent).

@@ -2,6 +2,23 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-10 — villa-api is now deployed from this repo via CI (NOT YET ACTIVE — needs one-time secret)
+Added `.github/workflows/deploy-villa-api.yml`: pushing a change under
+`supabase/functions/villa-api/` to `main` now deploys it to the live
+`villa-api` Edge Function via Supabase CLI automatically. Goal (owner
+request): villa-api should no longer be something edited only in the
+Supabase dashboard and separately hunted down when someone needs the
+source — this repo becomes the single source of truth for it, same as the
+frontend. Also re-synced the previously-stale `index.ts` snapshot (was v26
+from 2026-09-04, live had moved to v34) — see
+`supabase/functions/villa-api/README.md` for detail on both.
+**Not live yet**: the workflow needs a `SUPABASE_ACCESS_TOKEN` repo secret
+(GitHub Settings → Secrets and variables → Actions) that only the owner can
+add — until then the workflow will fail visibly in the Actions tab rather
+than deploying. Scope explicitly does NOT cover Mkhsistem's WhatsApp/AI
+bridge calls (`sendWa()`, Gemini vision) — those remain intentionally
+external per owner instruction; only villa-api itself was brought in-repo.
+
 ## 2026-09-10 — Automatic monthly income sync to MKH Property (LIVE, `villa-api` v34)
 Villa-api gained `POST /cron/sync-mkh-income` (deployed as version 34) plus a
 new Vercel Cron (`/api/cron/sync-mkh-income`, 1st of month 09:15 WITA) that
