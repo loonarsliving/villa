@@ -647,6 +647,35 @@ Deno.serve(async (req)=>{
     return json({success:true, dispatched});
   }
 
+  // Reminder WA to every active investor to fill/confirm their dividend
+  // bank account, added 2026-09-10 (owner request). One-time send (11 Sep
+  // 2026, 13:05 WITA per vercel.json) -- not a recurring monthly cron, so
+  // this endpoint being callable again isn't itself a re-send risk, but
+  // don't wire a recurring schedule to it without asking first.
+  // Sent to ALL active investors regardless of payment status -- the
+  // message text itself explains the eligibility rule (paid off last
+  // month -> dividend this month; still paying this month -> dividend on
+  // the 25th of the month after), since villa has no record of Loonars'
+  // separate unit-purchase payment status to filter on automatically.
+  if(path==='/cron/investor-bank-reminder' && m==='POST'){
+    const cron = await getSetting('cron');
+    const provided = req.headers.get('x-cron-secret') ?? '';
+    if(!cron.secret) return err('Cron belum dikonfigurasi (integration_settings.cron.secret)',503);
+    if(!await secretsMatch(provided, cron.secret)) return err('Unauthorized',401);
+
+    const {data:investors} = await supabase.from('villa_users')
+      .select('nama,hp,bank_nama,no_rekening').eq('role','owner').eq('is_active',true);
+
+    let sent=0;
+    for(const inv of investors ?? []){
+      const rekeningLengkap = !!(inv.bank_nama && inv.no_rekening);
+      const message = `Halo ${inv.nama}, mohon ${rekeningLengkap ? 'konfirmasi/perbarui' : 'lengkapi'} nomor rekening Anda untuk pencairan dividen bulan ini di aplikasi Loonars Private Living (menu Profil).\n\nInfo: dividen bulan ini berlaku untuk investor yang sudah melunasi pembayaran bulan lalu. Investor yang baru melunasi pembayaran bulan ini akan menerima dividen pada tanggal 25 bulan depan.\n\nTerima kasih.`;
+      await sendWa(inv.hp, message, {template_type:'investor_bank_reminder'});
+      sent++;
+    }
+    return json({success:true, sent});
+  }
+
   if(path==='/cron/dividend-list' && m==='POST'){
     const cron = await getSetting('cron');
     const provided = req.headers.get('x-cron-secret') ?? '';
@@ -901,10 +930,45 @@ Deno.serve(async (req)=>{
     return json({success:true});
   }
 
-  if(path==='/admin/investors' && m==='GET'){
-    const {data,error} = await supabase.from('investor_profiles').select('*, units(nomor,blok)').order('created_at',{ascending:false});
+  // Toggles a unit's payment-settlement checkbox (units.lunas_pembayaran)
+  // from the admin investor list, added 2026-09-10. Deliberately does NOT
+  // trigger any WA/notification to the investor -- this is an internal
+  // admin-only record, never surfaced to the investor as "you are unpaid"
+  // (owner's explicit instruction, to avoid offending them). Any future
+  // investor-facing message must stay generic like the existing dividend
+  // reminder text, never naming an individual's payment status.
+  if(path==='/admin/investors/lunas' && m==='PATCH'){
+    const b = await req.json();
+    if(!b.unit_id || typeof b.lunas_pembayaran !== 'boolean') return err('unit_id dan lunas_pembayaran wajib diisi');
+    const {data,error} = await supabase.from('units').update({lunas_pembayaran:b.lunas_pembayaran}).eq('id',b.unit_id).select('id,nomor,lunas_pembayaran').single();
     if(error) return err(error.message);
     return json(data);
+  }
+
+  if(path==='/admin/investors' && m==='GET'){
+    // Switched 2026-09-10 (owner request: complete "daftar rekening"
+    // module) from investor_profiles -- which only has a row once an
+    // investor has submitted the onboarding form at least once, so a
+    // never-touched account was invisible here -- to villa_users itself,
+    // which every active investor account has regardless of whether
+    // they've filled anything in. Same shape (id/unit_nomor/nama/hp/
+    // bank_nama/no_rekening/nama_pemilik_rekening/created_at) the
+    // frontend already expects.
+    const {data,error} = await supabase.from('villa_users')
+      .select('id,unit_id,unit_nomor,nama,hp,bank_nama,no_rekening,nama_pemilik_rekening,created_at')
+      .eq('role','owner').order('unit_nomor');
+    if(error) return err(error.message);
+
+    // Merged in JS (rather than an embedded units(...) select) to avoid
+    // any ambiguity over whether the client returns that as an object or
+    // an array -- same defensive pattern used elsewhere in this file.
+    const unitIds = (data ?? []).map(r=>r.unit_id).filter(Boolean);
+    const {data:unitsData} = unitIds.length
+      ? await supabase.from('units').select('id,lunas_pembayaran').in('id', unitIds)
+      : {data: []};
+    const lunasByUnitId = new Map((unitsData ?? []).map(u=>[u.id, u.lunas_pembayaran]));
+    const enriched = (data ?? []).map(r => ({...r, lunas_pembayaran: lunasByUnitId.get(r.unit_id) ?? true}));
+    return json(enriched);
   }
 
   if(path==='/admin/dividends' && m==='GET'){
