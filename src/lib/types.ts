@@ -237,6 +237,7 @@ export interface InvestorProfile {
   nama_pemilik_rekening?: string | null;
   created_at: string;
   units?: { nomor: string; blok: string };
+  lunas_pembayaran?: boolean;
 }
 
 export interface MyInvestorProfile {

@@ -930,6 +930,21 @@ Deno.serve(async (req)=>{
     return json({success:true});
   }
 
+  // Toggles a unit's payment-settlement checkbox (units.lunas_pembayaran)
+  // from the admin investor list, added 2026-09-10. Deliberately does NOT
+  // trigger any WA/notification to the investor -- this is an internal
+  // admin-only record, never surfaced to the investor as "you are unpaid"
+  // (owner's explicit instruction, to avoid offending them). Any future
+  // investor-facing message must stay generic like the existing dividend
+  // reminder text, never naming an individual's payment status.
+  if(path==='/admin/investors/lunas' && m==='PATCH'){
+    const b = await req.json();
+    if(!b.unit_id || typeof b.lunas_pembayaran !== 'boolean') return err('unit_id dan lunas_pembayaran wajib diisi');
+    const {data,error} = await supabase.from('units').update({lunas_pembayaran:b.lunas_pembayaran}).eq('id',b.unit_id).select('id,nomor,lunas_pembayaran').single();
+    if(error) return err(error.message);
+    return json(data);
+  }
+
   if(path==='/admin/investors' && m==='GET'){
     // Switched 2026-09-10 (owner request: complete "daftar rekening"
     // module) from investor_profiles -- which only has a row once an
@@ -943,7 +958,17 @@ Deno.serve(async (req)=>{
       .select('id,unit_id,unit_nomor,nama,hp,bank_nama,no_rekening,nama_pemilik_rekening,created_at')
       .eq('role','owner').order('unit_nomor');
     if(error) return err(error.message);
-    return json(data);
+
+    // Merged in JS (rather than an embedded units(...) select) to avoid
+    // any ambiguity over whether the client returns that as an object or
+    // an array -- same defensive pattern used elsewhere in this file.
+    const unitIds = (data ?? []).map(r=>r.unit_id).filter(Boolean);
+    const {data:unitsData} = unitIds.length
+      ? await supabase.from('units').select('id,lunas_pembayaran').in('id', unitIds)
+      : {data: []};
+    const lunasByUnitId = new Map((unitsData ?? []).map(u=>[u.id, u.lunas_pembayaran]));
+    const enriched = (data ?? []).map(r => ({...r, lunas_pembayaran: lunasByUnitId.get(r.unit_id) ?? true}));
+    return json(enriched);
   }
 
   if(path==='/admin/dividends' && m==='GET'){
