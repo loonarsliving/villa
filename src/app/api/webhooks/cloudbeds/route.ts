@@ -202,12 +202,11 @@ export async function POST(request: Request) {
         .from("cloudbeds_room_mapping")
         .select("unit_id, units(nomor)")
         .eq("cloudbeds_room_id", cloudbedsRoomId)
-        .maybeSingle<{ unit_id: string; units: { nomor: string } | null }>();
+        .maybeSingle<{ unit_id: string; units: { nomor: string } | { nomor: string }[] | null }>();
 
       if (mapping?.unit_id) {
-        matched = true;
         unitId = mapping.unit_id;
-        unitNomor = mapping.units?.nomor ?? null;
+        unitNomor = Array.isArray(mapping.units) ? (mapping.units[0]?.nomor ?? null) : (mapping.units?.nomor ?? null);
 
         const guestNama = reservation.guestName ?? reservation.guest_name ?? "Tamu Cloudbeds";
         const guestHp = reservation.guestPhone ?? reservation.guest_phone ?? null;
@@ -228,7 +227,7 @@ export async function POST(request: Request) {
           guestId = g?.id ?? null;
         }
 
-        await supabase.from("bookings").upsert(
+        const { error: bookingUpsertError } = await supabase.from("bookings").upsert(
           {
             unit_id: unitId,
             unit_nomor: unitNomor,
@@ -246,7 +245,13 @@ export async function POST(request: Request) {
           { onConflict: "cloudbeds_reservation_id" },
         );
 
-        if (unitNomor) {
+        if (bookingUpsertError) {
+          logError = `bookings_upsert_failed: ${bookingUpsertError.message}`;
+        } else {
+          matched = true;
+        }
+
+        if (!bookingUpsertError && unitNomor) {
           await supabase.from("notifications").insert({
             unit_id: unitId,
             target_role: "all",
