@@ -8,11 +8,14 @@ export const maxDuration = 30;
 const API_BASE = "https://svcmybsziaelwwdrnzcv.supabase.co/functions/v1/villa-api";
 
 /**
- * Vercel Cron target (see vercel.json, tanggal 20 tiap bulan jam 09:00 WITA
- * -- 5 hari sebelum dividend-list cron di tanggal 25, supaya investor
- * sempat lengkapi rekening sebelum daftar transfer dihitung). Same
- * CRON_SECRET guard as the other cron routes; the actual WA-sending logic
- * stays in villa-api's own POST /cron/investor-bank-reminder.
+ * Vercel Cron target (see vercel.json). Owner explicitly asked for a
+ * ONE-TIME send (11 Sep 2026, 13:05 WITA), not a recurring monthly
+ * reminder -- the schedule is a single specific date/time, not a
+ * wildcard pattern, so it only fires once in practice. Remove the cron
+ * entry from vercel.json after it fires so it doesn't also fire again on
+ * the same date next year. Same CRON_SECRET guard as the other cron
+ * routes; the actual WA-sending logic stays in villa-api's own
+ * POST /cron/investor-bank-reminder.
  */
 export async function GET(request: Request) {
   const expected = (process.env.CRON_SECRET || "").trim();

@@ -648,8 +648,10 @@ Deno.serve(async (req)=>{
   }
 
   // Reminder WA to every active investor to fill/confirm their dividend
-  // bank account, added 2026-09-10 (owner request). Runs a few days
-  // before the dividend-list cron (25th) so accounts are ready in time.
+  // bank account, added 2026-09-10 (owner request). One-time send (11 Sep
+  // 2026, 13:05 WITA per vercel.json) -- not a recurring monthly cron, so
+  // this endpoint being callable again isn't itself a re-send risk, but
+  // don't wire a recurring schedule to it without asking first.
   // Sent to ALL active investors regardless of payment status -- the
   // message text itself explains the eligibility rule (paid off last
   // month -> dividend this month; still paying this month -> dividend on
