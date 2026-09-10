@@ -28,6 +28,7 @@ export default function AdminCloudbedsPage() {
   const [manualEntry, setManualEntry] = useState(false);
   const [testing, setTesting] = useState(false);
   const [lastChecked, setLastChecked] = useState<Date | null>(null);
+  const [backfilling, setBackfilling] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -87,6 +88,27 @@ export default function AdminCloudbedsPage() {
     load();
   }
 
+  async function runBackfill() {
+    setBackfilling(true);
+    try {
+      const body = await localApi<{ fetched: number; matched: number; inserted: number; skipped_unmapped: number; errors: string[] }>(
+        "/api/admin/cloudbeds/backfill",
+        { method: "POST" },
+      );
+      toast(
+        "✓",
+        "Selesai",
+        `${body.fetched} reservasi aktif ditemukan, ${body.inserted} berhasil masuk ke kalender villa (${body.skipped_unmapped} room belum dipetakan).`,
+        "sage",
+      );
+      load();
+    } catch (e) {
+      toast("⚠", "Gagal", e instanceof Error ? e.message : "Terjadi kesalahan.", "ruby");
+    } finally {
+      setBackfilling(false);
+    }
+  }
+
   return (
     <AdminShell pageTitle="Cloudbeds" pageSub="Pemetaan room & log event">
       <div className="bg-gold-500/10 border-l-2 border-gold-500 rounded-r p-3.5 text-[11px] text-ink/50 leading-relaxed mb-3.5">
@@ -133,6 +155,24 @@ export default function AdminCloudbedsPage() {
               langsung dari daftar live di bawah.
             </div>
           )}
+        </div>
+      </Card>
+
+      <Card className="mb-3.5">
+        <CardHeader
+          title="Tarik Reservasi Aktif dari Cloudbeds"
+          action={
+            <button
+              onClick={runBackfill}
+              disabled={backfilling}
+              className="text-[10.5px] font-semibold text-gold-500 border border-gold-500/25 rounded px-3 py-1.5 shrink-0 disabled:opacity-50"
+            >
+              {backfilling ? "Menarik…" : "Tarik Sekarang"}
+            </button>
+          }
+        />
+        <div className="px-4 sm:px-5 py-3.5 text-[11px] text-ink/50 leading-relaxed">
+          Menarik reservasi yang statusnya masih aktif/akan datang (belum checkout) dari Cloudbeds untuk semua room yang sudah dipetakan, lalu memasukkannya ke kalender booking villa. Aman dijalankan berkali-kali — tidak akan membuat data duplikat.
         </div>
       </Card>
 
