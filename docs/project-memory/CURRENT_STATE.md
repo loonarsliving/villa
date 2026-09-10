@@ -2,6 +2,26 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-10 — Cloudbeds sync is now two-way (villa → Cloudbeds added; NOT YET ACTIVE — needs one-time secret)
+`villa-api`'s `POST /bookings` now also pushes walk-in/direct bookings out
+to Cloudbeds (`POST /postReservation`) so a room booked at Front Desk shows
+blocked in Cloudbeds/OTAs too — until now the sync only worked one way
+(Cloudbeds → villa, via the existing webhook). Root cause of the owner's
+report that "staff-entered Cloudbeds data doesn't match villa" was actually
+that the **inbound** webhook itself was never confirmed registered on
+Cloudbeds' side (`cloudbeds_events_log` has 0 rows as of this session) —
+that is still open and separate from this outbound addition; see
+INTEGRATIONS.md's Cloudbeds section for both directions' detail.
+**Not live yet**: needs a `CLOUDBEDS_API_KEY` Supabase Edge Function secret
+on `villa-api` (separate from the same-named Vercel env var the frontend
+already has) before the outbound push does anything, and separately still
+needs the Cloudbeds-side webhook registration for the inbound direction to
+start working, plus the `SUPABASE_ACCESS_TOKEN` CI secret noted below
+before this code change even reaches production. Contract verified against
+Cloudbeds' public OpenAPI spec (`github.com/cloudbeds/openapi-specs`,
+`pms-v1.2`) — not guessed. Known gap: villa-side booking cancellation does
+not yet push a cancellation to Cloudbeds.
+
 ## 2026-09-10 — villa-api is now deployed from this repo via CI (NOT YET ACTIVE — needs one-time secret)
 Added `.github/workflows/deploy-villa-api.yml`: pushing a change under
 `supabase/functions/villa-api/` to `main` now deploys it to the live
