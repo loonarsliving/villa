@@ -2,6 +2,19 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-10 — Automatic monthly income sync to MKH Property (LIVE, `villa-api` v34)
+Villa-api gained `POST /cron/sync-mkh-income` (deployed as version 34) plus a
+new Vercel Cron (`/api/cron/sync-mkh-income`, 1st of month 09:15 WITA) that
+pushes last month's rental + cafe/spa/lainnya income to MKH Property's new
+`pendapatan_villa` table (a separate internal finance app/Supabase project).
+See CHANGELOG.md for full detail. **Not yet observed firing for real** — the
+cron hasn't run on its schedule yet as of this note, and this session's
+sandbox couldn't make direct HTTPS calls to villa-api to test it manually
+(network policy blocked `*.supabase.co`). Confirm after the 1st of the next
+month that a row with `sumber='villa_api'` lands in MKH Property's
+`pendapatan_villa`, or trigger `/api/cron/sync-mkh-income` manually with a
+valid `CRON_SECRET` sooner if you want to check before then.
+
 ## Last known completed work (on `main`)
 - UI redesign to a "light, colorful mobile-style theme" (merged 2026-08-18, commits `932f6de`/`54fc066`).
 - Double-booking prevention by date on Front Desk (`346ab86`).
