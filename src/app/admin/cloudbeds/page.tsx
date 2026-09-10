@@ -29,6 +29,7 @@ export default function AdminCloudbedsPage() {
   const [testing, setTesting] = useState(false);
   const [lastChecked, setLastChecked] = useState<Date | null>(null);
   const [backfilling, setBackfilling] = useState(false);
+  const [subscribing, setSubscribing] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -109,12 +110,57 @@ export default function AdminCloudbedsPage() {
     }
   }
 
+  async function runWebhookSetup() {
+    setSubscribing(true);
+    try {
+      const body = await localApi<{
+        endpoint_url: string;
+        already_registered_before: number;
+        attempts: Array<{ object: string; action: string; success: boolean; subscriptionID?: string; error?: string }>;
+      }>("/api/admin/cloudbeds/webhook-setup", { method: "POST" });
+      const okCount = body.attempts.filter((a) => a.success).length;
+      const failed = body.attempts.filter((a) => !a.success);
+      if (failed.length === 0) {
+        toast("✓", "Webhook terdaftar", `${okCount} event Cloudbeds berhasil terdaftar ke villa.`, "sage");
+      } else {
+        toast(
+          "⚠",
+          "Sebagian gagal",
+          `${okCount} berhasil, ${failed.length} gagal: ${failed.map((f) => `${f.object}.${f.action} (${f.error})`).join("; ")}`,
+          "ruby",
+        );
+      }
+    } catch (e) {
+      toast("⚠", "Gagal", e instanceof Error ? e.message : "Terjadi kesalahan.", "ruby");
+    } finally {
+      setSubscribing(false);
+    }
+  }
+
   return (
     <AdminShell pageTitle="Cloudbeds" pageSub="Pemetaan room & log event">
       <div className="bg-gold-500/10 border-l-2 border-gold-500 rounded-r p-3.5 text-[11px] text-ink/50 leading-relaxed mb-3.5">
         Webhook Cloudbeds: arahkan ke <code className="text-gold-400">https://living.haluoleo.id/api/webhooks/cloudbeds</code> dengan header{" "}
         <code className="text-gold-400">x-cloudbeds-secret</code> sesuai nilai <code className="text-gold-400">CLOUDBEDS_WEBHOOK_SECRET</code> di Vercel env variable project ini. Ditangani langsung di sini — bukan lagi lewat Supabase.
       </div>
+
+      <Card className="mb-3.5">
+        <CardHeader
+          title="Daftarkan Webhook Otomatis (sinkron live)"
+          action={
+            <button
+              onClick={runWebhookSetup}
+              disabled={subscribing}
+              className="text-[10.5px] font-semibold text-gold-500 border border-gold-500/25 rounded px-3 py-1.5 shrink-0 disabled:opacity-50"
+            >
+              {subscribing ? "Mendaftar…" : "Daftarkan Sekarang"}
+            </button>
+          }
+        />
+        <div className="px-4 sm:px-5 py-3.5 text-[11px] text-ink/50 leading-relaxed">
+          Mendaftarkan webhook Cloudbeds secara otomatis lewat API mereka — tidak perlu buka dashboard Cloudbeds manual. Setelah berhasil, setiap reservasi baru/berubah di Cloudbeds otomatis masuk live ke kalender villa. Aman diklik berkali-kali (tidak dobel jika sudah terdaftar).
+        </div>
+      </Card>
 
       <Card className="mb-3.5">
         <CardHeader
