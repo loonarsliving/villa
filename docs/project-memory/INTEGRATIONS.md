@@ -55,6 +55,15 @@ When a Cloudbeds/OTA reservation event matches a mapped unit, `src/app/api/webho
 - Per AI_AND_AGENTS.md, the unmerged CCTV branch calls `https://mkh.haluoleo.id/api/villa/ai/cctv-vision` rather than Gemini directly — same sibling system, same pattern as the WA bridge above. Villa does not hold its own `GEMINI_API_KEY` in either case.
 - The currently deployed `villa-api` v18 (confirmed via source read, 2026-08-27) has no AI/Gemini code at all — consistent with AI_AND_AGENTS.md.
 
+## MKH Property (internal finance app, separate Supabase project — added 2026-09-10)
+- **Purpose**: automatic monthly push of Loonars Villa's rental + cafe/spa/lainnya income to PT Maha Karya Haluoleo's internal finance app ("MKH Property" / repo `mkh-properti`), for a CFO-facing "Pendapatan Villa" report there. MKH Property is a **completely separate Supabase project** (`gluoioiimapyhchdasfl`) from villa's own (`svcmybsziaelwwdrnzcv`) — this is villa's only cross-Supabase-project integration.
+- **Direction**: one-directional, villa → MKH Property only.
+- **Mechanism**: `villa-api`'s `POST /cron/sync-mkh-income` (v34) computes last month's numbers via the existing `computeReport()` (rental, `gross_revenue`) and `computeWalkinIncome()` (cafe/spa/lainnya), then calls MKH Property's `POST /rest/v1/rpc/villa_income_sync` directly (PostgREST RPC, not a webhook route) with `apikey`/`Authorization: Bearer` set to MKH Property's public anon key and a dedicated `x-villa-sync-secret` header for authorization.
+- **Config**: `integration_settings.mkh_finance_bridge` (`base_url`, `apikey`, `secret`) — same shape as `vercel_bridge` but its own row/secret, not shared with the Mkhsistem WA bridge or the cron secret.
+- **Trigger**: new Vercel Cron `/api/cron/sync-mkh-income` (1st of month, 09:15 WITA), same `CRON_SECRET`-guarded pattern as `/api/cron/dividend-list`.
+- **Status**: DONE / deployed, **not yet observed running end-to-end for real** (cron hasn't fired on schedule yet; this session could only verify the receiving RPC directly via Supabase MCP, not a live HTTP round trip). See CURRENT_STATE.md/CHANGELOG.md.
+- **Why not exposed as a public/anon-open endpoint on villa's side**: this is villa calling out, not receiving — no new inbound route on `villa-api` was added for this.
+
 ## Relationship to "Mkhsistem" — CONFIRMED 2026-08-27
 Villa's own repo/backend implement neither AI nor WhatsApp sending themselves. Both are borrowed from the sibling Mkhsistem (MK Connect) system at `https://mkh.haluoleo.id`: WA via `villa-api`'s `vercel_bridge` setting (confirmed live), AI/Gemini via the CCTV branch's `MKHSISTEM_AI_BRIDGE_URL` (not yet deployed). This resolves the "relationship between this repo and mkhsistem" question PROJECT_CONTEXT.md previously marked UNKNOWN.
 
