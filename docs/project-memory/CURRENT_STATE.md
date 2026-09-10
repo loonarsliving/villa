@@ -55,7 +55,7 @@ None explicitly documented as open/unfixed in this repo (no issue tracker conten
 - **No automated tests** anywhere in the repo.
 - **No CI/CD pipeline** (no `.github/workflows`) — quality gates before deploy are manual/best-effort only.
 - **No `.env.example`** — onboarding a new developer requires reverse-engineering required env vars from source (see ENVIRONMENT.md).
-- **Core backend (`villa-api`) is not version-controlled in this repo** — this is the single largest piece of technical/process debt found: business logic, auth enforcement, and schema live in an Edge Function whose source this repository does not track, making it impossible to audit, diff, or roll back alongside frontend changes.
+- **Core backend (`villa-api`) has a manually-synced source snapshot at `supabase/functions/villa-api/index.ts`, not a live/automated one** — it is not deployed from this repo (no CI wires it to Supabase) and is not kept in sync automatically, so it drifts whenever someone deploys a `villa-api` change without also re-running the capture step in `supabase/functions/villa-api/README.md`. It had in fact drifted (last captured v26 on 2026-09-04, live had moved to v34) until re-synced 2026-09-10 in this session. Treat this file as **possibly stale** unless it was just re-synced — verify against `mcp__Supabase__get_edge_function` before trusting it for anything version-sensitive, per the villa-api verification rule in `CLAUDE.md`.
 - **No database migrations tracked in git** — schema changes are presumably made ad hoc against the live Supabase project.
 
 ## Blocked work

@@ -15,10 +15,24 @@ It is **not automatically deployed** by any build step in this repository —
 |---|---|
 | Supabase project | `svcmybsziaelwwdrnzcv` (`loonars-private-living`, shared with Mkhsistem) |
 | Function slug | `villa-api` |
-| Deployed version at capture time | **v26** (`verify_jwt: false`) |
+| Deployed version at capture time | **v34** (`verify_jwt: false`) |
 | Captured via | Supabase MCP `get_edge_function` (read-only) |
-| Captured on | 2026-09-04, this session |
-| `ezbr_sha256` at capture | `c1184511bf252121de5b4a1efda4a22effd698ec1343b07a0d0d3f71c2722895` |
+| Captured on | 2026-09-10, this session |
+| `ezbr_sha256` at capture | `a3fe3202cdce01befbea2f3cf5d1c67428afa7e9ddc9b670c9de75c1ead0b778` |
+
+**2026-09-10 re-sync note:** this snapshot had drifted — it was last captured
+at v26 (2026-09-04) and the live function had since moved to v34 without a
+matching snapshot update (the "Keeping this snapshot current" step below was
+skipped across v27–v33). Re-fetched and re-synced now; the diff against the
+old v26 file was a clean 192-line addition with no removed/altered lines,
+consistent with the incremental features documented in `CURRENT_STATE.md`
+(dividend bank account fields, RLS hardening endpoints, MKH Property income
+sync `/cron/sync-mkh-income`, etc.) landing between v26 and v34. The
+intermediate v27–v33 diffs themselves were never captured and cannot be
+reconstructed. **Lesson: this file is only trustworthy immediately after a
+deploy — treat it as possibly stale otherwise, and re-run the sync step
+below before relying on it, especially before debugging "why doesn't the
+code do X" against outdated source.**
 
 **v26 deployed 2026-09-04** (owner-approved): atomic check-in/checkout via
 new RPCs, server-side pricing for new walk-in/direct bookings,

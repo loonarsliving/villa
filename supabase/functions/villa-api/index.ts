@@ -233,6 +233,151 @@ Deno.serve(async (req)=>{
     return json({token, user:u});
   }
 
+  // ---------------------------------------------------------------------
+  // PUBLIC booking routes (loonars.id website) -- unauthenticated by
+  // design. Added 2026-09-09 so the public site can offer real-time,
+  // self-service villa booking. Deliberately reuse the exact same
+  // `bookings`/`units` tables and the exact same conflict-check logic as
+  // the staff POST /bookings below, so a website booking can NEVER
+  // collide with a Cloudbeds-synced or staff-entered booking -- they all
+  // read/write the same rows. Every booking created here is tagged
+  // sumber:'website' and carries a note asking staff to verify the QRIS
+  // payment proof, since there is no automated online payment
+  // verification wired up yet (only the staff walk-in QRIS/iPaymu flow
+  // has that, and only for cafe/spa walkin_payments -- see
+  // /api/webhooks/ipaymu in the frontend repo).
+  // ---------------------------------------------------------------------
+
+  if(path==='/public/room-types' && m==='GET'){
+    const {data,error} = await supabase.from('villa_room_types')
+      .select('code,name,description,min_rate,max_rate').eq('active',true).order('min_rate');
+    if(error) return err(error.message);
+    return json(data);
+  }
+
+  if(path==='/public/availability' && m==='GET'){
+    const checkin = url.searchParams.get('checkin');
+    const checkout = url.searchParams.get('checkout');
+    const room_type = url.searchParams.get('room_type');
+    if(!checkin || !isValidDateStr(checkin)) return err('checkin wajib diisi (YYYY-MM-DD)');
+    if(!checkout || !isValidDateStr(checkout)) return err('checkout wajib diisi (YYYY-MM-DD)');
+    if(new Date(checkout) <= new Date(checkin)) return err('checkout harus setelah checkin');
+
+    const {data:units, error:unitsErr} = await supabase.from('units').select('id,room_type_id');
+    if(unitsErr) return err(unitsErr.message);
+    const {data:roomTypes} = await supabase.from('villa_room_types').select('id,code,name').eq('active',true);
+    const rtById = new Map((roomTypes??[]).map(r=>[r.id,r]));
+
+    const {data:bookings} = await supabase.from('bookings').select('unit_id,tgl_checkin,tgl_checkout').in('status',['terjadwal','checkin']);
+    const conflicts = findConflicts(bookings??[], checkin, checkout);
+
+    const byType = new Map();
+    for(const u of units??[]){
+      const rt = rtById.get(u.room_type_id);
+      const code = rt?.code ?? 'unknown';
+      if(room_type && code !== room_type) continue;
+      if(!byType.has(code)) byType.set(code, {code, name: rt?.name ?? code, total:0, available:0});
+      const entry = byType.get(code);
+      entry.total++;
+      if(!conflicts.has(u.id)) entry.available++;
+    }
+    const room_types_result = Array.from(byType.values());
+    return json({
+      checkin, checkout,
+      available: room_types_result.some(r=>r.available>0),
+      room_types: room_types_result,
+    });
+  }
+
+  if(path==='/public/payment-info' && m==='GET'){
+    const setting = await getSetting('public_booking_qris');
+    return json({
+      qris_data_url: setting?.data_url ?? null,
+      note: setting?.note ?? 'QRIS pembayaran belum tersedia -- silakan hubungi kami di WhatsApp untuk info pembayaran.',
+    });
+  }
+
+  if(path==='/public/bookings' && m==='POST'){
+    const b = await req.json().catch(()=>null);
+    if(!b) return err('Body tidak valid');
+    const nama = String(b.nama??'').trim();
+    const hp = String(b.hp??'').trim();
+    const tgl_checkin = b.tgl_checkin;
+    const tgl_checkout = b.tgl_checkout;
+    const room_type = String(b.room_type??'').trim() || null;
+    const catatan = String(b.catatan??'').trim();
+
+    if(nama.length<2) return err('Nama wajib diisi');
+    if(!/^[0-9+][0-9+\-\s]{7,}$/.test(hp)) return err('Nomor WhatsApp tidak valid');
+    if(!isValidDateStr(tgl_checkin)) return err('Tanggal checkin tidak valid');
+    if(!isValidDateStr(tgl_checkout)) return err('Tanggal checkout tidak valid');
+    if(new Date(tgl_checkout) <= new Date(tgl_checkin)) return err('Tanggal checkout harus setelah checkin');
+
+    let unitsQ = supabase.from('units').select('id,nomor,tarif_harian,room_type_id');
+    if(room_type){
+      const {data:rt} = await supabase.from('villa_room_types').select('id').eq('code',room_type).maybeSingle();
+      if(!rt) return err('Tipe unit tidak dikenali');
+      unitsQ = unitsQ.eq('room_type_id', rt.id);
+    }
+    const {data:candidateUnits, error:unitsErr} = await unitsQ.order('nomor');
+    if(unitsErr) return err(unitsErr.message);
+    if(!candidateUnits?.length) return err('Tipe unit tidak tersedia', 404);
+
+    const {data:existingBookings} = await supabase.from('bookings')
+      .select('unit_id,tgl_checkin,tgl_checkout')
+      .in('unit_id', candidateUnits.map(u=>u.id))
+      .in('status', ['terjadwal','checkin']);
+    const conflicts = findConflicts(existingBookings??[], tgl_checkin, tgl_checkout);
+    const freeUnit = candidateUnits.find(u=>!conflicts.has(u.id));
+    if(!freeUnit) return err('Maaf, villa sudah penuh untuk tanggal yang dipilih. Silakan pilih tanggal lain atau hubungi kami di WhatsApp.', 409);
+
+    const nights = Math.max(1, Math.round((new Date(tgl_checkout).getTime() - new Date(tgl_checkin).getTime())/86400000));
+    const flatTarif = Number(freeUnit.tarif_harian ?? 0);
+    let computedTarif = flatTarif * nights;
+    if(freeUnit.room_type_id){
+      const nightDates=[];
+      for(let i=0;i<nights;i++){
+        const d=new Date(`${tgl_checkin}T00:00:00Z`); d.setUTCDate(d.getUTCDate()+i);
+        nightDates.push(d.toISOString().slice(0,10));
+      }
+      const {data:plannedRates} = await supabase.from('villa_rates').select('date,rate')
+        .eq('room_type_id',freeUnit.room_type_id).in('date',nightDates);
+      const plannedByDate = new Map((plannedRates??[]).map(r=>[r.date, Number(r.rate)]));
+      if(plannedByDate.size>0){
+        computedTarif = 0;
+        for(let i=0;i<nights;i++){
+          const d=new Date(`${tgl_checkin}T00:00:00Z`); d.setUTCDate(d.getUTCDate()+i);
+          const dateStr=d.toISOString().slice(0,10);
+          computedTarif += plannedByDate.has(dateStr) ? plannedByDate.get(dateStr) : flatTarif;
+        }
+      }
+    }
+    if(computedTarif<=0) return err('Tarif unit belum diatur, hubungi kami langsung', 409);
+
+    const {data:g} = await supabase.from('guests').insert({nama, hp}).select('id').single();
+
+    const {data:booking, error:bookErr} = await supabase.from('bookings').insert({
+      unit_id: freeUnit.id, unit_nomor: freeUnit.nomor, guest_id: g?.id ?? null, guest_nama: nama,
+      tipe: 'harian', sumber: 'website', tgl_checkin, tgl_checkout,
+      durasi_malam: nights, checkin_time: '14:00:00',
+      tarif: computedTarif, total_bayar: computedTarif, status: 'terjadwal',
+      catatan: catatan ? `[Website] ${catatan}` : '[Website] Booking mandiri dari loonars.id -- mohon verifikasi bukti pembayaran QRIS via WhatsApp.',
+    }).select().single();
+    if(bookErr){
+      if(bookErr.code === '23P01') return err('Maaf, unit baru saja dibooking tamu lain. Silakan pilih tanggal/tipe lain.', 409);
+      return err(bookErr.message);
+    }
+
+    await notif(freeUnit.id, 'all', 'booking', `Booking baru dari Website -- Unit ${freeUnit.nomor}`,
+      `${nama} (${hp}) - ${tgl_checkin} s/d ${tgl_checkout} - Rp ${Math.round(computedTarif).toLocaleString('id-ID')} -- mohon cek bukti pembayaran`, booking.id);
+
+    return json({
+      booking_id: booking.id, unit_nomor: freeUnit.nomor,
+      tgl_checkin, tgl_checkout, durasi_malam: nights,
+      tarif: computedTarif, total_bayar: computedTarif, status: booking.status,
+    }, 201);
+  }
+
   if(path==='/me/password' && m==='POST'){
     const session = await requireAuth(req);
     if(!session) return err('Unauthorized',401);
@@ -355,6 +500,53 @@ Deno.serve(async (req)=>{
       sent++;
     }
     return json({success:true, periode, sent_to_admins:sent, investor_count:list.investor_count});
+  }
+
+  if(path==='/cron/sync-mkh-income' && m==='POST'){
+    const cron = await getSetting('cron');
+    const provided = req.headers.get('x-cron-secret') ?? '';
+    if(!cron.secret) return err('Cron belum dikonfigurasi (integration_settings.cron.secret)',503);
+    if(!await secretsMatch(provided, cron.secret)) return err('Unauthorized',401);
+
+    let periode = url.searchParams.get('periode');
+    if(!periode){
+      const now = new Date();
+      const prev = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth()-1, 1));
+      periode = prev.toISOString().slice(0,7);
+    }
+
+    let report;
+    try { report = await computeReport(undefined, periode); } catch(e){ return err(e.message,500); }
+
+    const items = [
+      {kategori:'rental',  jumlah: report.gross_revenue},
+      {kategori:'cafe',    jumlah: report.walkin_income.cafe},
+      {kategori:'spa',     jumlah: report.walkin_income.spa},
+      {kategori:'lainnya', jumlah: report.walkin_income.lainnya},
+    ];
+
+    const bridge = await getSetting('mkh_finance_bridge');
+    if(!bridge.base_url || !bridge.apikey || !bridge.secret){
+      return err('Jembatan MKH Property belum dikonfigurasi (integration_settings.mkh_finance_bridge)',503);
+    }
+
+    try {
+      const r = await fetch(bridge.base_url, {
+        method:'POST',
+        headers:{
+          'Content-Type':'application/json',
+          apikey: bridge.apikey,
+          Authorization: `Bearer ${bridge.apikey}`,
+          'x-villa-sync-secret': bridge.secret,
+        },
+        body: JSON.stringify({p_periode:`${periode}-01`, p_items:items}),
+      });
+      const result = await r.json().catch(()=>null);
+      if(!r.ok) return err((result && (result.message||result.error)) ?? `MKH Property menolak (HTTP ${r.status})`, 502);
+      return json({success:true, periode, items, mkh_response:result});
+    } catch(e){
+      return err(`Gagal menghubungi MKH Property: ${String(e)}`,502);
+    }
   }
 
   const session = await requireAuth(req);
