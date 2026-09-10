@@ -7,6 +7,18 @@ const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPAB
 const SESSION_SECRET = Deno.env.get('VILLA_SESSION_SECRET') ?? '';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 
+// Outbound Cloudbeds sync (villa -> Cloudbeds), added 2026-09-10 so a
+// walk-in/direct booking created in Front Desk blocks the room in
+// Cloudbeds too, matching the existing inbound webhook that brings
+// Cloudbeds/OTA reservations into `bookings`. Separate secret from the
+// frontend's CLOUDBEDS_API_KEY (Vercel) -- this one lives in this Edge
+// Function's own secrets, set via `supabase secrets set` or the Supabase
+// dashboard, never in this file. Contract verified against Cloudbeds'
+// published OpenAPI spec (pms-v1.2, POST /postReservation, GET /getRooms,
+// GET /getSources) -- not guessed.
+const CLOUDBEDS_API_BASE = 'https://api.cloudbeds.com/api/v1.2';
+function cloudbedsApiKey(){ return (Deno.env.get('CLOUDBEDS_API_KEY') ?? '').trim(); }
+
 const CORS = { 'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'authorization,x-client-info,apikey,content-type,x-villa-token,x-cloudbeds-secret,x-cron-secret,x-internal-secret','Access-Control-Allow-Methods':'GET,POST,PATCH,DELETE,OPTIONS' };
 
 function json(d, s=200){ return new Response(JSON.stringify(d),{status:s,headers:{...CORS,'Content-Type':'application/json'}}); }
@@ -94,6 +106,107 @@ async function notif(unit_id, role, tipe, judul, pesan, ref_id){
 
 async function getVercelBridge(){
   return await getSetting('vercel_bridge');
+}
+
+// Pushes a villa-created booking (walk-in/direct, never one that already
+// came FROM Cloudbeds -- caller must check that) out to Cloudbeds as a real
+// reservation, so the room is blocked there too and OTAs stop seeing it as
+// available. Best-effort: any failure is logged to cloudbeds_events_log and
+// swallowed -- villa's own booking must never fail or roll back because
+// Cloudbeds is unreachable or misconfigured, same fail-soft philosophy as
+// the inbound webhook and the WA bridge.
+async function pushBookingToCloudbeds(booking){
+  const apiKey = cloudbedsApiKey();
+  if(!apiKey) return; // CLOUDBEDS_API_KEY not set for this function -- outbound sync just not configured yet.
+
+  const logOutbound = async (matched, extra) => {
+    await supabase.from('cloudbeds_events_log').insert({
+      reservation_id: booking.cloudbeds_reservation_id ?? null,
+      event_type: 'outbound.reservation.created',
+      payload: {booking_id: booking.id, unit_id: booking.unit_id, ...extra},
+      matched,
+      error: extra?.error ?? null,
+    });
+  };
+
+  try {
+    const {data: mapping} = await supabase.from('cloudbeds_room_mapping')
+      .select('cloudbeds_room_id').eq('unit_id', booking.unit_id).maybeSingle();
+    if(!mapping?.cloudbeds_room_id){
+      await logOutbound(false, {error: 'no_cloudbeds_mapping_for_unit'});
+      return;
+    }
+
+    const roomsRes = await fetch(`${CLOUDBEDS_API_BASE}/getRooms`, {headers: {'x-api-key': apiKey}});
+    const roomsBody = await roomsRes.json().catch(()=>null);
+    if(!roomsRes.ok || roomsBody?.success === false){
+      await logOutbound(false, {error: `getRooms_failed: ${roomsBody?.message ?? roomsRes.status}`});
+      return;
+    }
+    let roomTypeID = null;
+    for(const entry of (roomsBody?.data ?? [])){
+      const candidates = Array.isArray(entry.rooms) ? entry.rooms : [entry];
+      for(const r of candidates){
+        if(String(r.roomID) === String(mapping.cloudbeds_room_id)){ roomTypeID = entry.roomTypeID ?? r.roomTypeID ?? null; break; }
+      }
+      if(roomTypeID) break;
+    }
+    if(!roomTypeID){
+      await logOutbound(false, {error: 'cloudbeds_room_id_not_found_in_live_getRooms'});
+      return;
+    }
+
+    let sourceSetting = await getSetting('cloudbeds_outbound');
+    let sourceID = sourceSetting?.source_id ?? null;
+    if(!sourceID){
+      const sourcesRes = await fetch(`${CLOUDBEDS_API_BASE}/getSources`, {headers: {'x-api-key': apiKey}});
+      const sourcesBody = await sourcesRes.json().catch(()=>null);
+      const direct = (sourcesBody?.data ?? []).find(s => s.isThirdParty === false && s.status === true);
+      sourceID = direct?.sourceID ?? null;
+    }
+    if(!sourceID){
+      await logOutbound(false, {error: 'no_direct_source_id_resolved -- set integration_settings.cloudbeds_outbound.source_id manually'});
+      return;
+    }
+
+    const nama = (booking.guest_nama ?? 'Tamu Villa').trim();
+    const spaceIdx = nama.indexOf(' ');
+    const guestFirstName = spaceIdx === -1 ? nama : nama.slice(0, spaceIdx);
+    const guestLastName = spaceIdx === -1 ? nama : nama.slice(spaceIdx + 1);
+    const guestCountry = sourceSetting?.guest_country_default ?? 'ID';
+
+    const form = new URLSearchParams();
+    form.set('sourceID', sourceID);
+    form.set('thirdPartyIdentifier', String(booking.id));
+    form.set('startDate', booking.tgl_checkin);
+    form.set('endDate', booking.tgl_checkout ?? booking.tgl_checkin);
+    form.set('guestFirstName', guestFirstName);
+    form.set('guestLastName', guestLastName || guestFirstName);
+    form.set('guestCountry', guestCountry);
+    form.set('rooms[0][roomTypeID]', String(roomTypeID));
+    form.set('rooms[0][roomID]', String(mapping.cloudbeds_room_id));
+    form.set('rooms[0][quantity]', '1');
+    form.set('adults[0][roomTypeID]', String(roomTypeID));
+    form.set('adults[0][quantity]', '1');
+    form.set('paymentMethod', 'cash');
+    form.set('sendEmailConfirmation', 'false');
+
+    const res = await fetch(`${CLOUDBEDS_API_BASE}/postReservation`, {
+      method: 'POST',
+      headers: {'x-api-key': apiKey, 'Content-Type': 'application/x-www-form-urlencoded'},
+      body: form.toString(),
+    });
+    const body = await res.json().catch(()=>null);
+    if(!res.ok || body?.success === false){
+      await logOutbound(false, {error: `postReservation_failed: ${body?.message ?? res.status}`, response: body});
+      return;
+    }
+
+    await supabase.from('bookings').update({cloudbeds_reservation_id: body.reservationID}).eq('id', booking.id);
+    await logOutbound(true, {cloudbeds_reservation_id: body.reservationID});
+  } catch(e) {
+    await logOutbound(false, {error: e instanceof Error ? e.message : String(e)});
+  }
 }
 
 async function sendWa(phone, message, meta){
@@ -1103,6 +1216,14 @@ Deno.serve(async (req)=>{
       return err(error.message);
     }
     await notif(b.unit_id,'all','booking',`Booking baru — Unit ${b.unit_nomor}`,`${b.guest_nama} · ${b.tipe} · ${b.sumber}`,data.id);
+    // Sync out to Cloudbeds so OTAs see this room as taken too -- never for
+    // a booking whose sumber is 'cloudbeds' (that came FROM Cloudbeds via
+    // the webhook route already, pushing it back would create a duplicate
+    // reservation there). Awaited so the outbound log write completes
+    // before responding, but never blocks/fails this endpoint itself.
+    if(data.sumber !== 'cloudbeds'){
+      await pushBookingToCloudbeds(data);
+    }
     return json(data,201);
   }
   if(path==='/bookings' && m==='PATCH'){
