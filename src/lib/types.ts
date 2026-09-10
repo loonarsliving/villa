@@ -173,6 +173,22 @@ export interface Report {
   per_investor_amount?: number;
 }
 
+export interface OtaBreakdownSource {
+  sumber: string;
+  gross: number;
+  commission_pct: number;
+  commission_amount: number;
+  net: number;
+}
+export interface OtaBreakdown {
+  periode: string;
+  sources: OtaBreakdownSource[];
+  total_gross: number;
+  total_commission: number;
+  total_net: number;
+  commission_source: "cloudbeds_live" | "unavailable_no_api_key";
+}
+
 export interface Summary {
   available: number;
   occupied: number;
