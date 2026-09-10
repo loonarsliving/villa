@@ -7,19 +7,37 @@ import { api } from "@/lib/api";
 import { fmtCurrency, currentPeriod, periodLabel } from "@/lib/format";
 import { Card, CardHeader, Loading } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
-import type { Report } from "@/lib/types";
+import type { Report, OtaBreakdown } from "@/lib/types";
+
+const SUMBER_LABEL: Record<string, string> = {
+  "airbnb": "Airbnb",
+  "booking.com": "Booking.com",
+  "agoda": "Agoda",
+  "tiket": "Tiket.com",
+  "cloudbeds": "Cloudbeds (OTA lain/belum teridentifikasi)",
+  "walk-in": "Walk-in / Langsung",
+  "website": "Website Loonars",
+  "whatsapp": "WhatsApp",
+  "other": "Lainnya",
+};
 
 export default function PendapatanPage() {
   const { user } = useAuth();
   const unitId = user?.unit_id || "";
   const [report, setReport] = useState<Report | null>(null);
+  const [ota, setOta] = useState<OtaBreakdown | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!unitId) return;
-    api
-      .get<Report>(`/report?unit_id=${unitId}&periode=${currentPeriod()}`)
-      .then(setReport)
+    Promise.all([
+      api.get<Report>(`/report?unit_id=${unitId}&periode=${currentPeriod()}`),
+      api.get<OtaBreakdown>(`/report/ota-breakdown?periode=${currentPeriod()}`),
+    ])
+      .then(([r, o]) => {
+        setReport(r);
+        setOta(o);
+      })
       .finally(() => setLoading(false));
   }, [unitId]);
 
@@ -75,6 +93,48 @@ export default function PendapatanPage() {
               </div>
             </div>
           ))
+        )}
+      </Card>
+
+      <Card className="mt-3.5">
+        <CardHeader
+          title="Rincian Potongan per Platform OTA"
+          subtitle={
+            ota?.commission_source === "cloudbeds_live"
+              ? `${periodLabel()} — persen komisi diambil langsung dari data Cloudbeds`
+              : `${periodLabel()} — belum bisa ambil % komisi dari Cloudbeds (key belum aktif)`
+          }
+        />
+        {loading ? (
+          <Loading />
+        ) : !ota || ota.sources.length === 0 ? (
+          <div className="px-4 sm:px-5 py-4 text-[11px] text-ink/40">Belum ada pendapatan tercatat bulan ini.</div>
+        ) : (
+          <>
+            {ota.sources.map((s) => (
+              <div key={s.sumber} className="flex items-center px-4 sm:px-5 py-2.5 border-b border-ink/[0.05] last:border-0 text-xs">
+                <div className="flex-1 min-w-0">
+                  <div className="text-ink/80">{SUMBER_LABEL[s.sumber] ?? s.sumber}</div>
+                  <div className="text-[10px] text-ink/30 mt-0.5">
+                    {s.commission_pct > 0 ? `Komisi ${s.commission_pct}%` : "Tanpa komisi (langsung)"}
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="font-mono text-[11.5px] text-ink/80">{fmtCurrency(s.gross)}</div>
+                  {s.commission_amount > 0 && (
+                    <div className="font-mono text-[10px] text-ruby-400">− {fmtCurrency(s.commission_amount)}</div>
+                  )}
+                </div>
+              </div>
+            ))}
+            <div className="flex items-center px-4 sm:px-5 py-3 bg-gold-500/10 text-xs">
+              <div className="flex-1 font-medium text-ink/80">Total setelah potongan OTA</div>
+              <div className="text-right">
+                <div className="font-mono text-[11.5px] font-semibold text-gold-500">{fmtCurrency(ota.total_net)}</div>
+                <div className="font-mono text-[10px] text-ink/30">dari {fmtCurrency(ota.total_gross)} kotor</div>
+              </div>
+            </div>
+          </>
         )}
       </Card>
     </InvestorShell>

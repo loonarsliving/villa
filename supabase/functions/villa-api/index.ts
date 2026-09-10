@@ -311,6 +311,65 @@ async function computeReport(unit_id, periode){
   };
 }
 
+// Real per-OTA commission breakdown for investor reporting, added
+// 2026-09-10 (owner request). Groups actual booking revenue by sumber
+// (walk-in/airbnb/booking.com/agoda/tiket/cloudbeds/website/whatsapp/
+// other -- see bookings_sumber_check) for the period, then applies the
+// REAL commission percentage each OTA charges as configured on the
+// Cloudbeds account itself (GET /getSources' `commission` field) -- never
+// an invented/estimated %. A sumber with no matching live Cloudbeds
+// source (walk-in, website, whatsapp, other, or 'cloudbeds' when the
+// specific OTA inside it couldn't be identified) gets 0% here, which is
+// correct for direct channels and honest (not a guess) for the rest.
+async function computeOtaBreakdown(periode){
+  const [y, mo] = periode.split('-').map(Number);
+  const start = `${periode}-01`;
+  const end = new Date(Date.UTC(y, mo, 1)).toISOString().slice(0, 10);
+
+  const { data: bookings } = await supabase.from('bookings')
+    .select('sumber,total_bayar')
+    .gte('tgl_checkin', start).lt('tgl_checkin', end)
+    .neq('status', 'batal');
+
+  const grossBySumber = new Map();
+  for (const b of (bookings ?? [])) {
+    const key = b.sumber ?? 'other';
+    grossBySumber.set(key, (grossBySumber.get(key) ?? 0) + Number(b.total_bayar ?? 0));
+  }
+
+  const commissionPctBySumber = new Map();
+  const apiKey = cloudbedsApiKey();
+  if (apiKey) {
+    try {
+      const res = await fetch(`${CLOUDBEDS_API_BASE}/getSources`, { headers: { 'x-api-key': apiKey } });
+      const body = await res.json().catch(() => null);
+      for (const s of (body?.data ?? [])) {
+        const name = (s.sourceName ?? '').toLowerCase();
+        if (name.includes('airbnb')) commissionPctBySumber.set('airbnb', Number(s.commission ?? 0));
+        else if (name.includes('booking.com')) commissionPctBySumber.set('booking.com', Number(s.commission ?? 0));
+        else if (name.includes('agoda')) commissionPctBySumber.set('agoda', Number(s.commission ?? 0));
+        else if (name.includes('tiket')) commissionPctBySumber.set('tiket', Number(s.commission ?? 0));
+      }
+    } catch { /* Cloudbeds unreachable -- fall through with 0% for OTA sumbers below, never invent a number */ }
+  }
+
+  const sources = [];
+  let total_gross = 0, total_commission = 0;
+  for (const [sumber, gross] of grossBySumber) {
+    const commission_pct = commissionPctBySumber.get(sumber) ?? 0;
+    const commission_amount = gross * (commission_pct / 100);
+    total_gross += gross;
+    total_commission += commission_amount;
+    sources.push({ sumber, gross, commission_pct, commission_amount, net: gross - commission_amount });
+  }
+  sources.sort((a, b) => b.gross - a.gross);
+
+  return {
+    periode, sources, total_gross, total_commission, total_net: total_gross - total_commission,
+    commission_source: apiKey ? 'cloudbeds_live' : 'unavailable_no_api_key',
+  };
+}
+
 async function computeDividendList(periode){
   const report = await computeReport(undefined, periode);
   const {data:investors, error} = await supabase.from('villa_users')
@@ -1371,6 +1430,11 @@ Deno.serve(async (req)=>{
     let unit_id=url.searchParams.get('unit_id');
     if(isOwner) unit_id = undefined;
     return json(await computeReport(unit_id, periode));
+  }
+
+  if(path==='/report/ota-breakdown' && m==='GET'){
+    const periode = url.searchParams.get('periode') ?? new Date().toISOString().slice(0,7);
+    return json(await computeOtaBreakdown(periode));
   }
 
   return err('Endpoint tidak ditemukan',404);

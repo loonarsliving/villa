@@ -103,8 +103,28 @@ const ReservationSchema = z
     checkOutDate: z.string().nullable().optional(),
     checkout_date: z.string().nullable().optional(),
     total: z.number().optional(),
+    sourceName: z.string().nullable().optional(),
+    source_name: z.string().nullable().optional(),
   })
   .passthrough();
+
+// Maps Cloudbeds' free-text sourceName (e.g. "Airbnb", "Booking.com (Channel
+// Collect)", "Agoda") to one of bookings.sumber's fixed allowed values
+// (bookings_sumber_check) -- added 2026-09-10 so investor reports can show
+// real per-OTA commission cuts instead of a single flat "cloudbeds" bucket.
+// Falls back to 'cloudbeds' (still a valid value) for anything unrecognized,
+// e.g. Cloudbeds' own booking engine or a channel we don't have a distinct
+// bookings.sumber value for -- never guesses a value the CHECK constraint
+// doesn't already allow.
+function mapSourceNameToSumber(sourceName: string | null | undefined): string {
+  const s = (sourceName ?? "").toLowerCase();
+  if (s.includes("airbnb")) return "airbnb";
+  if (s.includes("booking.com") || s.includes("booking dot com")) return "booking.com";
+  if (s.includes("agoda")) return "agoda";
+  if (s.includes("tiket")) return "tiket";
+  if (s.includes("whatsapp")) return "whatsapp";
+  return "cloudbeds";
+}
 
 const WebhookPayloadSchema = z
   .object({
@@ -227,6 +247,8 @@ export async function POST(request: Request) {
           guestId = g?.id ?? null;
         }
 
+        const sumber = mapSourceNameToSumber(reservation.sourceName ?? reservation.source_name);
+
         const { error: bookingUpsertError } = await supabase.from("bookings").upsert(
           {
             unit_id: unitId,
@@ -234,7 +256,7 @@ export async function POST(request: Request) {
             guest_id: guestId,
             guest_nama: guestNama,
             tipe: (reservation.los ?? 0) > 27 ? "bulanan" : "harian",
-            sumber: "cloudbeds",
+            sumber,
             tgl_checkin: reservation.checkInDate ?? reservation.checkin_date,
             tgl_checkout: reservation.checkOutDate ?? reservation.checkout_date,
             tarif: reservation.total ?? 0,
