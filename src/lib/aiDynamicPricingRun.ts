@@ -180,7 +180,7 @@ export async function runAiDynamicPricing(supabase: SupabaseClient, pushOverride
         } else {
           const pushResult = await pushCloudbedsRate(
             rateId,
-            decisions.map((d) => ({ startDate: d.date, endDate: addDays(d.date, 1), rate: d.decided_rate })),
+            decisions.map((d) => ({ startDate: d.date, endDate: d.date, rate: d.decided_rate })),
           );
           jobReferenceId = pushResult.jobReferenceId;
 

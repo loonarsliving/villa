@@ -63,7 +63,11 @@ export async function GET(request: Request) {
   const raw = await res.text();
 
   await new Promise((r) => setTimeout(r, 5000));
-  const readBack = await getCloudbedsRoomTypeRate(roomTypeId, "2027-03-01", "2027-03-05");
+  const from = new Date(`${date}T00:00:00Z`);
+  from.setUTCDate(from.getUTCDate() - 2);
+  const to = new Date(`${nextDate}T00:00:00Z`);
+  to.setUTCDate(to.getUTCDate() + 2);
+  const readBack = await getCloudbedsRoomTypeRate(roomTypeId, from.toISOString().slice(0, 10), to.toISOString().slice(0, 10));
 
   return NextResponse.json({ mode, rateId, sent: form.toString(), status: res.status, raw: raw.slice(0, 800), readBack });
 }

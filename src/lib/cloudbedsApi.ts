@@ -198,9 +198,15 @@ export interface RateInterval {
  * manager distributes it outward. Async on Cloudbeds' side (returns a
  * jobReferenceID, tracked via GET /getRateJobs if ever needed).
  * CLOUDBEDS_API_KEY was confirmed (2026-09-11, live test) to already
- * carry write:rate. `endDate` on each interval is EXCLUSIVE, like a
- * checkout date -- a single day must be [date, date+1), or Cloudbeds
- * rejects it with "endDate should be greater than startDate".
+ * carry write:rate.
+ *
+ * `endDate` here is INCLUSIVE -- established by probing one far-future
+ * date: sending [Mar 2, Mar 3] set BOTH days, and [Mar 6, Mar 6] is
+ * accepted for a single night. So one night is [date, date], NOT
+ * [date, date+1); the latter silently bleeds each price into the
+ * following day. (Note this is the opposite of getRate, which rejects
+ * startDate === endDate -- the two endpoints do not agree, so neither
+ * can be assumed from the other.)
  */
 export async function pushCloudbedsRate(rateId: string, intervals: RateInterval[]): Promise<{ jobReferenceId: string | null }> {
   const key = apiKey();
