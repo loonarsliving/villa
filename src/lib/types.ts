@@ -39,7 +39,7 @@ export interface Booking {
   guest_nama: string;
   guest_hp?: string | null;
   tipe: "harian" | "bulanan";
-  status: "terjadwal" | "checkin" | "checkout" | "batal";
+  status: "terjadwal" | "checkin" | "checkout" | "batal" | "menunggu_pembayaran";
   sumber: string;
   tgl_checkin: string;
   tgl_checkout: string | null;

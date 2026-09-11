@@ -58,7 +58,11 @@ export default function BookingCalendarPage() {
     ])
       .then(([u, b]) => {
         setUnits(u || []);
-        setBookings((b || []).filter((x) => x.status !== "batal"));
+        // 'menunggu_pembayaran' bookings (public site, proof-of-transfer not
+        // yet uploaded) don't lock a unit and shouldn't show on the
+        // calendar until confirmed to 'terjadwal' -- see villa-api's
+        // POST /public/bookings and /public/bookings/confirm-payment.
+        setBookings((b || []).filter((x) => x.status !== "batal" && x.status !== "menunggu_pembayaran"));
       })
       .finally(() => setLoading(false));
   }
