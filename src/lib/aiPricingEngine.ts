@@ -255,11 +255,17 @@ export async function decideRatesForRoomType(
     .lte("start_date", toDate)
     .gte("end_date", today);
 
+  // Owner correction (2026-09-11): a hotel's per-room rate isn't a fair
+  // comparison for a private villa unit -- one hotel sample (Rp351,074)
+  // dragged the average for a Rp1,000,000 villa competitor down to
+  // Rp675,537, which then cut a real Saturday price the same day this
+  // ran. Only "villa" competitors count toward the price cap/floor now.
   const competitorSince = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
   const { data: competitorRates } = await supabase
     .from("villa_competitor_rates")
     .select("price, observed_at")
     .eq("room_type_id", roomType.id)
+    .eq("competitor_type", "villa")
     .gte("observed_at", competitorSince);
   const competitorAvg =
     competitorRates && competitorRates.length > 0 ? competitorRates.reduce((sum, r) => sum + Number(r.price), 0) / competitorRates.length : null;
