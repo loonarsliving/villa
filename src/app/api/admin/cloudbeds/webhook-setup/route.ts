@@ -35,6 +35,7 @@ export async function POST(request: Request) {
 
   const apiKey = (process.env.CLOUDBEDS_API_KEY ?? "").trim();
   const webhookSecret = (process.env.CLOUDBEDS_WEBHOOK_SECRET ?? "").trim();
+  const propertyId = (process.env.CLOUDBEDS_PROPERTY_ID ?? "").trim();
   if (!apiKey) {
     return NextResponse.json({ error: "CLOUDBEDS_API_KEY belum dikonfigurasi" }, { status: 503 });
   }
@@ -42,7 +43,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "CLOUDBEDS_WEBHOOK_SECRET belum dikonfigurasi" }, { status: 503 });
   }
 
-  const existingRes = await fetch(`${CLOUDBEDS_API_BASE}/getWebhooks`, { headers: { "x-api-key": apiKey } });
+  const getWebhooksUrl = new URL(`${CLOUDBEDS_API_BASE}/getWebhooks`);
+  if (propertyId) getWebhooksUrl.searchParams.set("propertyID", propertyId);
+  const existingRes = await fetch(getWebhooksUrl, { headers: { "x-api-key": apiKey } });
   const existingBody = await existingRes.json().catch(() => null);
   const existing = (existingBody?.data ?? []) as Array<{ event?: { entity?: string; action?: string }; subscriptionData?: { endpoint?: string } }>;
   const alreadyRegistered = existing.filter((s) => s.subscriptionData?.endpoint === WEBHOOK_ENDPOINT_URL);
@@ -55,6 +58,7 @@ export async function POST(request: Request) {
       continue;
     }
     const form = new URLSearchParams();
+    if (propertyId) form.set("propertyID", propertyId);
     form.set("object", ev.object);
     form.set("action", ev.action);
     form.set("endpointUrl", WEBHOOK_ENDPOINT_URL);

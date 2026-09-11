@@ -46,11 +46,13 @@ interface CloudbedsReservation {
 
 async function fetchAllActiveReservations(apiKey: string): Promise<CloudbedsReservation[]> {
   const today = new Date().toISOString().slice(0, 10);
+  const propertyId = (process.env.CLOUDBEDS_PROPERTY_ID ?? "").trim();
   const all: CloudbedsReservation[] = [];
   let pageNumber = 1;
   const pageSize = 100;
   for (;;) {
     const url = new URL(`${CLOUDBEDS_API_BASE}/getReservations`);
+    if (propertyId) url.searchParams.set("propertyID", propertyId);
     url.searchParams.set("checkOutFrom", today);
     url.searchParams.set("includeAllRooms", "true");
     url.searchParams.set("includeGuestsDetails", "true");
@@ -66,7 +68,7 @@ async function fetchAllActiveReservations(apiKey: string): Promise<CloudbedsRese
     if (rows.length < pageSize) break;
     pageNumber++;
   }
-  return all.filter((r) => (ACTIVE_STATUSES as readonly string[]).includes(r.status));
+  return all;
 }
 
 function statusToVilla(status: string): string {
@@ -90,12 +92,16 @@ export async function POST(request: Request) {
   }
   const supabase: SupabaseClient = createClient(SUPABASE_URL, serviceRoleKey);
 
-  let reservations: CloudbedsReservation[];
+  let allReservations: CloudbedsReservation[];
   try {
-    reservations = await fetchAllActiveReservations(apiKey);
+    allReservations = await fetchAllActiveReservations(apiKey);
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Gagal mengambil reservasi dari Cloudbeds" }, { status: 502 });
   }
+
+  const statusCounts: Record<string, number> = {};
+  for (const r of allReservations) statusCounts[r.status] = (statusCounts[r.status] ?? 0) + 1;
+  const reservations = allReservations.filter((r) => (ACTIVE_STATUSES as readonly string[]).includes(r.status));
 
   const { data: mappings } = await supabase.from("cloudbeds_room_mapping").select("cloudbeds_room_id, unit_id, units(nomor)");
   type MappingRow = { unit_id: string; units: { nomor: string }[] | { nomor: string } | null };
@@ -106,12 +112,14 @@ export async function POST(request: Request) {
   let matched = 0;
   let inserted = 0;
   let skippedUnmapped = 0;
+  const unmappedRoomIds: string[] = [];
   const errors: string[] = [];
 
   for (const resv of reservations) {
     const room = (resv.rooms ?? []).find((r) => r.roomID && mappingByRoomId.has(String(r.roomID)));
     if (!room?.roomID) {
       skippedUnmapped++;
+      for (const r of resv.rooms ?? []) if (r.roomID) unmappedRoomIds.push(String(r.roomID));
       continue;
     }
     const mapping = mappingByRoomId.get(String(room.roomID))!;
@@ -163,10 +171,13 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     success: true,
-    fetched: reservations.length,
+    fetched_total: allReservations.length,
+    fetched_active: reservations.length,
+    status_counts: statusCounts,
     matched,
     inserted,
     skipped_unmapped: skippedUnmapped,
+    unmapped_room_ids: [...new Set(unmappedRoomIds)].slice(0, 20),
     errors: errors.slice(0, 20),
   });
 }
