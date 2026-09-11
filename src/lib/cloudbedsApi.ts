@@ -121,8 +121,31 @@ export async function getCloudbedsRoomTypeRate(roomTypeId: string, startDate: st
     throw new CloudbedsApiError(message, res.status >= 400 ? res.status : 502);
   }
 
-  const detailed = (body?.data?.roomRateDetailed ?? []) as Array<{ date?: string; rate?: number }>;
-  return detailed.filter((r) => r.date && typeof r.rate === "number").map((r) => ({ date: r.date as string, rate: r.rate as number }));
+  // Cloudbeds returns `data` as a single object for some properties and
+  // as an array (one entry per rate plan) for others -- the same
+  // shape ambiguity that silently broke the room-mapping join earlier.
+  // Handle both rather than assuming, and log the raw body when nothing
+  // parses, since a silent empty result here means every downstream
+  // price is wrong without anything saying so.
+  const data = body?.data;
+  const entries = (Array.isArray(data) ? data : data ? [data] : []) as Array<{
+    roomRateDetailed?: Array<{ date?: string; rate?: number }>;
+  }>;
+
+  const out: CloudbedsRoomTypeRate[] = [];
+  for (const entry of entries) {
+    for (const r of entry?.roomRateDetailed ?? []) {
+      if (r.date && typeof r.rate === "number") out.push({ date: r.date, rate: r.rate });
+    }
+  }
+
+  if (out.length === 0) {
+    console.log(
+      "[cloudbeds-getRate] no detailed rates",
+      JSON.stringify({ roomTypeId, startDate, endDate, raw: JSON.stringify(body ?? null).slice(0, 1500) }),
+    );
+  }
+  return out;
 }
 
 /**
