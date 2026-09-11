@@ -29,5 +29,8 @@ export async function GET(request: Request) {
   }
 
   const summary = await runAiDynamicPricing(supabaseAdmin());
+  // Logged so an unattended nightly run is auditable after the fact --
+  // what it decided, whether it pushed, and whether Cloudbeds confirmed.
+  console.log("[ai-dynamic-pricing]", JSON.stringify(summary));
   return NextResponse.json(summary);
 }

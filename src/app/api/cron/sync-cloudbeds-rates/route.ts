@@ -30,5 +30,6 @@ export async function GET(request: Request) {
   }
 
   const summary = await syncCloudbedsRates(supabaseAdmin());
+  console.log("[sync-cloudbeds-rates]", JSON.stringify(summary));
   return NextResponse.json(summary);
 }
