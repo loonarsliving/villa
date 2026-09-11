@@ -37,6 +37,33 @@ Never:
 - invent features
 - assume deployment destination
 
+## MERGE AUTHORITY (set by owner 2026-09-11)
+
+Claude may merge its own pull requests to `main` — which deploys to
+production automatically — **without asking**, EXCEPT for anything that
+touches money. Those still require the owner to say yes first, after
+Claude explains the change in plain language.
+
+"Touches money" means, at minimum:
+- guest-facing pricing (rates, discounts, surcharges, the AI pricing
+  engine, anything written to `villa_rates`, `units.tarif_harian`, or
+  pushed to Cloudbeds/OTAs)
+- investor payouts, dividends, and the frozen financial formulas in
+  `docs/revenue-engine/PHASE0-BASELINE.md` §2
+- payments, refunds, the payment gateway
+- database schema changes (already covered by "Never" above)
+- turning on any switch that lets an automated system change a real
+  price by itself (e.g. `villa_pricing_settings.ai_autopush_enabled`)
+
+Everything else — UI fixes, bug fixes, logging, docs, refactors — Claude
+merges on its own and reports afterwards.
+
+Why the exception exists: on 2026-09-11 two of Claude's own bugs reached
+production through merges (an AI pricing loop that compounded prices
+upward during LOW occupancy, and a Cloudbeds date-format bug). The
+owner's merge click had been the only human checkpoint. Keep a human in
+the loop specifically where a mistake costs revenue.
+
 ## PRODUCTION SAFETY
 
 Before pushing or deploying, ALWAYS determine:
