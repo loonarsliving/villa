@@ -27,6 +27,21 @@ import { researchCompetitorRates } from "@/lib/aiBridge";
 const COMPETITOR_STALE_DAYS = 7;
 const WEEKEND_SURCHARGE = 100000;
 
+/**
+ * Owner instruction (2026-09-11, ahead of the 20 Sep opening): hold the
+ * low-occupancy discount until there is real booking history. A brand
+ * new villa is empty by definition, so without this the engine would
+ * read "0% occupancy" on day one and immediately sell at the floor,
+ * before the market has ever seen the normal price.
+ *
+ * The threshold reuses this codebase's existing "not enough data yet"
+ * boundary -- the <20 bookings = confidence 'low' rule the Phase 6
+ * engine already used -- rather than inventing a new number. The
+ * high-occupancy INCREASE is deliberately not held back: if rooms are
+ * filling up, raising the price is safe whatever the history.
+ */
+const COLD_START_MIN_BOOKINGS = 20;
+
 export interface RoomTypeForPricing {
   id: string;
   code: string;
@@ -173,6 +188,8 @@ export async function decideRatesForRoomType(
     return (highSeasonPeriods ?? []).find((p) => p.start_date <= dateStr && p.end_date >= dateStr) ?? null;
   }
 
+  const coldStart = (allBookings ?? []).length < COLD_START_MIN_BOOKINGS;
+
   const results: DatePriceDecision[] = [];
   for (const targetDate of targetDates) {
     const activeForDate = (allBookings ?? []).filter(
@@ -190,8 +207,12 @@ export async function decideRatesForRoomType(
       deltaPct = settings.high_occupancy_adjustment_pct;
       reasonCodes.push("high_occupancy");
     } else if (occupancyPct <= settings.low_occupancy_threshold_pct) {
-      deltaPct = settings.low_occupancy_adjustment_pct;
-      reasonCodes.push("low_occupancy");
+      if (coldStart) {
+        reasonCodes.push("cold_start_hold");
+      } else {
+        deltaPct = settings.low_occupancy_adjustment_pct;
+        reasonCodes.push("low_occupancy");
+      }
     }
 
     let clampedDelta = deltaPct;
