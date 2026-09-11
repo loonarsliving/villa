@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { syncCloudbedsRates } from "@/lib/cloudbedsRateSync";
+import { isAuthorizedCronRequest } from "@/lib/cronAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 /**
  * Owner instruction (2026-09-11): villa's own guest-facing rate
@@ -20,12 +21,7 @@ export const maxDuration = 30;
  * endpoint (src/app/api/admin/cloudbeds/sync-rates).
  */
 export async function GET(request: Request) {
-  const expected = (process.env.CRON_SECRET || "").trim();
-  if (!expected) {
-    return NextResponse.json({ error: "CRON_SECRET is not configured" }, { status: 503 });
-  }
-  const auth = request.headers.get("authorization") || "";
-  if (auth !== `Bearer ${expected}`) {
+  if (!(await isAuthorizedCronRequest(request))) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 

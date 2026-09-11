@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { runAiDynamicPricing } from "@/lib/aiDynamicPricingRun";
+import { isAuthorizedCronRequest } from "@/lib/cronAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,12 +20,7 @@ export const maxDuration = 60;
  * keeps following Cloudbeds.
  */
 export async function GET(request: Request) {
-  const expected = (process.env.CRON_SECRET || "").trim();
-  if (!expected) {
-    return NextResponse.json({ error: "CRON_SECRET is not configured" }, { status: 503 });
-  }
-  const auth = request.headers.get("authorization") || "";
-  if (auth !== `Bearer ${expected}`) {
+  if (!(await isAuthorizedCronRequest(request))) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
