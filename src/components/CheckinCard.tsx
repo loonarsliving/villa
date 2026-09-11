@@ -14,6 +14,36 @@ export interface CheckinCardGuest {
   checkoutDate: string | null;
 }
 
+// Tata tertib & larangan Loonars Private Living, ditandatangani tamu saat
+// check-in (owner request 2026-09-11, mengadaptasi format kartu registrasi
+// fisik "Canggu Villas" -- jam check-in 14:00 WITA per instruksi owner,
+// sisanya struktur & nominal disamakan).
+const HOUSE_RULES = `Batas waktu check-in pukul 14:00 WITA,
+- Check-in lebih awal antara pukul 09:00 - 13:59 WITA dikenakan biaya sebesar 25% dari publish rate.
+- Check-in lebih awal antara pukul 06:00 - 08:59 WITA dikenakan biaya sebesar 50% dari publish rate.
+- Check-in sebelum pukul 05:59 WITA dikenakan biaya satu malam dari publish rate.
+
+Batas waktu check-out pukul 12:00 WITA,
+- Perpanjangan waktu check-out antara pukul 12:01 - 14:59 WITA dikenakan biaya sebesar 25% dari publish rate.
+- Perpanjangan waktu check-out antara pukul 15:00 - 17:59 WITA dikenakan biaya sebesar 50% dari publish rate.
+- Perpanjangan waktu check-out lebih dari pukul 18:00 WITA dikenakan biaya satu malam dari publish rate.
+
+* Kunci villa harap dikembalikan pada saat check-out.
+* Tamu wajib membayar lunas seluruh biaya pemakaian villa pada saat check-in.
+* Tamu wajib menunjukkan identitas diri (KTP/SIM/Paspor/KITAS) yang masih berlaku.
+* Harga villa hanya berlaku untuk dua orang tamu dewasa; lebih dari dua tamu dewasa dikenakan biaya tambahan Rp100.000/orang (extra bed).
+* Apabila terjadi kerusakan barang penginapan, tamu wajib bertanggung jawab atas segala kerusakan yang terjadi.
+
+Larangan:
+* Dilarang merokok di dalam villa — merokok di dalam villa dikenakan biaya sebesar Rp500.000. Tersedia area merokok di public area.
+* Dilarang menggunakan, membawa, dan mengedarkan narkoba atau obat psikotropika lainnya.
+* Dilarang mabuk-mabukan dan membawa minuman keras di area villa.
+* Dilarang membawa benda berbau tajam (durian, nangka, dll).
+* Dilarang melakukan praktik prostitusi di area penginapan.
+* Dilarang membuat kegaduhan di area villa demi menghormati privasi tamu lain.
+* Dilarang membawa binatang peliharaan dan alat grill.
+* Noda yang ditinggalkan di area bed akan dikenakan charge sesuai kerusakan tersebut.`;
+
 /**
  * Shared check-in card shown right before any booking actually flips to
  * "checkin" (walk-in after payment, OTA/existing booking on arrival, or a
@@ -38,6 +68,7 @@ export function CheckinCard({
   const [ktpPreview, setKtpPreview] = useState<string | null>(null);
   const [ktpFile, setKtpFile] = useState<File | null>(null);
   const [hasSignature, setHasSignature] = useState(false);
+  const [agreed, setAgreed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -45,6 +76,7 @@ export function CheckinCard({
     setKtpPreview(null);
     setKtpFile(null);
     setHasSignature(false);
+    setAgreed(false);
     setSubmitting(false);
     const canvas = canvasRef.current;
     if (canvas) {
@@ -111,6 +143,10 @@ export function CheckinCard({
       toast("⚠", "Foto KTP wajib", "Foto KTP/paspor tamu dulu sebelum check-in.", "ruby");
       return;
     }
+    if (!agreed) {
+      toast("⚠", "Persetujuan wajib", "Tamu harus mencentang persetujuan tata tertib dulu.", "ruby");
+      return;
+    }
     if (!hasSignature) {
       toast("⚠", "Tanda tangan wajib", "Minta tamu tanda tangan di layar dulu.", "ruby");
       return;
@@ -172,6 +208,24 @@ export function CheckinCard({
             <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => onPickKtp(e.target.files?.[0] ?? null)} />
           </label>
         )}
+      </div>
+
+      <div className="mb-5">
+        <label className="block text-[9.5px] font-semibold text-ink/30 tracking-[0.12em] uppercase mb-1.5">Tata Tertib & Larangan</label>
+        <div className="max-h-40 overflow-y-auto rounded-lg border border-ink/15 bg-base-800/40 p-3 text-[10.5px] leading-relaxed text-ink/60 whitespace-pre-line">
+          {HOUSE_RULES}
+        </div>
+        <label className="flex items-start gap-2 mt-2.5 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={agreed}
+            onChange={(e) => setAgreed(e.target.checked)}
+            className="mt-0.5 w-4 h-4 accent-sage-500 cursor-pointer shrink-0"
+          />
+          <span className="text-[10.5px] text-ink/70">
+            Tamu menyetujui, mengerti, dan akan mengikuti seluruh tata tertib yang berlaku selama menginap.
+          </span>
+        </label>
       </div>
 
       <div className="mb-1">

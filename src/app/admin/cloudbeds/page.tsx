@@ -92,14 +92,20 @@ export default function AdminCloudbedsPage() {
   async function runBackfill() {
     setBackfilling(true);
     try {
-      const body = await localApi<{ fetched: number; matched: number; inserted: number; skipped_unmapped: number; errors: string[] }>(
-        "/api/admin/cloudbeds/backfill",
-        { method: "POST" },
-      );
+      const body = await localApi<{
+        fetched_total: number;
+        fetched_active: number;
+        matched: number;
+        inserted: number;
+        skipped_unmapped: number;
+        unmapped_room_ids: string[];
+        errors: string[];
+      }>("/api/admin/cloudbeds/backfill", { method: "POST" });
+      const unmappedNote = body.unmapped_room_ids.length ? ` Room ID belum dipetakan: ${body.unmapped_room_ids.join(", ")}.` : "";
       toast(
         "✓",
         "Selesai",
-        `${body.fetched} reservasi aktif ditemukan, ${body.inserted} berhasil masuk ke kalender villa (${body.skipped_unmapped} room belum dipetakan).`,
+        `${body.fetched_total} reservasi total di Cloudbeds, ${body.fetched_active} aktif, ${body.inserted} berhasil masuk ke kalender villa (${body.skipped_unmapped} room belum dipetakan).${unmappedNote}`,
         "sage",
       );
       load();
