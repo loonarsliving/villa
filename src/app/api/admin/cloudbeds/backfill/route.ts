@@ -169,6 +169,18 @@ export async function POST(request: Request) {
     }
   }
 
+  console.log("[cloudbeds-backfill]", JSON.stringify({
+    property_id_used: (process.env.CLOUDBEDS_PROPERTY_ID ?? "").trim() || null,
+    fetched_total: allReservations.length,
+    fetched_active: reservations.length,
+    status_counts: statusCounts,
+    matched,
+    inserted,
+    skipped_unmapped: skippedUnmapped,
+    unmapped_room_ids: [...new Set(unmappedRoomIds)].slice(0, 20),
+    errors: errors.slice(0, 20),
+  }));
+
   return NextResponse.json({
     success: true,
     fetched_total: allReservations.length,
