@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getCloudbedsRoomTypeRate, CloudbedsApiError } from "@/lib/cloudbedsApi";
+import { resolveCloudbedsRoomTypeGroups } from "@/lib/cloudbedsRoomTypeMapping";
 
 /**
  * Shared by the daily cron (src/app/api/cron/sync-cloudbeds-rates) and the
@@ -22,9 +23,6 @@ function addDays(dateStr: string, days: number): string {
 }
 export function todayJakarta(): string {
   return fmtDateJakarta(new Date());
-}
-function cloudbedsRoomTypeIdOf(cloudbedsRoomId: string): string {
-  return cloudbedsRoomId.replace(/-\d+$/, "");
 }
 
 export interface RateSyncResult {
@@ -50,32 +48,15 @@ export async function syncCloudbedsRates(supabase: SupabaseClient): Promise<Rate
   const today = todayJakarta();
   const toDate = addDays(today, RATE_SYNC_WINDOW_DAYS - 1);
 
-  const { data: mappings } = await supabase.from("cloudbeds_room_mapping").select("cloudbeds_room_id, unit_id");
-  const { data: units } = await supabase.from("units").select("id, room_type_id, tarif_harian");
   const { data: roomTypes } = await supabase.from("villa_room_types").select("id, code, min_rate, max_rate");
+  const { villaRoomTypeIdByCloudbedsRoomType, inconsistentGroups } = await resolveCloudbedsRoomTypeGroups(supabase);
 
-  if (!mappings || mappings.length === 0) {
-    return { ok: true, today, window_days: RATE_SYNC_WINDOW_DAYS, room_types_synced: 0, inconsistent_groups: [], results: [] };
+  if (villaRoomTypeIdByCloudbedsRoomType.size === 0) {
+    return { ok: true, today, window_days: RATE_SYNC_WINDOW_DAYS, room_types_synced: 0, inconsistent_groups: inconsistentGroups, results: [] };
   }
 
-  type UnitRow = { id: string; room_type_id: string | null; tarif_harian: number };
   type RoomTypeRow = { id: string; code: string; min_rate: number | null; max_rate: number | null };
-  const unitById = new Map<string, UnitRow>((units ?? []).map((u: UnitRow) => [u.id, u]));
   const roomTypeById = new Map<string, RoomTypeRow>((roomTypes ?? []).map((rt: RoomTypeRow) => [rt.id, rt]));
-
-  const villaRoomTypeIdByCloudbedsRoomType = new Map<string, string>();
-  const inconsistentGroups: string[] = [];
-  for (const m of mappings as Array<{ cloudbeds_room_id: string; unit_id: string }>) {
-    const cbRoomTypeId = cloudbedsRoomTypeIdOf(String(m.cloudbeds_room_id));
-    const unit = unitById.get(m.unit_id);
-    if (!unit?.room_type_id) continue;
-    const existing = villaRoomTypeIdByCloudbedsRoomType.get(cbRoomTypeId);
-    if (existing && existing !== unit.room_type_id) {
-      if (!inconsistentGroups.includes(cbRoomTypeId)) inconsistentGroups.push(cbRoomTypeId);
-      continue;
-    }
-    villaRoomTypeIdByCloudbedsRoomType.set(cbRoomTypeId, unit.room_type_id);
-  }
 
   const results: RateSyncResult[] = [];
 
