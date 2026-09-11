@@ -90,3 +90,37 @@ export async function getCloudbedsRooms(): Promise<CloudbedsRoom[]> {
   }
   return flat;
 }
+
+export interface CloudbedsRoomTypeRate {
+  date: string;
+  rate: number;
+}
+
+/**
+ * Fetches the live daily rate Cloudbeds has set for one room type over a
+ * date range (GET /getRate, detailedRates=true) -- this is the same rate
+ * already being distributed to every OTA through Cloudbeds' channel
+ * manager, per owner instruction (2026-09-11) to make villa's own
+ * tarif_harian follow it directly rather than maintain a separate price.
+ */
+export async function getCloudbedsRoomTypeRate(roomTypeId: string, startDate: string, endDate: string): Promise<CloudbedsRoomTypeRate[]> {
+  const key = apiKey();
+  const propertyId = (process.env.CLOUDBEDS_PROPERTY_ID ?? "").trim();
+  const url = new URL(`${CLOUDBEDS_API_BASE}/getRate`);
+  if (propertyId) url.searchParams.set("propertyID", propertyId);
+  url.searchParams.set("roomTypeID", roomTypeId);
+  url.searchParams.set("startDate", startDate);
+  url.searchParams.set("endDate", endDate);
+  url.searchParams.set("detailedRates", "true");
+
+  const res = await fetch(url, { headers: { "x-api-key": key }, cache: "no-store" });
+  const body = await res.json().catch(() => null);
+
+  if (!res.ok || body?.success === false) {
+    const message = body?.message || body?.error || `Cloudbeds API error (HTTP ${res.status})`;
+    throw new CloudbedsApiError(message, res.status >= 400 ? res.status : 502);
+  }
+
+  const detailed = (body?.data?.roomRateDetailed ?? []) as Array<{ date?: string; rate?: number }>;
+  return detailed.filter((r) => r.date && typeof r.rate === "number").map((r) => ({ date: r.date as string, rate: r.rate as number }));
+}
