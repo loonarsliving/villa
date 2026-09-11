@@ -269,7 +269,7 @@ export default function AdminCloudbedsPage() {
           }
         />
         <div className="px-4 sm:px-5 py-3.5 text-[11px] text-ink/50 leading-relaxed">
-          Menarik harga live per room type dari Cloudbeds (harga yang sama yang sudah tersebar ke semua OTA) dan langsung menjadikannya tarif harian unit villa hari ini — tidak perlu approve manual, sesuai instruksi. Otomatis berjalan tiap hari jam 00:05 WITA; tombol ini untuk sinkron langsung sekarang.
+          Menarik harga live per room type dari Cloudbeds (harga yang sama yang sudah tersebar ke semua OTA) untuk <strong>90 hari ke depan</strong>, lalu memakainya sebagai harga resmi villa — termasuk untuk booking langsung dan walk-in, per tanggal menginap, bukan satu harga rata. Otomatis berjalan tiap hari jam 00:25 WIB; tombol ini untuk sinkron langsung sekarang.
         </div>
       </Card>
 
@@ -300,7 +300,7 @@ export default function AdminCloudbedsPage() {
           <br />
           <strong>Hitung Saja</strong> hanya menyimpan usulan harga untuk Anda lihat di Kalender Harga — tidak ada harga yang berubah. <strong>Hitung + Kirim</strong> mengirim ke Cloudbeds (berlaku ke semua OTA) lalu membaca ulang untuk memastikan harga benar-benar tersimpan di tanggal yang tepat.
           <br />
-          Cron harian jam 22:58 WIB <strong>hanya menghitung</strong> selama sakelar <code className="text-gold-400">ai_autopush_enabled</code> masih mati — harga yang berlaku tetap mengikuti Cloudbeds.
+          Cron harian jam 00:10 WIB <strong>hanya menghitung</strong> selama sakelar <code className="text-gold-400">ai_autopush_enabled</code> masih mati — harga yang berlaku tetap mengikuti Cloudbeds.
         </div>
       </Card>
 

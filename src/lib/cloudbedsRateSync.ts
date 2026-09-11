@@ -11,7 +11,18 @@ import { resolveCloudbedsRoomTypeGroups } from "@/lib/cloudbedsRoomTypeMapping";
  */
 
 const JAKARTA_TZ = "Asia/Jakarta";
-export const RATE_SYNC_WINDOW_DAYS = 14;
+
+/**
+ * 90 days, not 14: villa-api prices every night of a booking from
+ * villa_rates and only falls back to the flat units.tarif_harian for a
+ * night with no row. With a 14-day window, any stay booked further out
+ * -- website, front desk, or walk-in -- was silently charged that flat
+ * rate instead of the price actually published to the OTAs for those
+ * dates. Per owner instruction (2026-09-11) every channel must charge
+ * the same published price, so the mirror has to cover the real booking
+ * horizon.
+ */
+export const RATE_SYNC_WINDOW_DAYS = 90;
 
 function fmtDateJakarta(d: Date): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: JAKARTA_TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
@@ -80,16 +91,12 @@ export async function syncCloudbedsRates(supabase: SupabaseClient): Promise<Rate
       continue;
     }
 
-    let datesSynced = 0;
-    for (const r of rates) {
-      const { data: existingRate } = await supabase
-        .from("villa_rates")
-        .select("id")
-        .eq("room_type_id", villaRoomTypeId)
-        .eq("date", r.date)
-        .is("rate_plan_id", null)
-        .maybeSingle();
-      const row = {
+    // One batched upsert rather than a round trip per date: at 90 days x
+    // 2 room types the old select-then-write loop would not finish inside
+    // the request time limit. Safe to target this conflict key since
+    // 20260911000002 made the constraint NULLS NOT DISTINCT.
+    const { error: upsertError } = await supabase.from("villa_rates").upsert(
+      rates.map((r) => ({
         room_type_id: villaRoomTypeId,
         rate_plan_id: null,
         date: r.date,
@@ -97,14 +104,22 @@ export async function syncCloudbedsRates(supabase: SupabaseClient): Promise<Rate
         source: "cloudbeds_sync",
         reason: "Live rate from Cloudbeds getRate",
         updated_by: "cloudbeds_sync_cron",
-      };
-      if (existingRate) {
-        await supabase.from("villa_rates").update(row).eq("id", existingRate.id);
-      } else {
-        await supabase.from("villa_rates").insert(row);
-      }
-      datesSynced++;
+      })),
+      { onConflict: "room_type_id,rate_plan_id,date" },
+    );
+    if (upsertError) {
+      results.push({
+        cloudbeds_room_type_id: cbRoomTypeId,
+        villa_room_type_code: roomType.code,
+        dates_synced: 0,
+        today_rate: null,
+        today_rate_clamped: null,
+        tarif_harian_updated_units: 0,
+        error: `Gagal menyimpan harga: ${upsertError.message}`,
+      });
+      continue;
     }
+    const datesSynced = rates.length;
 
     const todayRate = rates.find((r) => r.date === today)?.rate ?? null;
     let todayRateClamped = todayRate;
