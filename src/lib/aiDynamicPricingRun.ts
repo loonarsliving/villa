@@ -13,12 +13,12 @@ import { refreshCompetitorDataIfStale, decideRatesForRoomType, type PricingSetti
  * (src/app/api/cron/ai-dynamic-pricing) and the admin manual trigger
  * (src/app/api/admin/cloudbeds/run-ai-pricing).
  *
- * Requires CLOUDBEDS_API_KEY to carry write:rate scope -- as of
- * 2026-09-11 it does not (read-only key). Until the owner upgrades the
- * key on Cloudbeds' own dashboard, every room type will report a
- * CloudbedsApiError here (permission denied), which is surfaced per
- * room type in the result rather than thrown, so the rest of the run
- * (decision computation, villa_rates bookkeeping) still completes.
+ * NOTE (2026-09-11): CLOUDBEDS_API_KEY already carries write:rate --
+ * confirmed by testing putRate directly (a validation error surfaced,
+ * not a permission error), correcting this file's earlier assumption
+ * that the key was read-only. putRate's endDate is EXCLUSIVE (like a
+ * checkout date), so a single-day interval must be [date, date+1), not
+ * [date, date] -- that off-by-one was the real, only, blocker.
  */
 
 const JAKARTA_TZ = "Asia/Jakarta";
@@ -149,7 +149,7 @@ export async function runAiDynamicPricing(supabase: SupabaseClient): Promise<AiP
         } else {
           const pushResult = await pushCloudbedsRate(
             rateId,
-            decisions.map((d) => ({ startDate: d.date, endDate: d.date, rate: d.decided_rate })),
+            decisions.map((d) => ({ startDate: d.date, endDate: addDays(d.date, 1), rate: d.decided_rate })),
           );
           pushed = true;
           jobReferenceId = pushResult.jobReferenceId;

@@ -274,7 +274,7 @@ export default function AdminCloudbedsPage() {
           }
         />
         <div className="px-4 sm:px-5 py-3.5 text-[11px] text-ink/50 leading-relaxed">
-          Menghitung harga otomatis (okupansi + riset AI kompetitor sekitar + high season, selalu dijepit ke batas base/min/max per tipe unit) lalu mendorongnya ke Cloudbeds via API mereka — otomatis berlaku ke semua OTA. Butuh <code className="text-gold-400">CLOUDBEDS_API_KEY</code> dengan akses <code className="text-gold-400">write:rate</code> (upgrade di dashboard Cloudbeds → Apps &amp; Marketplace); sampai itu diaktifkan, tombol ini akan melapor gagal per tipe unit. Riset kompetitor butuh lokasi villa tersimpan di <code className="text-gold-400">integration_settings.revenue_engine.location_label</code>. Otomatis berjalan tiap hari jam 23:58 WITA (sebelum sinkron tarik di atas).
+          Menghitung harga otomatis (okupansi + riset AI kompetitor sekitar + high season, selalu dijepit ke batas base/min/max per tipe unit) lalu mendorongnya ke Cloudbeds via API mereka — otomatis berlaku ke semua OTA. Otomatis berjalan tiap hari jam 23:58 WITA (sebelum sinkron tarik di atas).
         </div>
       </Card>
 
