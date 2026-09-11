@@ -16,17 +16,20 @@ export interface CheckinCardGuest {
 
 // Tata tertib & larangan Loonars Private Living, ditandatangani tamu saat
 // check-in (owner request 2026-09-11, mengadaptasi format kartu registrasi
-// fisik "Canggu Villas" -- jam check-in 14:00 WITA per instruksi owner,
-// sisanya struktur & nominal disamakan).
-const HOUSE_RULES = `Batas waktu check-in pukul 14:00 WITA,
-- Check-in lebih awal antara pukul 09:00 - 13:59 WITA dikenakan biaya sebesar 25% dari publish rate.
-- Check-in lebih awal antara pukul 06:00 - 08:59 WITA dikenakan biaya sebesar 50% dari publish rate.
-- Check-in sebelum pukul 05:59 WITA dikenakan biaya satu malam dari publish rate.
+// fisik "Canggu Villas" -- jam check-in 14:00 per instruksi owner,
+// sisanya struktur & nominal disamakan). Zona waktu WIB: villa berada di
+// Jalan Palagan, Sleman, Yogyakarta (dikoreksi 2026-09-11 -- sempat
+// tertulis WITA, selisih satu jam pada dokumen yang ditandatangani tamu
+// dan jadi dasar denda keterlambatan check-out).
+const HOUSE_RULES = `Batas waktu check-in pukul 14:00 WIB,
+- Check-in lebih awal antara pukul 09:00 - 13:59 WIB dikenakan biaya sebesar 25% dari publish rate.
+- Check-in lebih awal antara pukul 06:00 - 08:59 WIB dikenakan biaya sebesar 50% dari publish rate.
+- Check-in sebelum pukul 05:59 WIB dikenakan biaya satu malam dari publish rate.
 
-Batas waktu check-out pukul 12:00 WITA,
-- Perpanjangan waktu check-out antara pukul 12:01 - 14:59 WITA dikenakan biaya sebesar 25% dari publish rate.
-- Perpanjangan waktu check-out antara pukul 15:00 - 17:59 WITA dikenakan biaya sebesar 50% dari publish rate.
-- Perpanjangan waktu check-out lebih dari pukul 18:00 WITA dikenakan biaya satu malam dari publish rate.
+Batas waktu check-out pukul 12:00 WIB,
+- Perpanjangan waktu check-out antara pukul 12:01 - 14:59 WIB dikenakan biaya sebesar 25% dari publish rate.
+- Perpanjangan waktu check-out antara pukul 15:00 - 17:59 WIB dikenakan biaya sebesar 50% dari publish rate.
+- Perpanjangan waktu check-out lebih dari pukul 18:00 WIB dikenakan biaya satu malam dari publish rate.
 
 * Kunci villa harap dikembalikan pada saat check-out.
 * Tamu wajib membayar lunas seluruh biaya pemakaian villa pada saat check-in.

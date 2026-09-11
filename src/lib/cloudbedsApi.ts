@@ -161,11 +161,11 @@ export interface RateInterval {
  * Pushes a new price to Cloudbeds via POST /putRate -- this is what
  * actually changes the price on every OTA, since Cloudbeds' channel
  * manager distributes it outward. Async on Cloudbeds' side (returns a
- * jobReferenceID, tracked via GET /getRateJobs if ever needed); requires
- * the API key to carry write:rate scope, which CLOUDBEDS_API_KEY does
- * NOT have as of 2026-09-11 -- calling this before the key is upgraded on
- * Cloudbeds' own dashboard will fail with a permission error, surfaced as
- * a normal CloudbedsApiError rather than crashing silently.
+ * jobReferenceID, tracked via GET /getRateJobs if ever needed).
+ * CLOUDBEDS_API_KEY was confirmed (2026-09-11, live test) to already
+ * carry write:rate. `endDate` on each interval is EXCLUSIVE, like a
+ * checkout date -- a single day must be [date, date+1), or Cloudbeds
+ * rejects it with "endDate should be greater than startDate".
  */
 export async function pushCloudbedsRate(rateId: string, intervals: RateInterval[]): Promise<{ jobReferenceId: string | null }> {
   const key = apiKey();

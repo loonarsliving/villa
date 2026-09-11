@@ -112,3 +112,51 @@ NOT IMPLEMENTED — no Capacitor/native mobile wrapper exists (see MOBILE_BUILD.
 
 ## Database status
 Live Supabase Postgres project in use; schema/migrations are not tracked in this repository (see DATABASE.md) — status of the database itself (health, RLS coverage, backups) is UNKNOWN — NEEDS CONFIRMATION from outside this repo.
+
+## Pricing architecture (added 2026-09-11, all points verified against live data/code)
+
+How a guest price is decided today:
+
+1. **`villa_room_types.base_rate`** (Standard 650,000 / Sawah View 750,000) is
+   the fixed anchor. Nothing automated writes it. `min_rate`/`max_rate`
+   clamp every computed price.
+2. **`/api/cron/ai-dynamic-pricing`** (00:10 WIB) computes a price per date
+   from that anchor — occupancy, weekend surcharge, high season, AI
+   competitor research (via Mkhsistem's bridge; outside high season the
+   market average acts as a CAP, never a floor). It pushes to Cloudbeds
+   **only** when `villa_pricing_settings.ai_autopush_enabled` is true
+   (**currently false** per owner instruction: the live price follows
+   Cloudbeds while the AI's market analysis is being evaluated). Every
+   push is read back from Cloudbeds and verified date by date.
+3. **`/api/cron/sync-cloudbeds-rates`** (00:25 WIB) mirrors Cloudbeds' live
+   rates for **90 days** into `villa_rates` and sets `units.tarif_harian`
+   to today's rate. This is the **only** writer of local price state —
+   the AI engine never writes it directly, so villa and the OTAs cannot
+   silently disagree.
+4. **`villa-api` v39 `POST /bookings`** (both the public website endpoint
+   and the staff/front-desk one) prices **every night** of a `harian`
+   booking from `villa_rates`, falling back to `units.tarif_harian` only
+   for a night with no row. So website, front-desk and walk-in guests are
+   all charged the same published per-date price as OTA guests. `bulanan`
+   stays still use `tarif_bulanan`.
+
+Defects fixed the same day, recorded so they are not reintroduced:
+- The engine used to compute from `units.tarif_harian` and write its result
+  back there, compounding each run; two runs moved Standard 650,000 →
+  716,500 and Sawah View 750,000 → 797,500 **upward during low occupancy**
+  (weekend surcharge baked into the base: `x → 0.9x + 100,000` converges to
+  `max_rate`). Fixed by the fixed `base_rate` anchor.
+- `tarif_harian` was updated even when the Cloudbeds push failed, diverging
+  villa's direct price from the OTA price.
+- `villa_rates`' unique key was `NULLS DISTINCT` on a nullable
+  `rate_plan_id`, so it did not prevent duplicate rows and `ON CONFLICT`
+  upserts (including villa-api's own) would insert instead of update.
+  Fixed in `20260911000002`.
+- The rate mirror covered only 14 days, so bookings further out silently
+  fell back to a flat rate that did not match the OTA price. Now 90 days.
+
+**Timezone**: the villa is at Jalan Palagan, Sleman, **Yogyakarta = WIB
+(UTC+7)**. The guest registration card wrongly said WITA until 2026-09-11
+(a one-hour error on a signed document that sets late-checkout fees).
+Cron schedules in `vercel.json` are UTC; older comments in this repo
+describing them as WITA are off by one hour.

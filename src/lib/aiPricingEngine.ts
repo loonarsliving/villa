@@ -32,6 +32,7 @@ export interface RoomTypeForPricing {
   code: string;
   name: string;
   description: string | null;
+  base_rate: number | null;
   min_rate: number | null;
   max_rate: number | null;
 }
@@ -46,11 +47,18 @@ export interface PricingSettings {
 
 export interface DatePriceDecision {
   date: string;
-  current_rate: number;
+  anchor_rate: number;
   decided_rate: number;
   reason_codes: string[];
   guardrail_status: "within_range" | "clamped_min" | "clamped_max" | "clamped_movement";
   occupancy_pct: number;
+}
+
+export interface CompetitorRefreshResult {
+  refreshed: boolean;
+  rows_inserted?: number;
+  skipped_reason?: string;
+  error?: string;
 }
 
 function isWeekendJakarta(dateStr: string): boolean {
@@ -65,10 +73,15 @@ function isWeekendJakarta(dateStr: string): boolean {
  * Silently no-ops (returns false) if no location label is configured,
  * rather than guessing one.
  */
-export async function refreshCompetitorDataIfStale(supabase: SupabaseClient, roomType: RoomTypeForPricing): Promise<boolean> {
+export async function refreshCompetitorDataIfStale(
+  supabase: SupabaseClient,
+  roomType: RoomTypeForPricing,
+  allowResearch = true,
+): Promise<CompetitorRefreshResult> {
+  if (!allowResearch) return { refreshed: false, skipped_reason: "research budget used this run (Vercel 60s limit)" };
   const { data: settingRow } = await supabase.from("integration_settings").select("value").eq("key", "revenue_engine").maybeSingle();
   const locationLabel = (settingRow?.value as { location_label?: string } | undefined)?.location_label;
-  if (!locationLabel) return false;
+  if (!locationLabel) return { refreshed: false, skipped_reason: "no location_label configured" };
 
   const staleSince = new Date(Date.now() - COMPETITOR_STALE_DAYS * 86400000).toISOString().slice(0, 10);
   const { data: recent } = await supabase
@@ -77,14 +90,21 @@ export async function refreshCompetitorDataIfStale(supabase: SupabaseClient, roo
     .eq("room_type_id", roomType.id)
     .gte("observed_at", staleSince)
     .limit(1);
-  if (recent && recent.length > 0) return false;
+  if (recent && recent.length > 0) return { refreshed: false, skipped_reason: "existing data still fresh" };
 
-  const results = await researchCompetitorRates({
-    location_label: locationLabel,
-    room_type_name: roomType.name,
-    room_type_description: roomType.description ?? "",
-  });
-  if (results.length === 0) return false;
+  let results: Awaited<ReturnType<typeof researchCompetitorRates>>;
+  try {
+    results = await researchCompetitorRates({
+      location_label: locationLabel,
+      room_type_name: roomType.name,
+      room_type_description: roomType.description ?? "",
+    });
+  } catch (e) {
+    // Surfaced, never swallowed: a silent failure here meant the owner's
+    // core ask (AI learning the market) was quietly not happening at all.
+    return { refreshed: false, error: e instanceof Error ? e.message : String(e) };
+  }
+  if (results.length === 0) return { refreshed: false, skipped_reason: "AI returned no competitor rows" };
 
   await supabase.from("villa_competitor_rates").insert(
     results.map((r) => ({
@@ -100,22 +120,27 @@ export async function refreshCompetitorDataIfStale(supabase: SupabaseClient, roo
       created_by: "ai_dynamic_pricing_cron",
     })),
   );
-  return true;
+  return { refreshed: true, rows_inserted: results.length };
 }
 
 /**
  * Computes the decided rate for one room type across a set of target
  * dates -- occupancy-driven delta (clamped to max_daily_movement_pct),
- * weekend surcharge, high-season floor, competitor-market floor during
- * high season, always clamped last to the room type's min_rate/max_rate.
- * Mirrors the old generate-pricing-recommendations math exactly (that
- * logic was correct -- only its "write a pending row and stop" ending
- * changes here, replaced by the caller pushing the result to Cloudbeds).
+ * weekend surcharge, high-season floor, competitor-market floor/cap,
+ * always clamped last to the room type's min_rate/max_rate.
+ *
+ * `anchorRate` MUST be a stable value the engine never writes to
+ * (villa_room_types.base_rate) -- passing units.tarif_harian here, as
+ * the first version did, made every run compound on the previous run's
+ * output and ratchet the price toward max_rate on Fri/Sat regardless of
+ * occupancy (see 20260911000001_pricing_base_rate_and_autopush.sql).
+ * With a fixed anchor this function is idempotent: same inputs, same
+ * price, however many times it runs in a day.
  */
 export async function decideRatesForRoomType(
   supabase: SupabaseClient,
   roomType: RoomTypeForPricing,
-  currentRate: number,
+  anchorRate: number,
   targetDates: string[],
   settings: PricingSettings,
 ): Promise<DatePriceDecision[]> {
@@ -176,7 +201,7 @@ export async function decideRatesForRoomType(
       guardrailStatus = "clamped_movement";
     }
 
-    let decidedRate = Math.round(currentRate * (1 + clampedDelta));
+    let decidedRate = Math.round(anchorRate * (1 + clampedDelta));
 
     if (isWeekendJakarta(targetDate)) {
       decidedRate += WEEKEND_SURCHARGE;
@@ -185,12 +210,22 @@ export async function decideRatesForRoomType(
 
     const highSeasonPeriod = highSeasonPeriodFor(targetDate);
     if (highSeasonPeriod) {
-      const floor = Math.round(currentRate * (1 + Number(highSeasonPeriod.suggested_adjustment_pct)));
+      const floor = Math.round(anchorRate * (1 + Number(highSeasonPeriod.suggested_adjustment_pct)));
       if (floor > decidedRate) decidedRate = floor;
       reasonCodes.push("high_season");
       if (competitorAvg !== null && Math.round(competitorAvg) > decidedRate) {
         decidedRate = Math.round(competitorAvg);
         reasonCodes.push("competitor_market_rate");
+      }
+    } else if (competitorAvg !== null) {
+      // Outside high season the market average acts as a CAP, never a
+      // floor: the owner's goal is filling rooms, so we never ask more
+      // than nearby villas/hotels are actually charging. min_rate below
+      // still protects the downside.
+      const cap = Math.round(competitorAvg);
+      if (decidedRate > cap) {
+        decidedRate = cap;
+        reasonCodes.push("competitor_market_cap");
       }
     }
 
@@ -205,7 +240,7 @@ export async function decideRatesForRoomType(
       guardrailStatus = "clamped_max";
     }
 
-    results.push({ date: targetDate, current_rate: currentRate, decided_rate: decidedRate, reason_codes: reasonCodes, guardrail_status: guardrailStatus, occupancy_pct: occupancyPct });
+    results.push({ date: targetDate, anchor_rate: anchorRate, decided_rate: decidedRate, reason_codes: reasonCodes, guardrail_status: guardrailStatus, occupancy_pct: occupancyPct });
   }
   return results;
 }

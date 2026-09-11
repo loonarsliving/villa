@@ -50,13 +50,17 @@ ready the moment real data starts flowing in.
 - **No autonomous price changes.** The cron only ever writes
   `pending_review` rows. Nothing changes a live price without a human
   clicking Approve on `/admin/pricing-recommendations` (Phase 9).
-- **`villa_rates` is not wired into booking-time pricing.**
-  `POST /bookings` still prices off `units.tarif_harian` only. Approving
-  a recommendation records the planned rate for that date but does not
-  yet change what a guest is actually charged — see the Scope note in
-  `phase6-draft/CHANGES.md`. Wiring `villa_rates` into `POST /bookings`
-  (checking the stay date first, falling back to `tarif_harian`) is
-  real, buildable, explicitly flagged next work, not done silently here.
+- ~~**`villa_rates` is not wired into booking-time pricing.**~~
+  **SUPERSEDED 2026-09-04** — this was done shortly after this document
+  was written and the text was never updated. `villa-api` v39 (verified
+  against the deployed function, 2026-09-11) prices **every night** of a
+  `harian` booking from `villa_rates`, falling back to
+  `units.tarif_harian` only for a night with no row — on both the public
+  website endpoint and the staff/front-desk one, so walk-ins included.
+  Monthly (`bulanan`) stays still use `tarif_bulanan`.
+  Leaving the stale claim here cost a wrong conclusion during the
+  2026-09-11 pricing review: always confirm against the deployed
+  function, per CLAUDE.md's villa-api verification rule.
 - `villa_pricing_settings`' seeded thresholds are defaults, not an
   owner-approved business rule — safe to run (guardrail-clamped either
   way), but worth a real conversation with the owner once real
