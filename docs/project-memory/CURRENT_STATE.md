@@ -160,3 +160,41 @@ Defects fixed the same day, recorded so they are not reintroduced:
 (a one-hour error on a signed document that sets late-checkout fees).
 Cron schedules in `vercel.json` are UTC; older comments in this repo
 describing them as WITA are off by one hour.
+
+### Cloudbeds API contracts — established by live probing 2026-09-11
+
+These cost most of a day to find because they are NOT in the OpenAPI
+spec, they contradict each other, and every failure was silent. Verified
+by probing one far-future date (2 & 6 Mar 2027) and reading the result
+back, not by assumption:
+
+| Behaviour | `getRate` | `putRate` |
+|---|---|---|
+| `endDate` | **EXCLUSIVE** — last day is not returned | **INCLUSIVE** — `[d, d]` sets exactly one night |
+| `startDate == endDate` | **REJECTED**: "Parameter endDate should be greater than startDate" | **ACCEPTED** — this is how a single night is set |
+
+Other hard-won facts:
+- **Every numeric field comes back as a STRING** (`"rate":"650000.00"`).
+  A `typeof x === "number"` check drops every row, and the caller sees a
+  successful response with zero data. This silently broke the entire
+  rate mirror from the day it was written.
+- `data` may be an object or an array of rate plans — handle both.
+- The nested form encoding `rates[0][interval][0][startDate]` is
+  correct; a rejection here is far more likely to come from the
+  `getRate` lookup that runs immediately before the push.
+- `putRate` is asynchronous: it answers `202` with a `jobReferenceID`,
+  so read the rate back (after a short wait) rather than trusting the
+  `success: true`.
+
+**Rule of thumb for this integration: a Cloudbeds call that "succeeds"
+with empty data is the normal failure mode. Always log the raw body and
+verify by reading back.**
+
+First successful autopilot push: 2026-09-11. Fri/Sat 750,000 (Standard)
+and 850,000 (Sawah View); other days at base 650,000 / 750,000, with the
+occupancy discount held back until there is real booking history.
+
+Still open: AI competitor research fails with "AI bridge failed: 200" —
+Mkhsistem's `/api/villa/ai/competitor-pricing` answers 200 without
+`success: true`. Until that is fixed the engine runs on occupancy,
+weekend and high-season rules only, with no market data.

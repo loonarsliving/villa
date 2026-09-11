@@ -192,7 +192,10 @@ export async function runAiDynamicPricing(supabase: SupabaseClient, pushOverride
           // updates asynchronously, so a mismatch here is reported as a
           // warning to check, not treated as a failed push.
           await new Promise((r) => setTimeout(r, 4000));
-          const readBack = await getCloudbedsRoomTypeRate(cbRoomTypeId, today, toDate);
+          // getRate's endDate is EXCLUSIVE (unlike putRate's, which is
+          // inclusive), so asking only up to toDate silently omits the
+          // last day and reports it as a phantom mismatch every run.
+          const readBack = await getCloudbedsRoomTypeRate(cbRoomTypeId, today, addDays(toDate, 1));
           const actualByDate = new Map(readBack.map((r) => [r.date, r.rate]));
           const mismatched = decisions
             .map((d) => ({ date: d.date, expected: d.decided_rate, actual: actualByDate.get(d.date) ?? null }))
