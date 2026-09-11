@@ -162,11 +162,19 @@ export async function getCloudbedsRoomTypeRate(roomTypeId: string, startDate: st
 export async function getCloudbedsBaseRateId(roomTypeId: string, onDate: string): Promise<string | null> {
   const key = apiKey();
   const propertyId = (process.env.CLOUDBEDS_PROPERTY_ID ?? "").trim();
+
+  // getRate rejects startDate === endDate ("Parameter endDate should be
+  // greater than startDate"). This lookup ran BEFORE every push, so that
+  // one rejection was what actually blocked the whole autopilot -- the
+  // error was misread as coming from putRate.
+  const next = new Date(`${onDate}T00:00:00Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+
   const url = new URL(`${CLOUDBEDS_API_BASE}/getRate`);
   if (propertyId) url.searchParams.set("propertyID", propertyId);
   url.searchParams.set("roomTypeID", roomTypeId);
   url.searchParams.set("startDate", onDate);
-  url.searchParams.set("endDate", onDate);
+  url.searchParams.set("endDate", next.toISOString().slice(0, 10));
 
   const res = await fetch(url, { headers: { "x-api-key": key }, cache: "no-store" });
   const body = await res.json().catch(() => null);
