@@ -40,6 +40,7 @@ interface CloudbedsReservation {
   guestName?: string;
   startDate: string;
   endDate: string;
+  total?: number;
   rooms?: CloudbedsRoomAssignment[];
   guestList?: Record<string, CloudbedsGuestDetail>;
 }
@@ -154,6 +155,8 @@ export async function POST(request: Request) {
           sumber: "cloudbeds",
           tgl_checkin: room.roomCheckIn ?? resv.startDate,
           tgl_checkout: room.roomCheckOut ?? resv.endDate,
+          tarif: resv.total ?? 0,
+          total_bayar: resv.total ?? 0,
           status: statusToVilla(resv.status),
           cloudbeds_reservation_id: resv.reservationID,
         },
