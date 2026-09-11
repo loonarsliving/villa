@@ -13,6 +13,16 @@ import { StatCard } from "@/components/StatCard";
 import { CheckinCard } from "@/components/CheckinCard";
 import type { Booking, Unit, UnitAvailability, WalkinKategori, WalkinPayment, WalkinStatus } from "@/lib/types";
 import { loadQrisImage, saveQrisImage, clearQrisImage } from "@/lib/walkin";
+import { pdfFirstPageToPngDataUrl } from "@/lib/pdfToImage";
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error ?? new Error("Gagal membaca berkas"));
+    reader.readAsDataURL(file);
+  });
+}
 
 type KasirKategori = WalkinKategori | "villa";
 
@@ -241,25 +251,43 @@ export default function PaymentGatewayPage() {
   const cafeTotal = todayLunas.filter((r) => r.kategori === "cafe").reduce((s, r) => s + r.jumlah, 0);
   const spaTotal = todayLunas.filter((r) => r.kategori === "spa").reduce((s, r) => s + r.jumlah, 0);
 
-  function onUploadQris(e: ChangeEvent<HTMLInputElement>) {
+  async function onUploadQris(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 1.5 * 1024 * 1024) {
-      toast("⚠", "Gambar terlalu besar", "Ukuran maksimal 1.5MB — kompres/perkecil gambar QRIS dulu.", "ruby");
+    if (file.size > 8 * 1024 * 1024) {
+      toast("⚠", "Berkas terlalu besar", "Ukuran berkas asli maksimal 8MB sebelum dikonversi.", "ruby");
+      e.target.value = "";
       return;
     }
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const dataUrl = reader.result as string;
-      try {
-        await saveQrisImage(dataUrl);
-        setQris(dataUrl);
-        toast("✓", "QRIS disimpan", "Gambar QRIS statis berhasil diunggah.", "sage");
-      } catch (e) {
-        toast("⚠", "Gagal menyimpan QRIS", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby");
+
+    try {
+      // PDF (mis. lembar QRIS resmi dari bank/PSP) dirender jadi PNG dulu di
+      // browser -- walkin_qris hanya menyimpan satu gambar raster, jadi ini
+      // konversi sekali saat upload, bukan penampil PDF umum.
+      const dataUrl =
+        file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
+          ? await pdfFirstPageToPngDataUrl(file)
+          : await readFileAsDataUrl(file);
+
+      if (dataUrl.length > 1.5 * 1024 * 1024 * 1.4) {
+        // data URL base64 membengkak ~1.37x dari ukuran biner aslinya
+        toast("⚠", "Gambar terlalu besar", "Ukuran maksimal 1.5MB setelah dikonversi — kompres/perkecil dulu.", "ruby");
+        return;
       }
-    };
-    reader.readAsDataURL(file);
+
+      await saveQrisImage(dataUrl);
+      setQris(dataUrl);
+      toast("✓", "QRIS disimpan", "QRIS statis berhasil diunggah dan akan tampil langsung di layar.", "sage");
+    } catch (err) {
+      toast(
+        "⚠",
+        "Gagal menyimpan QRIS",
+        err instanceof ApiError ? err.message : err instanceof Error ? err.message : "Terjadi kesalahan.",
+        "ruby",
+      );
+    } finally {
+      e.target.value = "";
+    }
   }
 
   async function removeQris() {
@@ -487,13 +515,15 @@ export default function PaymentGatewayPage() {
             {showSettings && (
               <div className="px-4 sm:px-5 py-4 border-b border-ink/[0.05] bg-base-800/40">
                 <div className="text-[10px] text-ink/40 mb-2">
-                  Unggah gambar QRIS statis milik villa (dari e-wallet/rekening). Gambar ini akan ditampilkan bersama nominal setiap transaksi.
+                  Unggah QRIS statis milik villa (gambar, atau PDF lembar QRIS dari bank/PSP — otomatis
+                  dikonversi jadi gambar). QRIS ini langsung tampil di layar bersama nominal setiap
+                  transaksi, tidak perlu diunduh manual lagi.
                 </div>
                 <div className="flex items-center gap-3">
                   {qris && <img src={qris} alt="QRIS" className="w-16 h-16 rounded object-cover border border-ink/10" />}
                   <label className="text-[10.5px] font-semibold text-gold-500 border border-gold-500/25 rounded px-3 py-1.5 cursor-pointer">
-                    Pilih Gambar
-                    <input type="file" accept="image/*" className="hidden" onChange={onUploadQris} />
+                    Pilih Gambar / PDF
+                    <input type="file" accept="image/*,application/pdf" className="hidden" onChange={onUploadQris} />
                   </label>
                   {qris && (
                     <button onClick={removeQris} className="text-[10.5px] font-semibold text-ruby-400">
