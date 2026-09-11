@@ -1,7 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getCloudbedsBaseRateId, pushCloudbedsRate, CloudbedsApiError } from "@/lib/cloudbedsApi";
+import { getCloudbedsBaseRateId, pushCloudbedsRate, getCloudbedsRoomTypeRate, CloudbedsApiError } from "@/lib/cloudbedsApi";
 import { resolveCloudbedsRoomTypeGroups } from "@/lib/cloudbedsRoomTypeMapping";
-import { refreshCompetitorDataIfStale, decideRatesForRoomType, type PricingSettings, type RoomTypeForPricing } from "@/lib/aiPricingEngine";
+import { syncCloudbedsRates, type RateSyncSummary } from "@/lib/cloudbedsRateSync";
+import {
+  refreshCompetitorDataIfStale,
+  decideRatesForRoomType,
+  type PricingSettings,
+  type RoomTypeForPricing,
+  type CompetitorRefreshResult,
+} from "@/lib/aiPricingEngine";
 
 /**
  * Owner-approved (2026-09-11) AI dynamic pricing: decide a price per room
@@ -15,10 +22,21 @@ import { refreshCompetitorDataIfStale, decideRatesForRoomType, type PricingSetti
  *
  * NOTE (2026-09-11): CLOUDBEDS_API_KEY already carries write:rate --
  * confirmed by testing putRate directly (a validation error surfaced,
- * not a permission error), correcting this file's earlier assumption
- * that the key was read-only. putRate's endDate is EXCLUSIVE (like a
- * checkout date), so a single-day interval must be [date, date+1), not
- * [date, date] -- that off-by-one was the real, only, blocker.
+ * not a permission error). putRate's endDate is EXCLUSIVE (like a
+ * checkout date), so a single-day interval is [date, date+1); the
+ * post-push read-back below verifies that empirically every run rather
+ * than trusting the assumption with real money.
+ *
+ * Safety rules this module must keep (all three were violated by the
+ * first version and cost real price drift on 2026-09-11):
+ *  1. Compute from villa_room_types.base_rate, a value this engine
+ *     never writes -- never from tarif_harian, which it does write.
+ *     Otherwise each run compounds on the last and Fri/Sat runs ratchet
+ *     the price up to max_rate no matter how empty the villa is.
+ *  2. Change nothing locally unless Cloudbeds accepted the same price.
+ *  3. Push only when asked: the nightly cron obeys
+ *     villa_pricing_settings.ai_autopush_enabled (default false), so
+ *     the live price keeps following Cloudbeds until the owner opts in.
  */
 
 const JAKARTA_TZ = "Asia/Jakarta";
@@ -39,13 +57,14 @@ function todayJakarta(): string {
 export interface AiPricingRoomTypeResult {
   villa_room_type_code: string;
   cloudbeds_room_type_id: string | null;
-  competitor_data_refreshed: boolean;
+  anchor_rate: number;
+  competitor_refresh: CompetitorRefreshResult;
   today_decided_rate: number | null;
   today_guardrail_status: string | null;
   dates_decided: number;
   pushed_to_cloudbeds: boolean;
   job_reference_id: string | null;
-  tarif_harian_updated_units: number;
+  verification: { checked: boolean; matched_dates: number; mismatched: Array<{ date: string; expected: number; actual: number | null }> } | null;
   error?: string;
 }
 
@@ -53,10 +72,18 @@ export interface AiPricingRunSummary {
   ok: true;
   today: string;
   window_days: number;
+  autopush_enabled: boolean;
+  push_requested: boolean;
   results: AiPricingRoomTypeResult[];
+  reconciled: RateSyncSummary | null;
 }
 
-export async function runAiDynamicPricing(supabase: SupabaseClient): Promise<AiPricingRunSummary> {
+/**
+ * `pushOverride` lets the admin manual trigger push for a deliberate
+ * test while the nightly cron stays governed by
+ * villa_pricing_settings.ai_autopush_enabled (default false).
+ */
+export async function runAiDynamicPricing(supabase: SupabaseClient, pushOverride?: boolean): Promise<AiPricingRunSummary> {
   const today = todayJakarta();
   const toDate = addDays(today, WINDOW_DAYS - 1);
   const targetDates: string[] = [];
@@ -70,10 +97,13 @@ export async function runAiDynamicPricing(supabase: SupabaseClient): Promise<AiP
         high_occupancy_adjustment_pct: number;
         low_occupancy_threshold_pct: number;
         low_occupancy_adjustment_pct: number;
+        ai_autopush_enabled: boolean;
       }
     | undefined;
+  const autopushEnabled = !!settings?.ai_autopush_enabled;
+  const pushRequested = pushOverride ?? autopushEnabled;
   if (!settings) {
-    return { ok: true, today, window_days: WINDOW_DAYS, results: [] };
+    return { ok: true, today, window_days: WINDOW_DAYS, autopush_enabled: false, push_requested: false, results: [], reconciled: null };
   }
   const pricingSettings: PricingSettings = {
     max_daily_movement_pct: Number(settings.max_daily_movement_pct),
@@ -85,7 +115,7 @@ export async function runAiDynamicPricing(supabase: SupabaseClient): Promise<AiP
 
   const { data: roomTypes } = await supabase
     .from("villa_room_types")
-    .select("id, code, name, description, min_rate, max_rate")
+    .select("id, code, name, description, base_rate, min_rate, max_rate")
     .eq("active", true);
   const { data: units } = await supabase.from("units").select("id, room_type_id, tarif_harian");
   const { villaRoomTypeIdByCloudbedsRoomType } = await resolveCloudbedsRoomTypeGroups(supabase);
@@ -93,53 +123,54 @@ export async function runAiDynamicPricing(supabase: SupabaseClient): Promise<AiP
   for (const [cb, villa] of villaRoomTypeIdByCloudbedsRoomType) cbRoomTypeIdByVillaRoomType.set(villa, cb);
 
   const results: AiPricingRoomTypeResult[] = [];
+  let researchBudget = 1;
 
   for (const rt of (roomTypes ?? []) as RoomTypeForPricing[]) {
     const unitsOfType = (units ?? []).filter((u: { room_type_id: string | null }) => u.room_type_id === rt.id);
     if (unitsOfType.length === 0) continue;
-    const currentRate = Number(unitsOfType[0].tarif_harian ?? 0);
-    if (currentRate <= 0) continue;
+
+    // Anchor on the room type's fixed base_rate, never on tarif_harian:
+    // tarif_harian is written BY this engine (and by the Cloudbeds pull),
+    // so using it as the input made every run compound on the last one.
+    const anchorRate = rt.base_rate !== null ? Number(rt.base_rate) : 0;
+    if (anchorRate <= 0) {
+      results.push({
+        villa_room_type_code: rt.code,
+        cloudbeds_room_type_id: cbRoomTypeIdByVillaRoomType.get(rt.id) ?? null,
+        anchor_rate: 0,
+        competitor_refresh: { refreshed: false, skipped_reason: "no base_rate set" },
+        today_decided_rate: null,
+        today_guardrail_status: null,
+        dates_decided: 0,
+        pushed_to_cloudbeds: false,
+        job_reference_id: null,
+        verification: null,
+        error: "villa_room_types.base_rate is not set for this room type -- refusing to guess an anchor price",
+      });
+      continue;
+    }
 
     const cbRoomTypeId = cbRoomTypeIdByVillaRoomType.get(rt.id) ?? null;
 
-    let competitorRefreshed = false;
-    try {
-      competitorRefreshed = await refreshCompetitorDataIfStale(supabase, rt);
-    } catch {
-      // AI research bridge failure never blocks the deterministic part of the run.
-    }
+    // One AI research call per run at most: Gemini + Google Search takes
+    // 10-30s and this deployment is capped at 60s per request, which a
+    // push must not lose. The 7-day staleness window means every room
+    // type still gets refreshed within a couple of runs.
+    const competitorRefresh = await refreshCompetitorDataIfStale(supabase, rt, researchBudget > 0);
+    if (competitorRefresh.refreshed || competitorRefresh.error) researchBudget--;
 
-    const decisions = await decideRatesForRoomType(supabase, rt, currentRate, targetDates, pricingSettings);
+    const decisions = await decideRatesForRoomType(supabase, rt, anchorRate, targetDates, pricingSettings);
     const todayDecision = decisions.find((d) => d.date === today) ?? null;
-
-    for (const d of decisions) {
-      const { data: existingRate } = await supabase
-        .from("villa_rates")
-        .select("id")
-        .eq("room_type_id", rt.id)
-        .eq("date", d.date)
-        .is("rate_plan_id", null)
-        .maybeSingle();
-      const row = {
-        room_type_id: rt.id,
-        rate_plan_id: null,
-        date: d.date,
-        rate: d.decided_rate,
-        source: "ai_recommendation",
-        reason: d.reason_codes.join(",") || "no_adjustment",
-        updated_by: "ai_dynamic_pricing_cron",
-      };
-      if (existingRate) {
-        await supabase.from("villa_rates").update(row).eq("id", existingRate.id);
-      } else {
-        await supabase.from("villa_rates").insert(row);
-      }
-    }
 
     let pushed = false;
     let jobReferenceId: string | null = null;
+    let verification: AiPricingRoomTypeResult["verification"] = null;
     let error: string | undefined;
-    if (!cbRoomTypeId) {
+
+    if (!pushRequested) {
+      // Dry run: decide and report, touch nothing. The live price keeps
+      // following Cloudbeds until the owner switches autopush on.
+    } else if (!cbRoomTypeId) {
       error = "No Cloudbeds room type mapped for this villa room type";
     } else {
       try {
@@ -151,38 +182,54 @@ export async function runAiDynamicPricing(supabase: SupabaseClient): Promise<AiP
             rateId,
             decisions.map((d) => ({ startDate: d.date, endDate: addDays(d.date, 1), rate: d.decided_rate })),
           );
-          pushed = true;
           jobReferenceId = pushResult.jobReferenceId;
+
+          // Read back what Cloudbeds actually stored. putRate's endDate is
+          // documented nowhere we can reach, so this proves empirically
+          // that [date, date+1) writes exactly one night rather than
+          // silently shifting every day's price by one (which overlapping
+          // inclusive intervals would do). Cloudbeds processes rate
+          // updates asynchronously, so a mismatch here is reported as a
+          // warning to check, not treated as a failed push.
+          await new Promise((r) => setTimeout(r, 4000));
+          const readBack = await getCloudbedsRoomTypeRate(cbRoomTypeId, today, toDate);
+          const actualByDate = new Map(readBack.map((r) => [r.date, r.rate]));
+          const mismatched = decisions
+            .map((d) => ({ date: d.date, expected: d.decided_rate, actual: actualByDate.get(d.date) ?? null }))
+            .filter((x) => x.actual === null || Math.round(x.actual) !== x.expected);
+          verification = { checked: true, matched_dates: decisions.length - mismatched.length, mismatched: mismatched.slice(0, 5) };
+          pushed = true;
         }
       } catch (e) {
         error = e instanceof CloudbedsApiError ? e.message : e instanceof Error ? e.message : String(e);
       }
     }
 
-    let updatedUnits = 0;
-    if (todayDecision) {
-      const { data: updated } = await supabase
-        .from("units")
-        .update({ tarif_harian: todayDecision.decided_rate })
-        .eq("room_type_id", rt.id)
-        .neq("tarif_harian", todayDecision.decided_rate)
-        .select("id");
-      updatedUnits = updated?.length ?? 0;
-    }
-
     results.push({
       villa_room_type_code: rt.code,
       cloudbeds_room_type_id: cbRoomTypeId,
-      competitor_data_refreshed: competitorRefreshed,
+      anchor_rate: anchorRate,
+      competitor_refresh: competitorRefresh,
       today_decided_rate: todayDecision?.decided_rate ?? null,
       today_guardrail_status: todayDecision?.guardrail_status ?? null,
       dates_decided: decisions.length,
       pushed_to_cloudbeds: pushed,
       job_reference_id: jobReferenceId,
-      tarif_harian_updated_units: updatedUnits,
+      verification,
       error,
     });
   }
 
-  return { ok: true, today, window_days: WINDOW_DAYS, results };
+  // Single writer for local state: whatever Cloudbeds ended up holding is
+  // pulled back into villa_rates and units.tarif_harian by the existing
+  // sync path, rather than this engine writing its own intended price
+  // locally. If Cloudbeds rejected or is still queueing, local prices
+  // simply stay as they were -- villa and the OTAs can never silently
+  // disagree because of this run.
+  let reconciled: RateSyncSummary | null = null;
+  if (results.some((r) => r.pushed_to_cloudbeds)) {
+    reconciled = await syncCloudbedsRates(supabase);
+  }
+
+  return { ok: true, today, window_days: WINDOW_DAYS, autopush_enabled: autopushEnabled, push_requested: pushRequested, results, reconciled };
 }

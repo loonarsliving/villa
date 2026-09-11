@@ -9,9 +9,13 @@ export const maxDuration = 60;
 /**
  * Owner-approved (2026-09-11) AI dynamic pricing cron -- see
  * src/lib/aiDynamicPricingRun.ts for the full design/rationale. Runs
- * just ahead of sync-cloudbeds-rates (00:05 WITA) so that cron's pull
- * picks up whatever this one just pushed, once Cloudbeds' async rate
- * job finishes.
+ * just ahead of sync-cloudbeds-rates (23:05 WIB) so that cron's pull
+ * picks up whatever this one pushed, once Cloudbeds' async rate job
+ * finishes.
+ *
+ * Pushes nothing while villa_pricing_settings.ai_autopush_enabled is
+ * false (its default): it computes and reports, and the live price
+ * keeps following Cloudbeds.
  */
 export async function GET(request: Request) {
   const expected = (process.env.CRON_SECRET || "").trim();

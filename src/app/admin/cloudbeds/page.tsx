@@ -177,36 +177,49 @@ export default function AdminCloudbedsPage() {
     }
   }
 
-  async function runAiPricing() {
+  async function runAiPricing(push: boolean) {
+    if (push && !confirm("Harga hasil hitungan akan DIKIRIM ke Cloudbeds dan langsung berlaku di semua OTA. Lanjutkan?")) return;
     setRunningAiPricing(true);
     try {
       const body = await localApi<{
+        push_requested: boolean;
         results: Array<{
           villa_room_type_code: string;
-          competitor_data_refreshed: boolean;
+          anchor_rate: number;
+          competitor_refresh: { refreshed: boolean; rows_inserted?: number; skipped_reason?: string; error?: string };
           today_decided_rate: number | null;
-          today_guardrail_status: string | null;
           pushed_to_cloudbeds: boolean;
-          tarif_harian_updated_units: number;
+          verification: { matched_dates: number; mismatched: Array<{ date: string; expected: number; actual: number | null }> } | null;
           error?: string;
         }>;
-      }>("/api/admin/cloudbeds/run-ai-pricing", { method: "POST" });
+      }>("/api/admin/cloudbeds/run-ai-pricing", { method: "POST", body: JSON.stringify({ push }) });
+
       const failed = body.results.filter((r) => r.error);
+      const mismatch = body.results.filter((r) => r.verification && r.verification.mismatched.length > 0);
       const okSummary = body.results
         .filter((r) => !r.error)
-        .map(
-          (r) =>
-            `${r.villa_room_type_code}: Rp${(r.today_decided_rate ?? 0).toLocaleString("id-ID")}${r.pushed_to_cloudbeds ? " (terkirim ke Cloudbeds)" : ""}`,
-        )
+        .map((r) => `${r.villa_room_type_code}: Rp${(r.today_decided_rate ?? 0).toLocaleString("id-ID")}${r.pushed_to_cloudbeds ? " ✓terkirim" : ""}`)
         .join(", ");
-      if (failed.length === 0) {
-        toast("✓", "AI pricing selesai", okSummary || "Tidak ada room type untuk diproses.", "sage");
-      } else {
+      const riset = body.results
+        .map((r) => r.competitor_refresh?.error && `${r.villa_room_type_code}: riset AI gagal (${r.competitor_refresh.error})`)
+        .filter(Boolean)
+        .join("; ");
+
+      if (failed.length > 0) {
+        toast("⚠", "Sebagian gagal", `${okSummary ? okSummary + " — " : ""}Gagal: ${failed.map((f) => `${f.villa_room_type_code} (${f.error})`).join("; ")}`, "ruby");
+      } else if (mismatch.length > 0) {
         toast(
           "⚠",
-          "Sebagian gagal",
-          `${okSummary ? okSummary + " — " : ""}Gagal: ${failed.map((f) => `${f.villa_room_type_code} (${f.error})`).join("; ")}`,
+          "Perlu dicek",
+          `Terkirim, tapi harga di Cloudbeds belum cocok untuk ${mismatch[0].verification!.mismatched.length} tanggal (mis. ${mismatch[0].verification!.mismatched[0].date}: dikirim Rp${mismatch[0].verification!.mismatched[0].expected.toLocaleString("id-ID")}, terbaca Rp${(mismatch[0].verification!.mismatched[0].actual ?? 0).toLocaleString("id-ID")}). Bisa jadi hanya proses antrean Cloudbeds belum selesai.`,
           "ruby",
+        );
+      } else {
+        toast(
+          "✓",
+          push ? "Terkirim & terverifikasi" : "Hitungan selesai (belum dikirim)",
+          `${okSummary || "Tidak ada tipe unit untuk diproses."}${riset ? ` — ${riset}` : ""}`,
+          "sage",
         );
       }
       load();
@@ -264,17 +277,30 @@ export default function AdminCloudbedsPage() {
         <CardHeader
           title="AI Dynamic Pricing → Cloudbeds"
           action={
-            <button
-              onClick={runAiPricing}
-              disabled={runningAiPricing}
-              className="text-[10.5px] font-semibold text-gold-500 border border-gold-500/25 rounded px-3 py-1.5 shrink-0 disabled:opacity-50"
-            >
-              {runningAiPricing ? "Memproses…" : "Jalankan Sekarang"}
-            </button>
+            <div className="flex gap-2 shrink-0">
+              <button
+                onClick={() => runAiPricing(false)}
+                disabled={runningAiPricing}
+                className="text-[10.5px] font-semibold text-ink/60 border border-ink/15 rounded px-3 py-1.5 disabled:opacity-50"
+              >
+                {runningAiPricing ? "Memproses…" : "Hitung Saja"}
+              </button>
+              <button
+                onClick={() => runAiPricing(true)}
+                disabled={runningAiPricing}
+                className="text-[10.5px] font-semibold text-gold-500 border border-gold-500/25 rounded px-3 py-1.5 disabled:opacity-50"
+              >
+                Hitung + Kirim
+              </button>
+            </div>
           }
         />
         <div className="px-4 sm:px-5 py-3.5 text-[11px] text-ink/50 leading-relaxed">
-          Menghitung harga otomatis (okupansi + riset AI kompetitor sekitar + high season, selalu dijepit ke batas base/min/max per tipe unit) lalu mendorongnya ke Cloudbeds via API mereka — otomatis berlaku ke semua OTA. Otomatis berjalan tiap hari jam 23:58 WITA (sebelum sinkron tarik di atas).
+          Menghitung harga dari <strong>harga dasar tetap</strong> tiap tipe unit (bukan dari harga hasil hitungan sebelumnya, supaya tidak beranak-pinak), memakai okupansi + riset AI kompetitor sekitar + high season, dan selalu dijepit ke batas min/max Anda.
+          <br />
+          <strong>Hitung Saja</strong> hanya menyimpan usulan harga untuk Anda lihat di Kalender Harga — tidak ada harga yang berubah. <strong>Hitung + Kirim</strong> mengirim ke Cloudbeds (berlaku ke semua OTA) lalu membaca ulang untuk memastikan harga benar-benar tersimpan di tanggal yang tepat.
+          <br />
+          Cron harian jam 22:58 WIB <strong>hanya menghitung</strong> selama sakelar <code className="text-gold-400">ai_autopush_enabled</code> masih mati — harga yang berlaku tetap mengikuti Cloudbeds.
         </div>
       </Card>
 
