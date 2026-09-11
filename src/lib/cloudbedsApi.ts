@@ -129,13 +129,17 @@ export async function getCloudbedsRoomTypeRate(roomTypeId: string, startDate: st
   // price is wrong without anything saying so.
   const data = body?.data;
   const entries = (Array.isArray(data) ? data : data ? [data] : []) as Array<{
-    roomRateDetailed?: Array<{ date?: string; rate?: number }>;
+    roomRateDetailed?: Array<{ date?: string; rate?: number | string }>;
   }>;
 
+  // Cloudbeds sends every numeric field as a STRING ("650000.00"), so a
+  // typeof === "number" check silently rejected every single row and the
+  // whole rate mirror came back empty while reporting success.
   const out: CloudbedsRoomTypeRate[] = [];
   for (const entry of entries) {
     for (const r of entry?.roomRateDetailed ?? []) {
-      if (r.date && typeof r.rate === "number") out.push({ date: r.date, rate: r.rate });
+      const rate = Number(r.rate);
+      if (r.date && Number.isFinite(rate) && rate > 0) out.push({ date: String(r.date), rate });
     }
   }
 
