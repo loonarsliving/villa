@@ -22,10 +22,6 @@
       "schedule": "55 15 * * *"
     },
     {
-      "path": "/api/cron/generate-pricing-recommendations",
-      "schedule": "10 16 * * *"
-    },
-    {
       "path": "/api/cron/sync-cloudbeds-rates",
       "schedule": "5 16 * * *"
     }
