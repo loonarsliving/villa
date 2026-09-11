@@ -30,6 +30,7 @@ export default function AdminCloudbedsPage() {
   const [lastChecked, setLastChecked] = useState<Date | null>(null);
   const [backfilling, setBackfilling] = useState(false);
   const [subscribing, setSubscribing] = useState(false);
+  const [syncingRates, setSyncingRates] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -143,6 +144,38 @@ export default function AdminCloudbedsPage() {
     }
   }
 
+  async function runSyncRates() {
+    setSyncingRates(true);
+    try {
+      const body = await localApi<{
+        room_types_synced: number;
+        results: Array<{
+          villa_room_type_code: string;
+          dates_synced: number;
+          today_rate: number | null;
+          today_rate_clamped: number | null;
+          tarif_harian_updated_units: number;
+          error?: string;
+        }>;
+      }>("/api/admin/cloudbeds/sync-rates", { method: "POST" });
+      const failed = body.results.filter((r) => r.error);
+      const okSummary = body.results
+        .filter((r) => !r.error)
+        .map((r) => `${r.villa_room_type_code}: Rp${(r.today_rate_clamped ?? 0).toLocaleString("id-ID")} (${r.tarif_harian_updated_units} unit diupdate)`)
+        .join(", ");
+      if (failed.length === 0) {
+        toast("✓", "Harga disinkronkan", okSummary || "Tidak ada room type untuk disinkronkan.", "sage");
+      } else {
+        toast("⚠", "Sebagian gagal", `${okSummary ? okSummary + " — " : ""}Gagal: ${failed.map((f) => `${f.villa_room_type_code} (${f.error})`).join("; ")}`, "ruby");
+      }
+      load();
+    } catch (e) {
+      toast("⚠", "Gagal", e instanceof Error ? e.message : "Terjadi kesalahan.", "ruby");
+    } finally {
+      setSyncingRates(false);
+    }
+  }
+
   return (
     <AdminShell pageTitle="Cloudbeds" pageSub="Pemetaan room & log event">
       <div className="bg-gold-500/10 border-l-2 border-gold-500 rounded-r p-3.5 text-[11px] text-ink/50 leading-relaxed mb-3.5">
@@ -165,6 +198,24 @@ export default function AdminCloudbedsPage() {
         />
         <div className="px-4 sm:px-5 py-3.5 text-[11px] text-ink/50 leading-relaxed">
           Mendaftarkan webhook Cloudbeds secara otomatis lewat API mereka — tidak perlu buka dashboard Cloudbeds manual. Setelah berhasil, setiap reservasi baru/berubah di Cloudbeds otomatis masuk live ke kalender villa. Aman diklik berkali-kali (tidak dobel jika sudah terdaftar).
+        </div>
+      </Card>
+
+      <Card className="mb-3.5">
+        <CardHeader
+          title="Sinkron Harga dari Cloudbeds"
+          action={
+            <button
+              onClick={runSyncRates}
+              disabled={syncingRates}
+              className="text-[10.5px] font-semibold text-gold-500 border border-gold-500/25 rounded px-3 py-1.5 shrink-0 disabled:opacity-50"
+            >
+              {syncingRates ? "Menyinkron…" : "Sinkron Sekarang"}
+            </button>
+          }
+        />
+        <div className="px-4 sm:px-5 py-3.5 text-[11px] text-ink/50 leading-relaxed">
+          Menarik harga live per room type dari Cloudbeds (harga yang sama yang sudah tersebar ke semua OTA) dan langsung menjadikannya tarif harian unit villa hari ini — tidak perlu approve manual, sesuai instruksi. Otomatis berjalan tiap hari jam 00:05 WITA; tombol ini untuk sinkron langsung sekarang.
         </div>
       </Card>
 
