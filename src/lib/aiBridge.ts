@@ -138,3 +138,58 @@ export async function researchCompetitorRates(input: CompetitorRateInput): Promi
   }
   return Array.isArray(data.results) ? data.results : [];
 }
+
+export type DemandTrend = "naik" | "turun" | "stabil";
+
+export interface MarketDemandEvent {
+  label: string;
+  start_date: string;
+  end_date: string;
+  expected_impact: "low" | "medium" | "high";
+  source_note: string;
+}
+
+export interface MarketDemandResult {
+  demand_trend: DemandTrend;
+  trend_note: string;
+  events: MarketDemandEvent[];
+}
+
+/**
+ * Market-demand research (owner request 2026-09-11, follow-up to
+ * researchCompetitorRates above): general Google-search interest for
+ * villa/homestay rentals near the location, plus real upcoming events/
+ * festivals/holidays that plausibly raise demand -- explicitly NOT
+ * Google Analytics (confirmed via AskUserQuestion; no GA4 property
+ * exists for villa's site to read). Same research-only discipline: this
+ * never writes a price itself. The caller (aiPricingEngine.ts) lands
+ * events in villa_high_season_periods, tagged
+ * created_by='ai_jogja_events_research' so they're distinguishable from
+ * a manual entry, for the existing rule engine to read exactly like any
+ * other high-season period.
+ */
+export async function researchMarketDemand(locationLabel: string): Promise<MarketDemandResult> {
+  const { data: setting, error } = await supabaseAdmin().from("integration_settings").select("value").eq("key", "vercel_bridge").maybeSingle();
+  if (error) throw new Error(`Failed to load vercel_bridge setting: ${error.message}`);
+  const baseUrl = setting?.value?.base_url as string | undefined;
+  const secret = setting?.value?.secret as string | undefined;
+  if (!baseUrl || !secret) {
+    throw new Error("integration_settings.vercel_bridge (base_url/secret) is not configured");
+  }
+
+  const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/api/villa/ai/market-demand`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-internal-secret": secret },
+    body: JSON.stringify({ location_label: locationLabel }),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data || data.success !== true) {
+    throw new Error(`AI bridge failed: ${data?.error || res.status}`);
+  }
+  const trend: DemandTrend = data.demand_trend === "naik" || data.demand_trend === "turun" ? data.demand_trend : "stabil";
+  return {
+    demand_trend: trend,
+    trend_note: typeof data.trend_note === "string" ? data.trend_note : "",
+    events: Array.isArray(data.events) ? data.events : [],
+  };
+}

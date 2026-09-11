@@ -4,10 +4,12 @@ import { resolveCloudbedsRoomTypeGroups } from "@/lib/cloudbedsRoomTypeMapping";
 import { syncCloudbedsRates, type RateSyncSummary } from "@/lib/cloudbedsRateSync";
 import {
   refreshCompetitorDataIfStale,
+  refreshMarketDemandIfStale,
   decideRatesForRoomType,
   type PricingSettings,
   type RoomTypeForPricing,
   type CompetitorRefreshResult,
+  type MarketDemandRefreshResult,
 } from "@/lib/aiPricingEngine";
 
 /**
@@ -21,11 +23,11 @@ import {
  * (src/app/api/admin/cloudbeds/run-ai-pricing).
  *
  * NOTE (2026-09-11): CLOUDBEDS_API_KEY already carries write:rate --
- * confirmed by testing putRate directly (a validation error surfaced,
- * not a permission error). putRate's endDate is EXCLUSIVE (like a
- * checkout date), so a single-day interval is [date, date+1); the
- * post-push read-back below verifies that empirically every run rather
- * than trusting the assumption with real money.
+ * confirmed by testing putRate directly. putRate's endDate is INCLUSIVE
+ * (a single night is [date, date], unlike getRate's endDate which is
+ * exclusive -- see src/lib/cloudbedsApi.ts); the post-push read-back
+ * below verifies that empirically every run rather than trusting either
+ * assumption with real money.
  *
  * Safety rules this module must keep (all three were violated by the
  * first version and cost real price drift on 2026-09-11):
@@ -74,6 +76,7 @@ export interface AiPricingRunSummary {
   window_days: number;
   autopush_enabled: boolean;
   push_requested: boolean;
+  market_demand: MarketDemandRefreshResult;
   results: AiPricingRoomTypeResult[];
   reconciled: RateSyncSummary | null;
 }
@@ -103,8 +106,14 @@ export async function runAiDynamicPricing(supabase: SupabaseClient, pushOverride
   const autopushEnabled = !!settings?.ai_autopush_enabled;
   const pushRequested = pushOverride ?? autopushEnabled;
   if (!settings) {
-    return { ok: true, today, window_days: WINDOW_DAYS, autopush_enabled: false, push_requested: false, results: [], reconciled: null };
+    return { ok: true, today, window_days: WINDOW_DAYS, autopush_enabled: false, push_requested: false, market_demand: { refreshed: false }, results: [], reconciled: null };
   }
+
+  // Once per run, not per room type -- events are location-wide, and its
+  // own 7-day staleness window means this AI call almost never actually
+  // fires on a given day, so it doesn't compete with the per-room-type
+  // competitor-research budget below.
+  const marketDemand = await refreshMarketDemandIfStale(supabase);
   const pricingSettings: PricingSettings = {
     max_daily_movement_pct: Number(settings.max_daily_movement_pct),
     high_occupancy_threshold_pct: Number(settings.high_occupancy_threshold_pct),
@@ -234,5 +243,5 @@ export async function runAiDynamicPricing(supabase: SupabaseClient, pushOverride
     reconciled = await syncCloudbedsRates(supabase);
   }
 
-  return { ok: true, today, window_days: WINDOW_DAYS, autopush_enabled: autopushEnabled, push_requested: pushRequested, results, reconciled };
+  return { ok: true, today, window_days: WINDOW_DAYS, autopush_enabled: autopushEnabled, push_requested: pushRequested, market_demand: marketDemand, results, reconciled };
 }
