@@ -31,6 +31,7 @@ export default function AdminCloudbedsPage() {
   const [backfilling, setBackfilling] = useState(false);
   const [subscribing, setSubscribing] = useState(false);
   const [syncingRates, setSyncingRates] = useState(false);
+  const [runningAiPricing, setRunningAiPricing] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -176,6 +177,46 @@ export default function AdminCloudbedsPage() {
     }
   }
 
+  async function runAiPricing() {
+    setRunningAiPricing(true);
+    try {
+      const body = await localApi<{
+        results: Array<{
+          villa_room_type_code: string;
+          competitor_data_refreshed: boolean;
+          today_decided_rate: number | null;
+          today_guardrail_status: string | null;
+          pushed_to_cloudbeds: boolean;
+          tarif_harian_updated_units: number;
+          error?: string;
+        }>;
+      }>("/api/admin/cloudbeds/run-ai-pricing", { method: "POST" });
+      const failed = body.results.filter((r) => r.error);
+      const okSummary = body.results
+        .filter((r) => !r.error)
+        .map(
+          (r) =>
+            `${r.villa_room_type_code}: Rp${(r.today_decided_rate ?? 0).toLocaleString("id-ID")}${r.pushed_to_cloudbeds ? " (terkirim ke Cloudbeds)" : ""}`,
+        )
+        .join(", ");
+      if (failed.length === 0) {
+        toast("✓", "AI pricing selesai", okSummary || "Tidak ada room type untuk diproses.", "sage");
+      } else {
+        toast(
+          "⚠",
+          "Sebagian gagal",
+          `${okSummary ? okSummary + " — " : ""}Gagal: ${failed.map((f) => `${f.villa_room_type_code} (${f.error})`).join("; ")}`,
+          "ruby",
+        );
+      }
+      load();
+    } catch (e) {
+      toast("⚠", "Gagal", e instanceof Error ? e.message : "Terjadi kesalahan.", "ruby");
+    } finally {
+      setRunningAiPricing(false);
+    }
+  }
+
   return (
     <AdminShell pageTitle="Cloudbeds" pageSub="Pemetaan room & log event">
       <div className="bg-gold-500/10 border-l-2 border-gold-500 rounded-r p-3.5 text-[11px] text-ink/50 leading-relaxed mb-3.5">
@@ -216,6 +257,24 @@ export default function AdminCloudbedsPage() {
         />
         <div className="px-4 sm:px-5 py-3.5 text-[11px] text-ink/50 leading-relaxed">
           Menarik harga live per room type dari Cloudbeds (harga yang sama yang sudah tersebar ke semua OTA) dan langsung menjadikannya tarif harian unit villa hari ini — tidak perlu approve manual, sesuai instruksi. Otomatis berjalan tiap hari jam 00:05 WITA; tombol ini untuk sinkron langsung sekarang.
+        </div>
+      </Card>
+
+      <Card className="mb-3.5">
+        <CardHeader
+          title="AI Dynamic Pricing → Cloudbeds"
+          action={
+            <button
+              onClick={runAiPricing}
+              disabled={runningAiPricing}
+              className="text-[10.5px] font-semibold text-gold-500 border border-gold-500/25 rounded px-3 py-1.5 shrink-0 disabled:opacity-50"
+            >
+              {runningAiPricing ? "Memproses…" : "Jalankan Sekarang"}
+            </button>
+          }
+        />
+        <div className="px-4 sm:px-5 py-3.5 text-[11px] text-ink/50 leading-relaxed">
+          Menghitung harga otomatis (okupansi + riset AI kompetitor sekitar + high season, selalu dijepit ke batas base/min/max per tipe unit) lalu mendorongnya ke Cloudbeds via API mereka — otomatis berlaku ke semua OTA. Butuh <code className="text-gold-400">CLOUDBEDS_API_KEY</code> dengan akses <code className="text-gold-400">write:rate</code> (upgrade di dashboard Cloudbeds → Apps &amp; Marketplace); sampai itu diaktifkan, tombol ini akan melapor gagal per tipe unit. Riset kompetitor butuh lokasi villa tersimpan di <code className="text-gold-400">integration_settings.revenue_engine.location_label</code>. Otomatis berjalan tiap hari jam 23:58 WITA (sebelum sinkron tarik di atas).
         </div>
       </Card>
 

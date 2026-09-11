@@ -22,6 +22,10 @@
       "schedule": "55 15 * * *"
     },
     {
+      "path": "/api/cron/ai-dynamic-pricing",
+      "schedule": "58 15 * * *"
+    },
+    {
       "path": "/api/cron/sync-cloudbeds-rates",
       "schedule": "5 16 * * *"
     }

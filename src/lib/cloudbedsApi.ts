@@ -124,3 +124,68 @@ export async function getCloudbedsRoomTypeRate(roomTypeId: string, startDate: st
   const detailed = (body?.data?.roomRateDetailed ?? []) as Array<{ date?: string; rate?: number }>;
   return detailed.filter((r) => r.date && typeof r.rate === "number").map((r) => ({ date: r.date as string, rate: r.rate as number }));
 }
+
+/**
+ * Looks up the base (non-derived) rateID for a room type -- required by
+ * PUT /putRate, which can only update a non-derived rate. Returns null if
+ * Cloudbeds' own rate for this room type is itself derived from another
+ * rate plan (isDerived: true), since pushing to that would be rejected by
+ * Cloudbeds -- caller should surface this rather than guess a different ID.
+ */
+export async function getCloudbedsBaseRateId(roomTypeId: string, onDate: string): Promise<string | null> {
+  const key = apiKey();
+  const propertyId = (process.env.CLOUDBEDS_PROPERTY_ID ?? "").trim();
+  const url = new URL(`${CLOUDBEDS_API_BASE}/getRate`);
+  if (propertyId) url.searchParams.set("propertyID", propertyId);
+  url.searchParams.set("roomTypeID", roomTypeId);
+  url.searchParams.set("startDate", onDate);
+  url.searchParams.set("endDate", onDate);
+
+  const res = await fetch(url, { headers: { "x-api-key": key }, cache: "no-store" });
+  const body = await res.json().catch(() => null);
+  if (!res.ok || body?.success === false) {
+    const message = body?.message || body?.error || `Cloudbeds API error (HTTP ${res.status})`;
+    throw new CloudbedsApiError(message, res.status >= 400 ? res.status : 502);
+  }
+  if (body?.data?.isDerived) return null;
+  return typeof body?.data?.rateID === "string" ? body.data.rateID : null;
+}
+
+export interface RateInterval {
+  startDate: string;
+  endDate: string;
+  rate: number;
+}
+
+/**
+ * Pushes a new price to Cloudbeds via POST /putRate -- this is what
+ * actually changes the price on every OTA, since Cloudbeds' channel
+ * manager distributes it outward. Async on Cloudbeds' side (returns a
+ * jobReferenceID, tracked via GET /getRateJobs if ever needed); requires
+ * the API key to carry write:rate scope, which CLOUDBEDS_API_KEY does
+ * NOT have as of 2026-09-11 -- calling this before the key is upgraded on
+ * Cloudbeds' own dashboard will fail with a permission error, surfaced as
+ * a normal CloudbedsApiError rather than crashing silently.
+ */
+export async function pushCloudbedsRate(rateId: string, intervals: RateInterval[]): Promise<{ jobReferenceId: string | null }> {
+  const key = apiKey();
+  const form = new URLSearchParams();
+  form.set("rates[0][rateID]", rateId);
+  intervals.forEach((iv, i) => {
+    form.set(`rates[0][interval][${i}][startDate]`, iv.startDate);
+    form.set(`rates[0][interval][${i}][endDate]`, iv.endDate);
+    form.set(`rates[0][interval][${i}][rate]`, String(iv.rate));
+  });
+
+  const res = await fetch(`${CLOUDBEDS_API_BASE}/putRate`, {
+    method: "POST",
+    headers: { "x-api-key": key, "Content-Type": "application/x-www-form-urlencoded" },
+    body: form.toString(),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok || body?.success === false) {
+    const message = body?.message || body?.error || `Cloudbeds API error (HTTP ${res.status})`;
+    throw new CloudbedsApiError(message, res.status >= 400 ? res.status : 502);
+  }
+  return { jobReferenceId: typeof body?.jobReferenceID === "string" ? body.jobReferenceID : null };
+}
