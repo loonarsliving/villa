@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { researchCompetitorRates } from "@/lib/aiBridge";
+import { researchCompetitorRates, researchMarketDemand, type DemandTrend } from "@/lib/aiBridge";
 
 /**
  * Owner instruction (2026-09-11): villa should run its own AI-assisted
@@ -25,7 +25,16 @@ import { researchCompetitorRates } from "@/lib/aiBridge";
  */
 
 const COMPETITOR_STALE_DAYS = 7;
+const MARKET_DEMAND_STALE_DAYS = 7;
 const WEEKEND_SURCHARGE = 100000;
+const MARKET_DEMAND_CREATED_BY = "ai_jogja_events_research";
+
+// AI never outputs a raw percentage for an event -- only a qualitative
+// impact rating -- so a bad/exaggerated model response can move price by
+// at most this much, deliberately, rather than trusting an arbitrary
+// number from a web-search summary. Same order of magnitude as the
+// manually-entered high-season periods already in this table.
+const EVENT_IMPACT_ADJUSTMENT_PCT: Record<"low" | "medium" | "high", number> = { low: 0.05, medium: 0.1, high: 0.2 };
 
 /**
  * Owner instruction (2026-09-11, ahead of the 20 Sep opening): hold the
@@ -72,6 +81,15 @@ export interface DatePriceDecision {
 export interface CompetitorRefreshResult {
   refreshed: boolean;
   rows_inserted?: number;
+  skipped_reason?: string;
+  error?: string;
+}
+
+export interface MarketDemandRefreshResult {
+  refreshed: boolean;
+  demand_trend?: DemandTrend;
+  trend_note?: string;
+  events_upserted?: number;
   skipped_reason?: string;
   error?: string;
 }
@@ -136,6 +154,68 @@ export async function refreshCompetitorDataIfStale(
     })),
   );
   return { refreshed: true, rows_inserted: results.length };
+}
+
+/**
+ * Refreshes villa_high_season_periods with AI-detected upcoming Jogja
+ * events, once per run at most (not per room type -- this is location-
+ * wide, not room-type-specific), if the most recent AI-sourced period
+ * is older than MARKET_DEMAND_STALE_DAYS or none exists yet. Rows are
+ * tagged created_by=MARKET_DEMAND_CREATED_BY so they read exactly like
+ * any other high-season period to decideRatesForRoomType below, but
+ * stay distinguishable from a manual admin entry. Matched by
+ * (label, start_date) on refresh -- the table has no unique constraint
+ * for this, so this check-then-write avoids piling up duplicates every
+ * time the research reruns.
+ */
+export async function refreshMarketDemandIfStale(supabase: SupabaseClient, allowResearch = true): Promise<MarketDemandRefreshResult> {
+  if (!allowResearch) return { refreshed: false, skipped_reason: "research budget used this run (Vercel 60s limit)" };
+  const { data: settingRow } = await supabase.from("integration_settings").select("value").eq("key", "revenue_engine").maybeSingle();
+  const locationLabel = (settingRow?.value as { location_label?: string } | undefined)?.location_label;
+  if (!locationLabel) return { refreshed: false, skipped_reason: "no location_label configured" };
+
+  const staleSince = new Date(Date.now() - MARKET_DEMAND_STALE_DAYS * 86400000).toISOString();
+  const { data: recent } = await supabase
+    .from("villa_high_season_periods")
+    .select("id")
+    .eq("created_by", MARKET_DEMAND_CREATED_BY)
+    .gte("created_at", staleSince)
+    .limit(1);
+  if (recent && recent.length > 0) return { refreshed: false, skipped_reason: "existing data still fresh" };
+
+  let result: Awaited<ReturnType<typeof researchMarketDemand>>;
+  try {
+    result = await researchMarketDemand(locationLabel);
+  } catch (e) {
+    return { refreshed: false, error: e instanceof Error ? e.message : String(e) };
+  }
+
+  let upserted = 0;
+  for (const ev of result.events) {
+    const { data: existing } = await supabase
+      .from("villa_high_season_periods")
+      .select("id")
+      .eq("created_by", MARKET_DEMAND_CREATED_BY)
+      .eq("label", ev.label)
+      .eq("start_date", ev.start_date)
+      .maybeSingle();
+    const row = {
+      label: ev.label,
+      start_date: ev.start_date,
+      end_date: ev.end_date,
+      suggested_adjustment_pct: EVENT_IMPACT_ADJUSTMENT_PCT[ev.expected_impact],
+      active: true,
+      created_by: MARKET_DEMAND_CREATED_BY,
+    };
+    if (existing) {
+      await supabase.from("villa_high_season_periods").update(row).eq("id", existing.id);
+    } else {
+      await supabase.from("villa_high_season_periods").insert(row);
+    }
+    upserted++;
+  }
+
+  return { refreshed: true, demand_trend: result.demand_trend, trend_note: result.trend_note, events_upserted: upserted };
 }
 
 /**

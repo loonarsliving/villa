@@ -183,6 +183,14 @@ export default function AdminCloudbedsPage() {
     try {
       const body = await localApi<{
         push_requested: boolean;
+        market_demand: {
+          refreshed: boolean;
+          demand_trend?: "naik" | "turun" | "stabil";
+          trend_note?: string;
+          events_upserted?: number;
+          skipped_reason?: string;
+          error?: string;
+        };
         results: Array<{
           villa_room_type_code: string;
           anchor_rate: number;
@@ -200,8 +208,12 @@ export default function AdminCloudbedsPage() {
         .filter((r) => !r.error)
         .map((r) => `${r.villa_room_type_code}: Rp${(r.today_decided_rate ?? 0).toLocaleString("id-ID")}${r.pushed_to_cloudbeds ? " ✓terkirim" : ""}`)
         .join(", ");
-      const riset = body.results
-        .map((r) => r.competitor_refresh?.error && `${r.villa_room_type_code}: riset AI gagal (${r.competitor_refresh.error})`)
+      const riset = [
+        ...body.results.map((r) => r.competitor_refresh?.error && `${r.villa_room_type_code}: riset kompetitor gagal (${r.competitor_refresh.error})`),
+        body.market_demand?.error && `riset pasar/event gagal (${body.market_demand.error})`,
+        body.market_demand?.refreshed &&
+          `pasar: ${body.market_demand.demand_trend ?? "stabil"}${body.market_demand.events_upserted ? `, ${body.market_demand.events_upserted} event terdeteksi` : ""}`,
+      ]
         .filter(Boolean)
         .join("; ");
 
@@ -296,7 +308,7 @@ export default function AdminCloudbedsPage() {
           }
         />
         <div className="px-4 sm:px-5 py-3.5 text-[11px] text-ink/50 leading-relaxed">
-          Menghitung harga dari <strong>harga dasar tetap</strong> tiap tipe unit (bukan dari harga hasil hitungan sebelumnya, supaya tidak beranak-pinak), memakai okupansi + riset AI kompetitor sekitar + high season, dan selalu dijepit ke batas min/max Anda.
+          Menghitung harga dari <strong>harga dasar tetap</strong> tiap tipe unit (bukan dari harga hasil hitungan sebelumnya, supaya tidak beranak-pinak), memakai okupansi + riset AI kompetitor sekitar + high season, dan selalu dijepit ke batas min/max Anda. Sekali per minggu AI juga meriset tren minat pasar dan event/festival mendatang di Jogja (lewat pencarian Google publik, bukan Google Analytics) — event yang ditemukan otomatis masuk sebagai periode high season di <a href="/admin/pricing-competitor" className="underline">High Season &amp; Kompetitor</a> untuk Anda tinjau.
           <br />
           <strong>Hitung Saja</strong> hanya menyimpan usulan harga untuk Anda lihat di Kalender Harga — tidak ada harga yang berubah. <strong>Hitung + Kirim</strong> mengirim ke Cloudbeds (berlaku ke semua OTA) lalu membaca ulang untuk memastikan harga benar-benar tersimpan di tanggal yang tepat.
           <br />

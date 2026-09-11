@@ -32,6 +32,7 @@ interface HighSeasonPeriod {
   end_date: string;
   suggested_adjustment_pct: number;
   active: boolean;
+  created_by: string | null;
 }
 
 interface CompetitorRate {
@@ -180,7 +181,12 @@ export default function PricingCompetitorPage() {
                   {periods.map((p) => (
                     <div key={p.id} className="flex items-center justify-between gap-3 text-[12px] border-b border-ink/[0.05] pb-2 last:border-0">
                       <div>
-                        <div className="font-medium text-ink">{p.label}</div>
+                        <div className="font-medium text-ink flex items-center gap-1.5">
+                          {p.label}
+                          {p.created_by === "ai_jogja_events_research" && (
+                            <span className="text-[9px] font-semibold text-gold-500 border border-gold-500/25 rounded px-1.5 py-0.5">✨ AI</span>
+                          )}
+                        </div>
                         <div className="text-ink/40 text-[10.5px]">
                           {fmtDate(p.start_date)} – {fmtDate(p.end_date)} · target +{Math.round(p.suggested_adjustment_pct * 1000) / 10}%
                         </div>
