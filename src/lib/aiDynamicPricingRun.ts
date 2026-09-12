@@ -42,7 +42,22 @@ import {
  */
 
 const JAKARTA_TZ = "Asia/Jakarta";
-const WINDOW_DAYS = 14;
+/**
+ * How far ahead the engine decides and publishes prices.
+ *
+ * Owner instruction (2026-09-12): "ai harus mempelajari jauh kedepan
+ * jangan hanya 30 hari, karena banyak orang memesan untuk 1 bulan ke
+ * depan bahkan untuk tahun baru". A 14-day window meant New Year, Lebaran
+ * and every school holiday were simply never priced -- a guest booking
+ * six months out got whatever flat rate happened to be sitting in
+ * Cloudbeds, and the engine had no opinion about it at all.
+ *
+ * A full year covers every seasonal peak a guest can currently book.
+ * The cost is payload size, not call count: this is still ONE putRate and
+ * ONE read-back per room type, because Cloudbeds takes the whole set of
+ * intervals in a single request.
+ */
+const WINDOW_DAYS = 365;
 
 function fmtDateJakarta(d: Date): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: JAKARTA_TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
