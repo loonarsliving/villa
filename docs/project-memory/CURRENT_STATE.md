@@ -2,7 +2,7 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
-## 2026-09-12 — verifikasi: API Cloudbeds MEMANG bisa mengubah harga, tapi cron malamnya patut dicurigai tidak jalan
+## 2026-09-12 — verifikasi: API Cloudbeds bisa mengubah harga, DAN cron malamnya memang jalan otomatis
 
 Owner bertanya: pastikan dulu API ke Cloudbeds benar-benar bisa **menulis**
 harga, bukan cuma membaca.
@@ -29,25 +29,42 @@ ujung-ke-ujung. `getRate` (baca) juga terverifikasi: log
 `sync-cloudbeds-rates` 2026-09-12 18:21 UTC melaporkan
 `dates_synced: 364` untuk kedua tipe kamar.
 
-**TAPI — cron `/api/cron/ai-dynamic-pricing` tidak muncul sama sekali di
-log runtime 24 jam terakhir**, padahal rutenya memanggil
-`console.log("[ai-dynamic-pricing]", ...)` di setiap run, dan
-`sync-cloudbeds-rates` yang jadwalnya hanya 15 menit setelahnya **muncul**.
-Kecurigaan utamanya: **Vercel plan `hobby` hanya menjadwalkan 2 cron job
-per proyek, sedangkan `vercel.json` mendeklarasikan 7.** Tidak ada pg_cron
-yang menggantikan rute ini (dicek: hanya `villa-sync-cloudbeds-reservations`
-jobid 105 yang memanggil rute villa dari Postgres; harga tidak ada).
-Cocok juga dengan jamnya yang meleset ~1 jam dari `vercel.json`, ciri khas
-cron harian hobby.
+**CRON MALAMNYA JALAN — dan ini sempat saya simpulkan keliru.** Log
+runtime Vercel tidak memperlihatkan `/api/cron/ai-dynamic-pricing` sama
+sekali, yang sempat saya baca sebagai "cronnya tidak jalan". Itu salah:
+**retensi log Vercel hobby hanya ~1 jam**, bukan 24 jam seperti yang
+disiratkan parameter kuerinya. Ketahuan dari `sync-cloudbeds-reservations`
+yang jadwalnya `*/10` tapi hanya muncul **6 kali** — persis 60 menit. Cron
+harga jam 17:10 UTC memang di luar jendela itu.
 
-**Belum dipastikan**, karena retensi log hobby hanya ~1 hari sehingga tidak
-bisa melihat ke belakang lebih jauh, dan sandbox sesi ini diblokir keluar
-ke `api.cloudbeds.com` (proxy menjawab 403) sehingga tidak bisa memanggil
-Cloudbeds langsung. Yang perlu dilakukan: buka Vercel → proyek `villa` →
-Settings → Cron Jobs, dan lihat cron mana saja yang benar-benar terdaftar.
-Kalau benar hanya 2, mesin harganya hanya pernah jalan saat dipicu manual
-— yang konsisten dengan bukti terakhir: baris tanggal terjauh
-(2027-09-11) terakhir berubah 2026-09-12 17:21 UTC, bukan malam ini.
+Bukti bahwa ia benar-benar jalan ada di jejak `villa_rates.updated_at`
+(kolom ini hanya berubah kalau nilai harganya berubah):
+
+| Waktu sinkron (UTC) | Baris berubah |
+|---|---|
+| 2026-09-12 **17:21** | 2 |
+| 2026-09-12 04:21 | 534 |
+| 2026-09-11 **17:17** | 2 |
+| 2026-09-11 14:29 | 106 |
+
+Dua malam berturut-turut pada **17:17** dan **17:21** — persis jendela cron
+`10 17 * * *` (00:10 WIB). Dan tepat **2 baris** tiap malam: satu tanggal
+jauh-depan baru per tipe kamar, tanda tangan jendela 365 hari yang bergulir
+maju sehari tiap malam. Itu hanya mungkin kalau push harganya sungguh
+berjalan. Nilainya pun konsisten dengan aturan mesin harga: 2027-09-11
+(Sabtu) Standard 750.000 = tarif akhir pekan, 2027-09-09 (Kamis) 650.000 =
+tarif dasar.
+
+Jadi rantainya utuh dan otonom tiap malam: putuskan harga → `putRate` ke
+Cloudbeds → baca balik → cerminkan ke `villa_rates`. **Tidak ada yang perlu
+dipindahkan ke pg_cron**; menambahkannya justru akan membuat push ganda.
+
+Catatan untuk sesi berikutnya: jangan simpulkan sebuah cron mati dari
+ketiadaannya di log runtime Vercel pada plan hobby. Hitung dulu berapa
+entri yang muncul untuk job yang frekuensinya diketahui — itu memberi tahu
+lebar jendela retensi yang sebenarnya. Sandbox sesi ini juga diblokir
+keluar ke `api.cloudbeds.com` (proxy 403), jadi verifikasi harus lewat
+jejak di database, bukan panggilan langsung.
 
 ## 2026-09-12 — penalaran harga AI diperluas (branch `claude/duetto-villa-pricing-reasoning-1eygpo`, BELUM di `main`, autopush masih OFF)
 
