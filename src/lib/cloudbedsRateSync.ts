@@ -22,7 +22,7 @@ const JAKARTA_TZ = "Asia/Jakarta";
  * the same published price, so the mirror has to cover the real booking
  * horizon.
  */
-export const RATE_SYNC_WINDOW_DAYS = 90;
+export const RATE_SYNC_WINDOW_DAYS = 365;
 
 function fmtDateJakarta(d: Date): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: JAKARTA_TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);

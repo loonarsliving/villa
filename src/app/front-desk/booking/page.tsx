@@ -26,7 +26,32 @@ const toneClass: Record<string, string> = {
   checkin: "bg-sage-500/25 border-sage-500/50 text-sage-700",
   terjadwal: "bg-gold-500/20 border-gold-500/40 text-gold-700",
   checkout: "bg-ink/[0.06] border-ink/15 text-ink/40",
+  menunggu_pembayaran: "bg-ink/[0.04] border-dashed border-ink/25 text-ink/50",
 };
+
+/**
+ * How long an unpaid website booking may hold a slot on this calendar
+ * before it stops being shown (owner instruction 2026-09-12, prompted by
+ * a booking that had been sitting here unpaid for ten hours).
+ *
+ * It is only a display rule, and deliberately so: villa-api creates these
+ * rows with status 'menunggu_pembayaran', which sits OUTSIDE the
+ * bookings_no_overlap_active exclusion constraint -- verified against the
+ * deployed function, not inferred -- so an unpaid booking never locked
+ * the unit and never blocked another guest in the first place. What it
+ * did do was clutter the calendar indefinitely, because the filter below
+ * only ever dropped 'batal'. (villa-api's own comment claims these do not
+ * appear in the staff calendar; that claim was simply wrong.)
+ */
+const PENDING_PAYMENT_HOLD_MINUTES = 60;
+
+function isVisibleOnCalendar(b: Booking, now: number): boolean {
+  if (b.status === "batal") return false;
+  if (b.status !== "menunggu_pembayaran") return true;
+  const createdAt = Date.parse(b.created_at);
+  if (!Number.isFinite(createdAt)) return false;
+  return now - createdAt < PENDING_PAYMENT_HOLD_MINUTES * 60000;
+}
 
 /**
  * Booking calendar (Front Desk + Admin, read-only for now) -- unit rows,
@@ -58,7 +83,8 @@ export default function BookingCalendarPage() {
     ])
       .then(([u, b]) => {
         setUnits(u || []);
-        setBookings((b || []).filter((x) => x.status !== "batal"));
+        const now = Date.now();
+        setBookings((b || []).filter((x) => isVisibleOnCalendar(x, now)));
       })
       .finally(() => setLoading(false));
   }

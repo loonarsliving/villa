@@ -146,6 +146,15 @@ export interface MarketDemandEvent {
   start_date: string;
   end_date: string;
   expected_impact: "low" | "medium" | "high";
+  /**
+   * "recurring" = a certain, yearly seasonal peak (New Year, Lebaran,
+   * school holidays); "announced" = a scheduled event found published.
+   * The pricing engine prices the first ahead of time and makes the
+   * second earn its uplift from real pickup. Missing = "announced",
+   * the cautious side, so an older bridge deployment cannot silently
+   * turn every event into an advance price rise.
+   */
+  certainty?: "recurring" | "announced";
   source_note: string;
 }
 

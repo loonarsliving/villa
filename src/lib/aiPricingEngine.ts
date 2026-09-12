@@ -29,6 +29,16 @@ const MARKET_DEMAND_STALE_DAYS = 7;
 const WEEKEND_SURCHARGE = 100000;
 const MARKET_DEMAND_CREATED_BY = "ai_jogja_events_research";
 
+/**
+ * Certain, yearly seasonal peaks (New Year, Lebaran, school holidays)
+ * get their own created_by so decideRatesForRoomType can price them
+ * ahead of time, while ordinary AI-found events still have to earn
+ * their uplift from real pickup. Same table, same column, a second
+ * value -- no schema change.
+ */
+const MARKET_DEMAND_RECURRING_CREATED_BY = "ai_recurring_peak";
+const AI_PERIOD_CREATED_BY = [MARKET_DEMAND_CREATED_BY, MARKET_DEMAND_RECURRING_CREATED_BY];
+
 // AI never outputs a raw percentage for an event -- only a qualitative
 // impact rating -- so a bad/exaggerated model response can move price by
 // at most this much, deliberately, rather than trusting an arbitrary
@@ -57,6 +67,32 @@ const EVENT_IMPACT_ADJUSTMENT_PCT: Record<"low" | "medium" | "high", number> = {
  */
 const EVENT_DEMAND_FULL_PCT = 50;
 const EVENT_DEMAND_HALF_PCT = 25;
+
+/**
+ * ...with one deliberate exception, added 2026-09-12 alongside the
+ * year-long pricing horizon.
+ *
+ * "Earn it with pickup" is the right rule for a SPECULATIVE period -- an
+ * event the AI found by searching the web, which may or may not move
+ * accommodation demand at all. It is the wrong rule for a STRUCTURAL one:
+ * New Year, Lebaran and the long national holidays are certain, they
+ * recur every year, and the whole industry publishes higher rates for
+ * them months in advance. Waiting for pickup there means selling the
+ * peak at base rate to whoever books first.
+ *
+ * The two are distinguishable from created_by alone, with no schema
+ * change: an ordinary AI-found event is stamped
+ * 'ai_jogja_events_research', a certain yearly peak the research
+ * identified as recurring is stamped 'ai_recurring_peak', and anything
+ * else means a human entered the period deliberately. The last two apply
+ * in full straight away; only the first has to be earned. All three stay
+ * bounded by min_rate/max_rate and by the daily movement clamp.
+ */
+function appliesWithoutPickup(createdBy: string | null | undefined): boolean {
+  // Anything that is not an ordinary AI-found event: an owner-entered
+  // period (their own rate plan) or a certain recurring seasonal peak.
+  return (createdBy ?? "") !== MARKET_DEMAND_CREATED_BY;
+}
 
 /**
  * Same incident: "Standard" had exactly ONE villa comparable in
@@ -234,7 +270,7 @@ export async function refreshMarketDemandIfStale(supabase: SupabaseClient, allow
   const { data: recent } = await supabase
     .from("villa_high_season_periods")
     .select("id")
-    .eq("created_by", MARKET_DEMAND_CREATED_BY)
+    .in("created_by", AI_PERIOD_CREATED_BY)
     .gte("created_at", staleSince)
     .limit(1);
   if (recent && recent.length > 0) return { refreshed: false, skipped_reason: "existing data still fresh" };
@@ -251,7 +287,7 @@ export async function refreshMarketDemandIfStale(supabase: SupabaseClient, allow
     const { data: existing } = await supabase
       .from("villa_high_season_periods")
       .select("id")
-      .eq("created_by", MARKET_DEMAND_CREATED_BY)
+      .in("created_by", AI_PERIOD_CREATED_BY)
       .eq("label", ev.label)
       .eq("start_date", ev.start_date)
       .maybeSingle();
@@ -261,7 +297,7 @@ export async function refreshMarketDemandIfStale(supabase: SupabaseClient, allow
       end_date: ev.end_date,
       suggested_adjustment_pct: EVENT_IMPACT_ADJUSTMENT_PCT[ev.expected_impact],
       active: true,
-      created_by: MARKET_DEMAND_CREATED_BY,
+      created_by: ev.certainty === "recurring" ? MARKET_DEMAND_RECURRING_CREATED_BY : MARKET_DEMAND_CREATED_BY,
     };
     if (existing) {
       await supabase.from("villa_high_season_periods").update(row).eq("id", existing.id);
@@ -320,7 +356,7 @@ export async function decideRatesForRoomType(
   const toDate = targetDates[targetDates.length - 1] ?? today;
   const { data: highSeasonPeriods } = await supabase
     .from("villa_high_season_periods")
-    .select("start_date, end_date, suggested_adjustment_pct")
+    .select("start_date, end_date, suggested_adjustment_pct, created_by")
     .eq("active", true)
     .lte("start_date", toDate)
     .gte("end_date", today);
@@ -413,7 +449,14 @@ export async function decideRatesForRoomType(
       reasonCodes.push("high_season");
       const eventPct = Number(highSeasonPeriod.suggested_adjustment_pct) || 0;
       let earnedShare = 0;
-      if (coldStart) {
+      if (appliesWithoutPickup(highSeasonPeriod.created_by)) {
+        // An owner-entered period, or a certain yearly peak like New Year
+        // or Lebaran. Both are priced ahead of time on purpose and are
+        // not subject to the pickup test -- guests book these months out,
+        // so waiting for pickup means selling the peak at base rate.
+        earnedShare = 1;
+        reasonCodes.push(highSeasonPeriod.created_by === MARKET_DEMAND_RECURRING_CREATED_BY ? "recurring_peak" : "owner_high_season");
+      } else if (coldStart) {
         reasonCodes.push("event_uplift_held_cold_start");
       } else if (occupancyPct >= EVENT_DEMAND_FULL_PCT) {
         earnedShare = 1;
