@@ -28,6 +28,8 @@ const COMPETITOR_STALE_DAYS = 7;
 const MARKET_DEMAND_STALE_DAYS = 7;
 const WEEKEND_SURCHARGE = 100000;
 const MARKET_DEMAND_CREATED_BY = "ai_jogja_events_research";
+/** Declared here because AI_PERIOD_CREATED_BY below needs it; see SIGNAL 1. */
+const LOW_SEASON_CREATED_BY = "ai_low_season";
 
 /**
  * Certain, yearly seasonal peaks (New Year, Lebaran, school holidays)
@@ -37,7 +39,10 @@ const MARKET_DEMAND_CREATED_BY = "ai_jogja_events_research";
  * value -- no schema change.
  */
 const MARKET_DEMAND_RECURRING_CREATED_BY = "ai_recurring_peak";
-const AI_PERIOD_CREATED_BY = [MARKET_DEMAND_CREATED_BY, MARKET_DEMAND_RECURRING_CREATED_BY];
+const AI_PERIOD_CREATED_BY = [MARKET_DEMAND_CREATED_BY, MARKET_DEMAND_RECURRING_CREATED_BY, LOW_SEASON_CREATED_BY];
+
+/** A trough is as certain as a peak, so it carries the same weight class. */
+const LOW_SEASON_IMPACT_ADJUSTMENT_PCT: Record<"low" | "medium" | "high", number> = { low: -0.05, medium: -0.1, high: -0.2 };
 
 // AI never outputs a raw percentage for an event -- only a qualitative
 // impact rating -- so a bad/exaggerated model response can move price by
@@ -118,6 +123,84 @@ const COMPETITOR_MIN_SAMPLES = 3;
 const NEAR_ARRIVAL_DAYS = 7;
 const NEAR_ARRIVAL_MIN_OCC_PCT = 30;
 
+/**
+ * Owner instruction (2026-09-12): the engine should reason from more of
+ * the signals a real revenue manager watches -- search interest for
+ * villas in Jogja, competitor rates, event/holiday news, AND the quiet
+ * months like Ramadan -- not just occupancy, and it is allowed to set
+ * the price itself as long as min_rate holds the floor.
+ *
+ * Three signals were missing entirely before this change. Each one is
+ * added below with its own bound, so no single signal -- least of all a
+ * qualitative one a language model produced -- can move price far on its
+ * own.
+ */
+
+/**
+ * SIGNAL 1: low season (a period that moves demand DOWN).
+ *
+ * villa_high_season_periods stores a signed suggested_adjustment_pct and
+ * has no CHECK forcing it positive (verified against the live schema),
+ * so a trough is the same row shape with a negative percentage and its
+ * own created_by. No migration, no new table -- the same deliberate
+ * reuse the AI-found event rows already make of this table.
+ *
+ * The rule that governs it is the MIRROR of the event rule, not a copy:
+ *  - an UPLIFT has to be earned by pickup, because charging more for
+ *    demand that never shows up leaves the date empty;
+ *  - a DISCOUNT is applied straight away, because the whole point is to
+ *    attract demand that is not there yet -- waiting for pickup to
+ *    discount is waiting for something that by definition will not come.
+ * ...but it is withdrawn the moment the date proves it does not need it
+ * (LOW_SEASON_SUPPRESS_OCC_PCT): a Ramadan weekend that fills up anyway
+ * should not be sold at a discount.
+ *
+ * min_rate still bounds it, so "bulan puasa" can never price below the
+ * owner's floor.
+ */
+const LOW_SEASON_SUPPRESS_OCC_PCT = 50;
+
+/**
+ * SIGNAL 2: search/market interest (researchMarketDemand's demand_trend).
+ *
+ * This has been researched every run since 2026-09-11 and then THROWN
+ * AWAY -- refreshMarketDemandIfStale returned it, runAiDynamicPricing
+ * reported it in the run summary, and no code path ever let it touch a
+ * price. The owner asked specifically for "seberapa banyak orang mencari
+ * villa di jogja" to count, so it now does.
+ *
+ * Deliberately the smallest adjustment in this file. It is a qualitative
+ * naik/turun/stabil read from a web-search summary, covering the market
+ * as a whole with no date attached -- weaker evidence than this villa's
+ * own pickup on the actual date, so it gets a nudge, not a lever.
+ */
+const MARKET_TREND_ADJUSTMENT_PCT = 0.03;
+
+/**
+ * SIGNAL 3: lead time -- the one Duetto-style idea the engine lacked
+ * most.
+ *
+ * Occupancy alone is not a demand signal; occupancy AT A GIVEN LEAD TIME
+ * is. An empty date 200 days out is not a problem, it is a date nobody
+ * has had a reason to book yet -- discounting it gives away money for
+ * nothing and, worse, teaches the OTAs a low price for a date that had
+ * every chance of selling at full rate. The same emptiness three days
+ * out is a genuine distress signal: there is no time left for demand to
+ * arrive.
+ *
+ * Before this, low_occupancy_adjustment_pct applied identically at H-300
+ * and H-3. Now the discount ramps in as arrival approaches:
+ *   <= FULL days  -> full discount (last chance to fill it)
+ *   <= HALF days  -> half discount (softly stimulating)
+ *   beyond that   -> none at all (still far too early to panic)
+ *
+ * The high-occupancy INCREASE is deliberately NOT ramped: filling up
+ * early is the strongest demand signal there is, and the existing
+ * movement clamp and max_rate already bound how fast it can act.
+ */
+const DISCOUNT_LEAD_TIME_FULL_DAYS = 14;
+const DISCOUNT_LEAD_TIME_HALF_DAYS = 45;
+
 function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
@@ -168,6 +251,8 @@ export interface DatePriceDecision {
   reason_codes: string[];
   guardrail_status: "within_range" | "clamped_min" | "clamped_max" | "clamped_movement";
   occupancy_pct: number;
+  /** One plain-Indonesian sentence explaining this date's price, built from reason_codes. */
+  reason_text: string;
 }
 
 export interface CompetitorRefreshResult {
@@ -291,13 +376,19 @@ export async function refreshMarketDemandIfStale(supabase: SupabaseClient, allow
       .eq("label", ev.label)
       .eq("start_date", ev.start_date)
       .maybeSingle();
+
+    // A trough and a peak are the same row with opposite signs. `direction`
+    // missing means "naik" -- see the MarketDemandEvent doc comment: a
+    // bridge deployment older than this change only ever reported peaks,
+    // and must not have its peaks silently reinterpreted as discounts.
+    const isLowSeason = ev.direction === "turun";
     const row = {
       label: ev.label,
       start_date: ev.start_date,
       end_date: ev.end_date,
-      suggested_adjustment_pct: EVENT_IMPACT_ADJUSTMENT_PCT[ev.expected_impact],
+      suggested_adjustment_pct: isLowSeason ? LOW_SEASON_IMPACT_ADJUSTMENT_PCT[ev.expected_impact] : EVENT_IMPACT_ADJUSTMENT_PCT[ev.expected_impact],
       active: true,
-      created_by: ev.certainty === "recurring" ? MARKET_DEMAND_RECURRING_CREATED_BY : MARKET_DEMAND_CREATED_BY,
+      created_by: isLowSeason ? LOW_SEASON_CREATED_BY : ev.certainty === "recurring" ? MARKET_DEMAND_RECURRING_CREATED_BY : MARKET_DEMAND_CREATED_BY,
     };
     if (existing) {
       await supabase.from("villa_high_season_periods").update(row).eq("id", existing.id);
@@ -307,36 +398,361 @@ export async function refreshMarketDemandIfStale(supabase: SupabaseClient, allow
     upserted++;
   }
 
+  // The market-interest read is persisted, not just returned. Research runs
+  // at most once a week (MARKET_DEMAND_STALE_DAYS) while pricing is decided
+  // every night, so a signal that lived only in this function's return value
+  // could never reach decideRatesForRoomType -- which is exactly why
+  // demand_trend was researched from 2026-09-11 onward and never once
+  // affected a price. Stored alongside location_label in the settings row
+  // this module already reads, so no new table is needed.
+  const { data: settingRowNow } = await supabase.from("integration_settings").select("value").eq("key", "revenue_engine").maybeSingle();
+  const existingValue = (settingRowNow?.value ?? {}) as Record<string, unknown>;
+  await supabase
+    .from("integration_settings")
+    .update({
+      value: {
+        ...existingValue,
+        market_demand: { trend: result.demand_trend, note: result.trend_note.slice(0, 500), observed_at: new Date().toISOString() },
+      },
+    })
+    .eq("key", "revenue_engine");
+
   return { refreshed: true, demand_trend: result.demand_trend, trend_note: result.trend_note, events_upserted: upserted };
 }
 
 /**
- * Computes the decided rate for one room type across a set of target
- * dates, in the order a revenue manager would reason in:
- *   1. stable anchor (base_rate)
- *   2. weekend surcharge  -- a known, permanent pattern
- *   3. realised demand    -- occupancy actually picked up for that date
- *   4. event uplift       -- only the share demand has EARNED (step 3)
- *   5. competitor median  -- a sanity CAP, never a floor
- *   6. near-arrival guard -- an empty date close in is never priced up
- *   7. movement clamp     -- vs. what the date sells at TODAY
- *   8. min_rate/max_rate  -- the owner's hard guardrails, always last
+ * How stale a stored market-interest read may be before the engine stops
+ * believing it. Research refreshes weekly; if it has been failing for a
+ * month the right behaviour is to fall back to "no opinion" rather than
+ * keep nudging every price on a reading from a different season.
+ */
+const MARKET_TREND_MAX_AGE_DAYS = 30;
+
+/** Reads back what refreshMarketDemandIfStale stored, or null if too old/absent. */
+export async function loadMarketTrend(supabase: SupabaseClient): Promise<DemandTrend | null> {
+  const { data: settingRow } = await supabase.from("integration_settings").select("value").eq("key", "revenue_engine").maybeSingle();
+  const md = (settingRow?.value as { market_demand?: { trend?: string; observed_at?: string } } | undefined)?.market_demand;
+  if (!md?.trend || !md.observed_at) return null;
+  const ageDays = (Date.now() - Date.parse(md.observed_at)) / 86400000;
+  if (!Number.isFinite(ageDays) || ageDays > MARKET_TREND_MAX_AGE_DAYS) return null;
+  return md.trend === "naik" || md.trend === "turun" ? md.trend : "stabil";
+}
+
+export interface SeasonPeriod {
+  suggested_adjustment_pct: number;
+  created_by: string | null;
+}
+
+export interface DateDecisionInput {
+  targetDate: string;
+  anchorRate: number;
+  occupancyPct: number;
+  /** Nights between the run date and the stay date. 0 = tonight. */
+  daysToArrival: number;
+  coldStart: boolean;
+  /** The strongest period covering this date, or null. See pickPeriodForDate. */
+  period: SeasonPeriod | null;
+  competitorMedian: number | null;
+  /** What this date sells at right now (villa_rates), or null if unpriced. */
+  liveRate: number | null;
+  marketTrend: DemandTrend | null;
+  settings: PricingSettings;
+  minRate: number | null;
+  maxRate: number | null;
+}
+
+/**
+ * The whole price decision for ONE date, as a pure function.
  *
- * Steps 4-7 are the 2026-09-12 rewrite. Before it, an event put the
- * date into "high season", where the competitor average acted as a
- * FLOOR and bypassed the movement clamp entirely -- which pushed
- * 16/22/23 Sep from Rp650,000 to the Rp1,000,000 ceiling in a single
- * run, live on every OTA, on dates with zero bookings. The rule that
- * replaces it: an event is a reason to EXPECT demand, only pickup is a
- * reason to charge for it.
+ * Extracted from decideRatesForRoomType on 2026-09-12 so the reasoning
+ * can be tested directly (src/lib/aiPricingEngine.test.ts) instead of
+ * only against live Supabase data. Every regression this file documents
+ * -- the compounding anchor, the event that jumped 16/22/23 Sep to the
+ * ceiling, the thin competitor sample that cut a real Saturday -- was
+ * found in production, on real OTA-visible prices, because there was no
+ * way to ask "what would this rule do?" without running it for real.
  *
- * `anchorRate` MUST be a stable value the engine never writes to
- * (villa_room_types.base_rate) -- passing units.tarif_harian here, as
- * the first version did, made every run compound on the previous run's
- * output and ratchet the price toward max_rate on Fri/Sat regardless of
- * occupancy (see 20260911000001_pricing_base_rate_and_autopush.sql).
- * With a fixed anchor this function is idempotent: same inputs, same
- * price, however many times it runs in a day.
+ * The order below is the order a revenue manager reasons in, and the
+ * order matters: each step may only adjust the number the step before it
+ * produced.
+ *
+ *   1. anchor            -- base_rate, a value this engine never writes
+ *   2. weekend           -- a known, permanent pattern
+ *   3. pickup            -- demand actually realised for THIS date,
+ *                           weighted by how close arrival is (lead time)
+ *   4. season period     -- a peak must be EARNED by pickup; a trough is
+ *                           applied straight away but withdrawn if the
+ *                           date is selling anyway
+ *   5. market interest   -- a small nudge from search/booking interest
+ *   6. competitor median -- a sanity CAP, never a floor
+ *   7. near-arrival      -- an empty date close in is never priced UP
+ *   8. movement clamp    -- vs. what the date sells at TODAY
+ *   9. min_rate/max_rate -- the owner's hard guardrails, always last
+ *
+ * Steps 4-8 came from the 2026-09-12 incident: an event used to put the
+ * date into "high season", where the competitor average acted as a FLOOR
+ * and bypassed the movement clamp entirely, which pushed 16/22/23 Sep
+ * from Rp650,000 to the Rp1,000,000 ceiling in a single run, live on
+ * every OTA, on dates with zero bookings. The rule that replaced it: an
+ * event is a reason to EXPECT demand, only pickup is a reason to charge
+ * for it.
+ *
+ * Steps 3 (lead time), 4 (troughs) and 5 (market interest) are the
+ * 2026-09-12 reasoning expansion -- see SIGNAL 1/2/3 at the top of this
+ * file for why each exists and why each is bounded where it is.
+ *
+ * `anchorRate` MUST be villa_room_types.base_rate, a value this engine
+ * never writes to. Passing units.tarif_harian, as the first version did,
+ * made every run compound on the previous run's output and ratchet the
+ * price toward max_rate on Fri/Sat regardless of occupancy (see
+ * 20260911000001_pricing_base_rate_and_autopush.sql). With a fixed
+ * anchor this function is idempotent: same inputs, same price, however
+ * many times it runs in a day.
+ */
+export function decideRateForDate(input: DateDecisionInput): DatePriceDecision {
+  const { targetDate, anchorRate, occupancyPct, daysToArrival, coldStart, period, competitorMedian, liveRate, marketTrend, settings, minRate, maxRate } = input;
+
+  const reasonCodes: string[] = [];
+  let guardrailStatus: DatePriceDecision["guardrail_status"] = "within_range";
+
+  // --- 1. Start from the stable anchor, never from the last price ---
+  let decidedRate = anchorRate;
+
+  // --- 2. Day-of-week seasonality (a known, permanent pattern) ---
+  if (isWeekendJakarta(targetDate)) {
+    decidedRate += WEEKEND_SURCHARGE;
+    reasonCodes.push("weekend");
+  }
+
+  // The owner's own rate plan: base rate plus the weekend pattern, before
+  // any demand, event or market adjustment. The competitor cap below is
+  // not allowed to price UNDER this on research alone.
+  const structuralRate = decidedRate;
+
+  // --- 3. Realised demand for THIS date (pickup), weighted by lead time ---
+  let demandPct = 0;
+  if (occupancyPct >= settings.high_occupancy_threshold_pct) {
+    // Filling up is the strongest signal there is, at any lead time.
+    demandPct = settings.high_occupancy_adjustment_pct;
+    reasonCodes.push("high_occupancy");
+  } else if (occupancyPct <= settings.low_occupancy_threshold_pct) {
+    if (coldStart) {
+      reasonCodes.push("cold_start_hold");
+    } else {
+      // An empty date far out is not a distress signal -- see SIGNAL 3.
+      const leadShare = daysToArrival <= DISCOUNT_LEAD_TIME_FULL_DAYS ? 1 : daysToArrival <= DISCOUNT_LEAD_TIME_HALF_DAYS ? 0.5 : 0;
+      if (leadShare === 0) {
+        reasonCodes.push("low_occupancy_too_early_to_discount");
+      } else {
+        demandPct = settings.low_occupancy_adjustment_pct * leadShare;
+        reasonCodes.push(leadShare === 1 ? "low_occupancy" : "low_occupancy_partial_lead_time");
+      }
+    }
+  }
+  decidedRate = Math.round(decidedRate * (1 + demandPct));
+
+  // --- 4. Season period: a peak is earned, a trough is offered ---
+  const periodPct = period ? Number(period.suggested_adjustment_pct) || 0 : 0;
+  const isPeakPeriod = period !== null && periodPct > 0;
+  if (period && periodPct < 0) {
+    // A trough (Ramadan, the quiet weeks after the school holidays).
+    // Applied without waiting for pickup -- a discount exists precisely
+    // to attract demand that has not arrived -- but withdrawn if this
+    // date turns out not to need it.
+    reasonCodes.push("low_season");
+    if (occupancyPct >= LOW_SEASON_SUPPRESS_OCC_PCT) {
+      reasonCodes.push("low_season_discount_not_needed");
+    } else {
+      decidedRate = Math.round(decidedRate * (1 + periodPct));
+      reasonCodes.push("low_season_discount");
+    }
+  } else if (isPeakPeriod) {
+    reasonCodes.push("high_season");
+    let earnedShare = 0;
+    if (appliesWithoutPickup(period.created_by)) {
+      // An owner-entered period, or a certain yearly peak like New Year
+      // or Lebaran. Both are priced ahead of time on purpose and are not
+      // subject to the pickup test -- guests book these months out, so
+      // waiting for pickup means selling the peak at base rate.
+      earnedShare = 1;
+      reasonCodes.push(period.created_by === MARKET_DEMAND_RECURRING_CREATED_BY ? "recurring_peak" : "owner_high_season");
+    } else if (coldStart) {
+      reasonCodes.push("event_uplift_held_cold_start");
+    } else if (occupancyPct >= EVENT_DEMAND_FULL_PCT) {
+      earnedShare = 1;
+      reasonCodes.push("event_demand_confirmed");
+    } else if (occupancyPct >= EVENT_DEMAND_HALF_PCT) {
+      earnedShare = 0.5;
+      reasonCodes.push("event_demand_building");
+    } else {
+      reasonCodes.push("event_demand_unproven");
+    }
+    if (earnedShare > 0) decidedRate = Math.round(decidedRate * (1 + periodPct * earnedShare));
+  }
+
+  // --- 5. Market interest: the smallest lever in this file ---
+  //
+  // A qualitative naik/turun/stabil read of how much the market is
+  // searching for villas near us, with no date attached. Weaker evidence
+  // than this villa's own pickup on the actual date, so it nudges by
+  // MARKET_TREND_ADJUSTMENT_PCT and nothing more. Researched since
+  // 2026-09-11 and, until this change, never allowed to touch a price.
+  if (marketTrend === "naik") {
+    decidedRate = Math.round(decidedRate * (1 + MARKET_TREND_ADJUSTMENT_PCT));
+    reasonCodes.push("market_interest_up");
+  } else if (marketTrend === "turun") {
+    decidedRate = Math.round(decidedRate * (1 - MARKET_TREND_ADJUSTMENT_PCT));
+    reasonCodes.push("market_interest_down");
+  }
+
+  // --- 6. Competitor band: a sanity CAP, never a floor ---
+  //
+  // The cap restrains OUR optimism -- it trims an uplift we added on top
+  // of the rate plan. It is not allowed to undercut the rate plan itself:
+  // on 2026-09-11 a thin competitor sample cut a real Saturday price, and
+  // the median alone does not prevent that (the three Sawah View
+  // comparables median to Rp809,281, below our own Rp850,000 Saturday).
+  // Hence max() against structuralRate.
+  //
+  // And it does not apply on a certain peak at all. villa_competitor_
+  // rates holds an ORDINARY nightly price: the research prompt asks for
+  // "harga per malam publik" with no stay date, so the sample describes a
+  // normal night, not New Year. Capping a New Year price with it compares
+  // two different things -- and did: Sawah View's whole Christmas/New
+  // Year period came out at Rp809,281, with Fri/Sat getting no uplift
+  // whatsoever because the cap landed exactly on the ordinary weekend
+  // price. Everybody raises rates over New Year, so an off-peak
+  // observation is not evidence about that date.
+  //
+  // A TROUGH is the opposite case and keeps the cap: pricing below the
+  // neighbours during Ramadan is the entire intent, and the cap only ever
+  // pushes down.
+  const competitorCapApplies = competitorMedian !== null && !(isPeakPeriod && appliesWithoutPickup(period.created_by));
+  if (competitorCapApplies && competitorMedian !== null) {
+    const cap = Math.max(Math.round(competitorMedian), structuralRate);
+    if (decidedRate > cap) {
+      decidedRate = cap;
+      reasonCodes.push("competitor_market_cap");
+    }
+  }
+
+  // --- 7. Close to arrival and still empty: never price up ---
+  if (liveRate !== null && daysToArrival <= NEAR_ARRIVAL_DAYS && occupancyPct < NEAR_ARRIVAL_MIN_OCC_PCT && decidedRate > liveRate) {
+    decidedRate = liveRate;
+    reasonCodes.push("near_arrival_no_increase");
+  }
+
+  // --- 8. Movement clamp against what the date sells at TODAY ---
+  //
+  // The clamp exists so price never LURCHES -- "jangan dinaikkan
+  // drastis". It deliberately does not apply to a move that lands between
+  // today's live price and the anchor, because that is a correction back
+  // toward the owner's own base rate, not a swing away from it. Without
+  // this exception the clamp would actively slow down undoing a bad
+  // price: recovering 16 Sep from the Rp1,000,000 ceiling to Rp650,000
+  // would have taken three days of -15% steps, with the wrong price live
+  // on every OTA the whole time.
+  const anchorSide = Math.min(anchorRate, liveRate ?? anchorRate);
+  const liveSide = Math.max(anchorRate, liveRate ?? anchorRate);
+  const isCorrectionTowardAnchor = liveRate !== null && decidedRate >= anchorSide && decidedRate <= liveSide;
+
+  if (liveRate !== null && liveRate > 0 && !isCorrectionTowardAnchor) {
+    const maxUp = Math.round(liveRate * (1 + settings.max_daily_movement_pct));
+    const maxDown = Math.round(liveRate * (1 - settings.max_daily_movement_pct));
+    if (decidedRate > maxUp) {
+      decidedRate = maxUp;
+      guardrailStatus = "clamped_movement";
+    } else if (decidedRate < maxDown) {
+      decidedRate = maxDown;
+      guardrailStatus = "clamped_movement";
+    }
+  }
+
+  // --- 9. Owner's hard guardrails always win, last ---
+  //
+  // This is the line the owner pointed at when allowing the AI to set
+  // prices itself ("saya memang membuat batas bawah harga normal"):
+  // whatever the model researched and whatever the rules above concluded,
+  // no guest ever sees a price below min_rate or above max_rate.
+  if (minRate !== null && decidedRate < minRate) {
+    decidedRate = minRate;
+    guardrailStatus = "clamped_min";
+  }
+  if (maxRate !== null && decidedRate > maxRate) {
+    decidedRate = maxRate;
+    guardrailStatus = "clamped_max";
+  }
+
+  return {
+    date: targetDate,
+    anchor_rate: anchorRate,
+    decided_rate: decidedRate,
+    reason_codes: reasonCodes,
+    guardrail_status: guardrailStatus,
+    occupancy_pct: occupancyPct,
+    reason_text: narrateDecision(reasonCodes, guardrailStatus, occupancyPct, daysToArrival),
+  };
+}
+
+/**
+ * One plain-Indonesian sentence per date explaining WHY that price.
+ *
+ * reason_codes are precise but unreadable to the person who actually
+ * carries the consequence of a wrong price. This is written from the
+ * codes the rules above already emitted -- never by a language model, so
+ * the explanation can never drift from the arithmetic it describes.
+ */
+function narrateDecision(codes: string[], guardrail: DatePriceDecision["guardrail_status"], occupancyPct: number, daysToArrival: number): string {
+  const has = (c: string) => codes.includes(c);
+  const parts: string[] = [];
+
+  parts.push(has("weekend") ? "Harga dasar akhir pekan" : "Harga dasar");
+
+  if (has("high_occupancy")) parts.push(`dinaikkan karena tanggal ini sudah terisi ${occupancyPct}%`);
+  else if (has("cold_start_hold")) parts.push("diskon okupansi ditahan dulu karena riwayat pemesanan belum cukup");
+  else if (has("low_occupancy_too_early_to_discount")) parts.push(`belum diturunkan walau masih kosong — masih ${daysToArrival} hari lagi, terlalu dini`);
+  else if (has("low_occupancy_partial_lead_time")) parts.push(`didiskon separuh karena masih kosong dan tinggal ${daysToArrival} hari lagi`);
+  else if (has("low_occupancy")) parts.push(`didiskon penuh karena masih kosong dan tinggal ${daysToArrival} hari lagi`);
+
+  if (has("low_season_discount")) parts.push("diturunkan lagi karena masuk periode sepi");
+  else if (has("low_season_discount_not_needed")) parts.push("masuk periode sepi tapi tanggal ini sudah laku, jadi tidak didiskon");
+  else if (has("recurring_peak")) parts.push("dinaikkan penuh karena puncak musiman tahunan yang sudah pasti");
+  else if (has("owner_high_season")) parts.push("dinaikkan penuh karena periode high season yang diatur pemilik");
+  else if (has("event_demand_confirmed")) parts.push("dinaikkan penuh karena ada event dan permintaannya sudah terbukti");
+  else if (has("event_demand_building")) parts.push("dinaikkan separuh karena ada event dan permintaannya mulai terlihat");
+  else if (has("event_demand_unproven")) parts.push("ada event, tapi belum dinaikkan karena belum ada yang memesan");
+  else if (has("event_uplift_held_cold_start")) parts.push("ada event, tapi kenaikan ditahan karena data pemesanan belum cukup");
+
+  if (has("market_interest_up")) parts.push("sedikit dinaikkan karena minat pencarian villa sedang naik");
+  else if (has("market_interest_down")) parts.push("sedikit diturunkan karena minat pencarian villa sedang turun");
+
+  if (has("competitor_market_cap")) parts.push("lalu dibatasi agar tidak melewati harga tengah villa sekitar");
+  if (has("near_arrival_no_increase")) parts.push("dan tidak dinaikkan karena sudah dekat tanggal menginap tapi masih kosong");
+
+  if (guardrail === "clamped_movement") parts.push("terakhir direm agar tidak berubah drastis dari harga hari ini");
+  else if (guardrail === "clamped_min") parts.push("terakhir dinaikkan ke batas bawah harga yang pemilik tetapkan");
+  else if (guardrail === "clamped_max") parts.push("terakhir diturunkan ke batas atas harga yang pemilik tetapkan");
+
+  return `${parts.join(", ")}.`;
+}
+
+/**
+ * Which period governs a date when several overlap.
+ *
+ * The strongest adjustment wins, so a peak always beats a trough that
+ * overlaps it -- Idul Fitri sits days after Ramadan ends and the two
+ * ranges can touch, and a date that is both must be priced as the peak,
+ * never as the trough.
+ */
+function pickPeriodForDate(periods: SeasonPeriod[]): SeasonPeriod | null {
+  if (periods.length === 0) return null;
+  return periods.reduce((best, p) => (Number(p.suggested_adjustment_pct) > Number(best.suggested_adjustment_pct) ? p : best));
+}
+
+/**
+ * Loads everything decideRateForDate needs from Supabase and runs it
+ * across a set of dates for one room type. All the reasoning lives in
+ * decideRateForDate above; this function only gathers inputs.
  */
 export async function decideRatesForRoomType(
   supabase: SupabaseClient,
@@ -354,7 +770,7 @@ export async function decideRatesForRoomType(
 
   const today = targetDates[0] ?? new Date().toISOString().slice(0, 10);
   const toDate = targetDates[targetDates.length - 1] ?? today;
-  const { data: highSeasonPeriods } = await supabase
+  const { data: seasonPeriods } = await supabase
     .from("villa_high_season_periods")
     .select("start_date, end_date, suggested_adjustment_pct, created_by")
     .eq("active", true)
@@ -367,8 +783,8 @@ export async function decideRatesForRoomType(
   // Rp675,537, which then cut a real Saturday price the same day this
   // ran. Only "villa" competitors count toward the price band now.
   //
-  // Owner correction (2026-09-12): and only when there are enough of
-  // them to be a market rather than an anecdote, using the median so one
+  // Owner correction (2026-09-12): and only when there are enough of them
+  // to be a market rather than an anecdote, using the median so one
   // luxury villa can't set our price. See COMPETITOR_MIN_SAMPLES.
   const competitorSince = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
   const { data: competitorRates } = await supabase
@@ -382,10 +798,9 @@ export async function decideRatesForRoomType(
 
   // The price each date is actually selling at right now. Every guardrail
   // that talks about "how far price may move" is measured against THIS,
-  // not against the anchor -- the 16/22/23 Sep incident moved price
-  // +54% in one run precisely because the event and competitor branches
-  // wrote an absolute number that never passed through the movement
-  // clamp at all.
+  // not against the anchor -- the 16/22/23 Sep incident moved price +54%
+  // in one run precisely because the event and competitor branches wrote
+  // an absolute number that never passed through the movement clamp.
   const { data: liveRates } = await supabase
     .from("villa_rates")
     .select("date, rate")
@@ -394,14 +809,12 @@ export async function decideRatesForRoomType(
     .lte("date", toDate);
   const liveRateByDate = new Map((liveRates ?? []).map((r) => [String(r.date), Number(r.rate)]));
 
-  function highSeasonPeriodFor(dateStr: string) {
-    return (highSeasonPeriods ?? []).find((p) => p.start_date <= dateStr && p.end_date >= dateStr) ?? null;
-  }
-
+  const marketTrend = await loadMarketTrend(supabase);
   const coldStart = (allBookings ?? []).length < COLD_START_MIN_BOOKINGS;
+  const minRate = roomType.min_rate !== null ? Number(roomType.min_rate) : null;
+  const maxRate = roomType.max_rate !== null ? Number(roomType.max_rate) : null;
 
-  const results: DatePriceDecision[] = [];
-  for (const targetDate of targetDates) {
+  return targetDates.map((targetDate) => {
     const activeForDate = (allBookings ?? []).filter(
       (b) =>
         unitIds.has(b.unit_id) &&
@@ -410,142 +823,21 @@ export async function decideRatesForRoomType(
         (!b.tgl_checkout || b.tgl_checkout > targetDate),
     );
     const occupancyPct = unitIds.size > 0 ? Math.round((activeForDate.length / unitIds.size) * 1000) / 10 : 0;
+    const covering = (seasonPeriods ?? []).filter((p) => p.start_date <= targetDate && p.end_date >= targetDate);
 
-    const reasonCodes: string[] = [];
-    let guardrailStatus: DatePriceDecision["guardrail_status"] = "within_range";
-
-    // --- 1. Start from the stable anchor, never from the last price ---
-    let decidedRate = anchorRate;
-
-    // --- 2. Day-of-week seasonality (a known, permanent pattern) ---
-    if (isWeekendJakarta(targetDate)) {
-      decidedRate += WEEKEND_SURCHARGE;
-      reasonCodes.push("weekend");
-    }
-
-    // The owner's own rate plan: base rate plus the weekend pattern,
-    // before any demand or event adjustment. Nothing below is allowed to
-    // price UNDER this on the strength of competitor research alone.
-    const structuralRate = decidedRate;
-
-    // --- 3. Realised demand for THIS date (pickup) ---
-    let demandPct = 0;
-    if (occupancyPct >= settings.high_occupancy_threshold_pct) {
-      demandPct = settings.high_occupancy_adjustment_pct;
-      reasonCodes.push("high_occupancy");
-    } else if (occupancyPct <= settings.low_occupancy_threshold_pct) {
-      if (coldStart) {
-        reasonCodes.push("cold_start_hold");
-      } else {
-        demandPct = settings.low_occupancy_adjustment_pct;
-        reasonCodes.push("low_occupancy");
-      }
-    }
-    decidedRate = Math.round(decidedRate * (1 + demandPct));
-
-    // --- 4. Event uplift, but only as far as demand has earned it ---
-    const highSeasonPeriod = highSeasonPeriodFor(targetDate);
-    if (highSeasonPeriod) {
-      reasonCodes.push("high_season");
-      const eventPct = Number(highSeasonPeriod.suggested_adjustment_pct) || 0;
-      let earnedShare = 0;
-      if (appliesWithoutPickup(highSeasonPeriod.created_by)) {
-        // An owner-entered period, or a certain yearly peak like New Year
-        // or Lebaran. Both are priced ahead of time on purpose and are
-        // not subject to the pickup test -- guests book these months out,
-        // so waiting for pickup means selling the peak at base rate.
-        earnedShare = 1;
-        reasonCodes.push(highSeasonPeriod.created_by === MARKET_DEMAND_RECURRING_CREATED_BY ? "recurring_peak" : "owner_high_season");
-      } else if (coldStart) {
-        reasonCodes.push("event_uplift_held_cold_start");
-      } else if (occupancyPct >= EVENT_DEMAND_FULL_PCT) {
-        earnedShare = 1;
-        reasonCodes.push("event_demand_confirmed");
-      } else if (occupancyPct >= EVENT_DEMAND_HALF_PCT) {
-        earnedShare = 0.5;
-        reasonCodes.push("event_demand_building");
-      } else {
-        reasonCodes.push("event_demand_unproven");
-      }
-      if (earnedShare > 0) decidedRate = Math.round(decidedRate * (1 + eventPct * earnedShare));
-    }
-
-    // --- 5. Competitor band: a sanity CAP, never a floor ---
-    //
-    // The cap restrains OUR optimism -- it trims an uplift we added on
-    // top of the rate plan. It is not allowed to undercut the rate plan
-    // itself: on 2026-09-11 a thin competitor sample cut a real Saturday
-    // price, and the median alone does not prevent that (the three Sawah
-    // View comparables median to Rp809,281, below our own Rp850,000
-    // Saturday). Hence max() against structuralRate.
-    //
-    // And it does not apply on a certain peak at all. villa_competitor_
-    // rates holds an ORDINARY nightly price: the research prompt asks for
-    // "harga per malam publik" with no stay date, so the sample describes
-    // a normal night, not New Year. Capping a New Year price with it
-    // compares two different things -- and did: Sawah View's whole
-    // Christmas/New Year period came out at Rp809,281, with Fri/Sat
-    // getting no uplift whatsoever because the cap landed exactly on the
-    // ordinary weekend price. Everybody raises rates over New Year, so an
-    // off-peak observation is not evidence about that date. min_rate,
-    // max_rate and the movement clamp still bound these dates; the cap
-    // resumes on every ordinary night, which is what it is for.
-    const competitorCapApplies = competitorMedian !== null && !(highSeasonPeriod && appliesWithoutPickup(highSeasonPeriod.created_by));
-    if (competitorCapApplies && competitorMedian !== null) {
-      const cap = Math.max(Math.round(competitorMedian), structuralRate);
-      if (decidedRate > cap) {
-        decidedRate = cap;
-        reasonCodes.push("competitor_market_cap");
-      }
-    }
-
-    // --- 6. Close to arrival and still empty: never price up ---
-    const liveRate = liveRateByDate.get(targetDate) ?? null;
-    const daysToArrival = daysBetween(today, targetDate);
-    if (liveRate !== null && daysToArrival <= NEAR_ARRIVAL_DAYS && occupancyPct < NEAR_ARRIVAL_MIN_OCC_PCT && decidedRate > liveRate) {
-      decidedRate = liveRate;
-      reasonCodes.push("near_arrival_no_increase");
-    }
-
-    // --- 7. Movement clamp against what the date sells at TODAY ---
-    //
-    // The clamp exists so price never LURCHES -- "jangan dinaikkan
-    // drastis". It deliberately does not apply to a move that lands
-    // between today's live price and the anchor, because that is a
-    // correction back toward the owner's own base rate, not a swing away
-    // from it. Without this exception the clamp would actively slow down
-    // undoing a bad price: recovering 16 Sep from the Rp1,000,000
-    // ceiling to Rp650,000 would have taken three days of -15% steps,
-    // with the wrong price live on every OTA the whole time.
-    const anchorSide = Math.min(anchorRate, liveRate ?? anchorRate);
-    const liveSide = Math.max(anchorRate, liveRate ?? anchorRate);
-    const isCorrectionTowardAnchor = liveRate !== null && decidedRate >= anchorSide && decidedRate <= liveSide;
-
-    if (liveRate !== null && liveRate > 0 && !isCorrectionTowardAnchor) {
-      const maxUp = Math.round(liveRate * (1 + settings.max_daily_movement_pct));
-      const maxDown = Math.round(liveRate * (1 - settings.max_daily_movement_pct));
-      if (decidedRate > maxUp) {
-        decidedRate = maxUp;
-        guardrailStatus = "clamped_movement";
-      } else if (decidedRate < maxDown) {
-        decidedRate = maxDown;
-        guardrailStatus = "clamped_movement";
-      }
-    }
-
-    // --- 8. Owner's hard guardrails always win, last ---
-    const minRate = roomType.min_rate !== null ? Number(roomType.min_rate) : null;
-    const maxRate = roomType.max_rate !== null ? Number(roomType.max_rate) : null;
-    if (minRate !== null && decidedRate < minRate) {
-      decidedRate = minRate;
-      guardrailStatus = "clamped_min";
-    }
-    if (maxRate !== null && decidedRate > maxRate) {
-      decidedRate = maxRate;
-      guardrailStatus = "clamped_max";
-    }
-
-    results.push({ date: targetDate, anchor_rate: anchorRate, decided_rate: decidedRate, reason_codes: reasonCodes, guardrail_status: guardrailStatus, occupancy_pct: occupancyPct });
-  }
-  return results;
+    return decideRateForDate({
+      targetDate,
+      anchorRate,
+      occupancyPct,
+      daysToArrival: daysBetween(today, targetDate),
+      coldStart,
+      period: pickPeriodForDate(covering as SeasonPeriod[]),
+      competitorMedian,
+      liveRate: liveRateByDate.get(targetDate) ?? null,
+      marketTrend,
+      settings,
+      minRate,
+      maxRate,
+    });
+  });
 }

@@ -155,6 +155,20 @@ export interface MarketDemandEvent {
    * turn every event into an advance price rise.
    */
   certainty?: "recurring" | "announced";
+  /**
+   * Which way this period moves demand. Added 2026-09-12 at the owner's
+   * instruction to also "lihat bulan2 sepi seperti bulan puasa": until
+   * now the research could only ever report reasons to charge MORE, so
+   * Ramadan -- the deepest annual trough for a Jogja leisure villa --
+   * was invisible to the engine and priced exactly like an ordinary
+   * month.
+   *
+   * Missing = "naik", the backward-compatible reading: every period an
+   * older bridge deployment returns was a high-demand one, so a bridge
+   * that has not been redeployed yet cannot accidentally start
+   * DISCOUNTING dates it used to mark as peaks.
+   */
+  direction?: "naik" | "turun";
   source_note: string;
 }
 

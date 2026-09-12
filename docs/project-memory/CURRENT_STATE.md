@@ -2,6 +2,52 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-12 — penalaran harga AI diperluas (branch `claude/duetto-villa-pricing-reasoning-1eygpo`, BELUM di `main`, autopush masih OFF)
+
+Owner sedang mempelajari Duetto dan meminta AI penentu harga menimbang
+lebih banyak indikator, bukan hanya okupansi: minat pencarian villa di
+Jogja, riset kompetitor, berita event/tanggal merah/libur sekolah, dan
+**bulan-bulan sepi seperti bulan puasa**. Owner juga menegaskan AI boleh
+menetapkan harga sendiri karena batas bawahnya sudah dia pasang
+(`villa_room_types.min_rate`).
+
+Yang berubah (detail lengkap di CHANGELOG.md):
+- **Musim sepi bisa menurunkan harga.** Baris `villa_high_season_periods`
+  dengan persen negatif dan `created_by='ai_low_season'`. Diskon langsung
+  berlaku (tidak menunggu pickup), tapi ditarik kalau tanggalnya ternyata
+  laku ≥50%. `min_rate` tetap lantai keras.
+- **`demand_trend` akhirnya dipakai.** Sejak 2026-09-11 sinyal ini diriset
+  mingguan lalu dibuang; sekarang disimpan ke
+  `integration_settings.revenue_engine.market_demand` dan menggeser harga
+  maksimal ±3% saja, kedaluwarsa 30 hari.
+- **Lead time diperhitungkan.** Diskon okupansi rendah menanjak seiring
+  dekatnya tanggal (≤14 hari penuh, ≤45 hari separuh, di atas itu tidak
+  ada). Kenaikan okupansi tinggi tidak diperlakukan begitu.
+- **`decideRateForDate` jadi fungsi murni + 29 tes** (`npm test`,
+  42 tes hijau seluruh repo). Ini gerbang otomatis pertama yang dimiliki
+  logika harga.
+
+**Belum menyentuh harga tamu sama sekali**: tidak ada migrasi, tidak ada
+perubahan skema, dan `villa_pricing_settings.ai_autopush_enabled` masih
+`false`. Menunggu persetujuan owner sebelum di-merge (aturan MERGE
+AUTHORITY di CLAUDE.md: apa pun yang menyentuh harga tamu perlu owner
+bilang ya dulu).
+
+**Sisi riset (repo Mkhsistem, branch sama)**: `researchVillaMarketDemand`
+kini melaporkan periode `direction: "turun"` selain "naik", plus kalender
+tanggal merah nasional termasuk "harpitnas". Perlu **deploy Mkhsistem**
+sebelum periode sepi benar-benar muncul di villa — sampai itu terjadi,
+villa hanya menerima periode ramai seperti sebelumnya (pembacaan default
+yang aman, bukan kegagalan).
+
+**Catatan terkait**: "AI competitor research fails with AI bridge failed:
+200" yang tercatat di bagian "Pricing architecture" di bawah **sudah
+tidak berlaku**. Penyebabnya rute bridge belum terdaftar di
+`PUBLIC_PATHS` middleware Mkhsistem sehingga POST-nya mendarat di halaman
+/login (200 HTML); sudah diperbaiki dan ada di branch produksi Mkhsistem.
+Terverifikasi hari ini: baris `ai_recurring_peak` dibuat cron 2026-09-12
+04:23 UTC, dan `villa_competitor_rates` terisi 2026-09-11.
+
 ## 2026-09-12 — modul database tamu + promo LIVE, tapi pengiriman promo masih MODE PANTAU
 villa-api **v61**. Tiga repo ikut: villa (skema, API, halaman admin), loonars
 (kolom kode promo), Mkhsistem (routing balasan `PROMO`/`TOLAK`/`BERHENTI`).
