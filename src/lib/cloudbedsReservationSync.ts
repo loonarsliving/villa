@@ -41,11 +41,17 @@ interface CloudbedsGuestDetail {
   guestLastName?: string | null;
   guestPhone?: string | null;
   guestCellPhone?: string | null;
+  /** Verified against cloudbeds/openapi-specs `pms-v1.2` -- guestList entries carry the guest's email, we simply never read it. */
+  guestEmail?: string | null;
 }
 interface CloudbedsReservation {
   reservationID: string;
   status: string;
   guestName?: string;
+  /** "Main Guest Email" at reservation level, per the pms-v1.2 spec. */
+  guestEmail?: string | null;
+  /** "Flag indicating the main guest data was removed upon request" -- a deletion request we must not undo. */
+  isAnonymized?: boolean | null;
   startDate: string;
   endDate: string;
   rooms?: CloudbedsRoomAssignment[];
@@ -207,15 +213,44 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
         : (resv.guestName ?? "Tamu Cloudbeds");
     const guestHp = guestDetail?.guestPhone ?? guestDetail?.guestCellPhone ?? null;
 
+    // Email tamu OTA. Sebelum ini dibuang begitu saja: 6 dari 6 reservasi
+    // Cloudbeds punya baris guests tanpa email sama sekali, padahal
+    // getReservations sudah dipanggil dengan includeGuestsDetails=true dan
+    // spec pms-v1.2 menyatakan guestList membawa guestEmail. Tanpa ini,
+    // database tamu tidak akan pernah punya alamat tamu dari OTA.
+    //
+    // isAnonymized dihormati: itu penanda Cloudbeds bahwa data tamu dihapus
+    // atas permintaan tamu sendiri. Menyalinnya ke database kita sama dengan
+    // membatalkan permintaan penghapusan itu.
+    const anonymized = resv.isAnonymized === true;
+    const rawEmail = anonymized ? null : (guestDetail?.guestEmail ?? resv.guestEmail ?? null);
+    const guestEmail = typeof rawEmail === "string" && rawEmail.includes("@") ? rawEmail.trim() : null;
+
     try {
       let guestId: string | null = null;
       if (guestHp) {
         const { data: existingGuest } = await supabase.from("guests").select("id").eq("hp", guestHp).limit(1).maybeSingle();
         guestId = existingGuest?.id ?? null;
       }
+      // Dicocokkan lewat email kalau nomornya tidak ada, supaya tamu OTA yang
+      // hanya meninggalkan email tidak menumpuk jadi baris baru tiap sync.
+      if (!guestId && guestEmail) {
+        const { data: byEmail } = await supabase.from("guests").select("id").eq("email", guestEmail).limit(1).maybeSingle();
+        guestId = byEmail?.id ?? null;
+      }
       if (!guestId) {
-        const { data: g } = await supabase.from("guests").insert({ nama: guestNama, hp: guestHp }).select("id").single();
+        const { data: g } = await supabase.from("guests").insert({ nama: guestNama, hp: guestHp, email: guestEmail }).select("id").single();
         guestId = g?.id ?? null;
+      } else {
+        // Isi yang kosong saja. Tamu yang datang lagi lewat OTA lain bisa
+        // membawa email sekarang dan nomor lain kali; yang sudah terisi tidak
+        // ditimpa, karena data yang diketik staf atau tamu sendiri lebih
+        // dipercaya daripada apa yang diteruskan OTA.
+        const { data: cur } = await supabase.from("guests").select("hp,email").eq("id", guestId).maybeSingle();
+        const patch: Record<string, string> = {};
+        if (guestHp && !String(cur?.hp ?? "").trim()) patch.hp = guestHp;
+        if (guestEmail && !String(cur?.email ?? "").trim()) patch.email = guestEmail;
+        if (Object.keys(patch).length) await supabase.from("guests").update(patch).eq("id", guestId);
       }
 
       const { error } = await supabase.from("bookings").upsert(
