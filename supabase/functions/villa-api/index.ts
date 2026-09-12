@@ -487,6 +487,65 @@ async function computeStayTarif(unit, tgl_checkin, nights){
   return computedTarif;
 }
 
+/**
+ * Harga sebuah promo untuk satu masa menginap, atau alasan kenapa promo itu
+ * tidak berlaku.
+ *
+ * Prinsip yang menentukan bentuk fungsi ini (instruksi owner 2026-09-12:
+ * "kt kan punya harga batas bawah ... ai akn akan memakai harga paling bawah
+ * kita, nah bisa pakai seolah2 sedang ada promo untuk mngaktifkan harga bawah
+ * itu"): promo TIDAK menciptakan wewenang harga baru. Ia hanya memanggil
+ * batas bawah yang sudah ditetapkan di villa_room_types.min_rate.
+ *
+ * Karena itu harga promo SELALU dijepit tidak boleh di bawah min_rate --
+ * termasuk untuk mode 'harga_tetap'. Admin yang salah mengetik satu nol
+ * akan mendapat harga di lantai, bukan villa yang terjual seharga sepatu.
+ * Lantai harga itu juga yang menjaga mesin harga AI selama ini; promo tidak
+ * boleh jadi pintu belakang yang melewatinya.
+ *
+ * Promo juga tidak pernah MENAIKKAN harga: kalau harga normal ternyata sudah
+ * lebih murah (low season yang sudah ditekan mesin harga), tamu membayar
+ * harga normal dan promonya tidak dipakai.
+ */
+async function hitungHargaPromo(promo, roomTypeId, tgl_checkin, tgl_checkout, nights, hargaNormal){
+  const today = new Date().toISOString().slice(0,10);
+
+  if(!promo) return {ok:false, alasan:'Kode promo tidak ditemukan'};
+  if(promo.aktif !== true) return {ok:false, alasan:'Promo sudah tidak aktif'};
+  if(promo.pesan_dari && today < promo.pesan_dari) return {ok:false, alasan:'Promo belum dimulai'};
+  if(promo.pesan_sampai && today > promo.pesan_sampai) return {ok:false, alasan:'Promo sudah berakhir'};
+  if(promo.menginap_dari && tgl_checkin < promo.menginap_dari) return {ok:false, alasan:`Promo hanya untuk menginap mulai ${promo.menginap_dari}`};
+  if(promo.menginap_sampai && tgl_checkout > promo.menginap_sampai) return {ok:false, alasan:`Promo hanya untuk menginap sampai ${promo.menginap_sampai}`};
+  if(nights < Number(promo.min_malam ?? 1)) return {ok:false, alasan:`Promo ini minimal ${promo.min_malam} malam`};
+  if(promo.kuota != null && Number(promo.terpakai ?? 0) >= Number(promo.kuota)) return {ok:false, alasan:'Kuota promo sudah habis'};
+  if(promo.room_type_id && roomTypeId && String(promo.room_type_id) !== String(roomTypeId)){
+    return {ok:false, alasan:'Promo tidak berlaku untuk tipe unit ini'};
+  }
+  if(!roomTypeId) return {ok:false, alasan:'Unit ini belum punya tipe kamar, promo tidak bisa dihitung'};
+
+  const {data:rt} = await supabase.from('villa_room_types').select('min_rate,name').eq('id', roomTypeId).maybeSingle();
+  const minRate = Number(rt?.min_rate ?? 0);
+  if(!(minRate > 0)) return {ok:false, alasan:'Batas bawah harga tipe kamar belum diatur'};
+
+  const diminta = promo.mode_harga === 'harga_tetap' ? Number(promo.harga_per_malam ?? 0) : minRate;
+  const perMalam = Math.max(minRate, diminta);
+  const total = perMalam * nights;
+
+  if(!(hargaNormal > 0)) return {ok:false, alasan:'Harga normal belum bisa dihitung'};
+  if(total >= hargaNormal){
+    return {ok:false, alasan:'Harga normal sudah lebih murah dari promo ini', tidak_menguntungkan:true};
+  }
+
+  return {
+    ok:true,
+    harga_per_malam: perMalam,
+    total,
+    harga_normal: hargaNormal,
+    hemat: hargaNormal - total,
+    dijepit_ke_batas_bawah: perMalam > diminta,
+  };
+}
+
 async function computeWalkinIncome(periode){
   const [y,mo] = periode.split('-').map(Number);
   const start = new Date(Date.UTC(y, mo-1, 1)).toISOString();
@@ -692,6 +751,46 @@ Deno.serve(async (req)=>{
     });
   }
 
+  // Pratinjau promo sebelum memesan, supaya angka yang dilihat tamu di
+  // loonars.id sama persis dengan yang akan ditagih -- dihitung di sini,
+  // bukan di browser, karena harga tidak boleh punya dua sumber kebenaran.
+  if(path==='/public/promo' && m==='GET'){
+    const kode = String(url.searchParams.get('code') ?? '').trim().toUpperCase();
+    const checkin = url.searchParams.get('checkin') ?? '';
+    const checkout = url.searchParams.get('checkout') ?? '';
+    const roomTypeCode = String(url.searchParams.get('room_type') ?? '').trim();
+    if(!kode) return err('Kode promo wajib diisi');
+    if(!isValidDateStr(checkin) || !isValidDateStr(checkout)) return err('Tanggal tidak valid');
+    if(new Date(checkout) <= new Date(checkin)) return err('Tanggal checkout harus setelah checkin');
+
+    const nights = Math.max(1, Math.round((new Date(checkout).getTime() - new Date(checkin).getTime())/86400000));
+    const {data:promo} = await supabase.from('villa_promos').select('*').eq('kode', kode).maybeSingle();
+    if(!promo) return json({berlaku:false, alasan:'Kode promo tidak ditemukan'});
+
+    let roomTypeId = promo.room_type_id ?? null;
+    if(roomTypeCode){
+      const {data:rt} = await supabase.from('villa_room_types').select('id').eq('code', roomTypeCode).maybeSingle();
+      if(!rt) return json({berlaku:false, alasan:'Tipe unit tidak dikenali'});
+      roomTypeId = rt.id;
+    }
+    if(!roomTypeId) return json({berlaku:false, alasan:'Pilih tipe unit dulu untuk melihat harga promo'});
+
+    // Harga normal dihitung dari unit contoh pada tipe itu, jalur yang sama
+    // dengan /public/availability, supaya pembanding "hemat" bukan karangan.
+    const {data:unitContoh} = await supabase.from('units')
+      .select('id,tarif_harian,room_type_id').eq('room_type_id', roomTypeId).limit(1).maybeSingle();
+    if(!unitContoh) return json({berlaku:false, alasan:'Tipe unit tidak tersedia'});
+    const hargaNormal = await computeStayTarif(unitContoh, checkin, nights);
+
+    const hasil = await hitungHargaPromo(promo, roomTypeId, checkin, checkout, nights, hargaNormal);
+    if(!hasil.ok) return json({berlaku:false, alasan:hasil.alasan});
+    return json({
+      berlaku:true, kode:promo.kode, nama:promo.nama, deskripsi:promo.deskripsi ?? null,
+      malam:nights, harga_per_malam:hasil.harga_per_malam, total:hasil.total,
+      harga_normal:hasil.harga_normal, hemat:hasil.hemat,
+    });
+  }
+
   if(path==='/public/bookings' && m==='POST'){
     const b = await req.json().catch(()=>null);
     if(!b) return err('Body tidak valid');
@@ -702,6 +801,7 @@ Deno.serve(async (req)=>{
     const room_type = String(b.room_type??'').trim() || null;
     const catatan = String(b.catatan??'').trim();
     const email = String(b.email??'').trim();
+    const promo_code = String(b.promo_code??'').trim().toUpperCase() || null;
 
     // Jumlah tamu. Cloudbeds minta adults[] dan children[] per tipe kamar,
     // dan sebelum ini villa-api mengirim angka tetap 1 dewasa 0 anak untuk
@@ -745,8 +845,28 @@ Deno.serve(async (req)=>{
     if(!freeUnit) return err('Maaf, villa sudah penuh untuk tanggal yang dipilih. Silakan pilih tanggal lain atau hubungi kami di WhatsApp.', 409);
 
     const nights = Math.max(1, Math.round((new Date(tgl_checkout).getTime() - new Date(tgl_checkin).getTime())/86400000));
-    const computedTarif = await computeStayTarif(freeUnit, tgl_checkin, nights);
-    if(computedTarif<=0) return err('Tarif unit belum diatur, hubungi kami langsung', 409);
+    const hargaNormal = await computeStayTarif(freeUnit, tgl_checkin, nights);
+    if(hargaNormal<=0) return err('Tarif unit belum diatur, hubungi kami langsung', 409);
+
+    // Promo, kalau tamu membawa kodenya. Harganya dihitung ulang DI SINI --
+    // bukan dipercaya dari yang dikirim browser -- oleh fungsi yang sama
+    // dengan pratinjaunya, jadi tidak ada celah untuk menitipkan harga
+    // sendiri lewat body permintaan.
+    let computedTarif = hargaNormal;
+    let promoTerpakai = null;
+    if(promo_code){
+      const {data:promo} = await supabase.from('villa_promos').select('*').eq('kode', promo_code).maybeSingle();
+      const hasil = await hitungHargaPromo(promo, freeUnit.room_type_id, tgl_checkin, tgl_checkout, nights, hargaNormal);
+      if(!hasil.ok){
+        // Promo yang kalah murah dari harga normal bukan kesalahan tamu:
+        // pesanannya diteruskan dengan harga normal yang memang lebih baik
+        // baginya, bukan ditolak mentah-mentah.
+        if(!hasil.tidak_menguntungkan) return err(`Promo tidak bisa dipakai: ${hasil.alasan}`, 409);
+      } else {
+        computedTarif = hasil.total;
+        promoTerpakai = {promo, hasil};
+      }
+    }
 
     const {data:g} = await supabase.from('guests').insert({nama, hp, email}).select('id').single();
 
@@ -769,6 +889,24 @@ Deno.serve(async (req)=>{
       return err(bookErr.message);
     }
 
+    // Pemakaian promo dicatat setelah booking-nya benar-benar jadi, supaya
+    // kuota tidak habis oleh pemesanan yang gagal di exclusion constraint.
+    // Harga normalnya ikut disimpan: tanpa itu, pertanyaan "promo ini
+    // sebenarnya memotong berapa" tidak akan pernah bisa dijawab.
+    if(promoTerpakai){
+      await supabase.from('villa_promo_redemptions').insert({
+        promo_id: promoTerpakai.promo.id,
+        booking_id: booking.id,
+        guest_id: g?.id ?? null,
+        harga_normal: promoTerpakai.hasil.harga_normal,
+        harga_promo: promoTerpakai.hasil.total,
+        malam: nights,
+      });
+      await supabase.from('villa_promos')
+        .update({terpakai: Number(promoTerpakai.promo.terpakai ?? 0) + 1, updated_at: new Date().toISOString()})
+        .eq('id', promoTerpakai.promo.id);
+    }
+
     const kode = paymentCode(booking.id);
     await notif(freeUnit.id, 'all', 'booking', `Booking baru dari Website (menunggu pembayaran) -- Unit ${freeUnit.nomor}`,
       `${nama} (${hp}) - ${tgl_checkin} s/d ${tgl_checkout} - Rp ${Math.round(computedTarif).toLocaleString('id-ID')} -- unit belum terkunci, menunggu konfirmasi pembayaran (kode ${kode})`, booking.id);
@@ -780,13 +918,14 @@ Deno.serve(async (req)=>{
     // normal, jadi fitur ini tidak pernah bisa menggagalkan pemesanan.
     const notifySetting = await getSetting('villa_notify');
     await sendWa(notifySetting?.owner_hp ?? null,
-      `Booking baru dari website\n\n${nama} (${hp})\nUnit ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\nTotal: Rp ${Math.round(computedTarif).toLocaleString('id-ID')}\n\nKalau dana sudah masuk, balas:\nLUNAS ${kode}`,
+      `Booking baru dari website\n\n${nama} (${hp})\nUnit ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\nTotal: Rp ${Math.round(computedTarif).toLocaleString('id-ID')}${promoTerpakai ? `\nPromo ${promoTerpakai.promo.kode} (normal Rp ${Math.round(promoTerpakai.hasil.harga_normal).toLocaleString('id-ID')})` : ''}\n\nKalau dana sudah masuk, balas:\nLUNAS ${kode}`,
       {booking_id: booking.id, unit_id: freeUnit.id, template_type:'website_booking_awaiting_payment'});
 
     return json({
       booking_id: booking.id, unit_nomor: freeUnit.nomor,
       tgl_checkin, tgl_checkout, durasi_malam: nights,
       tarif: computedTarif, total_bayar: computedTarif, status: booking.status,
+      promo: promoTerpakai ? {kode: promoTerpakai.promo.kode, nama: promoTerpakai.promo.nama, harga_normal: promoTerpakai.hasil.harga_normal, hemat: promoTerpakai.hasil.hemat} : null,
     }, 201);
   }
 
@@ -1140,6 +1279,165 @@ Deno.serve(async (req)=>{
     });
   }
 
+  // ── Jembatan promo untuk AI (Mkhsistem) ────────────────────────────────
+  // Owner memilih: AI mengusulkan, owner menyetujui lewat WA. Jadi alurnya
+  // sengaja dipecah tiga: cari calon penerima -> ajukan (tersimpan sebagai
+  // baris yang menunggu) -> kirim hanya setelah disetujui. Tidak ada satu
+  // panggilan pun yang bisa langsung mengirim promo ke tamu.
+
+  // Siapa yang layak dikirimi. Bukan seluruh isi database tamu:
+  // hanya yang punya nomor, belum berhenti-langganan, pernah benar-benar
+  // menginap, dan tidak baru saja dikirimi promo.
+  if(path==='/bridge/promo-candidates' && m==='POST'){
+    const bridge = await getVercelBridge();
+    if(!bridge.secret) return err('Jembatan belum dikonfigurasi',503);
+    if(!await secretsMatch(req.headers.get('x-internal-secret') ?? '', bridge.secret)) return err('Unauthorized',401);
+
+    const b = await req.json().catch(()=>({}));
+    const jedaHari = Math.max(0, Math.trunc(Number(b?.jeda_hari ?? 30)));
+    const batas = Math.min(500, Math.max(1, Math.trunc(Number(b?.limit ?? 200))));
+    const ambangJeda = new Date(Date.now() - jedaHari*86400000).toISOString();
+
+    const {data, error} = await supabase.from('villa_guest_directory').select('*');
+    if(error) return err(error.message);
+    const calon = (data ?? []).filter(r =>
+      String(r.hp ?? '').trim().length >= 8 &&
+      r.wa_opt_out !== true &&
+      Number(r.jumlah_menginap ?? 0) >= 1 &&
+      (!r.terakhir_dikirimi_promo || r.terakhir_dikirimi_promo < ambangJeda)
+    ).slice(0, batas);
+
+    return json({
+      jumlah: calon.length,
+      jeda_hari: jedaHari,
+      penerima: calon.map(r => ({
+        guest_id: r.guest_id, nama: r.nama, hp: r.hp,
+        jumlah_menginap: r.jumlah_menginap, terakhir_menginap: r.terakhir_menginap,
+      })),
+    });
+  }
+
+  // Mengajukan kiriman. Ini TIDAK mengirim apa pun -- hanya menyimpan
+  // usulannya beserta kode yang harus dibalas owner.
+  if(path==='/bridge/promo-propose' && m==='POST'){
+    const bridge = await getVercelBridge();
+    if(!bridge.secret) return err('Jembatan belum dikonfigurasi',503);
+    if(!await secretsMatch(req.headers.get('x-internal-secret') ?? '', bridge.secret)) return err('Unauthorized',401);
+
+    const b = await req.json().catch(()=>null);
+    const kodePromo = String(b?.promo_kode ?? '').trim().toUpperCase();
+    const pesan = String(b?.pesan ?? '').trim();
+    const penerima = Array.isArray(b?.penerima) ? b.penerima : [];
+    if(!kodePromo) return err('promo_kode wajib diisi');
+    if(pesan.length < 10) return err('Isi pesan promo terlalu pendek');
+    if(!penerima.length) return json({success:false, reason:'tidak_ada_penerima'});
+
+    const {data:promo} = await supabase.from('villa_promos').select('*').eq('kode', kodePromo).maybeSingle();
+    if(!promo) return json({success:false, reason:'promo_tidak_ditemukan'});
+    if(promo.aktif !== true) return json({success:false, reason:'promo_tidak_aktif'});
+
+    // Kode konfirmasi 6 heksa, pola yang sama dengan LUNAS supaya owner
+    // tidak perlu menghafal dua bentuk balasan yang berbeda.
+    let kodeKonfirmasi = '';
+    for(let coba=0; coba<5; coba++){
+      const kandidat = Array.from(crypto.getRandomValues(new Uint8Array(3))).map(x=>x.toString(16).padStart(2,'0')).join('').toUpperCase();
+      const {data:bentrok} = await supabase.from('villa_promo_batches').select('id').eq('kode_konfirmasi', kandidat).maybeSingle();
+      if(!bentrok){ kodeKonfirmasi = kandidat; break; }
+    }
+    if(!kodeKonfirmasi) return err('Gagal membuat kode konfirmasi', 500);
+
+    const {data:batch, error} = await supabase.from('villa_promo_batches').insert({
+      promo_id: promo.id,
+      kode_konfirmasi: kodeKonfirmasi,
+      alasan: String(b?.alasan ?? '').trim() || null,
+      okupansi_persen: b?.okupansi_persen == null ? null : Number(b.okupansi_persen),
+      jumlah_penerima: penerima.length,
+      pesan,
+      hasil: {penerima},
+      status: 'menunggu',
+    }).select().single();
+    if(error) return err(error.message);
+
+    return json({success:true, batch_id:batch.id, kode_konfirmasi:kodeKonfirmasi, jumlah_penerima:penerima.length, promo:{kode:promo.kode, nama:promo.nama}});
+  }
+
+  // Owner membalas "PROMO <kode>". Baru di sinilah daftar penerimanya
+  // diserahkan untuk dikirim.
+  if(path==='/bridge/promo-approve' && m==='POST'){
+    const bridge = await getVercelBridge();
+    if(!bridge.secret) return err('Jembatan belum dikonfigurasi',503);
+    if(!await secretsMatch(req.headers.get('x-internal-secret') ?? '', bridge.secret)) return err('Unauthorized',401);
+
+    const b = await req.json().catch(()=>null);
+    const kode = String(b?.kode ?? '').trim().toUpperCase();
+    if(!/^[0-9A-F]{6}$/.test(kode)) return json({success:false, reason:'invalid_code'});
+
+    const {data:batch} = await supabase.from('villa_promo_batches').select('*').eq('kode_konfirmasi', kode).maybeSingle();
+    if(!batch) return json({success:false, reason:'not_found'});
+    if(batch.status === 'terkirim') return json({success:true, already_sent:true, jumlah_penerima:batch.jumlah_penerima});
+    if(batch.status === 'ditolak') return json({success:false, reason:'ditolak'});
+
+    // Usulan basi tidak boleh dihidupkan berhari-hari kemudian: alasan yang
+    // membuatnya diajukan (okupansi rendah pekan ini) sudah tidak berlaku.
+    const umurJam = (Date.now() - Date.parse(batch.created_at)) / 3600000;
+    if(umurJam > 48){
+      await supabase.from('villa_promo_batches').update({status:'kedaluwarsa'}).eq('id', batch.id);
+      return json({success:false, reason:'kedaluwarsa', umur_jam: Math.round(umurJam)});
+    }
+
+    const {data:promo} = await supabase.from('villa_promos').select('kode,nama,aktif').eq('id', batch.promo_id).maybeSingle();
+    if(promo?.aktif !== true) return json({success:false, reason:'promo_tidak_aktif'});
+
+    await supabase.from('villa_promo_batches').update({status:'disetujui', approved_at:new Date().toISOString()}).eq('id', batch.id);
+    return json({
+      success:true, batch_id:batch.id, pesan:batch.pesan,
+      promo:{kode:promo.kode, nama:promo.nama},
+      penerima: batch.hasil?.penerima ?? [],
+    });
+  }
+
+  // Mencatat hasil pengiriman. Dipisah dari approve supaya pengiriman yang
+  // gagal separuh jalan bisa diulang tanpa mengirim ulang ke tamu yang sudah
+  // menerima -- indeks unik (batch_id, guest_id) yang menjaganya.
+  if(path==='/bridge/promo-sent' && m==='POST'){
+    const bridge = await getVercelBridge();
+    if(!bridge.secret) return err('Jembatan belum dikonfigurasi',503);
+    if(!await secretsMatch(req.headers.get('x-internal-secret') ?? '', bridge.secret)) return err('Unauthorized',401);
+
+    const b = await req.json().catch(()=>null);
+    const batch_id = String(b?.batch_id ?? '').trim();
+    const hasil = Array.isArray(b?.hasil) ? b.hasil : [];
+    if(!/^[0-9a-f-]{36}$/i.test(batch_id)) return err('batch_id tidak valid');
+
+    const {data:batch} = await supabase.from('villa_promo_batches').select('*').eq('id', batch_id).maybeSingle();
+    if(!batch) return json({success:false, reason:'not_found'});
+
+    let tercatat = 0;
+    for(const r of hasil){
+      const guest_id = /^[0-9a-f-]{36}$/i.test(String(r?.guest_id ?? '')) ? r.guest_id : null;
+      const {error} = await supabase.from('villa_promo_sends').insert({
+        batch_id, promo_id: batch.promo_id, guest_id,
+        kanal: r?.kanal === 'email' ? 'email' : 'whatsapp',
+        tujuan: String(r?.tujuan ?? '').trim() || null,
+        status: r?.status === 'gagal' ? 'gagal' : (r?.status === 'dilewati' ? 'dilewati' : 'terkirim'),
+        error: String(r?.error ?? '').trim() || null,
+      });
+      if(!error){
+        tercatat++;
+        if(guest_id && r?.status !== 'gagal'){
+          await supabase.from('villa_guest_marketing').upsert(
+            {guest_id, terakhir_dikirimi_promo: new Date().toISOString(), updated_at: new Date().toISOString()},
+            {onConflict:'guest_id'});
+        }
+      }
+    }
+
+    await supabase.from('villa_promo_batches')
+      .update({status:'terkirim', sent_at:new Date().toISOString()})
+      .eq('id', batch_id);
+    return json({success:true, tercatat});
+  }
+
   if(path==='/public/bookings/invoice' && m==='GET'){
     const booking_id = url.searchParams.get('booking_id') ?? '';
     const hp = (url.searchParams.get('hp') ?? '').trim();
@@ -1415,6 +1713,134 @@ Deno.serve(async (req)=>{
   const isAdmin = session.role==='admin';
   const isStaff = session.role==='receptionist' || isAdmin;
   const isOwner = session.role==='owner';
+
+  // ── Database tamu ──────────────────────────────────────────────────────
+  // Tujuan owner 2026-09-12: "kt punya database tamu" dari OTA maupun web.
+  // Isinya nomor HP dan email orang, jadi admin saja -- resepsionis tidak
+  // punya alasan mengunduh seluruh daftar kontak tamu.
+  if(path==='/guests/directory' && m==='GET'){
+    if(!isAdmin) return forbidden();
+    const q = String(url.searchParams.get('q') ?? '').trim();
+    const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit') ?? 200)));
+    let query = supabase.from('villa_guest_directory').select('*');
+    if(q){
+      const like = `%${q}%`;
+      query = query.or(`nama.ilike.${like},hp.ilike.${like},email.ilike.${like}`);
+    }
+    const {data, error} = await query.order('terakhir_menginap', {ascending:false, nullsFirst:false}).limit(limit);
+    if(error) return err(error.message);
+    return json(data ?? []);
+  }
+
+  // Ringkasan untuk kartu di halaman admin, dihitung di server supaya
+  // tidak perlu mengunduh seluruh daftar tamu hanya untuk menghitungnya.
+  if(path==='/guests/directory/summary' && m==='GET'){
+    if(!isAdmin) return forbidden();
+    const {data} = await supabase.from('villa_guest_directory')
+      .select('hp,email,wa_opt_out,email_opt_out,jumlah_menginap,sumber_pertama');
+    const rows = data ?? [];
+    const punya = v => String(v ?? '').trim().length > 0;
+    return json({
+      total_tamu: rows.length,
+      punya_hp: rows.filter(r=>punya(r.hp)).length,
+      punya_email: rows.filter(r=>punya(r.email)).length,
+      bisa_diwa: rows.filter(r=>punya(r.hp) && r.wa_opt_out !== true).length,
+      berhenti_langganan: rows.filter(r=>r.wa_opt_out === true || r.email_opt_out === true).length,
+      tamu_berulang: rows.filter(r=>Number(r.jumlah_menginap ?? 0) > 1).length,
+      per_sumber: rows.reduce((acc,r)=>{ const k=r.sumber_pertama ?? 'tidak diketahui'; acc[k]=(acc[k]??0)+1; return acc; }, {}),
+    });
+  }
+
+  // Berhenti-langganan dan catatan. Baris villa_guest_marketing dibuat saat
+  // pertama kali disentuh, bukan untuk semua tamu di muka: 96 baris kosong
+  // tidak memberi tahu apa pun.
+  if(path==='/guests/marketing' && m==='PATCH'){
+    if(!isAdmin) return forbidden();
+    const b = await req.json().catch(()=>null);
+    const guest_id = String(b?.guest_id ?? '').trim();
+    if(!/^[0-9a-f-]{36}$/i.test(guest_id)) return err('guest_id tidak valid');
+    const patch = {guest_id, updated_at: new Date().toISOString()};
+    if(typeof b.wa_opt_out === 'boolean') patch.wa_opt_out = b.wa_opt_out;
+    if(typeof b.email_opt_out === 'boolean') patch.email_opt_out = b.email_opt_out;
+    if(typeof b.catatan === 'string') patch.catatan = b.catatan.trim() || null;
+    const {data, error} = await supabase.from('villa_guest_marketing').upsert(patch, {onConflict:'guest_id'}).select().single();
+    if(error) return err(error.message);
+    return json(data);
+  }
+
+  // ── Promo ──────────────────────────────────────────────────────────────
+  if(path==='/promos' && m==='GET'){
+    if(!isStaff) return forbidden();
+    const {data, error} = await supabase.from('villa_promos').select('*').order('created_at', {ascending:false}).limit(200);
+    if(error) return err(error.message);
+    return json(data ?? []);
+  }
+
+  if(path==='/promos' && m==='POST'){
+    if(!isAdmin) return forbidden();
+    const b = await req.json().catch(()=>null);
+    if(!b) return err('Body tidak valid');
+    const kode = String(b.kode ?? '').trim().toUpperCase();
+    const nama = String(b.nama ?? '').trim();
+    if(!/^[A-Z0-9-]{3,24}$/.test(kode)) return err('Kode promo hanya huruf/angka/strip, 3-24 karakter');
+    if(nama.length < 3) return err('Nama promo wajib diisi');
+    const mode_harga = b.mode_harga === 'harga_tetap' ? 'harga_tetap' : 'batas_bawah';
+    const harga_per_malam = mode_harga === 'harga_tetap' ? Number(b.harga_per_malam ?? 0) : null;
+    if(mode_harga === 'harga_tetap' && !(harga_per_malam > 0)) return err('Harga per malam wajib diisi untuk mode harga tetap');
+
+    const {data, error} = await supabase.from('villa_promos').insert({
+      kode, nama,
+      deskripsi: String(b.deskripsi ?? '').trim() || null,
+      mode_harga, harga_per_malam,
+      room_type_id: b.room_type_id ?? null,
+      pesan_dari: b.pesan_dari ?? null, pesan_sampai: b.pesan_sampai ?? null,
+      menginap_dari: b.menginap_dari ?? null, menginap_sampai: b.menginap_sampai ?? null,
+      min_malam: Math.max(1, Math.trunc(Number(b.min_malam ?? 1)) || 1),
+      kuota: b.kuota == null || b.kuota === '' ? null : Math.max(0, Math.trunc(Number(b.kuota))),
+      aktif: b.aktif !== false,
+      dibuat_oleh: session.uid ?? null,
+    }).select().single();
+    if(error){
+      if(error.code === '23505') return err('Kode promo itu sudah dipakai', 409);
+      return err(error.message);
+    }
+    return json(data, 201);
+  }
+
+  if(path==='/promos' && m==='PATCH'){
+    if(!isAdmin) return forbidden();
+    const b = await req.json().catch(()=>null);
+    const id = String(b?.id ?? '').trim();
+    if(!/^[0-9a-f-]{36}$/i.test(id)) return err('id promo tidak valid');
+    const patch = {updated_at: new Date().toISOString()};
+    for(const k of ['nama','deskripsi','mode_harga','room_type_id','pesan_dari','pesan_sampai','menginap_dari','menginap_sampai','aktif']){
+      if(k in b) patch[k] = b[k] === '' ? null : b[k];
+    }
+    if('harga_per_malam' in b) patch.harga_per_malam = b.harga_per_malam == null || b.harga_per_malam === '' ? null : Number(b.harga_per_malam);
+    if('min_malam' in b) patch.min_malam = Math.max(1, Math.trunc(Number(b.min_malam)) || 1);
+    if('kuota' in b) patch.kuota = b.kuota == null || b.kuota === '' ? null : Math.max(0, Math.trunc(Number(b.kuota)));
+    const {data, error} = await supabase.from('villa_promos').update(patch).eq('id', id).select().single();
+    if(error) return err(error.message);
+    return json(data);
+  }
+
+  // Hasil nyata sebuah promo: berapa kali dipakai, dan berapa yang dilepas.
+  // Angka "hemat" ini yang membuat promo bisa dievaluasi, bukan cuma dibuat.
+  if(path==='/promos/redemptions' && m==='GET'){
+    if(!isStaff) return forbidden();
+    const promo_id = String(url.searchParams.get('promo_id') ?? '').trim();
+    let q = supabase.from('villa_promo_redemptions').select('*').order('created_at',{ascending:false}).limit(200);
+    if(/^[0-9a-f-]{36}$/i.test(promo_id)) q = q.eq('promo_id', promo_id);
+    const {data, error} = await q;
+    if(error) return err(error.message);
+    const rows = data ?? [];
+    return json({
+      jumlah: rows.length,
+      total_harga_normal: rows.reduce((a,r)=>a+Number(r.harga_normal ?? 0),0),
+      total_harga_promo: rows.reduce((a,r)=>a+Number(r.harga_promo ?? 0),0),
+      redemptions: rows,
+    });
+  }
 
   if(path==='/walkin-payments' && m==='GET'){
     if(!isStaff) return forbidden();
