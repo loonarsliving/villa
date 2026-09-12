@@ -1389,11 +1389,111 @@ Deno.serve(async (req)=>{
     if(promo?.aktif !== true) return json({success:false, reason:'promo_tidak_aktif'});
 
     await supabase.from('villa_promo_batches').update({status:'disetujui', approved_at:new Date().toISOString()}).eq('id', batch.id);
+
+    // Dikirim DI SINI, bukan dengan menyerahkan daftar nomor tamu ke
+    // pemanggil. Mkhsistem tetap jadi jalur keluar WhatsApp-nya (sendWa
+    // memanggil jembatannya), tapi daftar kontak tamu tidak pernah
+    // meninggalkan villa-api -- tempat data itu memang tinggal.
+    //
+    // Dibatasi per panggilan supaya tidak ada satu permintaan yang berjalan
+    // menit-menitan lalu mati di tengah jalan dengan separuh tamu terkirim
+    // dan tidak ada catatan siapa saja. Sisanya dikirim oleh panggilan
+    // berikutnya, dan indeks unik (batch_id, guest_id) membuat pengulangan
+    // tidak pernah mengirim dua kali ke orang yang sama.
+    const MAKS_PER_PANGGILAN = 40;
+    const semua = Array.isArray(batch.hasil?.penerima) ? batch.hasil.penerima : [];
+    const {data:sudah} = await supabase.from('villa_promo_sends').select('guest_id').eq('batch_id', batch.id);
+    const sudahSet = new Set((sudah ?? []).map(r => String(r.guest_id)));
+    const antre = semua.filter(r => !sudahSet.has(String(r.guest_id)));
+    const giliran = antre.slice(0, MAKS_PER_PANGGILAN);
+
+    let terkirim = 0, gagal = 0;
+    for(const penerima of giliran){
+      const hp = String(penerima?.hp ?? '').trim();
+      const guest_id = /^[0-9a-f-]{36}$/i.test(String(penerima?.guest_id ?? '')) ? penerima.guest_id : null;
+      if(!hp){
+        await supabase.from('villa_promo_sends').insert({batch_id:batch.id, promo_id:batch.promo_id, guest_id, tujuan:null, status:'dilewati', error:'tanpa nomor'});
+        continue;
+      }
+      // Status berhenti-langganan dicek ULANG di detik pengiriman, bukan
+      // hanya saat usulan dibuat: tamu bisa saja minta berhenti di antara
+      // usulan dan persetujuan owner.
+      if(guest_id){
+        const {data:mk} = await supabase.from('villa_guest_marketing').select('wa_opt_out').eq('guest_id', guest_id).maybeSingle();
+        if(mk?.wa_opt_out === true){
+          await supabase.from('villa_promo_sends').insert({batch_id:batch.id, promo_id:batch.promo_id, guest_id, tujuan:hp, status:'dilewati', error:'berhenti langganan'});
+          continue;
+        }
+      }
+      const pesan = String(batch.pesan).replace(/\{nama\}/g, String(penerima?.nama ?? 'Bapak/Ibu'));
+      await sendWa(hp, pesan, {template_type:'villa_promo', promo_batch_id:batch.id});
+      const {error:insErr} = await supabase.from('villa_promo_sends').insert({
+        batch_id:batch.id, promo_id:batch.promo_id, guest_id, tujuan:hp, status:'terkirim',
+      });
+      if(insErr) gagal++; else terkirim++;
+      if(guest_id){
+        await supabase.from('villa_guest_marketing').upsert(
+          {guest_id, terakhir_dikirimi_promo:new Date().toISOString(), updated_at:new Date().toISOString()},
+          {onConflict:'guest_id'});
+      }
+    }
+
+    const sisa = Math.max(0, antre.length - giliran.length);
+    if(sisa === 0){
+      await supabase.from('villa_promo_batches').update({status:'terkirim', sent_at:new Date().toISOString()}).eq('id', batch.id);
+    }
+
     return json({
-      success:true, batch_id:batch.id, pesan:batch.pesan,
+      success:true, batch_id:batch.id,
       promo:{kode:promo.kode, nama:promo.nama},
-      penerima: batch.hasil?.penerima ?? [],
+      terkirim, gagal, sisa, total_penerima: semua.length,
     });
+  }
+
+  // Tamu membalas BERHENTI. Pesan promo menjanjikan ini, jadi ia harus
+  // benar-benar bekerja -- janji berhenti-langganan yang tidak berfungsi
+  // lebih buruk daripada tidak menjanjikannya sama sekali.
+  //
+  // Dicocokkan lewat 9 digit terakhir, cara yang sama dengan pencocokan
+  // nomor di tempat lain: nomor yang sama bisa tersimpan sebagai 0813...,
+  // +62813..., atau 62813....
+  if(path==='/bridge/guest-opt-out' && m==='POST'){
+    const bridge = await getVercelBridge();
+    if(!bridge.secret) return err('Jembatan belum dikonfigurasi',503);
+    if(!await secretsMatch(req.headers.get('x-internal-secret') ?? '', bridge.secret)) return err('Unauthorized',401);
+
+    const b = await req.json().catch(()=>null);
+    const digits = String(b?.hp ?? '').replace(/\D/g,'');
+    const suffix = digits.slice(-9);
+    if(suffix.length < 9) return json({success:false, reason:'nomor_tidak_valid'});
+
+    const {data:semua} = await supabase.from('guests').select('id,nama,hp').not('hp','is',null);
+    const cocok = (semua ?? []).filter(g => String(g.hp ?? '').replace(/\D/g,'').endsWith(suffix));
+    if(!cocok.length) return json({success:false, reason:'tamu_tidak_ditemukan'});
+
+    for(const g of cocok){
+      await supabase.from('villa_guest_marketing').upsert(
+        {guest_id:g.id, wa_opt_out:true, updated_at:new Date().toISOString()},
+        {onConflict:'guest_id'});
+    }
+    return json({success:true, jumlah:cocok.length, nama:cocok[0].nama ?? null});
+  }
+
+  // Owner menolak usulan. Tanpa ini, satu-satunya cara menolak adalah
+  // mendiamkannya sampai kedaluwarsa 48 jam -- dan usulan yang didiamkan
+  // tidak bisa dibedakan dari yang belum terbaca.
+  if(path==='/bridge/promo-reject' && m==='POST'){
+    const bridge = await getVercelBridge();
+    if(!bridge.secret) return err('Jembatan belum dikonfigurasi',503);
+    if(!await secretsMatch(req.headers.get('x-internal-secret') ?? '', bridge.secret)) return err('Unauthorized',401);
+    const b = await req.json().catch(()=>null);
+    const kode = String(b?.kode ?? '').trim().toUpperCase();
+    if(!/^[0-9A-F]{6}$/.test(kode)) return json({success:false, reason:'invalid_code'});
+    const {data:batch} = await supabase.from('villa_promo_batches').select('id,status').eq('kode_konfirmasi', kode).maybeSingle();
+    if(!batch) return json({success:false, reason:'not_found'});
+    if(batch.status === 'terkirim') return json({success:false, reason:'sudah_terkirim'});
+    await supabase.from('villa_promo_batches').update({status:'ditolak'}).eq('id', batch.id);
+    return json({success:true});
   }
 
   // Mencatat hasil pengiriman. Dipisah dari approve supaya pengiriman yang
@@ -1541,6 +1641,104 @@ Deno.serve(async (req)=>{
   // catatan bahwa seseorang pernah mencoba memesan tanggal itu, berguna untuk
   // melihat berapa banyak calon tamu yang lepas. Penghapusan juga akan
   // memutus jalur "LUNAS" telat di bawah.
+  // Mendeteksi low season dan MENGUSULKAN promo -- tidak pernah mengirim.
+  // Owner memilih: "AI usul, saya setujui via WA".
+  //
+  // Ambangnya dibaca dari integration_settings.villa_promo_auto supaya bisa
+  // diubah tanpa deploy; tanpa pengaturan itu, cron ini tidak melakukan
+  // apa-apa (aktif harus disetel true secara sadar). Jadi menambahkan
+  // jadwalnya tidak otomatis membuat tamu dikirimi apa pun.
+  if(path==='/cron/promo-low-season' && m==='POST'){
+    const cron = await getSetting('cron');
+    if(!cron.secret) return err('Cron belum dikonfigurasi',503);
+    if(!await secretsMatch(req.headers.get('x-cron-secret') ?? '', cron.secret)) return err('Unauthorized',401);
+
+    const cfg = await getSetting('villa_promo_auto');
+    if(cfg?.aktif !== true) return json({dilewati:'villa_promo_auto.aktif belum disetel true'});
+
+    const ambangOkupansi = Number(cfg.ambang_okupansi_persen ?? 40);
+    const horizonHari = Math.max(3, Math.trunc(Number(cfg.horizon_hari ?? 14)));
+    const jedaHari = Math.max(0, Math.trunc(Number(cfg.jeda_hari ?? 30)));
+    const kodePromo = String(cfg.promo_kode ?? '').trim().toUpperCase();
+    if(!kodePromo) return json({dilewati:'villa_promo_auto.promo_kode belum diisi'});
+
+    // Satu usulan yang masih menunggu sudah cukup. Menumpuk usulan setiap
+    // hari hanya akan membuat owner mengabaikan semuanya.
+    const {data:menunggu} = await supabase.from('villa_promo_batches')
+      .select('id,kode_konfirmasi,created_at').eq('status','menunggu').limit(1).maybeSingle();
+    if(menunggu) return json({dilewati:'masih ada usulan yang menunggu persetujuan', kode:menunggu.kode_konfirmasi});
+
+    const {data:promo} = await supabase.from('villa_promos').select('*').eq('kode', kodePromo).maybeSingle();
+    if(!promo || promo.aktif !== true) return json({dilewati:`promo ${kodePromo} tidak ada atau tidak aktif`});
+
+    // Okupansi horizon: berapa persen malam-unit yang terisi sampai
+    // horizonHari ke depan. Memakai bookings yang benar-benar mengunci unit.
+    const hariIni = new Date().toISOString().slice(0,10);
+    const akhir = new Date(Date.now() + horizonHari*86400000).toISOString().slice(0,10);
+    const {data:units} = await supabase.from('units').select('id');
+    const totalUnit = (units ?? []).length;
+    if(!totalUnit) return json({dilewati:'tidak ada unit'});
+
+    const {data:bk} = await supabase.from('bookings')
+      .select('tgl_checkin,tgl_checkout')
+      .in('status',['terjadwal','checkin'])
+      .lt('tgl_checkin', akhir).gte('tgl_checkout', hariIni);
+
+    let malamTerisi = 0;
+    for(const r of bk ?? []){
+      const mulai = new Date(Math.max(Date.parse(`${r.tgl_checkin}T00:00:00Z`), Date.parse(`${hariIni}T00:00:00Z`)));
+      const selesai = new Date(Math.min(Date.parse(`${r.tgl_checkout ?? r.tgl_checkin}T00:00:00Z`), Date.parse(`${akhir}T00:00:00Z`)));
+      malamTerisi += Math.max(0, Math.round((selesai.getTime() - mulai.getTime())/86400000));
+    }
+    const kapasitas = totalUnit * horizonHari;
+    const okupansi = kapasitas > 0 ? Math.round((malamTerisi / kapasitas) * 1000)/10 : 0;
+    if(okupansi >= ambangOkupansi){
+      return json({dilewati:'okupansi masih di atas ambang', okupansi_persen:okupansi, ambang:ambangOkupansi});
+    }
+
+    // Calon penerima: pernah menginap, punya nomor, belum berhenti
+    // langganan, dan tidak baru saja dikirimi promo.
+    const ambangJeda = new Date(Date.now() - jedaHari*86400000).toISOString();
+    const {data:dir} = await supabase.from('villa_guest_directory').select('*');
+    const penerima = (dir ?? []).filter(r =>
+      String(r.hp ?? '').trim().length >= 8 &&
+      r.wa_opt_out !== true &&
+      Number(r.jumlah_menginap ?? 0) >= 1 &&
+      (!r.terakhir_dikirimi_promo || r.terakhir_dikirimi_promo < ambangJeda)
+    ).slice(0, Math.min(500, Math.max(1, Math.trunc(Number(cfg.maks_penerima ?? 200)))))
+     .map(r => ({guest_id:r.guest_id, nama:r.nama, hp:r.hp}));
+
+    if(!penerima.length) return json({dilewati:'tidak ada calon penerima', okupansi_persen:okupansi});
+
+    const pesan = String(cfg.template ?? '').trim() ||
+      `Halo {nama}, salam dari Loonars Private Living.\n\n` +
+      `Kami sedang membuka ${promo.nama}. Pesan langsung di loonars.id dan masukkan kode ${promo.kode} untuk mendapatkan harga khususnya.\n\n` +
+      `Balas pesan ini kalau ada yang ingin ditanyakan. Kalau tidak ingin menerima info seperti ini lagi, balas BERHENTI.`;
+
+    let kodeKonfirmasi = '';
+    for(let coba=0; coba<5; coba++){
+      const kandidat = Array.from(crypto.getRandomValues(new Uint8Array(3))).map(x=>x.toString(16).padStart(2,'0')).join('').toUpperCase();
+      const {data:bentrok} = await supabase.from('villa_promo_batches').select('id').eq('kode_konfirmasi', kandidat).maybeSingle();
+      if(!bentrok){ kodeKonfirmasi = kandidat; break; }
+    }
+    if(!kodeKonfirmasi) return err('Gagal membuat kode konfirmasi',500);
+
+    const alasan = `Okupansi ${okupansi}% untuk ${horizonHari} hari ke depan, di bawah ambang ${ambangOkupansi}%`;
+    const {data:batch, error:batchErr} = await supabase.from('villa_promo_batches').insert({
+      promo_id: promo.id, kode_konfirmasi: kodeKonfirmasi, alasan,
+      okupansi_persen: okupansi, jumlah_penerima: penerima.length,
+      pesan, hasil:{penerima}, status:'menunggu',
+    }).select().single();
+    if(batchErr) return err(batchErr.message);
+
+    const notifySetting = await getSetting('villa_notify');
+    await sendWa(notifySetting?.owner_hp ?? null,
+      `Usulan promo low season\n\n${alasan}.\n\nPromo: ${promo.nama} (${promo.kode})\nPenerima: ${penerima.length} tamu yang pernah menginap\n\nIsi pesannya:\n"${pesan.replace('{nama}','Bapak/Ibu')}"\n\nKalau setuju, balas:\nPROMO ${kodeKonfirmasi}\n\nKalau tidak, balas:\nTOLAK ${kodeKonfirmasi}\n(usulan ini kedaluwarsa sendiri dalam 48 jam)`,
+      {template_type:'villa_promo_proposal', promo_batch_id:batch.id});
+
+    return json({diusulkan:true, kode_konfirmasi:kodeKonfirmasi, okupansi_persen:okupansi, jumlah_penerima:penerima.length});
+  }
+
   if(path==='/cron/expire-pending-bookings' && m==='POST'){
     const cron = await getSetting('cron');
     const provided = req.headers.get('x-cron-secret') ?? '';
