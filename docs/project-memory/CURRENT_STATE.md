@@ -2,6 +2,53 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-12 — verifikasi: API Cloudbeds MEMANG bisa mengubah harga, tapi cron malamnya patut dicurigai tidak jalan
+
+Owner bertanya: pastikan dulu API ke Cloudbeds benar-benar bisa **menulis**
+harga, bukan cuma membaca.
+
+**TERBUKTI BISA MENULIS.** Buktinya bukan catatan lama, tapi isi Cloudbeds
+sekarang (dicek lewat `villa_rates`, yang menurut aturan single-writer
+hanya diisi dari hasil baca-balik Cloudbeds — mesin harga tidak pernah
+menulisnya langsung):
+
+- 368 baris per tipe kamar, **2026-09-04 s/d 2027-09-11** — satu tahun
+  penuh, sesuai `WINDOW_DAYS = 365`.
+- Angkanya persis aritmetika mesin harga, sampai rupiahnya:
+  Standard 650.000 dasar / 750.000 Jum-Sab, dan pada periode
+  **24 Des–2 Jan** (persis baris `ai_recurring_peak` "Libur Natal dan
+  Tahun Baru") menjadi 780.000 / 900.000 = tepat ×1,2.
+  Sawah View 750.000 / 850.000 → 900.000 / 1.020.000, juga tepat ×1,2.
+  23 Des dan 3 Jan kembali ke harga dasar — batas periodenya pas.
+- Tidak ada manusia yang menetapkan 1.020.000 dengan tangan pada rentang
+  tanggal yang persis itu. Angka-angka ini berasal dari mesin harga villa,
+  ditulis ke Cloudbeds lewat `putRate`, lalu dibaca balik.
+
+Jadi kunci API-nya punya izin tulis rate dan jalurnya bekerja
+ujung-ke-ujung. `getRate` (baca) juga terverifikasi: log
+`sync-cloudbeds-rates` 2026-09-12 18:21 UTC melaporkan
+`dates_synced: 364` untuk kedua tipe kamar.
+
+**TAPI — cron `/api/cron/ai-dynamic-pricing` tidak muncul sama sekali di
+log runtime 24 jam terakhir**, padahal rutenya memanggil
+`console.log("[ai-dynamic-pricing]", ...)` di setiap run, dan
+`sync-cloudbeds-rates` yang jadwalnya hanya 15 menit setelahnya **muncul**.
+Kecurigaan utamanya: **Vercel plan `hobby` hanya menjadwalkan 2 cron job
+per proyek, sedangkan `vercel.json` mendeklarasikan 7.** Tidak ada pg_cron
+yang menggantikan rute ini (dicek: hanya `villa-sync-cloudbeds-reservations`
+jobid 105 yang memanggil rute villa dari Postgres; harga tidak ada).
+Cocok juga dengan jamnya yang meleset ~1 jam dari `vercel.json`, ciri khas
+cron harian hobby.
+
+**Belum dipastikan**, karena retensi log hobby hanya ~1 hari sehingga tidak
+bisa melihat ke belakang lebih jauh, dan sandbox sesi ini diblokir keluar
+ke `api.cloudbeds.com` (proxy menjawab 403) sehingga tidak bisa memanggil
+Cloudbeds langsung. Yang perlu dilakukan: buka Vercel → proyek `villa` →
+Settings → Cron Jobs, dan lihat cron mana saja yang benar-benar terdaftar.
+Kalau benar hanya 2, mesin harganya hanya pernah jalan saat dipicu manual
+— yang konsisten dengan bukti terakhir: baris tanggal terjauh
+(2027-09-11) terakhir berubah 2026-09-12 17:21 UTC, bukan malam ini.
+
 ## 2026-09-12 — penalaran harga AI diperluas (branch `claude/duetto-villa-pricing-reasoning-1eygpo`, BELUM di `main`, autopush masih OFF)
 
 Owner sedang mempelajari Duetto dan meminta AI penentu harga menimbang
@@ -27,11 +74,17 @@ Yang berubah (detail lengkap di CHANGELOG.md):
   42 tes hijau seluruh repo). Ini gerbang otomatis pertama yang dimiliki
   logika harga.
 
-**Belum menyentuh harga tamu sama sekali**: tidak ada migrasi, tidak ada
-perubahan skema, dan `villa_pricing_settings.ai_autopush_enabled` masih
-`false`. Menunggu persetujuan owner sebelum di-merge (aturan MERGE
-AUTHORITY di CLAUDE.md: apa pun yang menyentuh harga tamu perlu owner
-bilang ya dulu).
+**Belum menyentuh harga tamu**: tidak ada migrasi dan tidak ada perubahan
+skema, dan perubahannya belum di-merge. Menunggu persetujuan owner
+(aturan MERGE AUTHORITY di CLAUDE.md: apa pun yang menyentuh harga tamu
+perlu owner bilang ya dulu).
+
+**PENTING — `ai_autopush_enabled` ternyata sudah `true`** (diubah
+2026-09-11 14:48 UTC; diverifikasi lewat Supabase MCP 2026-09-12).
+Catatan lama di bagian "Pricing architecture" di bawah yang menyebutnya
+`false` sudah tidak berlaku. Artinya: begitu branch ini di-merge dan run
+harga berikutnya jalan, harga tamu di semua OTA **benar-benar ikut
+berubah**. Ini bukan lagi dry run.
 
 **Sisi riset (repo Mkhsistem, branch sama)**: `researchVillaMarketDemand`
 kini melaporkan periode `direction: "turun"` selain "naik", plus kalender
@@ -277,9 +330,10 @@ How a guest price is decided today:
    from that anchor — occupancy, weekend surcharge, high season, AI
    competitor research (via Mkhsistem's bridge; outside high season the
    market average acts as a CAP, never a floor). It pushes to Cloudbeds
-   **only** when `villa_pricing_settings.ai_autopush_enabled` is true
-   (**currently false** per owner instruction: the live price follows
-   Cloudbeds while the AI's market analysis is being evaluated). Every
+   **only** when `villa_pricing_settings.ai_autopush_enabled` is true.
+   **Update 2026-09-12: this is now `true`** (set 2026-09-11 14:48 UTC,
+   verified via Supabase MCP) — the note below saying it is `false` was
+   accurate when written and is not any more. Pushes are live. Every
    push is read back from Cloudbeds and verified date by date.
 3. **`/api/cron/sync-cloudbeds-rates`** (00:25 WIB) mirrors Cloudbeds' live
    rates for **90 days** into `villa_rates` and sets `units.tarif_harian`
