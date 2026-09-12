@@ -1768,6 +1768,18 @@ Deno.serve(async (req)=>{
     return json(data);
   }
 
+  // Tipe kamar beserta id-nya, untuk halaman admin. /public/room-types
+  // sengaja tidak membawa id -- halaman promo butuh id untuk menyimpan
+  // room_type_id, dan min_rate untuk menampilkan harga batas bawah yang
+  // akan dipakai promo.
+  if(path==='/room-types' && m==='GET'){
+    if(!isStaff) return forbidden();
+    const {data, error} = await supabase.from('villa_room_types')
+      .select('id,code,name,min_rate,max_rate,base_rate,active').order('name');
+    if(error) return err(error.message);
+    return json(data ?? []);
+  }
+
   // ── Promo ──────────────────────────────────────────────────────────────
   if(path==='/promos' && m==='GET'){
     if(!isStaff) return forbidden();

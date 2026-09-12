@@ -24,6 +24,13 @@ export function AdminShell({ pageTitle, pageSub, children }: { pageTitle: string
       items: [{ href: "/front-desk/booking", label: "Kalender Booking", icon: "◎" }],
     },
     {
+      title: "Pemasaran",
+      items: [
+        { href: "/admin/guests", label: "Database Tamu", icon: "◈" },
+        { href: "/admin/promos", label: "Promo", icon: "◆" },
+      ],
+    },
+    {
       title: "Kelola",
       items: [
         { href: "/admin/investors", label: "Investor", icon: "◎" },
