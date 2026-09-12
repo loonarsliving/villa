@@ -90,22 +90,43 @@ diubah sama sekali — yang perlu dipastikan adalah baris booking ini punya
 PENANDA yang jelas, lalu setiap kueri pendapatan/dividen mengecualikannya.
 Penanda itu harus ada sejak baris pertama dibuat, bukan ditambahkan belakangan.
 
-**RISIKO YANG SUDAH SAYA SAMPAIKAN KE OWNER, MENUNGGU KEPUTUSANNYA:**
-Tidak mendorong ke Cloudbeds berarti OTA (Airbnb, Booking, Agoda) **tidak tahu
-unit itu terpakai dan tetap menjualnya** — persis kebalikan dari yang dikejar
-owner pada 2026-09-12 ("agar cloudbeds mngetahui berapa kamar yg ada isi dan
-kosong"). Akibat terburuknya: tamu berbayar dari OTA datang dan unitnya sudah
-ditempati investor. Jalan tengah yang saya usulkan: tetap blokir unitnya di
-Cloudbeds supaya OTA berhenti menjual, TAPI tetap keluarkan dari laporan
-keuangan dan dividen — dua hal itu perhitungan kita sendiri dan tidak
-bergantung pada Cloudbeds. **Jangan bangun bagian ini sebelum owner memutuskan.**
+**KEPUTUSAN AKHIR OWNER (2026-09-12), setelah risikonya disampaikan:**
+*"Betul brrti ttp masuk cloudbeds, tpi tidak masuk hitungan okupansi"*.
 
-**Satu hal yang belum ditanyakan dan perlu ditanyakan:** malam gratis investor
-ikut dihitung sebagai okupansi oleh mesin harga AI atau tidak? Owner baru
-menjawab soal laporan keuangan dan dividen. Kalau ikut dihitung, okupansi
-terlihat lebih tinggi dan mesin bisa MENAIKKAN harga; kalau tidak, okupansi
-terlihat lebih rendah dan mesin bisa MENURUNKAN harga. Dua-duanya salah kalau
-dipilih tanpa sadar.
+Jadi malam gratis investor:
+- **TETAP didorong ke Cloudbeds** — unitnya diblokir supaya OTA berhenti
+  menjualnya. Ini memperbaiki jawaban owner sebelumnya ("tidak trcatat di
+  cloudbeds") setelah risiko tabrakan dengan tamu berbayar dijelaskan.
+- **TIDAK masuk laporan keuangan, rumus dividen, maupun hitungan okupansi.**
+
+**Ini bagian tersulit dari seluruh fitur, dan alasannya bukan Cloudbeds:**
+okupansi dihitung ULANG secara terpisah di **11 tempat**, masing-masing dengan
+kuerinya sendiri ke tabel `bookings`:
+
+| Berkas | Peran |
+|---|---|
+| `src/lib/aiPricingEngine.ts` | sinyal permintaan untuk keputusan harga |
+| `src/lib/aiDynamicPricingRun.ts` | eksekusi harga harian |
+| `src/lib/aiBridge.ts` | okupansi yang dikirim ke AI |
+| `src/app/api/admin/pricing-insight/route.ts` | |
+| `src/app/api/admin/occupancy-forecast/route.ts` | |
+| `src/app/api/admin/pricing-calendar/route.ts` | |
+| `src/app/api/admin/revenue-metrics/route.ts` | |
+| `src/app/api/cron/daily-inventory-snapshot/route.ts` | rekaman historis |
+| `src/app/api/cron/generate-pricing-recommendations/route.ts` | |
+| villa-api `/bridge/occupancy` | kartu okupansi front-desk & AI |
+| villa-api `/cron/promo-low-season` | ambang low season untuk promo |
+
+Kalau satu saja terlewat, angkanya akan berbeda-beda **tanpa satu pun pesan
+galat** — dan yang terlewat itu bisa jadi justru mesin harga. Karena itu
+pengecualiannya harus lewat SATU penanda yang disaring di satu tempat bersama,
+bukan ditempel satu per satu di sebelas kueri.
+
+**Yang masih perlu ditanyakan ke owner:** "tidak masuk hitungan okupansi" itu
+untuk keputusan harga/promo saja, atau juga untuk kartu okupansi yang dilihat
+staf di front desk? Dugaan saya yang pertama — staf tetap harus melihat unit
+itu TERISI, kalau tidak mereka mengira unitnya kosong padahal ada investor di
+dalamnya. Jangan diputuskan sendiri tanpa bertanya.
 
 ### 2. WhatsApp API sendiri untuk repo villa
 
@@ -113,6 +134,17 @@ Kata-kata owner: *"saya berniat menyiapkn 1 whatsapp api baru khusus untuk repo
 villa agar tidak perlu memanggil mkhsistem lagi hanya untuk wa"*, dan menyusul:
 *"kt akan coba whastapp api mengganti semua proses yg menggunakan wa di repo
 villa dan loonars"*.
+
+**Cakupannya dua repo, dan Mkhsistem TIDAK ikut** (owner 2026-09-12: *"yg saya
+buat sndiri hanya repo villa dan repo loonars, bukan mkhsistem yg sdh punay
+sistem lengkap"*). Mkhsistem tetap memakai sistem WhatsApp-nya sendiri; yang
+diputus hanyalah ketergantungan villa/loonars padanya.
+
+**Konsekuensi yang mudah terlewat:** memutus villa dari Mkhsistem berarti
+`lib/ai/domains/villa-payment-confirmation.ts` dan `villa-promo-campaign.ts`
+di Mkhsistem — beserta cabangnya di `webhook-handler.ts` — menjadi kode mati
+yang harus dicabut, BUKAN dibiarkan. Kalau dibiarkan, dua sistem akan sama-sama
+menanggapi balasan "LUNAS"/"PROMO" yang sama.
 
 **Cakupannya dua repo, bukan satu:** villa DAN loonars. Di loonars, WhatsApp
 saat ini hanya berupa tautan `wa.me/6282228885223` (tombol chat mengambang,
