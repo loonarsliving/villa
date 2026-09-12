@@ -37,6 +37,62 @@ const MARKET_DEMAND_CREATED_BY = "ai_jogja_events_research";
 const EVENT_IMPACT_ADJUSTMENT_PCT: Record<"low" | "medium" | "high", number> = { low: 0.05, medium: 0.1, high: 0.2 };
 
 /**
+ * Owner instruction (2026-09-12), after 16/22/23 Sep were pushed to the
+ * ceiling (Standard Rp1,000,000, Sawah View Rp1,055,546) purely because
+ * an event fell on those dates: "jangan hanya karena ada event dinaikkan
+ * drastis, perhatikan semua indikator yang membuat harga naik".
+ *
+ * That matches how revenue management actually works. A calendar event
+ * is a HYPOTHESIS about demand, not demand itself. Real operators raise
+ * price on PICKUP -- rooms actually selling for that date -- and treat
+ * the event only as a reason to expect pickup sooner. A date with an
+ * event and no bookings is still an empty date, and pricing it at the
+ * ceiling is the fastest way to keep it empty.
+ *
+ * So an event uplift now has to be EARNED by occupancy on that same
+ * date:
+ *   occupancy >= EVENT_DEMAND_FULL_PCT -> full uplift (demand confirmed)
+ *   occupancy >= EVENT_DEMAND_HALF_PCT -> half uplift (demand building)
+ *   below that, or during cold start   -> no uplift at all
+ */
+const EVENT_DEMAND_FULL_PCT = 50;
+const EVENT_DEMAND_HALF_PCT = 25;
+
+/**
+ * Same incident: "Standard" had exactly ONE villa comparable in
+ * villa_competitor_rates (Rp1,000,000) and "Sawah View" had three, one
+ * of which (Ubu Villa Gito Gati, Rp1,631,615) was double the other two.
+ * A mean over that sample is not a market rate, it is an anecdote.
+ *
+ * Two corrections: require a real sample before the competitor band is
+ * used at all, and use the MEDIAN so a single luxury outlier cannot set
+ * our price. The band is also a CAP only -- never a floor. Charging more
+ * than the neighbours because a thin sample says they are expensive is
+ * exactly the mistake this replaces; min_rate still protects the floor.
+ */
+const COMPETITOR_MIN_SAMPLES = 3;
+
+/**
+ * Close to arrival an empty date is a problem to solve, not an
+ * opportunity to price up: there is no longer time for demand to
+ * materialise. Inside this window, a date that is still under
+ * NEAR_ARRIVAL_MIN_OCC_PCT never gets priced above what it is already
+ * selling at, whatever the event calendar says.
+ */
+const NEAR_ARRIVAL_DAYS = 7;
+const NEAR_ARRIVAL_MIN_OCC_PCT = 30;
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
+function daysBetween(fromDate: string, toDate: string): number {
+  return Math.round((Date.parse(`${toDate}T00:00:00Z`) - Date.parse(`${fromDate}T00:00:00Z`)) / 86400000);
+}
+
+/**
  * Owner instruction (2026-09-11, ahead of the 20 Sep opening): hold the
  * low-occupancy discount until there is real booking history. A brand
  * new villa is empty by definition, so without this the engine would
@@ -220,9 +276,23 @@ export async function refreshMarketDemandIfStale(supabase: SupabaseClient, allow
 
 /**
  * Computes the decided rate for one room type across a set of target
- * dates -- occupancy-driven delta (clamped to max_daily_movement_pct),
- * weekend surcharge, high-season floor, competitor-market floor/cap,
- * always clamped last to the room type's min_rate/max_rate.
+ * dates, in the order a revenue manager would reason in:
+ *   1. stable anchor (base_rate)
+ *   2. weekend surcharge  -- a known, permanent pattern
+ *   3. realised demand    -- occupancy actually picked up for that date
+ *   4. event uplift       -- only the share demand has EARNED (step 3)
+ *   5. competitor median  -- a sanity CAP, never a floor
+ *   6. near-arrival guard -- an empty date close in is never priced up
+ *   7. movement clamp     -- vs. what the date sells at TODAY
+ *   8. min_rate/max_rate  -- the owner's hard guardrails, always last
+ *
+ * Steps 4-7 are the 2026-09-12 rewrite. Before it, an event put the
+ * date into "high season", where the competitor average acted as a
+ * FLOOR and bypassed the movement clamp entirely -- which pushed
+ * 16/22/23 Sep from Rp650,000 to the Rp1,000,000 ceiling in a single
+ * run, live on every OTA, on dates with zero bookings. The rule that
+ * replaces it: an event is a reason to EXPECT demand, only pickup is a
+ * reason to charge for it.
  *
  * `anchorRate` MUST be a stable value the engine never writes to
  * (villa_room_types.base_rate) -- passing units.tarif_harian here, as
@@ -259,7 +329,11 @@ export async function decideRatesForRoomType(
   // comparison for a private villa unit -- one hotel sample (Rp351,074)
   // dragged the average for a Rp1,000,000 villa competitor down to
   // Rp675,537, which then cut a real Saturday price the same day this
-  // ran. Only "villa" competitors count toward the price cap/floor now.
+  // ran. Only "villa" competitors count toward the price band now.
+  //
+  // Owner correction (2026-09-12): and only when there are enough of
+  // them to be a market rather than an anecdote, using the median so one
+  // luxury villa can't set our price. See COMPETITOR_MIN_SAMPLES.
   const competitorSince = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
   const { data: competitorRates } = await supabase
     .from("villa_competitor_rates")
@@ -267,8 +341,22 @@ export async function decideRatesForRoomType(
     .eq("room_type_id", roomType.id)
     .eq("competitor_type", "villa")
     .gte("observed_at", competitorSince);
-  const competitorAvg =
-    competitorRates && competitorRates.length > 0 ? competitorRates.reduce((sum, r) => sum + Number(r.price), 0) / competitorRates.length : null;
+  const competitorPrices = (competitorRates ?? []).map((r) => Number(r.price)).filter((n) => Number.isFinite(n) && n > 0);
+  const competitorMedian = competitorPrices.length >= COMPETITOR_MIN_SAMPLES ? median(competitorPrices) : null;
+
+  // The price each date is actually selling at right now. Every guardrail
+  // that talks about "how far price may move" is measured against THIS,
+  // not against the anchor -- the 16/22/23 Sep incident moved price
+  // +54% in one run precisely because the event and competitor branches
+  // wrote an absolute number that never passed through the movement
+  // clamp at all.
+  const { data: liveRates } = await supabase
+    .from("villa_rates")
+    .select("date, rate")
+    .eq("room_type_id", roomType.id)
+    .gte("date", today)
+    .lte("date", toDate);
+  const liveRateByDate = new Map((liveRates ?? []).map((r) => [String(r.date), Number(r.rate)]));
 
   function highSeasonPeriodFor(dateStr: string) {
     return (highSeasonPeriods ?? []).find((p) => p.start_date <= dateStr && p.end_date >= dateStr) ?? null;
@@ -287,55 +375,109 @@ export async function decideRatesForRoomType(
     );
     const occupancyPct = unitIds.size > 0 ? Math.round((activeForDate.length / unitIds.size) * 1000) / 10 : 0;
 
-    let deltaPct = 0;
     const reasonCodes: string[] = [];
-    if (occupancyPct >= settings.high_occupancy_threshold_pct) {
-      deltaPct = settings.high_occupancy_adjustment_pct;
-      reasonCodes.push("high_occupancy");
-    } else if (occupancyPct <= settings.low_occupancy_threshold_pct) {
-      if (coldStart) {
-        reasonCodes.push("cold_start_hold");
-      } else {
-        deltaPct = settings.low_occupancy_adjustment_pct;
-        reasonCodes.push("low_occupancy");
-      }
-    }
-
-    let clampedDelta = deltaPct;
     let guardrailStatus: DatePriceDecision["guardrail_status"] = "within_range";
-    if (Math.abs(clampedDelta) > settings.max_daily_movement_pct) {
-      clampedDelta = Math.sign(clampedDelta) * settings.max_daily_movement_pct;
-      guardrailStatus = "clamped_movement";
-    }
 
-    let decidedRate = Math.round(anchorRate * (1 + clampedDelta));
+    // --- 1. Start from the stable anchor, never from the last price ---
+    let decidedRate = anchorRate;
 
+    // --- 2. Day-of-week seasonality (a known, permanent pattern) ---
     if (isWeekendJakarta(targetDate)) {
       decidedRate += WEEKEND_SURCHARGE;
       reasonCodes.push("weekend");
     }
 
+    // The owner's own rate plan: base rate plus the weekend pattern,
+    // before any demand or event adjustment. Nothing below is allowed to
+    // price UNDER this on the strength of competitor research alone.
+    const structuralRate = decidedRate;
+
+    // --- 3. Realised demand for THIS date (pickup) ---
+    let demandPct = 0;
+    if (occupancyPct >= settings.high_occupancy_threshold_pct) {
+      demandPct = settings.high_occupancy_adjustment_pct;
+      reasonCodes.push("high_occupancy");
+    } else if (occupancyPct <= settings.low_occupancy_threshold_pct) {
+      if (coldStart) {
+        reasonCodes.push("cold_start_hold");
+      } else {
+        demandPct = settings.low_occupancy_adjustment_pct;
+        reasonCodes.push("low_occupancy");
+      }
+    }
+    decidedRate = Math.round(decidedRate * (1 + demandPct));
+
+    // --- 4. Event uplift, but only as far as demand has earned it ---
     const highSeasonPeriod = highSeasonPeriodFor(targetDate);
     if (highSeasonPeriod) {
-      const floor = Math.round(anchorRate * (1 + Number(highSeasonPeriod.suggested_adjustment_pct)));
-      if (floor > decidedRate) decidedRate = floor;
       reasonCodes.push("high_season");
-      if (competitorAvg !== null && Math.round(competitorAvg) > decidedRate) {
-        decidedRate = Math.round(competitorAvg);
-        reasonCodes.push("competitor_market_rate");
+      const eventPct = Number(highSeasonPeriod.suggested_adjustment_pct) || 0;
+      let earnedShare = 0;
+      if (coldStart) {
+        reasonCodes.push("event_uplift_held_cold_start");
+      } else if (occupancyPct >= EVENT_DEMAND_FULL_PCT) {
+        earnedShare = 1;
+        reasonCodes.push("event_demand_confirmed");
+      } else if (occupancyPct >= EVENT_DEMAND_HALF_PCT) {
+        earnedShare = 0.5;
+        reasonCodes.push("event_demand_building");
+      } else {
+        reasonCodes.push("event_demand_unproven");
       }
-    } else if (competitorAvg !== null) {
-      // Outside high season the market average acts as a CAP, never a
-      // floor: the owner's goal is filling rooms, so we never ask more
-      // than nearby villas/hotels are actually charging. min_rate below
-      // still protects the downside.
-      const cap = Math.round(competitorAvg);
+      if (earnedShare > 0) decidedRate = Math.round(decidedRate * (1 + eventPct * earnedShare));
+    }
+
+    // --- 5. Competitor band: a sanity CAP, never a floor ---
+    //
+    // The cap restrains OUR optimism -- it trims an uplift we added on
+    // top of the rate plan. It is not allowed to undercut the rate plan
+    // itself: on 2026-09-11 a thin competitor sample cut a real Saturday
+    // price, and the median alone does not prevent that (the three Sawah
+    // View comparables median to Rp809,281, below our own Rp850,000
+    // Saturday). Hence max() against structuralRate.
+    if (competitorMedian !== null) {
+      const cap = Math.max(Math.round(competitorMedian), structuralRate);
       if (decidedRate > cap) {
         decidedRate = cap;
         reasonCodes.push("competitor_market_cap");
       }
     }
 
+    // --- 6. Close to arrival and still empty: never price up ---
+    const liveRate = liveRateByDate.get(targetDate) ?? null;
+    const daysToArrival = daysBetween(today, targetDate);
+    if (liveRate !== null && daysToArrival <= NEAR_ARRIVAL_DAYS && occupancyPct < NEAR_ARRIVAL_MIN_OCC_PCT && decidedRate > liveRate) {
+      decidedRate = liveRate;
+      reasonCodes.push("near_arrival_no_increase");
+    }
+
+    // --- 7. Movement clamp against what the date sells at TODAY ---
+    //
+    // The clamp exists so price never LURCHES -- "jangan dinaikkan
+    // drastis". It deliberately does not apply to a move that lands
+    // between today's live price and the anchor, because that is a
+    // correction back toward the owner's own base rate, not a swing away
+    // from it. Without this exception the clamp would actively slow down
+    // undoing a bad price: recovering 16 Sep from the Rp1,000,000
+    // ceiling to Rp650,000 would have taken three days of -15% steps,
+    // with the wrong price live on every OTA the whole time.
+    const anchorSide = Math.min(anchorRate, liveRate ?? anchorRate);
+    const liveSide = Math.max(anchorRate, liveRate ?? anchorRate);
+    const isCorrectionTowardAnchor = liveRate !== null && decidedRate >= anchorSide && decidedRate <= liveSide;
+
+    if (liveRate !== null && liveRate > 0 && !isCorrectionTowardAnchor) {
+      const maxUp = Math.round(liveRate * (1 + settings.max_daily_movement_pct));
+      const maxDown = Math.round(liveRate * (1 - settings.max_daily_movement_pct));
+      if (decidedRate > maxUp) {
+        decidedRate = maxUp;
+        guardrailStatus = "clamped_movement";
+      } else if (decidedRate < maxDown) {
+        decidedRate = maxDown;
+        guardrailStatus = "clamped_movement";
+      }
+    }
+
+    // --- 8. Owner's hard guardrails always win, last ---
     const minRate = roomType.min_rate !== null ? Number(roomType.min_rate) : null;
     const maxRate = roomType.max_rate !== null ? Number(roomType.max_rate) : null;
     if (minRate !== null && decidedRate < minRate) {

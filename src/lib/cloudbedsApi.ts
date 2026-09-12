@@ -230,3 +230,100 @@ export async function pushCloudbedsRate(rateId: string, intervals: RateInterval[
   }
   return { jobReferenceId: typeof body?.jobReferenceID === "string" ? body.jobReferenceID : null };
 }
+
+export interface ReservationTotals {
+  /** Sum of subTotal + additionalItems + taxesFees -- what the guest owes. */
+  grandTotal: number;
+  /** Sum of the room prices only, before extras and taxes. */
+  subTotal: number;
+  /** Cloudbeds' per-date room rate map, keyed YYYY-MM-DD. */
+  detailedRates: Record<string, number>;
+}
+
+/**
+ * Fetches the money side of reservations, keyed by reservationID.
+ *
+ * Why a separate call: `getReservations` has NO total field at all --
+ * verified against the cached OpenAPI spec (pms-v1.2), whose
+ * GetReservationsResponse carries only `balance`. The backfill and the
+ * webhook both read `resv.total`, which is therefore always `undefined`,
+ * so every Cloudbeds booking landed with `tarif = 0` and `total_bayar =
+ * 0` and counted as zero revenue in reporting. `balance` would have been
+ * wrong too -- it is what is still OWED, not what the stay costs, so a
+ * fully prepaid OTA booking reads 0 there as well.
+ *
+ * `getReservationsWithRateDetails` is the endpoint that actually carries
+ * it, under `balanceDetailed` (subTotal / grandTotal) plus a
+ * `detailedRates` per-date map. Every numeric field arrives as a STRING
+ * here like everywhere else in this API, so each one is coerced.
+ *
+ * Returns an empty map rather than throwing when the call comes back
+ * empty: a missing total must never block a booking from being recorded.
+ */
+export async function getCloudbedsReservationTotals(params: {
+  checkOutFrom?: string;
+  reservationIDs?: string[];
+}): Promise<Map<string, ReservationTotals>> {
+  const key = apiKey();
+  const propertyId = (process.env.CLOUDBEDS_PROPERTY_ID ?? "").trim();
+  const wanted = params.reservationIDs ? new Set(params.reservationIDs) : null;
+  const out = new Map<string, ReservationTotals>();
+
+  let pageNumber = 1;
+  for (;;) {
+    const url = new URL(`${CLOUDBEDS_API_BASE}/getReservationsWithRateDetails`);
+    if (propertyId) url.searchParams.set("propertyID", propertyId);
+    if (params.checkOutFrom) url.searchParams.set("checkOutFrom", params.checkOutFrom);
+    url.searchParams.set("pageNumber", String(pageNumber));
+    url.searchParams.set("pageSize", "100");
+
+    const res = await fetch(url, { headers: { "x-api-key": key }, cache: "no-store" });
+    const body = await res.json().catch(() => null);
+    if (!res.ok || body?.success === false) return out;
+
+    const rows: unknown[] = Array.isArray(body?.data) ? body.data : body?.data ? [body.data] : [];
+    if (rows.length === 0) return out;
+
+    for (const row of rows) {
+      const r = row as Record<string, unknown>;
+      const id = typeof r.reservationID === "string" ? r.reservationID : null;
+      if (!id || (wanted && !wanted.has(id))) continue;
+
+      const detailed = (r.balanceDetailed ?? {}) as Record<string, unknown>;
+      const rates: Record<string, number> = {};
+      if (r.detailedRates && typeof r.detailedRates === "object") {
+        for (const [date, value] of Object.entries(r.detailedRates as Record<string, unknown>)) {
+          const n = Number(value);
+          if (Number.isFinite(n)) rates[date] = n;
+        }
+      }
+      const grandTotal = Number(detailed.grandTotal);
+      const subTotal = Number(detailed.subTotal);
+      out.set(id, {
+        grandTotal: Number.isFinite(grandTotal) ? grandTotal : 0,
+        subTotal: Number.isFinite(subTotal) ? subTotal : 0,
+        detailedRates: rates,
+      });
+    }
+
+    if (rows.length < 100) return out;
+    pageNumber++;
+    if (pageNumber > 50) return out;
+  }
+}
+
+/**
+ * Nightly rate to record on a booking: the average of Cloudbeds' own
+ * per-date rates across the stay when it gives them, otherwise
+ * subTotal (room charges only, excluding taxes/extras) divided by the
+ * number of nights. `total_bayar` should use grandTotal instead -- that
+ * is what the guest actually pays.
+ */
+export function nightlyRateFromTotals(totals: ReservationTotals, checkIn: string, checkOut: string | null): number {
+  const perDate = Object.values(totals.detailedRates);
+  if (perDate.length > 0) return Math.round(perDate.reduce((a, b) => a + b, 0) / perDate.length);
+
+  const nights = checkOut ? Math.round((Date.parse(`${checkOut}T00:00:00Z`) - Date.parse(`${checkIn}T00:00:00Z`)) / 86400000) : 1;
+  const base = totals.subTotal > 0 ? totals.subTotal : totals.grandTotal;
+  return nights > 0 ? Math.round(base / nights) : Math.round(base);
+}

@@ -4,6 +4,14 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-09-12 (branch `claude/serene-cori-ne0rhb`, not yet on `main`)
+- **Pricing — an event no longer raises price on its own.** After 16, 22 and 23 Sep were pushed to the ceiling (Standard Rp1,000,000, Sawah View Rp1,055,546) live on every OTA purely because an AI-detected event fell on those dates, `decideRatesForRoomType` was rewritten to the order a revenue manager actually reasons in: anchor → weekend → **realised demand (pickup)** → event uplift **only as far as occupancy has earned it** → competitor median as a cap → near-arrival guard → movement clamp → min/max. Owner instruction: *"jangan hanya karena ada event dinaikkan drastis, perhatikan semua indikator yang membuat harga naik"*.
+  - Event uplift now requires pickup on that same date (≥50% = full, ≥25% = half, below that = none) and is held entirely during cold start, mirroring the existing `cold_start_hold` discipline on the discount side.
+  - The competitor band is a **cap only, never a floor**, needs ≥3 villa samples, uses the **median** (one Rp1,631,615 outlier had been setting Sawah View's price), and can never price under the owner's own base+weekend rate plan.
+  - The movement clamp is now measured against **today's live rate**, which the old high-season and competitor branches bypassed entirely — that bypass is what allowed a +54% jump in a single run. A move that lands between the live rate and the anchor is exempt, so correcting a bad price is immediate rather than a three-day walk-down.
+- **Cloudbeds bookings recorded `tarif = 0`.** `getReservations` has no `total` field at all (verified against the cached pms-v1.2 OpenAPI spec — it carries only `balance`, which is what is still owed, not what the stay costs), so `resv.total` was always `undefined` and all three backfilled reservations counted as zero revenue. Added `getCloudbedsReservationTotals()` / `nightlyRateFromTotals()` reading `getReservationsWithRateDetails` (`balanceDetailed.subTotal`/`grandTotal` + the `detailedRates` per-date map), used by both the backfill and the webhook, which now also set `durasi_malam`.
+
+
 ### 2026-06-13
 - `18977d1` — Add files via upload (initial commit / project bootstrap).
 

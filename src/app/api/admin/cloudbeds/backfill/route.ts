@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { getCloudbedsReservationTotals, nightlyRateFromTotals } from "@/lib/cloudbedsApi";
 import { NextResponse } from "next/server";
 import { isAdminToken } from "@/lib/villaApiAuth";
 
@@ -40,7 +41,6 @@ interface CloudbedsReservation {
   guestName?: string;
   startDate: string;
   endDate: string;
-  total?: number;
   rooms?: CloudbedsRoomAssignment[];
   guestList?: Record<string, CloudbedsGuestDetail>;
 }
@@ -104,6 +104,16 @@ export async function POST(request: Request) {
   for (const r of allReservations) statusCounts[r.status] = (statusCounts[r.status] ?? 0) + 1;
   const reservations = allReservations.filter((r) => (ACTIVE_STATUSES as readonly string[]).includes(r.status));
 
+  // getReservations carries no total at all (see
+  // getCloudbedsReservationTotals) -- without this every row below landed
+  // with tarif = 0 and counted as zero revenue.
+  let totalsById = new Map<string, Awaited<ReturnType<typeof getCloudbedsReservationTotals>> extends Map<string, infer V> ? V : never>();
+  try {
+    totalsById = await getCloudbedsReservationTotals({ checkOutFrom: new Date().toISOString().slice(0, 10) });
+  } catch {
+    // A missing total must never block a booking from being recorded.
+  }
+
   const { data: mappings } = await supabase.from("cloudbeds_room_mapping").select("cloudbeds_room_id, unit_id, units(nomor)");
   type MappingRow = { unit_id: string; units: { nomor: string }[] | { nomor: string } | null };
   const mappingByRoomId = new Map(
@@ -126,6 +136,12 @@ export async function POST(request: Request) {
     const mapping = mappingByRoomId.get(String(room.roomID))!;
     const unitNomor = Array.isArray(mapping.units) ? (mapping.units[0]?.nomor ?? null) : (mapping.units?.nomor ?? null);
     matched++;
+
+    const checkIn = room.roomCheckIn ?? resv.startDate;
+    const checkOut = room.roomCheckOut ?? resv.endDate;
+    const nights = checkOut ? Math.round((Date.parse(`${checkOut}T00:00:00Z`) - Date.parse(`${checkIn}T00:00:00Z`)) / 86400000) : 0;
+    const totals = totalsById.get(resv.reservationID) ?? null;
+    const nightlyRate = totals ? nightlyRateFromTotals(totals, checkIn, checkOut) : 0;
 
     const guestDetail = room.guestID ? resv.guestList?.[room.guestID] : undefined;
     const guestNama =
@@ -153,10 +169,11 @@ export async function POST(request: Request) {
           guest_nama: guestNama,
           tipe: "harian",
           sumber: "cloudbeds",
-          tgl_checkin: room.roomCheckIn ?? resv.startDate,
-          tgl_checkout: room.roomCheckOut ?? resv.endDate,
-          tarif: resv.total ?? 0,
-          total_bayar: resv.total ?? 0,
+          tgl_checkin: checkIn,
+          tgl_checkout: checkOut,
+          durasi_malam: nights > 0 ? nights : null,
+          tarif: nightlyRate,
+          total_bayar: totals ? totals.grandTotal : 0,
           status: statusToVilla(resv.status),
           cloudbeds_reservation_id: resv.reservationID,
         },
