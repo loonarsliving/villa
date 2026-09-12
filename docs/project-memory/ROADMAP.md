@@ -23,6 +23,101 @@ UNKNOWN — NEEDS CONFIRMATION. No prioritized "next up" list exists in the repo
 ## PLANNED
 UNKNOWN — NEEDS CONFIRMATION. A handful of other `claude/*` branches exist (`file-hub-repo-integration`, `repo-overview`, `security-audit-repos`, `tampilan-design-request`, `villa-system-no-receptionist`) whose branch names suggest topics (file hub, another repo-overview/audit, additional security review, a design request, and a "no receptionist" system variant) but whose content was outside this audit's deep-dive scope. Their existence is evidence of exploratory/candidate work, not a confirmed plan.
 
+## PLANNED (eksplisit, dari owner, 2026-09-12) — dua pekerjaan berikutnya
+
+Dicatat atas permintaan owner sendiri ("saya ingin km catat baik2 ini besok kt
+akan lanjutkan"). Belum ada kode apa pun untuk keduanya.
+
+### 1. Kode menginap gratis untuk investor
+
+Kata-kata owner: *"kt akan buat kode referal gratis untuk investor, karna ke 13
+investor ini punya 12 poin mnginap gratis selama setahun, dan berlaku sebulan
+sekali, kemudian tidak bisa di pakai di weekedn highseason, jd nti km akan
+buatkan 12 kode referal yg akan tampil di dashboard mereka, dan itu akan
+trcoret jika sdh tepakai itu smua otomatis, dia bisa input kode itu tentu di
+pemesanan loonars.id"*.
+
+Bentuknya yang diminta:
+- 12 kode per investor, berlaku setahun, satu kali pakai per kode.
+- Hanya boleh dipakai **sebulan sekali**.
+- **Tidak berlaku di weekend/high season** (lihat pertanyaan terbuka di bawah).
+- Tampil di dashboard investor, dan **tercoret sendiri** begitu terpakai.
+- Ditukarkan oleh investor lewat form pemesanan di loonars.id.
+
+Catatan penamaan: owner menyebutnya "kode referal", tapi yang dijelaskannya
+adalah **voucher penukaran menginap gratis** (dipakai investor itu sendiri),
+bukan kode referal yang dibagikan ke orang lain. Bangun sesuai perilakunya,
+bukan sesuai namanya — dan tanyakan lagi kalau maksudnya ternyata dibagikan.
+
+**Fakta yang sudah diperiksa (2026-09-12), jangan diulang:**
+- **"13 investor" cocok dengan `villa_users` role `owner` yang aktif: 16 baris,
+  13 aktif.** Investor login memakai role `owner`, bukan role bernama
+  "investor" (role `investor` tidak ada sama sekali).
+- **`investor_profiles` hanya berisi 11 baris** — kolomnya: `id, unit_id,
+  unit_nomor, user_id, nama, hp, created_at, bank_nama, no_rekening,
+  nama_pemilik_rekening`. Jadi 13 investor vs 11 profil **tidak cocok**.
+  Selesaikan ini DULU: membuat 12 kode dari `investor_profiles` akan
+  menghasilkan 132 kode dan **melewatkan 2 investor**.
+- `villa_high_season_periods` ada dan berisi **5 periode aktif**, jadi aturan
+  "tidak berlaku di high season" sudah punya sumber data; tidak perlu tabel
+  baru untuk itu.
+- Dashboard investor sudah ada: `src/app/investor/` (`page`, `laporan`,
+  `opex`, `pendapatan`, `profil`, `notifikasi`).
+
+**Pertanyaan yang harus dijawab owner sebelum dibangun:**
+1. **"weekedn highseason" itu satu syarat atau dua?** Apakah terlarang di
+   SETIAP weekend DAN setiap high season (dua larangan terpisah), atau hanya
+   di weekend YANG jatuh di high season? Bedanya besar: tafsir pertama
+   membuang hampir semua Jumat-Sabtu sepanjang tahun.
+2. **Weekend itu hari apa?** Jumat+Sabtu (pola menginap Indonesia) atau
+   Sabtu+Minggu?
+3. **"Sebulan sekali" dihitung bagaimana?** Satu kali per bulan kalender, atau
+   minimal 30 hari antar pemakaian?
+4. **Gratis itu untuk berapa malam, dan tipe unit apa?** Satu malam? Unitnya
+   sendiri saja, atau tipe apa pun termasuk Sawah View?
+5. **Setahun dihitung dari kapan?** Dan poin yang tidak terpakai hangus atau
+   berlanjut?
+
+**Dua bahaya yang sudah terlihat dari sekarang:**
+- **Menginap gratis = `total_bayar` 0.** Itu masuk ke perhitungan pendapatan
+  dan pembagian dividen. Rumus keuangan di
+  `docs/revenue-engine/PHASE0-BASELINE.md` §2 DIBEKUKAN dan menyentuhnya butuh
+  izin owner. Putuskan lebih dulu: apakah malam gratis ini dihitung sebagai
+  okupansi dengan pendapatan nol (menurunkan rata-rata tarif dan bisa memicu
+  mesin harga menurunkan harga), atau dikeluarkan dari perhitungan pendapatan.
+- **Push ke Cloudbeds.** Booking gratis tetap harus memblokir kamar di semua
+  OTA, tapi `pushBookingToCloudbeds` tidak mengirim nominal sama sekali —
+  Cloudbeds akan memberi harganya sendiri. Ini persis lubang yang pada
+  2026-09-12 sempat mengubah harga tamu yang sudah membayar.
+
+### 2. WhatsApp API sendiri untuk repo villa
+
+Kata-kata owner: *"saya berniat menyiapkn 1 whatsapp api baru khusus untuk repo
+villa agar tidak perlu memanggil mkhsistem lagi hanya untuk wa"*.
+
+Keadaan sekarang — **dua arah** lewat Mkhsistem, dan keduanya harus pindah,
+bukan cuma yang keluar:
+- **Keluar:** `sendWa()` di villa-api POST ke
+  `integration_settings.vercel_bridge.base_url` + `/api/wa/send` milik
+  Mkhsistem. Dipakai oleh: notifikasi booking website, pesan `LUNAS` ke owner,
+  pengingat kebersihan, daftar transfer dividen, dan pengiriman promo.
+- **Masuk (mudah terlewat):** balasan WhatsApp `LUNAS`, `PROMO`, `TOLAK`,
+  `BERHENTI` dikenali oleh `lib/ai/webhook-handler.ts` **milik Mkhsistem**, lalu
+  memanggil balik villa-api lewat `/bridge/*`. Melepas Mkhsistem berarti villa
+  butuh penerima webhook WhatsApp-nya sendiri. Kalau hanya sisi keluar yang
+  dipindah, konfirmasi pembayaran owner akan berhenti bekerja tanpa pesan galat
+  apa pun.
+- Nomor WhatsApp-nya sendiri juga perlu diputuskan: nomor baru untuk villa,
+  atau nomor yang sama pindah penyedia (memindahkan nomor memutus riwayat chat
+  dan sesi perangkat).
+
+**Belum pernah dibuktikan sampai sekarang:** jalur balasan WhatsApp (`LUNAS`
+maupun `PROMO`) belum pernah diuji manusia satu kali pun. Batch `1DE5AA`
+disiapkan berisi hanya nomor owner untuk membuktikannya. Buktikan jalur lama
+bekerja SEBELUM menggantinya — kalau tidak, saat yang baru gagal, tidak ada cara
+mengetahui apakah itu karena penggantinya atau karena jalur itu memang tidak
+pernah hidup.
+
 ## PLANNED (explicit, from owner, 2026-08-27)
 - **KTP OCR + Filemanager (Ultron) integration** — Tahap 2/3 of the Check-In Card work. Tahap 1 (photo capture + digital signature, stored in villa's own private `guest-documents` Supabase bucket) is DONE. Not yet built: (a) an AI OCR endpoint on Mkhsistem (their existing Gemini client, no such endpoint exists there yet — confirmed by reading Mkhsistem's `app/api` tree 2026-08-27) that reads a KTP photo and returns structured guest data; (b) routing the KTP photo into the separate "Filemanager"/"Ultron" app (`filemanager.haluoleo.id`, repo `loonarsliving/Filemanager`, not in villa's or this audit's repo access) for permanent storage instead of villa's own bucket. Owner's framing: "sebenarnya semua fitur itu sudah ada, nanti kita benahi" (these capabilities basically already exist elsewhere, we'll wire them up later) — but as of 2026-08-27 no such KTP-OCR or villa-facing Filemanager bridge endpoint was found to exist yet on Mkhsistem's side; this needs re-confirming directly with the owner or by reading the Filemanager repo before building, not assumed.
 
