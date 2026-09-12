@@ -207,28 +207,70 @@ export interface RateInterval {
  * following day. (Note this is the opposite of getRate, which rejects
  * startDate === endDate -- the two endpoints do not agree, so neither
  * can be assumed from the other.)
+ *
+ * Sent in batches of MAX_INTERVALS_PER_CALL. Established the hard way on
+ * 2026-09-12, the first time a full year was pushed: 365 single-day
+ * intervals encode to 3 form fields each, 1,096 in total, and Cloudbeds
+ * answered "The endDate parameter value is missing". That is the
+ * signature of PHP's default max_input_vars = 1000 -- everything past
+ * the thousandth field is dropped silently, so the last intervals arrive
+ * with a startDate and no endDate. Nothing in the response says so.
+ * 90 intervals (271 fields) leaves a wide margin.
  */
+const MAX_INTERVALS_PER_CALL = 90;
+
 export async function pushCloudbedsRate(rateId: string, intervals: RateInterval[]): Promise<{ jobReferenceId: string | null }> {
   const key = apiKey();
-  const form = new URLSearchParams();
-  form.set("rates[0][rateID]", rateId);
-  intervals.forEach((iv, i) => {
-    form.set(`rates[0][interval][${i}][startDate]`, iv.startDate);
-    form.set(`rates[0][interval][${i}][endDate]`, iv.endDate);
-    form.set(`rates[0][interval][${i}][rate]`, String(iv.rate));
-  });
+  let lastJobReferenceId: string | null = null;
 
-  const res = await fetch(`${CLOUDBEDS_API_BASE}/putRate`, {
-    method: "POST",
-    headers: { "x-api-key": key, "Content-Type": "application/x-www-form-urlencoded" },
-    body: form.toString(),
-  });
-  const body = await res.json().catch(() => null);
-  if (!res.ok || body?.success === false) {
-    const message = body?.message || body?.error || `Cloudbeds API error (HTTP ${res.status})`;
-    throw new CloudbedsApiError(message, res.status >= 400 ? res.status : 502);
+  for (let offset = 0; offset < intervals.length; offset += MAX_INTERVALS_PER_CALL) {
+    const batch = intervals.slice(offset, offset + MAX_INTERVALS_PER_CALL);
+    const form = new URLSearchParams();
+    form.set("rates[0][rateID]", rateId);
+    batch.forEach((iv, i) => {
+      form.set(`rates[0][interval][${i}][startDate]`, iv.startDate);
+      form.set(`rates[0][interval][${i}][endDate]`, iv.endDate);
+      form.set(`rates[0][interval][${i}][rate]`, String(iv.rate));
+    });
+
+    const res = await fetch(`${CLOUDBEDS_API_BASE}/putRate`, {
+      method: "POST",
+      headers: { "x-api-key": key, "Content-Type": "application/x-www-form-urlencoded" },
+      body: form.toString(),
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok || body?.success === false) {
+      const message = body?.message || body?.error || `Cloudbeds API error (HTTP ${res.status})`;
+      throw new CloudbedsApiError(`${message} (batch ${offset / MAX_INTERVALS_PER_CALL + 1}, ${batch[0]?.startDate}..${batch[batch.length - 1]?.endDate})`, res.status >= 400 ? res.status : 502);
+    }
+    if (typeof body?.jobReferenceID === "string") lastJobReferenceId = body.jobReferenceID;
   }
-  return { jobReferenceId: typeof body?.jobReferenceID === "string" ? body.jobReferenceID : null };
+
+  return { jobReferenceId: lastJobReferenceId };
+}
+
+/**
+ * Collapses consecutive dates that carry the same price into one
+ * interval, which is what a Cloudbeds interval is for. A year priced on
+ * a weekday/weekend pattern is only a few hundred single days but far
+ * fewer runs, so this cuts the request size several times over before
+ * batching even applies -- and it is what a human would send.
+ *
+ * Requires `decisions` sorted ascending by date; a gap in the dates
+ * correctly ends a run, so a missing day is never silently filled in.
+ */
+export function collapseRateIntervals(decisions: { date: string; rate: number }[]): RateInterval[] {
+  const out: RateInterval[] = [];
+  for (const d of decisions) {
+    const last = out[out.length - 1];
+    const isNextDay = last ? Date.parse(`${d.date}T00:00:00Z`) - Date.parse(`${last.endDate}T00:00:00Z`) === 86400000 : false;
+    if (last && last.rate === d.rate && isNextDay) {
+      last.endDate = d.date;
+    } else {
+      out.push({ startDate: d.date, endDate: d.date, rate: d.rate });
+    }
+  }
+  return out;
 }
 
 export interface ReservationTotals {
