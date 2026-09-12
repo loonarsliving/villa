@@ -913,8 +913,12 @@ Deno.serve(async (req)=>{
     const propertyId = (Deno.env.get('CLOUDBEDS_PROPERTY_ID') ?? '').trim();
     if(propertyId) form.set('propertyID', propertyId);
 
+    // PUT, not POST. The spec declares this path under `put:` -- every
+    // other Cloudbeds call in this file is a POST, and copying that shape
+    // here got HTTP 404 {"error":"Unknown method."}, which reads like a
+    // missing endpoint rather than a wrong verb.
     const res = await fetch(`${CLOUDBEDS_API_BASE}/putReservation`, {
-      method:'POST',
+      method:'PUT',
       headers:{'x-api-key':apiKey,'Content-Type':'application/x-www-form-urlencoded'},
       body: form.toString(),
     });
