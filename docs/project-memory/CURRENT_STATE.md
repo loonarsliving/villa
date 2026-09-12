@@ -2,6 +2,122 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-12 — verifikasi: API Cloudbeds bisa mengubah harga, DAN cron malamnya memang jalan otomatis
+
+Owner bertanya: pastikan dulu API ke Cloudbeds benar-benar bisa **menulis**
+harga, bukan cuma membaca.
+
+**TERBUKTI BISA MENULIS.** Buktinya bukan catatan lama, tapi isi Cloudbeds
+sekarang (dicek lewat `villa_rates`, yang menurut aturan single-writer
+hanya diisi dari hasil baca-balik Cloudbeds — mesin harga tidak pernah
+menulisnya langsung):
+
+- 368 baris per tipe kamar, **2026-09-04 s/d 2027-09-11** — satu tahun
+  penuh, sesuai `WINDOW_DAYS = 365`.
+- Angkanya persis aritmetika mesin harga, sampai rupiahnya:
+  Standard 650.000 dasar / 750.000 Jum-Sab, dan pada periode
+  **24 Des–2 Jan** (persis baris `ai_recurring_peak` "Libur Natal dan
+  Tahun Baru") menjadi 780.000 / 900.000 = tepat ×1,2.
+  Sawah View 750.000 / 850.000 → 900.000 / 1.020.000, juga tepat ×1,2.
+  23 Des dan 3 Jan kembali ke harga dasar — batas periodenya pas.
+- Tidak ada manusia yang menetapkan 1.020.000 dengan tangan pada rentang
+  tanggal yang persis itu. Angka-angka ini berasal dari mesin harga villa,
+  ditulis ke Cloudbeds lewat `putRate`, lalu dibaca balik.
+
+Jadi kunci API-nya punya izin tulis rate dan jalurnya bekerja
+ujung-ke-ujung. `getRate` (baca) juga terverifikasi: log
+`sync-cloudbeds-rates` 2026-09-12 18:21 UTC melaporkan
+`dates_synced: 364` untuk kedua tipe kamar.
+
+**CRON MALAMNYA JALAN — dan ini sempat saya simpulkan keliru.** Log
+runtime Vercel tidak memperlihatkan `/api/cron/ai-dynamic-pricing` sama
+sekali, yang sempat saya baca sebagai "cronnya tidak jalan". Itu salah:
+**retensi log Vercel hobby hanya ~1 jam**, bukan 24 jam seperti yang
+disiratkan parameter kuerinya. Ketahuan dari `sync-cloudbeds-reservations`
+yang jadwalnya `*/10` tapi hanya muncul **6 kali** — persis 60 menit. Cron
+harga jam 17:10 UTC memang di luar jendela itu.
+
+Bukti bahwa ia benar-benar jalan ada di jejak `villa_rates.updated_at`
+(kolom ini hanya berubah kalau nilai harganya berubah):
+
+| Waktu sinkron (UTC) | Baris berubah |
+|---|---|
+| 2026-09-12 **17:21** | 2 |
+| 2026-09-12 04:21 | 534 |
+| 2026-09-11 **17:17** | 2 |
+| 2026-09-11 14:29 | 106 |
+
+Dua malam berturut-turut pada **17:17** dan **17:21** — persis jendela cron
+`10 17 * * *` (00:10 WIB). Dan tepat **2 baris** tiap malam: satu tanggal
+jauh-depan baru per tipe kamar, tanda tangan jendela 365 hari yang bergulir
+maju sehari tiap malam. Itu hanya mungkin kalau push harganya sungguh
+berjalan. Nilainya pun konsisten dengan aturan mesin harga: 2027-09-11
+(Sabtu) Standard 750.000 = tarif akhir pekan, 2027-09-09 (Kamis) 650.000 =
+tarif dasar.
+
+Jadi rantainya utuh dan otonom tiap malam: putuskan harga → `putRate` ke
+Cloudbeds → baca balik → cerminkan ke `villa_rates`. **Tidak ada yang perlu
+dipindahkan ke pg_cron**; menambahkannya justru akan membuat push ganda.
+
+Catatan untuk sesi berikutnya: jangan simpulkan sebuah cron mati dari
+ketiadaannya di log runtime Vercel pada plan hobby. Hitung dulu berapa
+entri yang muncul untuk job yang frekuensinya diketahui — itu memberi tahu
+lebar jendela retensi yang sebenarnya. Sandbox sesi ini juga diblokir
+keluar ke `api.cloudbeds.com` (proxy 403), jadi verifikasi harus lewat
+jejak di database, bukan panggilan langsung.
+
+## 2026-09-12 — penalaran harga AI diperluas (branch `claude/duetto-villa-pricing-reasoning-1eygpo`, BELUM di `main`, autopush masih OFF)
+
+Owner sedang mempelajari Duetto dan meminta AI penentu harga menimbang
+lebih banyak indikator, bukan hanya okupansi: minat pencarian villa di
+Jogja, riset kompetitor, berita event/tanggal merah/libur sekolah, dan
+**bulan-bulan sepi seperti bulan puasa**. Owner juga menegaskan AI boleh
+menetapkan harga sendiri karena batas bawahnya sudah dia pasang
+(`villa_room_types.min_rate`).
+
+Yang berubah (detail lengkap di CHANGELOG.md):
+- **Musim sepi bisa menurunkan harga.** Baris `villa_high_season_periods`
+  dengan persen negatif dan `created_by='ai_low_season'`. Diskon langsung
+  berlaku (tidak menunggu pickup), tapi ditarik kalau tanggalnya ternyata
+  laku ≥50%. `min_rate` tetap lantai keras.
+- **`demand_trend` akhirnya dipakai.** Sejak 2026-09-11 sinyal ini diriset
+  mingguan lalu dibuang; sekarang disimpan ke
+  `integration_settings.revenue_engine.market_demand` dan menggeser harga
+  maksimal ±3% saja, kedaluwarsa 30 hari.
+- **Lead time diperhitungkan.** Diskon okupansi rendah menanjak seiring
+  dekatnya tanggal (≤14 hari penuh, ≤45 hari separuh, di atas itu tidak
+  ada). Kenaikan okupansi tinggi tidak diperlakukan begitu.
+- **`decideRateForDate` jadi fungsi murni + 29 tes** (`npm test`,
+  42 tes hijau seluruh repo). Ini gerbang otomatis pertama yang dimiliki
+  logika harga.
+
+**Belum menyentuh harga tamu**: tidak ada migrasi dan tidak ada perubahan
+skema, dan perubahannya belum di-merge. Menunggu persetujuan owner
+(aturan MERGE AUTHORITY di CLAUDE.md: apa pun yang menyentuh harga tamu
+perlu owner bilang ya dulu).
+
+**PENTING — `ai_autopush_enabled` ternyata sudah `true`** (diubah
+2026-09-11 14:48 UTC; diverifikasi lewat Supabase MCP 2026-09-12).
+Catatan lama di bagian "Pricing architecture" di bawah yang menyebutnya
+`false` sudah tidak berlaku. Artinya: begitu branch ini di-merge dan run
+harga berikutnya jalan, harga tamu di semua OTA **benar-benar ikut
+berubah**. Ini bukan lagi dry run.
+
+**Sisi riset (repo Mkhsistem, branch sama)**: `researchVillaMarketDemand`
+kini melaporkan periode `direction: "turun"` selain "naik", plus kalender
+tanggal merah nasional termasuk "harpitnas". Perlu **deploy Mkhsistem**
+sebelum periode sepi benar-benar muncul di villa — sampai itu terjadi,
+villa hanya menerima periode ramai seperti sebelumnya (pembacaan default
+yang aman, bukan kegagalan).
+
+**Catatan terkait**: "AI competitor research fails with AI bridge failed:
+200" yang tercatat di bagian "Pricing architecture" di bawah **sudah
+tidak berlaku**. Penyebabnya rute bridge belum terdaftar di
+`PUBLIC_PATHS` middleware Mkhsistem sehingga POST-nya mendarat di halaman
+/login (200 HTML); sudah diperbaiki dan ada di branch produksi Mkhsistem.
+Terverifikasi hari ini: baris `ai_recurring_peak` dibuat cron 2026-09-12
+04:23 UTC, dan `villa_competitor_rates` terisi 2026-09-11.
+
 ## 2026-09-12 — modul database tamu + promo LIVE, tapi pengiriman promo masih MODE PANTAU
 villa-api **v61**. Tiga repo ikut: villa (skema, API, halaman admin), loonars
 (kolom kode promo), Mkhsistem (routing balasan `PROMO`/`TOLAK`/`BERHENTI`).
@@ -231,9 +347,10 @@ How a guest price is decided today:
    from that anchor — occupancy, weekend surcharge, high season, AI
    competitor research (via Mkhsistem's bridge; outside high season the
    market average acts as a CAP, never a floor). It pushes to Cloudbeds
-   **only** when `villa_pricing_settings.ai_autopush_enabled` is true
-   (**currently false** per owner instruction: the live price follows
-   Cloudbeds while the AI's market analysis is being evaluated). Every
+   **only** when `villa_pricing_settings.ai_autopush_enabled` is true.
+   **Update 2026-09-12: this is now `true`** (set 2026-09-11 14:48 UTC,
+   verified via Supabase MCP) — the note below saying it is `false` was
+   accurate when written and is not any more. Pushes are live. Every
    push is read back from Cloudbeds and verified date by date.
 3. **`/api/cron/sync-cloudbeds-rates`** (00:25 WIB) mirrors Cloudbeds' live
    rates for **90 days** into `villa_rates` and sets `units.tarif_harian`
