@@ -127,6 +127,15 @@ async function pushBookingToCloudbeds(booking){
   const apiKey = cloudbedsApiKey();
   if(!apiKey) return;
 
+  // Never push the same booking twice. postReservation is not idempotent:
+  // a second call creates a SECOND reservation in Cloudbeds for the same
+  // stay, which then blocks the room twice and shows up as a phantom
+  // guest. Any booking that already carries a cloudbeds_reservation_id
+  // either came FROM Cloudbeds or has already been pushed, so both cases
+  // stop here. This is what makes the retry sweep below safe to run every
+  // ten minutes.
+  if(booking.cloudbeds_reservation_id) return;
+
   const logOutbound = async (matched, extra) => {
     await supabase.from('cloudbeds_events_log').insert({
       reservation_id: booking.cloudbeds_reservation_id ?? null,
@@ -612,7 +621,7 @@ Deno.serve(async (req)=>{
     try{ bytes = Uint8Array.from(atob(base64), c=>c.charCodeAt(0)); } catch { return err('Bukti transfer tidak valid'); }
     if(bytes.length > 8*1024*1024) return err('Bukti transfer terlalu besar (maks 8MB)');
 
-    const {data:booking} = await supabase.from('bookings').select('id,guest_id,sumber,invoice_no,created_at,status,unit_nomor,tgl_checkin,tgl_checkout').eq('id',booking_id).maybeSingle();
+    const {data:booking} = await supabase.from('bookings').select('id,guest_id,sumber,invoice_no,created_at,status,unit_id,unit_nomor,guest_nama,cloudbeds_reservation_id,tgl_checkin,tgl_checkout').eq('id',booking_id).maybeSingle();
     if(!booking) return err('Booking tidak ditemukan', 404);
     if(booking.sumber !== 'website') return err('Booking ini tidak bisa dikonfirmasi lewat jalur ini', 403);
     let guestHp = null;
@@ -657,6 +666,9 @@ Deno.serve(async (req)=>{
     await notif(null, 'all', 'transfer', `Pembayaran dikonfirmasi -- Unit ${booking.unit_nomor} terkunci`,
       `Booking ${booking_id.slice(0,8)} (${booking.tgl_checkin} s/d ${booking.tgl_checkout}) sudah upload bukti transfer, unit sudah masuk kalender.`, booking_id);
 
+    // Same reason as the WhatsApp confirmation path above.
+    await pushBookingToCloudbeds({...booking, id: booking_id, status:'terjadwal'});
+
     return json({success:true, invoice_no});
   }
 
@@ -700,6 +712,50 @@ Deno.serve(async (req)=>{
   // antara booking website yang masih menunggu pembayaran -- jadi balasan
   // tidak pernah bisa mengunci booking yang salah, dan kode lama yang sudah
   // dipakai tidak melakukan apa-apa selain melaporkan sudah dikonfirmasi.
+  // Pushes any confirmed booking Cloudbeds still doesn't know about.
+  //
+  // The inline push at confirmation time is the normal path; this is what
+  // makes it reliable rather than best-effort. A push can fail for reasons
+  // that have nothing to do with the booking -- Cloudbeds down, a network
+  // blip, an unmapped room fixed later -- and without a retry that room
+  // silently stays on sale on every OTA while a real guest holds it.
+  //
+  // It also repairs everything booked BEFORE the inline push existed:
+  // website bookings were never pushed at all, so Cloudbeds believed those
+  // units were empty.
+  //
+  // Safe to run on a schedule: pushBookingToCloudbeds refuses any booking
+  // that already has a cloudbeds_reservation_id, so a room is never
+  // reserved twice. Past stays are skipped -- pushing a checkout that has
+  // already happened would only create a phantom reservation.
+  if(path==='/bridge/push-unsynced-bookings' && m==='POST'){
+    const bridge = await getVercelBridge();
+    if(!bridge.secret) return err('Jembatan belum dikonfigurasi (integration_settings.vercel_bridge.secret)',503);
+    const provided = req.headers.get('x-internal-secret') ?? '';
+    if(!await secretsMatch(provided, bridge.secret)) return err('Unauthorized',401);
+
+    const today = new Date().toISOString().slice(0,10);
+    const {data:pending} = await supabase.from('bookings')
+      .select('id,unit_id,unit_nomor,guest_nama,tgl_checkin,tgl_checkout,status,sumber,cloudbeds_reservation_id')
+      .is('cloudbeds_reservation_id', null)
+      .neq('sumber', 'cloudbeds')
+      .in('status', ['terjadwal','checkin'])
+      .gte('tgl_checkout', today);
+
+    const pushed = [];
+    for(const b of (pending ?? [])){
+      await pushBookingToCloudbeds(b);
+      const {data:after} = await supabase.from('bookings').select('cloudbeds_reservation_id').eq('id', b.id).maybeSingle();
+      pushed.push({
+        booking_id: b.id, unit_nomor: b.unit_nomor, guest_nama: b.guest_nama,
+        tgl_checkin: b.tgl_checkin, tgl_checkout: b.tgl_checkout,
+        cloudbeds_reservation_id: after?.cloudbeds_reservation_id ?? null,
+        ok: !!after?.cloudbeds_reservation_id,
+      });
+    }
+    return json({success:true, candidates:(pending ?? []).length, pushed});
+  }
+
   if(path==='/bridge/confirm-payment' && m==='POST'){
     const bridge = await getVercelBridge();
     if(!bridge.secret) return err('Jembatan belum dikonfigurasi (integration_settings.vercel_bridge.secret)',503);
@@ -711,7 +767,7 @@ Deno.serve(async (req)=>{
     if(!/^[0-9A-F]{6}$/.test(code)) return json({success:false, reason:'invalid_code'});
 
     const {data:pending} = await supabase.from('bookings')
-      .select('id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,total_bayar,created_at,status,invoice_no')
+      .select('id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,total_bayar,created_at,status,invoice_no,cloudbeds_reservation_id')
       .eq('sumber','website').eq('status','menunggu_pembayaran');
     const booking = (pending ?? []).find(x => paymentCode(x.id) === code) ?? null;
 
@@ -744,6 +800,19 @@ Deno.serve(async (req)=>{
 
     await notif(null, 'all', 'transfer', `Pembayaran dikonfirmasi -- Unit ${booking.unit_nomor} terkunci`,
       `Booking ${String(booking.id).slice(0,8)} (${booking.tgl_checkin} s/d ${booking.tgl_checkout}) dikonfirmasi lunas oleh owner via WhatsApp, unit sudah masuk kalender.`, booking.id);
+
+    // Tell Cloudbeds the room is sold, so it stops offering it on every
+    // OTA (owner 2026-09-12: "agar cloudbeds mngetahui berapa kamar yg ada
+    // isi dan kosong"). Website bookings were NEVER pushed before this --
+    // pushBookingToCloudbeds was only ever called from the staff
+    // POST /bookings route -- so a guest booking on loonars.id left the
+    // unit looking empty to Airbnb, Booking.com and Agoda.
+    //
+    // Deliberately here and not at booking time: until this moment the
+    // booking is 'menunggu_pembayaran' and holds nothing, so pushing then
+    // would block real OTA inventory on an unpaid hold and leave a junk
+    // reservation in Cloudbeds whenever a guest walked away.
+    await pushBookingToCloudbeds({...booking, status:'terjadwal'});
 
     return json({
       success:true, unit_nomor:booking.unit_nomor, guest_nama:booking.guest_nama,
