@@ -277,6 +277,20 @@ async function pushBookingToCloudbeds(booking){
     form.set('rooms[0][quantity]', '1');
     form.set('adults[0][roomTypeID]', String(roomTypeID));
     form.set('adults[0][quantity]', '1');
+    // Cloudbeds rejects the call outright without children, even for a
+    // stay that has none -- "Parameter children is required". The spec
+    // marks nothing required, so the only reliable guide is which fields
+    // it declares non-nullable: startDate, endDate, guestFirstName,
+    // guestLastName, guestCountry, guestZip, guestEmail, rooms, adults,
+    // children, paymentMethod. Those are all sent now, rather than
+    // discovering them one failed push at a time.
+    form.set('children[0][roomTypeID]', String(roomTypeID));
+    form.set('children[0][quantity]', '0');
+    // The booking form never asks a guest for a postal code, so this is
+    // the villa's own Sleman area as a stand-in -- a placeholder to
+    // satisfy a required field, not a claim about where the guest lives.
+    // Overridable via integration_settings.cloudbeds_outbound.guest_zip_default.
+    form.set('guestZip', String(sourceSetting?.guest_zip_default ?? '55581'));
     form.set('paymentMethod', 'cash');
     form.set('sendEmailConfirmation', 'false');
 
