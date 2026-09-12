@@ -109,6 +109,68 @@ function appliesWithoutPickup(createdBy: string | null | undefined): boolean {
 const COMPETITOR_MIN_SAMPLES = 3;
 
 /**
+ * ── Lapisan sinyal permintaan (permintaan owner 2026-09-12) ────────────
+ *
+ * Owner: "pendekatan kt brrti bisa berdasarkan beberapa pendekatan sampai
+ * akhirnya ai mngambil keputusan trkait harga ... agar bisa mengambil
+ * keputusan yg betul2 tepat dari berbagi sumber".
+ *
+ * Sebelum ini hanya ADA SATU sinyal permintaan: okupansi tanggal itu.
+ * Sekarang tiga, dan masing-masing HANYA ikut bicara kalau datanya cukup:
+ *
+ *   S1 okupansi   — sudah terisi berapa persen. Selalu tersedia.
+ *   S2 pace       — menumpuknya lebih cepat atau lebih lambat dari tanggal
+ *                   pembanding pada jarak hari yang sama. Butuh riwayat.
+ *   S3 minat pasar— berapa ramai orang mencari villa di Jogja bulan itu.
+ *                   Butuh indeks hasil riset.
+ *
+ * Aturan yang membuat lapisan ini tidak berbahaya:
+ *
+ * 1. Sinyal tanpa data TIDAK dianggap netral lalu ikut menarik rata-rata
+ *    ke nol — ia tidak ikut sama sekali, dan bobot sisanya dinormalkan.
+ *    Menganggap "tidak tahu" sebagai "biasa saja" adalah cara paling halus
+ *    untuk membuat sistem percaya diri pada data yang tidak ada.
+ * 2. Batas geraknya kecil dan terpisah dari okupansi, jadi kalaupun dua
+ *    sinyal baru ini salah arah bersamaan, pengaruhnya terbatas.
+ * 3. Semuanya tetap lewat plafon kompetitor, penjaga dekat-kedatangan,
+ *    klem pergerakan, dan lantai/plafon owner -- tidak ada satu pun yang
+ *    dilewati.
+ * 4. Cold start menahan keduanya, sama seperti event uplift.
+ */
+
+/** Pace butuh pembanding. Di bawah ini, "lebih cepat dari biasanya" tidak punya arti. */
+const PACE_MIN_COMPARABLE_DATES = 6;
+const PACE_MIN_HISTORY_BOOKINGS = 15;
+/** Jendela hari-sebelum-menginap yang dipakai membandingkan pace. */
+const PACE_LEAD_BUCKETS = [7, 14, 30, 60, 90];
+/** Sejauh mana pace boleh menggerakkan harga, sebelum digabung. */
+const PACE_MAX_ADJUSTMENT_PCT = 0.08;
+/** Selisih pace yang dianggap berarti (bukan derau satu-dua booking). */
+const PACE_SIGNIFICANT_RATIO = 0.25;
+
+/**
+ * Indeks minat pasar per bulan, 0-100, disimpan di
+ * integration_settings.villa_market_search_index sebagai
+ * { "2026-10": 62, "2026-11": 58, ... } beserta baseline-nya.
+ *
+ * Sengaja di settings, bukan tabel baru: isinya cuma belasan angka yang
+ * disegarkan berkala, dan menambah tabel untuk itu berarti mengubah skema
+ * -- yang di proyek ini butuh izin owner lebih dulu. Kalau nanti perlu
+ * riwayat per minggu, barulah pindah ke tabel sendiri.
+ */
+const MARKET_SEARCH_SETTINGS_KEY = "villa_market_search_index";
+/** Sejauh mana minat pasar boleh menggerakkan harga. Paling kecil: ia sinyal paling kasar. */
+const MARKET_SEARCH_MAX_ADJUSTMENT_PCT = 0.05;
+const MARKET_SEARCH_STALE_DAYS = 45;
+
+/**
+ * Bobot penggabungan. Okupansi paling berat karena ia satu-satunya yang
+ * mengukur uang yang benar-benar sudah masuk untuk tanggal itu; minat
+ * pasar paling ringan karena ia mengukur seluruh Jogja, bukan villa kita.
+ */
+const SIGNAL_WEIGHTS = { occupancy: 0.6, pace: 0.28, market_search: 0.12 } as const;
+
+/**
  * Close to arrival an empty date is a problem to solve, not an
  * opportunity to price up: there is no longer time for demand to
  * materialise. Inside this window, a date that is still under
@@ -182,6 +244,7 @@ export interface MarketDemandRefreshResult {
   demand_trend?: DemandTrend;
   trend_note?: string;
   events_upserted?: number;
+  search_index_months?: number;
   skipped_reason?: string;
   error?: string;
 }
@@ -307,7 +370,20 @@ export async function refreshMarketDemandIfStale(supabase: SupabaseClient, allow
     upserted++;
   }
 
-  return { refreshed: true, demand_trend: result.demand_trend, trend_note: result.trend_note, events_upserted: upserted };
+  // Simpan indeks minat pasar kalau jembatan mengirimkannya. Disimpan di
+  // settings, bukan tabel baru -- isinya belasan angka, dan menambah tabel
+  // berarti mengubah skema yang butuh izin owner lebih dulu.
+  if (result.search_index_by_month) {
+    await supabase.from("integration_settings").upsert(
+      {
+        key: MARKET_SEARCH_SETTINGS_KEY,
+        value: { by_month: result.search_index_by_month, researched_at: new Date().toISOString(), source: "ai_market_demand_research" },
+      },
+      { onConflict: "key" },
+    );
+  }
+
+  return { refreshed: true, demand_trend: result.demand_trend, trend_note: result.trend_note, events_upserted: upserted, search_index_months: result.search_index_by_month ? Object.keys(result.search_index_by_month).length : 0 };
 }
 
 /**
@@ -338,6 +414,147 @@ export async function refreshMarketDemandIfStale(supabase: SupabaseClient, allow
  * With a fixed anchor this function is idempotent: same inputs, same
  * price, however many times it runs in a day.
  */
+interface MarketSearchIndex {
+  /** "2026-10" -> 0..100 */
+  byMonth: Map<string, number>;
+  baseline: number | null;
+  researchedAt: string | null;
+  usable: boolean;
+}
+
+/**
+ * Indeks minat pasar: seberapa ramai orang mencari villa di Jogja per bulan.
+ *
+ * Ini yang diminta owner dengan sebutan "google analytic" -- dan setelah
+ * diperjelas, maksudnya volume PENCARIAN PASAR, bukan analitik situs kita
+ * sendiri. Bedanya penting: data "orang membuka halaman tapi tidak jadi
+ * memesan" (regrets/denials) dikenal tidak bisa dipercaya sebagai angka
+ * permintaan karena satu orang bisa membuka puluhan kali dari beberapa
+ * perangkat. Volume pencarian seluruh pasar tidak punya masalah itu; ia
+ * mengukur musim, bukan niat satu orang.
+ *
+ * Karena itu bobotnya paling kecil dan batas geraknya paling sempit: ia
+ * memberi tahu bulan mana Jogja ramai, bukan apakah VILLA KITA akan penuh.
+ */
+function readMarketSearchIndex(raw: unknown): MarketSearchIndex {
+  const empty: MarketSearchIndex = { byMonth: new Map(), baseline: null, researchedAt: null, usable: false };
+  if (!raw || typeof raw !== "object") return empty;
+  const obj = raw as Record<string, unknown>;
+  const months = obj.by_month && typeof obj.by_month === "object" ? (obj.by_month as Record<string, unknown>) : null;
+  if (!months) return empty;
+
+  const byMonth = new Map<string, number>();
+  for (const [k, v] of Object.entries(months)) {
+    const n = Number(v);
+    if (/^\d{4}-\d{2}$/.test(k) && Number.isFinite(n) && n >= 0 && n <= 100) byMonth.set(k, n);
+  }
+  if (byMonth.size < 3) return empty;
+
+  const researchedAt = typeof obj.researched_at === "string" ? obj.researched_at : null;
+  if (researchedAt) {
+    const ageDays = (Date.now() - Date.parse(researchedAt)) / 86400000;
+    // Indeks basi lebih berbahaya daripada tidak ada indeks: ia menggambarkan
+    // musim yang sudah lewat dengan penuh keyakinan.
+    if (Number.isFinite(ageDays) && ageDays > MARKET_SEARCH_STALE_DAYS) return empty;
+  }
+
+  // Baseline = rata-rata seluruh bulan yang diketahui, supaya "ramai" berarti
+  // ramai DIBANDING tahun itu sendiri, bukan dibanding angka yang kita karang.
+  const values = [...byMonth.values()];
+  const baseline = Number(obj.baseline) > 0 ? Number(obj.baseline) : values.reduce((a, b) => a + b, 0) / values.length;
+
+  return { byMonth, baseline, researchedAt, usable: baseline > 0 };
+}
+
+interface DemandSignal {
+  code: string;
+  /** penyesuaian yang diusulkan sinyal ini, dalam pecahan (0.05 = +5%) */
+  pct: number;
+  weight: number;
+}
+
+/**
+ * Menggabungkan sinyal yang TERSEDIA saja, lalu menormalkan bobotnya.
+ *
+ * Kalau hanya okupansi yang punya data, hasilnya sama persis dengan mesin
+ * sebelum lapisan ini ada -- itu disengaja, supaya penambahan ini tidak
+ * mengubah harga apa pun sampai sinyal barunya benar-benar punya bahan.
+ */
+function combineDemandSignals(signals: DemandSignal[]): { pct: number; codes: string[] } {
+  const usable = signals.filter((s) => s.weight > 0);
+  if (!usable.length) return { pct: 0, codes: [] };
+  const totalWeight = usable.reduce((a, s) => a + s.weight, 0);
+  const pct = usable.reduce((a, s) => a + s.pct * s.weight, 0) / totalWeight;
+  return { pct, codes: usable.filter((s) => s.pct !== 0).map((s) => s.code) };
+}
+
+interface PaceBaseline {
+  /** rata-rata unit terjual pada jarak hari itu, dari tanggal-tanggal pembanding */
+  byLeadDays: Map<number, number>;
+  comparableDates: number;
+  usable: boolean;
+}
+
+/**
+ * Membangun "pace normal" dari riwayat: pada H-7, H-14, H-30 dan seterusnya,
+ * biasanya sudah berapa unit terjual untuk sebuah tanggal?
+ *
+ * Dihitung dari bookings.created_at, BUKAN dari snapshot harian. Snapshot
+ * (villa_daily_inventory_snapshot) hanya merekam keadaan hari itu, jadi ia
+ * tidak bisa menjawab "20 Oktober sudah seramai apa saat kita masih 30 hari
+ * sebelumnya". created_at bisa menjawabnya secara surut, tanpa menunggu
+ * berbulan-bulan mengumpulkan snapshot baru.
+ *
+ * Dipisah per weekend/bukan-weekend: membandingkan Sabtu dengan Selasa akan
+ * membuat setiap Sabtu terlihat "lebih cepat dari biasanya" selamanya.
+ */
+function buildPaceBaseline(
+  bookings: { unit_id: string; tgl_checkin: string; tgl_checkout: string | null; status: string; created_at: string }[],
+  unitIds: Set<string>,
+  today: string,
+  weekend: boolean,
+): PaceBaseline {
+  const relevant = bookings.filter(
+    (b) => unitIds.has(b.unit_id) && (b.status === "terjadwal" || b.status === "checkin" || b.status === "checkout"),
+  );
+
+  // Tanggal pembanding: tanggal menginap yang SUDAH lewat, jadi pola
+  // penumpukannya sudah selesai dan tidak akan berubah lagi.
+  const stayDates = new Set<string>();
+  for (const b of relevant) {
+    const end = b.tgl_checkout ?? b.tgl_checkin;
+    for (let d = new Date(`${b.tgl_checkin}T00:00:00Z`); d < new Date(`${end}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1)) {
+      const iso = d.toISOString().slice(0, 10);
+      if (iso < today && isWeekendJakarta(iso) === weekend) stayDates.add(iso);
+    }
+  }
+
+  const byLeadDays = new Map<number, number>();
+  if (stayDates.size >= PACE_MIN_COMPARABLE_DATES && relevant.length >= PACE_MIN_HISTORY_BOOKINGS) {
+    for (const lead of PACE_LEAD_BUCKETS) {
+      let total = 0;
+      for (const stayDate of stayDates) {
+        const cutoff = new Date(new Date(`${stayDate}T00:00:00Z`).getTime() - lead * 86400000).toISOString();
+        total += relevant.filter(
+          (b) =>
+            b.created_at <= cutoff &&
+            b.tgl_checkin <= stayDate &&
+            (!b.tgl_checkout || b.tgl_checkout > stayDate),
+        ).length;
+      }
+      byLeadDays.set(lead, total / stayDates.size);
+    }
+  }
+
+  return { byLeadDays, comparableDates: stayDates.size, usable: byLeadDays.size > 0 };
+}
+
+/** Jarak-hari pembanding terdekat untuk sebuah tanggal target. */
+function nearestLeadBucket(daysToArrival: number): number | null {
+  const eligible = PACE_LEAD_BUCKETS.filter((b) => b >= daysToArrival);
+  return eligible.length ? Math.min(...eligible) : null;
+}
+
 export async function decideRatesForRoomType(
   supabase: SupabaseClient,
   roomType: RoomTypeForPricing,
@@ -347,7 +564,7 @@ export async function decideRatesForRoomType(
 ): Promise<DatePriceDecision[]> {
   const { data: allBookings } = await supabase
     .from("bookings")
-    .select("unit_id, tgl_checkin, tgl_checkout, status")
+    .select("unit_id, tgl_checkin, tgl_checkout, status, created_at")
     .neq("status", "batal");
   const { data: units } = await supabase.from("units").select("id").eq("room_type_id", roomType.id);
   const unitIds = new Set((units ?? []).map((u) => u.id));
@@ -400,6 +617,20 @@ export async function decideRatesForRoomType(
 
   const coldStart = (allBookings ?? []).length < COLD_START_MIN_BOOKINGS;
 
+  // Sinyal permintaan tambahan, disiapkan sekali di luar loop tanggal.
+  const bookingRows = (allBookings ?? []) as {
+    unit_id: string; tgl_checkin: string; tgl_checkout: string | null; status: string; created_at: string;
+  }[];
+  const paceWeekend = buildPaceBaseline(bookingRows, unitIds, today, true);
+  const paceWeekday = buildPaceBaseline(bookingRows, unitIds, today, false);
+
+  const { data: searchSetting } = await supabase
+    .from("integration_settings")
+    .select("value")
+    .eq("key", MARKET_SEARCH_SETTINGS_KEY)
+    .maybeSingle();
+  const marketSearch = readMarketSearchIndex(searchSetting?.value);
+
   const results: DatePriceDecision[] = [];
   for (const targetDate of targetDates) {
     const activeForDate = (allBookings ?? []).filter(
@@ -428,20 +659,87 @@ export async function decideRatesForRoomType(
     // price UNDER this on the strength of competitor research alone.
     const structuralRate = decidedRate;
 
-    // --- 3. Realised demand for THIS date (pickup) ---
-    let demandPct = 0;
+    // --- 3. Permintaan, dibaca dari BEBERAPA sinyal sekaligus ---
+    //
+    // Owner 2026-09-12: "pendekatan kt brrti bisa berdasarkan beberapa
+    // pendekatan sampai akhirnya ai mngambil keputusan trkait harga".
+    //
+    // Tiga sinyal, digabung berbobot, dan yang tidak punya data tidak ikut
+    // sama sekali. Kalau hanya okupansi yang tersedia -- keadaan hari ini --
+    // hasilnya identik dengan mesin sebelum lapisan ini ada.
+    const signals: DemandSignal[] = [];
+
+    // S1 · okupansi terealisasi: satu-satunya sinyal yang mengukur uang
+    // yang benar-benar sudah masuk untuk tanggal ini.
+    let occupancySignalPct = 0;
     if (occupancyPct >= settings.high_occupancy_threshold_pct) {
-      demandPct = settings.high_occupancy_adjustment_pct;
+      occupancySignalPct = settings.high_occupancy_adjustment_pct;
       reasonCodes.push("high_occupancy");
     } else if (occupancyPct <= settings.low_occupancy_threshold_pct) {
       if (coldStart) {
         reasonCodes.push("cold_start_hold");
       } else {
-        demandPct = settings.low_occupancy_adjustment_pct;
+        occupancySignalPct = settings.low_occupancy_adjustment_pct;
         reasonCodes.push("low_occupancy");
       }
     }
-    decidedRate = Math.round(decidedRate * (1 + demandPct));
+    signals.push({ code: "occupancy", pct: occupancySignalPct, weight: SIGNAL_WEIGHTS.occupancy });
+
+    const daysToArrivalForPace = daysBetween(today, targetDate);
+
+    // S2 · pace: menumpuk lebih cepat atau lebih lambat dari tanggal
+    // pembanding pada jarak hari yang sama. Ini sinyal paling dini yang
+    // kita punya -- ia bergerak jauh sebelum okupansi terlihat tinggi.
+    const paceBaseline = isWeekendJakarta(targetDate) ? paceWeekend : paceWeekday;
+    const leadBucket = nearestLeadBucket(daysToArrivalForPace);
+    const expectedSold = leadBucket !== null ? paceBaseline.byLeadDays.get(leadBucket) ?? null : null;
+
+    if (coldStart) {
+      // Ditahan sama seperti event uplift: menilai "lebih cepat dari
+      // biasanya" saat "biasanya" belum ada artinya adalah menebak.
+      if (paceBaseline.usable) reasonCodes.push("pace_held_cold_start");
+    } else if (paceBaseline.usable && expectedSold !== null && expectedSold > 0) {
+      const actualSold = activeForDate.length;
+      const ratio = (actualSold - expectedSold) / expectedSold;
+      if (Math.abs(ratio) >= PACE_SIGNIFICANT_RATIO) {
+        const pacePct = Math.max(-PACE_MAX_ADJUSTMENT_PCT, Math.min(PACE_MAX_ADJUSTMENT_PCT, ratio * PACE_MAX_ADJUSTMENT_PCT));
+        signals.push({ code: ratio > 0 ? "pace_ahead" : "pace_behind", pct: pacePct, weight: SIGNAL_WEIGHTS.pace });
+      }
+    }
+
+    // S3 · minat pasar: bulan ini seramai apa orang mencari villa di Jogja,
+    // dibanding rata-rata bulan lain. Mengukur musim pasar, bukan villa kita
+    // -- itu sebabnya bobot dan batas geraknya paling kecil.
+    //
+    // Ikut ditahan cold start. Ini ketahuan lewat simulasi, bukan lewat
+    // membaca kode: tanpa penahanan ini, villa yang belum punya riwayat
+    // penjualan sama sekali tetap menaikkan harga hanya karena seluruh
+    // Jogja sedang ramai dicari. Justru di saat itulah kita paling tidak
+    // punya bukti bahwa keramaian pasar akan sampai ke kita.
+    if (coldStart) {
+      if (marketSearch.usable) reasonCodes.push("market_search_held_cold_start");
+    } else if (marketSearch.usable && marketSearch.baseline) {
+      const monthKey = targetDate.slice(0, 7);
+      const monthIndex = marketSearch.byMonth.get(monthKey);
+      if (monthIndex !== undefined) {
+        const relative = (monthIndex - marketSearch.baseline) / marketSearch.baseline;
+        const searchPct = Math.max(
+          -MARKET_SEARCH_MAX_ADJUSTMENT_PCT,
+          Math.min(MARKET_SEARCH_MAX_ADJUSTMENT_PCT, relative * MARKET_SEARCH_MAX_ADJUSTMENT_PCT),
+        );
+        if (searchPct !== 0) {
+          signals.push({
+            code: searchPct > 0 ? "market_search_high" : "market_search_low",
+            pct: searchPct,
+            weight: SIGNAL_WEIGHTS.market_search,
+          });
+        }
+      }
+    }
+
+    const combined = combineDemandSignals(signals);
+    for (const code of combined.codes) if (!reasonCodes.includes(code)) reasonCodes.push(code);
+    decidedRate = Math.round(decidedRate * (1 + combined.pct));
 
     // --- 4. Event uplift, but only as far as demand has earned it ---
     const highSeasonPeriod = highSeasonPeriodFor(targetDate);

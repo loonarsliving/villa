@@ -162,6 +162,19 @@ export interface MarketDemandResult {
   demand_trend: DemandTrend;
   trend_note: string;
   events: MarketDemandEvent[];
+  /**
+   * Minat pencarian pasar per bulan, 0-100, mis. { "2026-10": 62 }.
+   *
+   * Opsional dengan sengaja: jembatan AI yang belum diperbarui tidak
+   * mengirimkannya, dan mesin harga memperlakukan ketiadaannya sebagai
+   * "sinyal ini tidak ikut bicara" -- bukan sebagai nol.
+   *
+   * Sebelum ini penelitian yang sama hanya menghasilkan SATU KATA
+   * (demand_trend: naik/turun/stabil) yang dilaporkan lalu tidak pernah
+   * dipakai menentukan harga sama sekali. Angka per bulan membuatnya
+   * benar-benar terpakai.
+   */
+  search_index_by_month?: Record<string, number>;
 }
 
 /**
@@ -196,9 +209,24 @@ export async function researchMarketDemand(locationLabel: string): Promise<Marke
     throw new Error(`AI bridge failed: ${data?.error || res.status}`);
   }
   const trend: DemandTrend = data.demand_trend === "naik" || data.demand_trend === "turun" ? data.demand_trend : "stabil";
+  const rawIndex = data.search_index_by_month;
+  let searchIndex: Record<string, number> | undefined;
+  if (rawIndex && typeof rawIndex === "object") {
+    const cleaned: Record<string, number> = {};
+    for (const [k, v] of Object.entries(rawIndex as Record<string, unknown>)) {
+      const n = Number(v);
+      // Disaring di sini, bukan dipercaya apa adanya: keluaran AI bisa
+      // mengandung bulan berformat aneh atau angka di luar 0-100, dan
+      // angka liar yang lolos akan langsung menggerakkan harga tamu.
+      if (/^\d{4}-\d{2}$/.test(k) && Number.isFinite(n) && n >= 0 && n <= 100) cleaned[k] = n;
+    }
+    if (Object.keys(cleaned).length >= 3) searchIndex = cleaned;
+  }
+
   return {
     demand_trend: trend,
     trend_note: typeof data.trend_note === "string" ? data.trend_note : "",
     events: Array.isArray(data.events) ? data.events : [],
+    search_index_by_month: searchIndex,
   };
 }
