@@ -175,14 +175,42 @@ async function pushBookingToCloudbeds(booking){
 
     let sourceSetting = await getSetting('cloudbeds_outbound');
     let sourceID = sourceSetting?.source_id ?? null;
+    let sourceNames = null;
     if(!sourceID){
-      const sourcesRes = await fetch(`${CLOUDBEDS_API_BASE}/getSources`, {headers: {'x-api-key': apiKey}});
+      // The OpenAPI spec calls isThirdParty and status booleans, but this
+      // API is known to send booleans and numbers as STRINGS -- that exact
+      // assumption silently emptied the whole rate mirror once already
+      // ("rate":"650000.00" failing a typeof === 'number' check). A strict
+      // `=== false` here matches nothing when Cloudbeds sends "0", and the
+      // push then fails with a message blaming missing configuration.
+      const falsy = v => v === false || v === 0 || v === '0' || v === 'false';
+      const truthy = v => v === true || v === 1 || v === '1' || v === 'true';
+
+      const sourcesUrl = new URL(`${CLOUDBEDS_API_BASE}/getSources`);
+      const propertyId = (Deno.env.get('CLOUDBEDS_PROPERTY_ID') ?? '').trim();
+      if(propertyId) sourcesUrl.searchParams.set('propertyID', propertyId);
+      const sourcesRes = await fetch(sourcesUrl, {headers: {'x-api-key': apiKey}});
       const sourcesBody = await sourcesRes.json().catch(()=>null);
-      const direct = (sourcesBody?.data ?? []).find(s => s.isThirdParty === false && s.status === true);
+      const rows = Array.isArray(sourcesBody?.data) ? sourcesBody.data : (sourcesBody?.data ? [sourcesBody.data] : []);
+
+      // Preferred: an active, non-third-party source -- that is the
+      // property's own direct/website booking source. Then progressively
+      // looser fallbacks, so a bookable source is found even if Cloudbeds
+      // words these fields differently than expected.
+      const direct = rows.find(x => falsy(x.isThirdParty) && truthy(x.status))
+        ?? rows.find(x => falsy(x.isThirdParty))
+        ?? rows.find(x => truthy(x.status) && /website|direct|walk|phone|front\s*desk/i.test(String(x.sourceName ?? '')));
       sourceID = direct?.sourceID ?? null;
+
+      // Kept for the failure log: without seeing what Cloudbeds actually
+      // returned, "no source resolved" is undiagnosable.
+      sourceNames = rows.map(x => ({id: x.sourceID, name: x.sourceName, isThirdParty: x.isThirdParty, status: x.status})).slice(0, 25);
     }
     if(!sourceID){
-      await logOutbound(false, {error: 'no_direct_source_id_resolved -- set integration_settings.cloudbeds_outbound.source_id manually'});
+      await logOutbound(false, {
+        error: 'no_direct_source_id_resolved -- set integration_settings.cloudbeds_outbound.source_id manually',
+        sources_seen: sourceNames,
+      });
       return;
     }
 
