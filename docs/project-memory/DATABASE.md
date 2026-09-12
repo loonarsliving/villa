@@ -37,6 +37,42 @@ These four tables are proven to exist because the webhook route performs live qu
 Confirmed 2026-08-23 via direct Supabase MCP access: every villa table has RLS enabled (`rls_enabled: true`), and `villa-api` uses the service-role key (bypasses RLS) for all reads/writes — RLS is defense-in-depth against direct anon/authenticated PostgREST access, not the enforcement layer (that's `villa-api`'s own token/role checks). RPC functions confirmed in use by `villa-api`: `villa_login`, `villa_set_password`, `villa_create_user`. Storage bucket usage: none observed in `villa-api`'s source.
 - **Project-wide advisory (unrelated to villa, surfaced for awareness):** at last check, 2 tables in this shared project had RLS fully disabled (`istri_daily_tips`, `contractor_fund_request_pending`) — anon-key-readable/writable. Not villa's tables; flagged to the project owner, not remediated from this session.
 
+## Modul database tamu + promo (ditambahkan 2026-09-12, disetujui owner)
+Migrasi `supabase/migrations/20260912000002_guest_database_and_promos.sql`,
+sudah diterapkan ke produksi.
+
+| Objek | Isi |
+|---|---|
+| `villa_guest_marketing` | berhenti-langganan per kanal, catatan, terakhir dikirimi promo. PK = `guest_id` |
+| `villa_promos` | kode, `mode_harga` (`batas_bawah`/`harga_tetap`), jendela pesan & menginap, min_malam, kuota, terpakai |
+| `villa_promo_batches` | usulan kiriman + `kode_konfirmasi` yang dibalas owner, `hasil.penerima` menyimpan daftarnya |
+| `villa_promo_sends` | catatan per pengiriman; unik `(batch_id, guest_id)` supaya pengulangan aman |
+| `villa_promo_redemptions` | pemakaian promo per booking, menyimpan harga normal DAN harga promo |
+| `villa_guest_directory` (view) | statistik menginap diturunkan dari `guests` + `bookings` |
+
+**Tidak ada tabel tamu baru, dan itu disengaja.** Kontak sudah hidup di
+`guests`; menyalinnya ke tabel kedua akan langsung menciptakan dua versi nomor
+HP yang sama. Statistik menginap dihitung di view, jadi tidak pernah basi.
+
+**Tidak ada kolom baru di `bookings`.** Pemakaian promo dicatat di
+`villa_promo_redemptions` — bentuk ini juga lebih baik, karena harga normalnya
+ikut tersimpan sehingga selalu bisa dijawab "promo ini memotong berapa".
+
+**RLS:** kelima tabel RLS ON dengan satu policy `service_role` (pola pengerasan
+2026-09-08), dan grant `anon`/`authenticated` **dicabut** — bukan cuma nol
+baris, tapi tidak boleh menyentuh sama sekali. Isinya nomor HP dan email tamu.
+View memakai `security_invoker = true` supaya RLS tabel dasarnya tetap berlaku
+lewatnya; tanpa itu view menjadi lubang yang membocorkan seluruh kontak tamu ke
+pemegang anon key. Terverifikasi: `anon` tidak punya SELECT di kelimanya
+maupun di view-nya.
+
+**Email tamu OTA:** `cloudbedsReservationSync` kini membaca `guestEmail` dari
+`guestList` (dan `guestEmail` tingkat reservasi sebagai cadangan) — spec
+`pms-v1.2` menyatakan field itu ada, dan `includeGuestsDetails=true` sudah
+dikirim sejak awal; kita hanya tidak pernah membacanya. `isAnonymized`
+dihormati: itu permintaan penghapusan data dari tamu, menyalinnya sama dengan
+membatalkannya.
+
 ## `bookings.adults` / `bookings.children` (ditambahkan 2026-09-12, disetujui owner)
 Migrasi `supabase/migrations/20260912000001_add_bookings_occupancy.sql`, sudah
 diterapkan ke produksi lewat Supabase MCP.
