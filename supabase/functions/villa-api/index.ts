@@ -260,22 +260,30 @@ async function pushBookingToCloudbeds(booking){
       return;
     }
 
-    // Cloudbeds requires guestEmail on postReservation, but this villa's
-    // booking form only ever asks for a name and a WhatsApp number --
-    // deliberately, since that is how guests here actually communicate.
-    // So a synthetic address stands in, derived from the booking id.
+    // Cloudbeds mewajibkan guestEmail. Sejak 2026-09-12 form loonars.id
+    // menanyakannya, jadi yang dikirim adalah alamat tamu yang sebenarnya.
     //
-    // It is never mailed: sendEmailConfirmation is 'false' below, and the
-    // address lives on a subdomain of the owner's own domain rather than
-    // anywhere that could reach a stranger. The real WhatsApp number goes
-    // in guestPhone, so staff opening the reservation in Cloudbeds can
-    // still contact the guest -- which is the thing that actually matters.
+    // Alamat sintetis tetap disimpan sebagai CADANGAN, bukan warisan yang
+    // lupa dibuang: booking yang dibuat staf di front desk dan reservasi
+    // lama dari sebelum form ini tidak punya email, dan tanpa cadangan itu
+    // Cloudbeds akan menolak seluruh push dengan "Invalid Parameters" yang
+    // tidak menyebut field-nya. Ia tidak pernah dikirimi surat --
+    // sendEmailConfirmation 'false' di bawah -- dan berada di subdomain
+    // milik owner sendiri, bukan alamat yang bisa sampai ke orang asing.
     let guestHp = null;
+    let guestEmailReal = null;
     if(booking.guest_id){
-      const {data:g} = await supabase.from('guests').select('hp').eq('id', booking.guest_id).maybeSingle();
+      const {data:g} = await supabase.from('guests').select('hp,email').eq('id', booking.guest_id).maybeSingle();
       guestHp = g?.hp ?? null;
+      guestEmailReal = String(g?.email ?? '').trim() || null;
     }
-    const guestEmail = `booking-${String(booking.id).slice(0,8)}@guest.loonars.id`;
+    const guestEmail = guestEmailReal ?? `booking-${String(booking.id).slice(0,8)}@guest.loonars.id`;
+
+    // Jumlah tamu diambil dari booking-nya, bukan dipatok 1/0 seperti
+    // sebelumnya. Kolom adults/children punya default 1/0 di database, jadi
+    // baris lama dan booking staf tetap berperilaku seperti dulu.
+    const adultsQty = Math.max(1, Math.trunc(Number(booking.adults ?? 1)) || 1);
+    const childrenQty = Math.max(0, Math.trunc(Number(booking.children ?? 0)) || 0);
 
     const nama = (booking.guest_nama ?? 'Tamu Villa').trim();
     const spaceIdx = nama.indexOf(' ');
@@ -305,9 +313,9 @@ async function pushBookingToCloudbeds(booking){
       f.set('rooms[0][roomTypeID]', String(roomTypeID));
       f.set('rooms[0][quantity]', '1');
       f.set('adults[0][roomTypeID]', String(roomTypeID));
-      f.set('adults[0][quantity]', '1');
+      f.set('adults[0][quantity]', String(adultsQty));
       f.set('children[0][roomTypeID]', String(roomTypeID));
-      f.set('children[0][quantity]', '0');
+      f.set('children[0][quantity]', String(childrenQty));
       f.set('paymentMethod', 'cash');
       f.set('sendEmailConfirmation', 'false');
       return f;
@@ -347,6 +355,22 @@ async function pushBookingToCloudbeds(booking){
         f.delete('children[0][roomTypeID]');
         f.delete('children[0][quantity]');
         f.set('children', '');
+        return f;
+      }},
+      // Jaring terakhir untuk risiko yang dibawa oleh pengiriman jumlah tamu
+      // yang sebenarnya (2026-09-12). Sebelumnya angkanya selalu 1 dewasa 0
+      // anak, jadi selalu diterima; sekarang tamu bisa memilih 8 dewasa,
+      // dan kalau itu melebihi kapasitas tipe kamar di Cloudbeds,
+      // "Invalid Parameters" akan membuat SELURUH push gagal -- kamarnya
+      // tidak terblokir dan tetap dijual di semua OTA. Itu kerugian yang
+      // jauh lebih besar daripada jumlah tamu yang kurang tepat, jadi
+      // percobaan pamungkas ini mundur ke 1/0 supaya kamarnya tetap
+      // terblokir. Tercatat di cloudbeds_events_log sebagai varian yang
+      // dipakai, jadi selisihnya bisa dilihat, bukan disembunyikan.
+      {name: 'room_type_only_occupancy_fallback_1_0', build: () => {
+        const f = baseForm();
+        f.set('adults[0][quantity]', '1');
+        f.set('children[0][quantity]', '0');
         return f;
       }},
     ];
@@ -677,9 +701,27 @@ Deno.serve(async (req)=>{
     const tgl_checkout = b.tgl_checkout;
     const room_type = String(b.room_type??'').trim() || null;
     const catatan = String(b.catatan??'').trim();
+    const email = String(b.email??'').trim();
+
+    // Jumlah tamu. Cloudbeds minta adults[] dan children[] per tipe kamar,
+    // dan sebelum ini villa-api mengirim angka tetap 1 dewasa 0 anak untuk
+    // SETIAP pemesanan web -- bukan karena benar, tapi karena formnya tidak
+    // pernah menanyakan (instruksi owner 2026-09-12: "tambahkan pgisian
+    // sesuai cloudbeds").
+    const adults = Number.isFinite(Number(b.adults)) ? Math.trunc(Number(b.adults)) : 1;
+    const children = Number.isFinite(Number(b.children)) ? Math.trunc(Number(b.children)) : 0;
 
     if(nama.length<2) return err('Nama wajib diisi');
     if(!/^[0-9+][0-9+\-\s]{7,}$/.test(hp)) return err('Nomor WhatsApp tidak valid');
+    // Wajib, pilihan owner 2026-09-12. Cloudbeds mewajibkan guestEmail dan
+    // sampai sekarang diisi alamat sintetis; sekarang alamat tamu yang asli
+    // yang dikirim. Sengaja dicek longgar (ada @ dan titik sesudahnya):
+    // validasi email yang ketat menolak alamat sah lebih sering daripada
+    // menangkap yang salah, dan yang benar-benar menjaga booking ini tetap
+    // nomor WhatsApp di atas.
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return err('Email tidak valid');
+    if(adults < 1 || adults > 20) return err('Jumlah dewasa tidak valid');
+    if(children < 0 || children > 20) return err('Jumlah anak tidak valid');
     if(!isValidDateStr(tgl_checkin)) return err('Tanggal checkin tidak valid');
     if(!isValidDateStr(tgl_checkout)) return err('Tanggal checkout tidak valid');
     if(new Date(tgl_checkout) <= new Date(tgl_checkin)) return err('Tanggal checkout harus setelah checkin');
@@ -706,7 +748,7 @@ Deno.serve(async (req)=>{
     const computedTarif = await computeStayTarif(freeUnit, tgl_checkin, nights);
     if(computedTarif<=0) return err('Tarif unit belum diatur, hubungi kami langsung', 409);
 
-    const {data:g} = await supabase.from('guests').insert({nama, hp}).select('id').single();
+    const {data:g} = await supabase.from('guests').insert({nama, hp, email}).select('id').single();
 
     // Status starts as 'menunggu_pembayaran' -- deliberately OUTSIDE the
     // bookings_no_overlap_active exclusion constraint (which only covers
@@ -718,7 +760,7 @@ Deno.serve(async (req)=>{
     const {data:booking, error:bookErr} = await supabase.from('bookings').insert({
       unit_id: freeUnit.id, unit_nomor: freeUnit.nomor, guest_id: g?.id ?? null, guest_nama: nama,
       tipe: 'harian', sumber: 'website', tgl_checkin, tgl_checkout,
-      durasi_malam: nights, checkin_time: '14:00:00',
+      durasi_malam: nights, checkin_time: '14:00:00', adults, children,
       tarif: computedTarif, total_bayar: computedTarif, status: 'menunggu_pembayaran',
       catatan: catatan ? `[Website] ${catatan}` : '[Website] Booking mandiri dari loonars.id -- menunggu bukti pembayaran QRIS.',
     }).select().single();
@@ -778,7 +820,7 @@ Deno.serve(async (req)=>{
     try{ bytes = Uint8Array.from(atob(base64), c=>c.charCodeAt(0)); } catch { return err('Bukti transfer tidak valid'); }
     if(bytes.length > 8*1024*1024) return err('Bukti transfer terlalu besar (maks 8MB)');
 
-    const {data:booking} = await supabase.from('bookings').select('id,guest_id,sumber,invoice_no,created_at,status,unit_id,unit_nomor,guest_nama,cloudbeds_reservation_id,tgl_checkin,tgl_checkout').eq('id',booking_id).maybeSingle();
+    const {data:booking} = await supabase.from('bookings').select('id,guest_id,sumber,invoice_no,created_at,status,unit_id,unit_nomor,guest_nama,cloudbeds_reservation_id,tgl_checkin,tgl_checkout,adults,children').eq('id',booking_id).maybeSingle();
     if(!booking) return err('Booking tidak ditemukan', 404);
     if(booking.sumber !== 'website') return err('Booking ini tidak bisa dikonfirmasi lewat jalur ini', 403);
     let guestHp = null;
@@ -919,7 +961,7 @@ Deno.serve(async (req)=>{
     if(!/^[0-9a-f-]{36}$/i.test(booking_id)) return err('booking_id tidak valid');
 
     const {data:booking} = await supabase.from('bookings')
-      .select('id,unit_id,unit_nomor,tgl_checkin,tgl_checkout,cloudbeds_reservation_id').eq('id',booking_id).maybeSingle();
+      .select('id,unit_id,unit_nomor,tgl_checkin,tgl_checkout,cloudbeds_reservation_id,adults,children').eq('id',booking_id).maybeSingle();
     if(!booking) return err('Booking tidak ditemukan',404);
     if(!booking.cloudbeds_reservation_id) return json({success:false, reason:'not_pushed_yet'});
 
@@ -952,8 +994,10 @@ Deno.serve(async (req)=>{
     form.set('rooms[0][roomTypeID]', String(roomTypeID));
     form.set('rooms[0][checkinDate]', String(booking.tgl_checkin));
     form.set('rooms[0][checkoutDate]', String(booking.tgl_checkout ?? booking.tgl_checkin));
-    form.set('rooms[0][adults]', '1');
-    form.set('rooms[0][children]', '0');
+    // Dari booking-nya, bukan dipatok: memindahkan kamar tidak boleh
+    // sekalian menurunkan jumlah tamu di Cloudbeds jadi 1 dewasa 0 anak.
+    form.set('rooms[0][adults]', String(Math.max(1, Math.trunc(Number(booking.adults ?? 1)) || 1)));
+    form.set('rooms[0][children]', String(Math.max(0, Math.trunc(Number(booking.children ?? 0)) || 0)));
     const propertyId = (Deno.env.get('CLOUDBEDS_PROPERTY_ID') ?? '').trim();
     if(propertyId) form.set('propertyID', propertyId);
 
@@ -989,7 +1033,7 @@ Deno.serve(async (req)=>{
 
     const today = new Date().toISOString().slice(0,10);
     const {data:pending} = await supabase.from('bookings')
-      .select('id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,status,sumber,cloudbeds_reservation_id')
+      .select('id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,status,sumber,cloudbeds_reservation_id,adults,children')
       .is('cloudbeds_reservation_id', null)
       .neq('sumber', 'cloudbeds')
       .in('status', ['terjadwal','checkin'])
@@ -1019,7 +1063,10 @@ Deno.serve(async (req)=>{
     const code = String(b?.code ?? '').trim().toUpperCase();
     if(!/^[0-9A-F]{6}$/.test(code)) return json({success:false, reason:'invalid_code'});
 
-    const SELECT_COLS = 'id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,total_bayar,created_at,status,invoice_no,cloudbeds_reservation_id,catatan';
+    // adults/children ikut dibawa: pushBookingToCloudbeds membacanya dari
+    // objek booking ini, jadi kolom yang tidak di-select akan diam-diam
+    // jatuh ke default 1 dewasa 0 anak -- persis bug yang sedang diperbaiki.
+    const SELECT_COLS = 'id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,total_bayar,created_at,status,invoice_no,cloudbeds_reservation_id,catatan,adults,children';
 
     const {data:pending} = await supabase.from('bookings')
       .select(SELECT_COLS)
