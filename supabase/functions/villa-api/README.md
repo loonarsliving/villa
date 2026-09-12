@@ -18,6 +18,29 @@ deploy rights on project `svcmybsziaelwwdrnzcv`. Until that secret exists,
 the workflow will fail (visible in the Actions tab) rather than deploying
 nothing silently.
 
+## 2026-09-12: the CI deploy has never once worked, and this file has drifted 10 versions
+
+All four runs of `.github/workflows/deploy-villa-api.yml` since it was added
+on 2026-09-10 have **failed** — the one-time `SUPABASE_ACCESS_TOKEN` repo
+secret the section above says is "still required" was never added. So the
+workflow has never deployed anything, and every villa-api change since v34
+went to production the old way, directly against Supabase, without this file
+being updated.
+
+That leaves a live hazard, not just untidiness. This file is still the
+v34-era snapshot while production runs **v44**. The moment somebody adds that
+secret, the next push touching this directory would deploy this file —
+silently rolling production back ten versions and taking out the public
+booking flow, payment confirmation, PDF invoices and per-date pricing in
+`/public/availability` with it.
+
+**Until this file is re-synced from the deployed v44, do not add the
+`SUPABASE_ACCESS_TOKEN` secret.** Adding the secret and re-syncing the file
+have to happen together, in that order: sync first, secret second.
+
+And whatever the Actions tab says, check it — a green-looking push here has
+so far never meant a deploy actually happened.
+
 ## Provenance
 
 | | |
