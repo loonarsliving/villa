@@ -109,6 +109,27 @@ function paymentCode(bookingId){
   return bookingId.replace(/-/g,'').slice(-6).toUpperCase();
 }
 
+/**
+ * Berapa lama sebuah booking website yang belum dibayar boleh ditahan
+ * (instruksi owner 2026-09-12: "harusnya stlah 1 jam pesanan langsung
+ * dibatalkan").
+ *
+ * Sebelum ini angka 60 menit hanya ada sebagai aturan TAMPILAN di kalender
+ * front-desk: booking yang lewat 1 jam berhenti digambar, tapi barisnya
+ * tetap 'menunggu_pembayaran' selamanya dan halaman tamu tetap menampilkan
+ * QRIS seolah unitnya masih ditahan. Sekarang pembatalannya nyata.
+ */
+const PENDING_PAYMENT_HOLD_MINUTES = 60;
+
+/**
+ * Penanda di kolom catatan untuk booking yang dibatalkan oleh mesin, bukan
+ * oleh manusia. Dipakai dua arah: supaya staf tahu kenapa sebuah booking
+ * jadi 'batal', dan supaya konfirmasi "LUNAS" yang datang terlambat masih
+ * bisa menghidupkannya kembali -- tanpa penanda ini, pembatalan otomatis
+ * akan menelan pembayaran tamu yang sudah masuk tepat sebelum batas waktu.
+ */
+const EXPIRED_HOLD_MARK = '[Kedaluwarsa otomatis]';
+
 function invoiceNoFor(booking){
   const d = new Date(booking.created_at);
   const ymd = d.toISOString().slice(0,10).replace(/-/g,'');
@@ -819,7 +840,7 @@ Deno.serve(async (req)=>{
     if(!hp) return err('Nomor WhatsApp wajib diisi');
 
     const {data:booking} = await supabase.from('bookings')
-      .select('id,guest_id,sumber,status,invoice_no').eq('id',booking_id).maybeSingle();
+      .select('id,guest_id,sumber,status,invoice_no,catatan,created_at').eq('id',booking_id).maybeSingle();
     if(!booking) return err('Booking tidak ditemukan', 404);
     if(booking.sumber !== 'website') return err('Booking ini tidak bisa dicek lewat jalur ini', 403);
 
@@ -833,9 +854,23 @@ Deno.serve(async (req)=>{
     }
     if(!guestHp || guestHp.trim() !== hp) return err('Nomor WhatsApp tidak cocok dengan booking ini', 403);
 
+    // hold_expires_at dikirim supaya halaman tamu bisa menghitung mundur
+    // sisa waktunya sendiri, dan cancelled/expired supaya halaman itu berhenti
+    // menampilkan QRIS begitu booking-nya tidak berlaku lagi. Sebelum ini
+    // halaman tamu hanya mengenal 'confirmed', jadi booking yang sudah
+    // dibatalkan tetap tampil sebagai "Selesaikan Pembayaran" selamanya.
+    const created = Date.parse(booking.created_at);
+    const holdExpiresAt = Number.isFinite(created)
+      ? new Date(created + PENDING_PAYMENT_HOLD_MINUTES*60*1000).toISOString()
+      : null;
+
     return json({
       status: booking.status,
       confirmed: booking.status === 'terjadwal',
+      cancelled: booking.status === 'batal',
+      expired: booking.status === 'batal' && String(booking.catatan ?? '').includes(EXPIRED_HOLD_MARK),
+      hold_expires_at: booking.status === 'menunggu_pembayaran' ? holdExpiresAt : null,
+      hold_minutes: PENDING_PAYMENT_HOLD_MINUTES,
       invoice_no: booking.invoice_no ?? null,
     });
   }
@@ -984,10 +1019,29 @@ Deno.serve(async (req)=>{
     const code = String(b?.code ?? '').trim().toUpperCase();
     if(!/^[0-9A-F]{6}$/.test(code)) return json({success:false, reason:'invalid_code'});
 
+    const SELECT_COLS = 'id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,total_bayar,created_at,status,invoice_no,cloudbeds_reservation_id,catatan';
+
     const {data:pending} = await supabase.from('bookings')
-      .select('id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,total_bayar,created_at,status,invoice_no,cloudbeds_reservation_id')
+      .select(SELECT_COLS)
       .eq('sumber','website').eq('status','menunggu_pembayaran');
-    const booking = (pending ?? []).find(x => paymentCode(x.id) === code) ?? null;
+    let booking = (pending ?? []).find(x => paymentCode(x.id) === code) ?? null;
+
+    // Tamu yang membayar di menit ke-59 dan owner yang membalas di menit
+    // ke-70 adalah kejadian biasa, bukan kasus langka. Tanpa cabang ini,
+    // pembatalan otomatis 1 jam akan menjawab "kode tidak ditemukan" untuk
+    // tamu yang uangnya sudah masuk -- persis kegagalan yang paling mahal
+    // dari fitur ini. Jadi booking yang dibatalkan MESIN (bukan manusia)
+    // masih bisa dihidupkan kembali; yang dibatalkan staf tidak.
+    let revived = false;
+    if(!booking){
+      const {data:cancelled} = await supabase.from('bookings')
+        .select(SELECT_COLS)
+        .eq('sumber','website').eq('status','batal');
+      const expired = (cancelled ?? [])
+        .filter(x => String(x.catatan ?? '').includes(EXPIRED_HOLD_MARK))
+        .find(x => paymentCode(x.id) === code) ?? null;
+      if(expired){ booking = expired; revived = true; }
+    }
 
     if(!booking){
       // Mungkin sudah dikonfirmasi sebelumnya -- balasan ganda dari owner
@@ -1017,7 +1071,7 @@ Deno.serve(async (req)=>{
     }
 
     await notif(null, 'all', 'transfer', `Pembayaran dikonfirmasi -- Unit ${booking.unit_nomor} terkunci`,
-      `Booking ${String(booking.id).slice(0,8)} (${booking.tgl_checkin} s/d ${booking.tgl_checkout}) dikonfirmasi lunas oleh owner via WhatsApp, unit sudah masuk kalender.`, booking.id);
+      `Booking ${String(booking.id).slice(0,8)} (${booking.tgl_checkin} s/d ${booking.tgl_checkout}) dikonfirmasi lunas oleh owner via WhatsApp, unit sudah masuk kalender.${revived ? ` Booking ini sempat kedaluwarsa lewat ${PENDING_PAYMENT_HOLD_MINUTES} menit dan dihidupkan kembali oleh konfirmasi ini.` : ''}`, booking.id);
 
     // Tell Cloudbeds the room is sold, so it stops offering it on every
     // OTA (owner 2026-09-12: "agar cloudbeds mngetahui berapa kamar yg ada
@@ -1033,7 +1087,7 @@ Deno.serve(async (req)=>{
     await pushBookingToCloudbeds({...booking, status:'terjadwal'});
 
     return json({
-      success:true, unit_nomor:booking.unit_nomor, guest_nama:booking.guest_nama,
+      success:true, revived, unit_nomor:booking.unit_nomor, guest_nama:booking.guest_nama,
       tgl_checkin:booking.tgl_checkin, tgl_checkout:booking.tgl_checkout,
       total_bayar:booking.total_bayar, invoice_no,
     });
@@ -1132,6 +1186,45 @@ Deno.serve(async (req)=>{
       checkout_hari_ini: co?.length??0,
       okupansi_persen: total>0 ? Math.round(terisi/total*100) : 0,
     });
+  }
+
+  // Batalkan booking website yang tidak dibayar dalam 1 jam (instruksi
+  // owner 2026-09-12). Dijalankan pg_cron tiap 5 menit, jadi pembatalan
+  // paling telat 5 menit setelah jatuh tempo.
+  //
+  // Statusnya dijadikan 'batal', BUKAN dihapus: barisnya adalah satu-satunya
+  // catatan bahwa seseorang pernah mencoba memesan tanggal itu, berguna untuk
+  // melihat berapa banyak calon tamu yang lepas. Penghapusan juga akan
+  // memutus jalur "LUNAS" telat di bawah.
+  if(path==='/cron/expire-pending-bookings' && m==='POST'){
+    const cron = await getSetting('cron');
+    const provided = req.headers.get('x-cron-secret') ?? '';
+    if(!cron.secret) return err('Cron belum dikonfigurasi (integration_settings.cron.secret)',503);
+    if(!await secretsMatch(provided, cron.secret)) return err('Unauthorized',401);
+
+    const cutoff = new Date(Date.now() - PENDING_PAYMENT_HOLD_MINUTES*60*1000).toISOString();
+    const {data:stale} = await supabase.from('bookings')
+      .select('id,unit_nomor,guest_nama,tgl_checkin,tgl_checkout,catatan,created_at')
+      .eq('sumber','website').eq('status','menunggu_pembayaran').lt('created_at', cutoff);
+
+    const expired = [];
+    for(const bk of stale ?? []){
+      // Dicek ulang per baris, bukan lewat satu UPDATE massal, supaya sebuah
+      // booking yang baru saja dikonfirmasi owner di detik yang sama tidak
+      // ikut terbatalkan: .eq('status','menunggu_pembayaran') di bawah
+      // membuat update-nya kalah kalau statusnya sudah berubah.
+      const catatan = `${bk.catatan ?? ''} ${EXPIRED_HOLD_MARK} ${new Date().toISOString()}`.trim();
+      const {data:updated, error:upErr} = await supabase.from('bookings')
+        .update({status:'batal', catatan})
+        .eq('id', bk.id).eq('status','menunggu_pembayaran')
+        .select('id');
+      if(upErr || !(updated ?? []).length) continue;
+      expired.push({id:bk.id, unit_nomor:bk.unit_nomor, guest_nama:bk.guest_nama});
+      await notif(null, 'all', 'booking', `Booking kedaluwarsa -- Unit ${bk.unit_nomor}`,
+        `${bk.guest_nama} (${bk.tgl_checkin} s/d ${bk.tgl_checkout}) tidak menyelesaikan pembayaran dalam ${PENDING_PAYMENT_HOLD_MINUTES} menit, booking dibatalkan otomatis.`, bk.id);
+    }
+
+    return json({expired: expired.length, bookings: expired});
   }
 
   if(path==='/cron/cleaning-calls' && m==='POST'){
