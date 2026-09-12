@@ -37,6 +37,38 @@ These four tables are proven to exist because the webhook route performs live qu
 Confirmed 2026-08-23 via direct Supabase MCP access: every villa table has RLS enabled (`rls_enabled: true`), and `villa-api` uses the service-role key (bypasses RLS) for all reads/writes — RLS is defense-in-depth against direct anon/authenticated PostgREST access, not the enforcement layer (that's `villa-api`'s own token/role checks). RPC functions confirmed in use by `villa-api`: `villa_login`, `villa_set_password`, `villa_create_user`. Storage bucket usage: none observed in `villa-api`'s source.
 - **Project-wide advisory (unrelated to villa, surfaced for awareness):** at last check, 2 tables in this shared project had RLS fully disabled (`istri_daily_tips`, `contractor_fund_request_pending`) — anon-key-readable/writable. Not villa's tables; flagged to the project owner, not remediated from this session.
 
+## `bookings.adults` / `bookings.children` (ditambahkan 2026-09-12, disetujui owner)
+Migrasi `supabase/migrations/20260912000001_add_bookings_occupancy.sql`, sudah
+diterapkan ke produksi lewat Supabase MCP.
+
+- `adults integer not null default 1`, `children integer not null default 0`
+- constraint `bookings_occupancy_sane`: `adults` 1–20, `children` 0–20
+
+Alasannya Cloudbeds: `postReservation` dan `putReservation` dua-duanya minta
+`adults[]`/`children[]` per tipe kamar, dan sebelum ini villa-api mengirim
+**angka tetap 1 dewasa 0 anak** untuk setiap pemesanan web — bukan karena benar,
+tapi karena form loonars.id tidak pernah menanyakannya. Okupansi di Cloudbeds
+(dan lewat Cloudbeds, di semua OTA) karena itu salah setiap kali tamunya lebih
+dari satu.
+
+Default 1/0 membuat 8 baris yang sudah ada saat migrasi — termasuk reservasi
+hasil sinkronisasi dari Cloudbeds, yang jumlah tamunya tidak pernah kita simpan
+— tetap sah tanpa menebak isinya, dan jalur booking staf (`POST /bookings`,
+yang belum menanyakan jumlah tamu) berperilaku persis seperti sebelumnya.
+
+**Jebakan untuk sesi berikutnya:** `pushBookingToCloudbeds` membaca kedua kolom
+ini dari objek booking yang diberikan padanya. Setiap `select` di jalur yang
+memanggilnya **harus** menyertakan `adults,children` — kolom yang lupa di-select
+akan diam-diam jatuh ke default 1/0, yang persis bug yang migrasi ini perbaiki.
+Empat jalur yang terpengaruh: `/public/bookings/confirm-payment`,
+`/bridge/confirm-payment`, sweep `/bridge/push-unsynced-bookings`, dan
+`POST /bookings` staf.
+
+`guests.email` sudah ada sejak awal dan tidak butuh migrasi; sejak 2026-09-12
+form web mewajibkannya, dan `pushBookingToCloudbeds` memakainya sebagai
+`guestEmail` dengan alamat sintetis `booking-<8 hex>@guest.loonars.id` tetap
+sebagai cadangan untuk booking yang tidak punya email.
+
 ## `walkin_payments` (added 2026-08-23 — Payment Gateway module)
 Isolated table for the walk-in cafe/spa cashier module (`/front-desk/payment-gateway` — a shared feature for both `admin` and `receptionist`, relocated from `/admin/payment-gateway` same day): `id, guest_nama, guest_hp, kategori (cafe|spa|lainnya), deskripsi, jumlah, status (pending|lunas|batal), created_by, created_at, paid_at`. RLS enabled, no policies (service-role/`villa-api`-only access, same pattern as `sync_config`/`automation_config`). Reachable via `GET/POST/PATCH /walkin-payments` (renamed off `/admin/*` in villa-api v17, gated `isStaff` not `isAdmin`, so receptionist isn't blocked by the blanket admin-only path check). **Deliberately not fed into `transactions`/`computeReport`** — that stream drives the investor 70/30 revenue-sharing split for villa rental income, and cafe/spa walk-in income is a separate business line not covered by that split. `GET /report` surfaces a read-only `walkin_income: {cafe, spa, lainnya, total}` breakdown for the requested `periode`, computed by `computeWalkinIncome()` — shown to investors purely for transparency (not summed into `gross_revenue`/`net`/`owner_amount`).
 
