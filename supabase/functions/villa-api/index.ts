@@ -1713,9 +1713,26 @@ Deno.serve(async (req)=>{
 
     // Satu usulan yang masih menunggu sudah cukup. Menumpuk usulan setiap
     // hari hanya akan membuat owner mengabaikan semuanya.
+    //
+    // Dua hal yang membuat penjaga ini tidak berbalik melumpuhkan fiturnya:
+    //
+    // 1. Usulan yang lewat 48 jam dikedaluwarsakan DI SINI. Sebelumnya
+    //    kedaluwarsa hanya dihitung saat ada yang mencoba menyetujui, jadi
+    //    satu usulan yang didiamkan akan memblokir cron ini selamanya --
+    //    fitur mati tanpa satu pun pesan galat.
+    // 2. Penjaganya hanya berlaku untuk mode 'usul'. Mode pantau tidak
+    //    membuat usulan apa pun, jadi tidak ada alasan pemantauan harian
+    //    ikut berhenti gara-gara ada usulan yang menunggu.
     const {data:menunggu} = await supabase.from('villa_promo_batches')
       .select('id,kode_konfirmasi,created_at').eq('status','menunggu').limit(1).maybeSingle();
-    if(menunggu) return json({dilewati:'masih ada usulan yang menunggu persetujuan', kode:menunggu.kode_konfirmasi});
+    if(menunggu){
+      const umurJam = (Date.now() - Date.parse(menunggu.created_at)) / 3600000;
+      if(umurJam > 48){
+        await supabase.from('villa_promo_batches').update({status:'kedaluwarsa'}).eq('id', menunggu.id);
+      } else if(mode === 'usul'){
+        return json({dilewati:'masih ada usulan yang menunggu persetujuan', kode:menunggu.kode_konfirmasi, mode});
+      }
+    }
 
     const {data:promo} = await supabase.from('villa_promos').select('*').eq('kode', kodePromo).maybeSingle();
     if(!promo || promo.aktif !== true) return json({dilewati:`promo ${kodePromo} tidak ada atau tidak aktif`});
