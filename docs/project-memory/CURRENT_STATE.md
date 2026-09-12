@@ -2,6 +2,65 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-12 — dua garapan paralel disatukan: permintaan kini dibaca dari EMPAT sinyal
+
+Dua sesi menggarap `src/lib/aiPricingEngine.ts` bersamaan. Branch
+`claude/serene-cori-ne0rhb` (komit `e979a59`, berbasis `main` lama)
+menambah pace + indeks minat pasar berangka; branch ini menambah musim
+sepi + lead time + minat pasar kualitatif. Keduanya saling melengkapi,
+bukan bertentangan, jadi disatukan — bukan salah satu dibuang.
+
+**Cara penyatuannya (yang penting diingat):**
+- **Minat pasar dulunya dua versi dari sinyal yang SAMA.** Indeks berangka
+  per bulan (`integration_settings.villa_market_search_index`, 0-100,
+  relatif baseline tahun itu) jadi **utama**, dan bacaan kualitatif
+  `demand_trend` hanya dipakai **kalau indeksnya tidak ada**. Tidak pernah
+  keduanya sekaligus — itu akan menghitung sinyal yang sama dua kali.
+- **Lead time** dikenakan pada sinyal okupansi **sebelum** masuk
+  penggabungan, bukan sebagai langkah terpisah.
+- **Musim sepi** tidak bersinggungan dengan keduanya, tetap di langkah 4.
+- Pace, indeks pasar, dan helper-nya dipindah ke dalam fungsi murni
+  `decideRateForDate` supaya ikut teruji.
+
+**Empat sinyal permintaan, digabung berbobot** (`SIGNAL_WEIGHTS`):
+
+| Sinyal | Bobot | Batas gerak | Butuh apa |
+|---|---|---|---|
+| Okupansi (ditimbang lead time) | 0,60 | setting owner | selalu ada |
+| Pace vs tanggal pembanding | 0,28 | ±8% | ≥6 tanggal lewat, ≥15 booking |
+| Minat pasar (indeks bulanan) | 0,12 | ±5% | indeks hasil riset |
+| — cadangan: tren kualitatif | 0,12 | ±3% | `demand_trend` |
+
+Aturan yang membuat lapisan ini aman: **sinyal tanpa data tidak dianggap
+netral lalu ikut menarik rata-rata ke nol — ia tidak ikut sama sekali, dan
+bobot sisanya dinormalkan.** Kalau hanya okupansi yang punya data (keadaan
+hari ini), hasilnya identik dengan mesin sebelum lapisan ini ada. Pace dan
+minat pasar juga ditahan saat cold start, sama seperti event uplift.
+
+**Pace dihitung dari `bookings.created_at`, bukan dari
+`villa_daily_inventory_snapshot`.** Snapshot hanya merekam keadaan hari
+itu, jadi ia tidak bisa menjawab "20 Oktober sudah seramai apa waktu kita
+masih 30 hari sebelumnya". `created_at` menjawabnya secara surut, tanpa
+menunggu berbulan-bulan mengumpulkan snapshot baru. Dipisah
+weekend/bukan-weekend, karena membandingkan Sabtu dengan Selasa akan
+membuat setiap Sabtu terlihat "lebih cepat dari biasanya" selamanya.
+
+**Verifikasi**: 51 tes hijau (38 di antaranya khusus penalaran harga), dan
+simulasi kering dengan data produksi asli (364 tanggal × 2 tipe kamar,
+dibanding harga yang hidup di Cloudbeds) → **nol perubahan harga**, sama
+seperti sebelum penyatuan. Memang begitu yang diharapkan: hari ini baru 8
+booking, jadi cold start menahan pace dan minat pasar, dan pace belum
+punya tanggal pembanding sama sekali.
+
+**Sisi Mkhsistem** kini mengembalikan `search_index_by_month` (0-100 per
+bulan, 12 bulan ke depan) di samping `direction` — keduanya dari riset yang
+sama, dan promptnya diminta konsisten: bulan yang ditandai `direction:
+"turun"` tidak boleh muncul tinggi di indeksnya.
+
+**Branch `claude/serene-cori-ne0rhb` sudah tidak perlu di-merge** — seluruh
+isinya sudah masuk lewat penyatuan ini. Kalau di-merge apa adanya justru
+akan menimpa balik musim sepi dan lead time.
+
 ## 2026-09-12 — verifikasi: API Cloudbeds bisa mengubah harga, DAN cron malamnya memang jalan otomatis
 
 Owner bertanya: pastikan dulu API ke Cloudbeds benar-benar bisa **menulis**

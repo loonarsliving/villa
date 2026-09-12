@@ -36,6 +36,9 @@ function decide(overrides: Partial<DateDecisionInput> = {}) {
     competitorMedian: null,
     liveRate: null,
     marketTrend: null,
+    marketSearchRelative: null,
+    paceExpectedSold: null,
+    unitsSoldNow: 0,
     settings,
     minRate: 600000,
     maxRate: 1000000,
@@ -149,12 +152,16 @@ describe("peaks still have to be earned", () => {
 });
 
 describe("market interest (SIGNAL 2)", () => {
+  // Sinyal ini masuk lewat penggabungan berbobot: okupansi selalu ikut
+  // (bobot 0,60) walau usulannya 0, jadi usulan +3% dari minat pasar
+  // (bobot 0,12) menjadi 0,12/0,72 x 3% = +0,5% pada harga akhir. Itu
+  // memang disengaja -- ia mengukur seluruh Jogja, bukan villa kita.
   it("nudges price up when search interest is rising", () => {
-    expect(decide({ marketTrend: "naik" }).decided_rate).toBe(669500);
+    expect(decide({ marketTrend: "naik" }).decided_rate).toBe(653250);
   });
 
   it("nudges price down when search interest is falling", () => {
-    expect(decide({ marketTrend: "turun" }).decided_rate).toBe(630500);
+    expect(decide({ marketTrend: "turun" }).decided_rate).toBe(646750);
   });
 
   it("does nothing when the trend is flat or unknown", () => {
@@ -162,10 +169,68 @@ describe("market interest (SIGNAL 2)", () => {
     expect(decide({ marketTrend: null }).decided_rate).toBe(650000);
   });
 
+  it("prefers the numeric monthly index over the qualitative trend", () => {
+    // Keduanya menjawab pertanyaan yang sama, jadi tidak boleh dihitung dua
+    // kali: kalau indeks berangka ada, ia yang dipakai.
+    const d = decide({ marketSearchRelative: 0.4, marketTrend: "turun" });
+    expect(d.reason_codes).toContain("market_search_high");
+    expect(d.reason_codes).not.toContain("market_interest_down");
+  });
+
+  it("holds the market signal entirely during cold start", () => {
+    const d = decide({ marketSearchRelative: 0.8, coldStart: true });
+    expect(d.decided_rate).toBe(650000);
+    expect(d.reason_codes).toContain("market_search_held_cold_start");
+  });
+
   it("stays the smallest lever: it cannot outweigh a full occupancy move", () => {
     const trendOnly = decide({ marketTrend: "naik" }).decided_rate - 650000;
     const occupancyOnly = decide({ occupancyPct: 90 }).decided_rate - 650000;
     expect(Math.abs(trendOnly)).toBeLessThan(Math.abs(occupancyOnly));
+  });
+});
+
+describe("pace (SIGNAL 4)", () => {
+  it("lifts a date that is filling faster than comparable dates", () => {
+    const d = decide({ paceExpectedSold: 1, unitsSoldNow: 2, minRate: 400000 });
+    expect(d.reason_codes).toContain("pace_ahead");
+    expect(d.decided_rate).toBeGreaterThan(650000);
+  });
+
+  it("eases a date that is filling slower than comparable dates", () => {
+    const d = decide({ paceExpectedSold: 2, unitsSoldNow: 1, minRate: 400000 });
+    expect(d.reason_codes).toContain("pace_behind");
+    expect(d.decided_rate).toBeLessThan(650000);
+  });
+
+  it("ignores a difference too small to be anything but noise", () => {
+    const d = decide({ paceExpectedSold: 10, unitsSoldNow: 11 });
+    expect(d.reason_codes).not.toContain("pace_ahead");
+    expect(d.decided_rate).toBe(650000);
+  });
+
+  it("does nothing at all when there is no comparable history", () => {
+    expect(decide({ paceExpectedSold: null, unitsSoldNow: 5 }).decided_rate).toBe(650000);
+  });
+
+  it("is held during cold start, like the event uplift", () => {
+    const d = decide({ paceExpectedSold: 1, unitsSoldNow: 3, coldStart: true });
+    expect(d.decided_rate).toBe(650000);
+    expect(d.reason_codes).toContain("pace_held_cold_start");
+  });
+
+  it("stays bounded even when a date sells ten times faster than normal", () => {
+    const d = decide({ paceExpectedSold: 0.5, unitsSoldNow: 10 });
+    // usulan pace dijepit ke +8%, lalu diencerkan bobotnya -> jauh di bawah
+    // lonjakan yang pernah terjadi pada insiden 16/22/23 Sep.
+    expect(d.decided_rate).toBeLessThanOrEqual(Math.round(650000 * 1.04));
+  });
+});
+
+describe("signals only count when they have data", () => {
+  it("with occupancy alone, the blend reproduces the old single-signal engine", () => {
+    const d = decide({ occupancyPct: 90, paceExpectedSold: null, marketSearchRelative: null, marketTrend: null });
+    expect(d.decided_rate).toBe(747500); // 650.000 x 1,15, persis seperti sebelum lapisan ini ada
   });
 });
 
