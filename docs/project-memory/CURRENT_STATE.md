@@ -66,7 +66,7 @@ lebar jendela retensi yang sebenarnya. Sandbox sesi ini juga diblokir
 keluar ke `api.cloudbeds.com` (proxy 403), jadi verifikasi harus lewat
 jejak di database, bukan panggilan langsung.
 
-## 2026-09-12 — penalaran harga AI diperluas (branch `claude/duetto-villa-pricing-reasoning-1eygpo`, BELUM di `main`, autopush masih OFF)
+## 2026-09-12 — penalaran harga AI diperluas (SUDAH DI `main`, sudah live)
 
 Owner sedang mempelajari Duetto dan meminta AI penentu harga menimbang
 lebih banyak indikator, bukan hanya okupansi: minat pencarian villa di
@@ -91,10 +91,29 @@ Yang berubah (detail lengkap di CHANGELOG.md):
   42 tes hijau seluruh repo). Ini gerbang otomatis pertama yang dimiliki
   logika harga.
 
-**Belum menyentuh harga tamu**: tidak ada migrasi dan tidak ada perubahan
-skema, dan perubahannya belum di-merge. Menunggu persetujuan owner
-(aturan MERGE AUTHORITY di CLAUDE.md: apa pun yang menyentuh harga tamu
-perlu owner bilang ya dulu).
+**Di-merge 2026-09-12 atas persetujuan owner** (villa PR #63 → `main`,
+Mkhsistem PR #63 → `claude/mk-connect-app-o9zw2p`; kedua deployment
+produksi `READY`). Tidak ada migrasi dan tidak ada perubahan skema.
+
+**Simulasi kering sebelum merge, dengan data produksi asli**: 364 tanggal
+× 2 tipe kamar, hasil mesin harga baru dibandingkan dengan harga yang
+sedang hidup di Cloudbeds → **nol perubahan harga**. Itu memang yang
+diharapkan: sinyal barunya menyala bertahap saat datanya tersedia —
+periode sepi setelah riset Mkhsistem berikutnya (staleness 7 hari, riset
+terakhir 2026-09-12 04:23), minat pasar setelah refresh yang sama, dan
+lead time baru setelah riwayat pemesanan melewati ambang cold start
+(`COLD_START_MIN_BOOKINGS = 20`; sekarang baru 8 booking). Harga live
+pembandingnya diverifikasi dulu ke database: 728 baris, 0 tidak cocok.
+
+**PERHATIAN — ada branch paralel yang menggarap berkas yang sama.**
+`claude/serene-cori-ne0rhb` (satu komit, `e979a59` "Mesin harga membaca
+tiga sinyal permintaan, bukan satu") mengubah `src/lib/aiPricingEngine.ts`
+dan `src/lib/aiBridge.ts` juga — menambah gabungan berbobot okupansi 0,60
+/ pace 0,28 / minat pasar 0,12. Branch itu berbasis `main` yang LAMA
+(`a75b8d1`), jadi **akan bentrok** dengan yang barusan di-merge, dan
+lapisan "minat pasar"-nya tumpang tindih dengan SINYAL 2 di sini. Jangan
+merge branch itu tanpa menyatukan keduanya lebih dulu — kalau tidak, salah
+satu penalaran akan hilang diam-diam.
 
 **PENTING — `ai_autopush_enabled` ternyata sudah `true`** (diubah
 2026-09-11 14:48 UTC; diverifikasi lewat Supabase MCP 2026-09-12).
