@@ -191,13 +191,26 @@ async function pushBookingToCloudbeds(booking){
       if(propertyId) sourcesUrl.searchParams.set('propertyID', propertyId);
       const sourcesRes = await fetch(sourcesUrl, {headers: {'x-api-key': apiKey}});
       const sourcesBody = await sourcesRes.json().catch(()=>null);
-      const rows = Array.isArray(sourcesBody?.data) ? sourcesBody.data : (sourcesBody?.data ? [sourcesBody.data] : []);
+      let rows = Array.isArray(sourcesBody?.data) ? sourcesBody.data : (sourcesBody?.data ? [sourcesBody.data] : []);
+      // getSources nests one level: data is [[source, source, ...]], one
+      // inner array per property -- the same per-property nesting getRooms
+      // uses above. Without flattening, that single inner ARRAY is treated
+      // as one source, isThirdParty reads undefined on it, nothing matches,
+      // and the push fails claiming no direct source is configured. Proven
+      // from the logged raw response, which begins "[[{" with row_count 1.
+      if(rows.length && Array.isArray(rows[0])) rows = rows.flat();
 
       // Preferred: an active, non-third-party source -- that is the
       // property's own direct/website booking source. Then progressively
       // looser fallbacks, so a bookable source is found even if Cloudbeds
       // words these fields differently than expected.
-      const direct = rows.find(x => falsy(x.isThirdParty) && truthy(x.status))
+      // "Website/Booking Engine" is the property's own direct channel and
+      // the right home for a loonars.id booking: naming it keeps these
+      // reservations distinguishable from Walk-In and Phone in Cloudbeds'
+      // own source reporting, instead of taking whichever happens to come
+      // first.
+      const direct = rows.find(x => /website|booking\s*engine/i.test(String(x.sourceName ?? '')) && falsy(x.isThirdParty) && truthy(x.status))
+        ?? rows.find(x => falsy(x.isThirdParty) && truthy(x.status))
         ?? rows.find(x => falsy(x.isThirdParty))
         ?? rows.find(x => truthy(x.status) && /website|direct|walk|phone|front\s*desk/i.test(String(x.sourceName ?? '')));
       sourceID = direct?.sourceID ?? null;
