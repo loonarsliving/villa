@@ -262,48 +262,89 @@ async function pushBookingToCloudbeds(booking){
     const guestLastName = spaceIdx === -1 ? nama : nama.slice(spaceIdx + 1);
     const guestCountry = sourceSetting?.guest_country_default ?? 'ID';
 
-    const form = new URLSearchParams();
-    form.set('sourceID', sourceID);
-    form.set('thirdPartyIdentifier', String(booking.id));
-    form.set('startDate', booking.tgl_checkin);
-    form.set('endDate', booking.tgl_checkout ?? booking.tgl_checkin);
-    form.set('guestFirstName', guestFirstName);
-    form.set('guestLastName', guestLastName || guestFirstName);
-    form.set('guestCountry', guestCountry);
-    form.set('guestEmail', guestEmail);
-    if(guestHp) form.set('guestPhone', guestHp);
-    form.set('rooms[0][roomTypeID]', String(roomTypeID));
-    form.set('rooms[0][roomID]', String(mapping.cloudbeds_room_id));
-    form.set('rooms[0][quantity]', '1');
-    form.set('adults[0][roomTypeID]', String(roomTypeID));
-    form.set('adults[0][quantity]', '1');
-    // Cloudbeds rejects the call outright without children, even for a
-    // stay that has none -- "Parameter children is required". The spec
-    // marks nothing required, so the only reliable guide is which fields
-    // it declares non-nullable: startDate, endDate, guestFirstName,
-    // guestLastName, guestCountry, guestZip, guestEmail, rooms, adults,
-    // children, paymentMethod. Those are all sent now, rather than
-    // discovering them one failed push at a time.
-    form.set('children[0][roomTypeID]', String(roomTypeID));
-    form.set('children[0][quantity]', '0');
-    // The booking form never asks a guest for a postal code, so this is
-    // the villa's own Sleman area as a stand-in -- a placeholder to
-    // satisfy a required field, not a claim about where the guest lives.
-    // Overridable via integration_settings.cloudbeds_outbound.guest_zip_default.
-    form.set('guestZip', String(sourceSetting?.guest_zip_default ?? '55581'));
-    form.set('paymentMethod', 'cash');
-    form.set('sendEmailConfirmation', 'false');
+    // "Invalid Parameters" names no field, so guessing one change per
+    // deploy is the slow way to find it. Instead: build the base payload,
+    // then try a short ordered list of variants in ONE call, logging what
+    // Cloudbeds says to each and stopping at the first that works. Same
+    // approach that settled putRate's undocumented interval contract.
+    //
+    // Only one reservation can ever be created, because the loop breaks on
+    // the first success.
+    const baseForm = () => {
+      const f = new URLSearchParams();
+      f.set('sourceID', sourceID);
+      f.set('startDate', booking.tgl_checkin);
+      f.set('endDate', booking.tgl_checkout ?? booking.tgl_checkin);
+      f.set('guestFirstName', guestFirstName);
+      f.set('guestLastName', guestLastName || guestFirstName);
+      f.set('guestCountry', guestCountry);
+      f.set('guestZip', String(sourceSetting?.guest_zip_default ?? '55581'));
+      f.set('guestEmail', guestEmail);
+      if(guestHp) f.set('guestPhone', guestHp);
+      f.set('rooms[0][roomTypeID]', String(roomTypeID));
+      f.set('rooms[0][quantity]', '1');
+      f.set('adults[0][roomTypeID]', String(roomTypeID));
+      f.set('adults[0][quantity]', '1');
+      f.set('children[0][roomTypeID]', String(roomTypeID));
+      f.set('children[0][quantity]', '0');
+      f.set('paymentMethod', 'cash');
+      f.set('sendEmailConfirmation', 'false');
+      return f;
+    };
 
-    const res = await fetch(`${CLOUDBEDS_API_BASE}/postReservation`, {
-      method: 'POST',
-      headers: {'x-api-key': apiKey, 'Content-Type': 'application/x-www-form-urlencoded'},
-      body: form.toString(),
-    });
-    const body = await res.json().catch(()=>null);
-    if(!res.ok || body?.success === false){
-      await logOutbound(false, {error: `postReservation_failed: ${body?.message ?? res.status}`, response: body});
+    const variants = [
+      // As sent today, plus the pinned room and our own booking id.
+      {name: 'with_roomID_and_thirdPartyIdentifier', build: () => {
+        const f = baseForm();
+        f.set('rooms[0][roomID]', String(mapping.cloudbeds_room_id));
+        f.set('thirdPartyIdentifier', String(booking.id));
+        return f;
+      }},
+      // thirdPartyIdentifier is documented for CHANNEL identifiers; a uuid
+      // from us may simply not be accepted here.
+      {name: 'with_roomID_only', build: () => {
+        const f = baseForm();
+        f.set('rooms[0][roomID]', String(mapping.cloudbeds_room_id));
+        return f;
+      }},
+      // Pinning an individual room requires the feature to be enabled in
+      // MyBookings settings; without it, roomID is invalid rather than
+      // ignored. Room type alone still blocks inventory correctly.
+      {name: 'room_type_only', build: () => baseForm()},
+      // Last resort: some deployments reject a zero-quantity children row.
+      {name: 'room_type_only_no_children_row', build: () => {
+        const f = baseForm();
+        f.delete('children[0][roomTypeID]');
+        f.delete('children[0][quantity]');
+        f.set('children', '');
+        return f;
+      }},
+    ];
+
+    let body = null;
+    const attempts = [];
+    for(const variant of variants){
+      const res = await fetch(`${CLOUDBEDS_API_BASE}/postReservation`, {
+        method: 'POST',
+        headers: {'x-api-key': apiKey, 'Content-Type': 'application/x-www-form-urlencoded'},
+        body: variant.build().toString(),
+      });
+      const attemptBody = await res.json().catch(()=>null);
+      attempts.push({variant: variant.name, http: res.status, success: attemptBody?.success ?? null, message: attemptBody?.message ?? null});
+      if(res.ok && attemptBody?.success !== false && attemptBody?.reservationID){
+        body = attemptBody;
+        break;
+      }
+    }
+
+    if(!body){
+      await logOutbound(false, {error: 'postReservation_failed_all_variants', attempts});
       return;
     }
+    // Recorded on success too: knowing WHICH shape Cloudbeds accepts is
+    // the whole point of having probed, and it is the first thing anyone
+    // debugging this next will want.
+    await logOutbound(true, {accepted_variant: attempts[attempts.length - 1]?.variant, attempts});
 
     await supabase.from('bookings').update({cloudbeds_reservation_id: body.reservationID}).eq('id', booking.id);
     await logOutbound(true, {cloudbeds_reservation_id: body.reservationID});
