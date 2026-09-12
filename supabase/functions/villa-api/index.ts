@@ -864,6 +864,75 @@ Deno.serve(async (req)=>{
   // that already has a cloudbeds_reservation_id, so a room is never
   // reserved twice. Past stays are skipped -- pushing a checkout that has
   // already happened would only create a phantom reservation.
+  // Moves an existing Cloudbeds reservation to the room type a booking now
+  // has. Needed because the push only ever CREATES: once a reservation
+  // exists, changing the unit on our side left Cloudbeds holding the old
+  // room type, and the two systems quietly disagreed about which room was
+  // sold -- the exact problem the outbound push was built to end.
+  //
+  // First real case: a guest upgraded from Standard to Sawah View as a
+  // free promotion (owner, 2026-09-12). Room moves and upgrades are
+  // ordinary hotel work, so this is an endpoint rather than a one-off.
+  if(path==='/bridge/resync-booking-room' && m==='POST'){
+    const bridge = await getVercelBridge();
+    if(!bridge.secret) return err('Jembatan belum dikonfigurasi',503);
+    const provided = req.headers.get('x-internal-secret') ?? '';
+    if(!await secretsMatch(provided, bridge.secret)) return err('Unauthorized',401);
+
+    const b = await req.json().catch(()=>null);
+    const booking_id = String(b?.booking_id ?? '').trim();
+    if(!/^[0-9a-f-]{36}$/i.test(booking_id)) return err('booking_id tidak valid');
+
+    const {data:booking} = await supabase.from('bookings')
+      .select('id,unit_id,unit_nomor,cloudbeds_reservation_id').eq('id',booking_id).maybeSingle();
+    if(!booking) return err('Booking tidak ditemukan',404);
+    if(!booking.cloudbeds_reservation_id) return json({success:false, reason:'not_pushed_yet'});
+
+    const apiKey = cloudbedsApiKey();
+    if(!apiKey) return err('CLOUDBEDS_API_KEY belum dikonfigurasi',503);
+
+    const {data:mapping} = await supabase.from('cloudbeds_room_mapping')
+      .select('cloudbeds_room_id').eq('unit_id', booking.unit_id).maybeSingle();
+    if(!mapping?.cloudbeds_room_id) return json({success:false, reason:'no_cloudbeds_mapping_for_unit'});
+
+    const roomsRes = await fetch(`${CLOUDBEDS_API_BASE}/getRooms`, {headers:{'x-api-key':apiKey}});
+    const roomsBody = await roomsRes.json().catch(()=>null);
+    let roomTypeID = null;
+    for(const entry of (roomsBody?.data ?? [])){
+      const candidates = Array.isArray(entry.rooms) ? entry.rooms : [entry];
+      for(const r of candidates){
+        if(String(r.roomID) === String(mapping.cloudbeds_room_id)){ roomTypeID = entry.roomTypeID ?? r.roomTypeID ?? null; break; }
+      }
+      if(roomTypeID) break;
+    }
+    if(!roomTypeID) return json({success:false, reason:'room_type_not_found_for_mapped_room'});
+
+    const form = new URLSearchParams();
+    form.set('reservationID', String(booking.cloudbeds_reservation_id));
+    form.set('rooms[0][roomTypeID]', String(roomTypeID));
+    const propertyId = (Deno.env.get('CLOUDBEDS_PROPERTY_ID') ?? '').trim();
+    if(propertyId) form.set('propertyID', propertyId);
+
+    const res = await fetch(`${CLOUDBEDS_API_BASE}/putReservation`, {
+      method:'POST',
+      headers:{'x-api-key':apiKey,'Content-Type':'application/x-www-form-urlencoded'},
+      body: form.toString(),
+    });
+    const body = await res.json().catch(()=>null);
+    const ok = res.ok && body?.success !== false;
+
+    await supabase.from('cloudbeds_events_log').insert({
+      reservation_id: String(booking.cloudbeds_reservation_id),
+      event_type: 'outbound.reservation.room_changed',
+      payload: {booking_id, unit_nomor: booking.unit_nomor, roomTypeID, response: body},
+      matched: ok,
+      error: ok ? null : (body?.message ?? `HTTP ${res.status}`),
+    });
+
+    return json({success: ok, unit_nomor: booking.unit_nomor, roomTypeID,
+      reservation_id: booking.cloudbeds_reservation_id, message: body?.message ?? null});
+  }
+
   if(path==='/bridge/push-unsynced-bookings' && m==='POST'){
     const bridge = await getVercelBridge();
     if(!bridge.secret) return err('Jembatan belum dikonfigurasi (integration_settings.vercel_bridge.secret)',503);
