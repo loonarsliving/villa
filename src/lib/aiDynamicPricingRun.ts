@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getCloudbedsBaseRateId, pushCloudbedsRate, getCloudbedsRoomTypeRate, CloudbedsApiError } from "@/lib/cloudbedsApi";
+import { getCloudbedsBaseRateId, pushCloudbedsRate, collapseRateIntervals, getCloudbedsRoomTypeRate, CloudbedsApiError } from "@/lib/cloudbedsApi";
 import { resolveCloudbedsRoomTypeGroups } from "@/lib/cloudbedsRoomTypeMapping";
 import { syncCloudbedsRates, type RateSyncSummary } from "@/lib/cloudbedsRateSync";
 import {
@@ -53,9 +53,10 @@ const JAKARTA_TZ = "Asia/Jakarta";
  * Cloudbeds, and the engine had no opinion about it at all.
  *
  * A full year covers every seasonal peak a guest can currently book.
- * The cost is payload size, not call count: this is still ONE putRate and
- * ONE read-back per room type, because Cloudbeds takes the whole set of
- * intervals in a single request.
+ * The push stays cheap because consecutive dates at the same price
+ * collapse into one interval (collapseRateIntervals) and putRate is sent
+ * in batches -- see the max_input_vars note on pushCloudbedsRate, found
+ * when the first full-year push was rejected outright.
  */
 const WINDOW_DAYS = 365;
 
@@ -204,7 +205,7 @@ export async function runAiDynamicPricing(supabase: SupabaseClient, pushOverride
         } else {
           const pushResult = await pushCloudbedsRate(
             rateId,
-            decisions.map((d) => ({ startDate: d.date, endDate: d.date, rate: d.decided_rate })),
+            collapseRateIntervals(decisions.map((d) => ({ date: d.date, rate: d.decided_rate }))),
           );
           jobReferenceId = pushResult.jobReferenceId;
 
