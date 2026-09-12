@@ -407,30 +407,57 @@ async function pushBookingToCloudbeds(booking){
   }
 }
 
+/**
+ * Mengirim WhatsApp lewat jembatan Mkhsistem, dan MELAPORKAN hasilnya.
+ *
+ * Dulu fungsi ini tidak mengembalikan apa pun, sehingga pemanggilnya tidak
+ * punya cara membedakan pesan yang terkirim dari yang gagal -- dan pada
+ * 2026-09-12 itu membuat villa_promo_sends mencatat 'terkirim' untuk pesan
+ * yang belum tentu sampai. Sekarang ia mengembalikan true hanya kalau
+ * jembatan benar-benar menjawab sukses.
+ *
+ * meta disaring ke kolom yang memang ada di wa_messages_log. Ini bukan
+ * kerapian: satu kunci asing di objek meta membuat SELURUH insert log gagal
+ * diam-diam (PostgREST menolak kolom yang tidak dikenal), dan pesan yang
+ * tidak tercatat tidak bisa dibedakan dari pesan yang tidak pernah dikirim.
+ * Persis itu yang terjadi saat 'promo_batch_id' ikut dikirim ke sini.
+ */
 async function sendWa(phone, message, meta){
+  const KOLOM_LOG = ['booking_id','unit_id','template_type'];
+  const metaAman = {};
+  for(const k of KOLOM_LOG){ if(meta && meta[k] !== undefined) metaAman[k] = meta[k]; }
+
+  const catat = async (row) => {
+    const {error} = await supabase.from('wa_messages_log').insert(row);
+    if(error) console.error('[sendWa] gagal mencatat log WA', error.message);
+  };
+
   if(!phone){
-    await supabase.from('wa_messages_log').insert({...meta, phone:null, message, status:'skipped_no_phone'});
-    return;
+    await catat({...metaAman, phone:null, message, status:'skipped_no_phone'});
+    return false;
   }
   const bridge = await getVercelBridge();
   if(!bridge.base_url || !bridge.secret){
-    await supabase.from('wa_messages_log').insert({...meta, phone, message, status:'skipped_not_configured'});
-    return;
+    await catat({...metaAman, phone, message, status:'skipped_not_configured'});
+    return false;
   }
   try {
     const r = await fetch(`${bridge.base_url.replace(/\/+$/,'')}/api/wa/send`, {
       method:'POST',
       headers:{'Content-Type':'application/json','x-internal-secret':bridge.secret},
-      body: JSON.stringify({phone, message, ...meta}),
+      body: JSON.stringify({phone, message, ...metaAman}),
     });
     const result = await r.json().catch(()=>null);
-    await supabase.from('wa_messages_log').insert({
-      ...meta, phone, message,
-      status: (r.ok && result?.success) ? 'sent' : 'failed',
+    const berhasil = r.ok && result?.success === true;
+    await catat({
+      ...metaAman, phone, message,
+      status: berhasil ? 'sent' : 'failed',
       response: result ?? {http_status:r.status},
     });
+    return berhasil;
   } catch(e){
-    await supabase.from('wa_messages_log').insert({...meta, phone, message, status:'error', response:{error:String(e)}});
+    await catat({...metaAman, phone, message, status:'error', response:{error:String(e)}});
+    return false;
   }
 }
 
@@ -1426,12 +1453,17 @@ Deno.serve(async (req)=>{
         }
       }
       const pesan = String(batch.pesan).replace(/\{nama\}/g, String(penerima?.nama ?? 'Bapak/Ibu'));
-      await sendWa(hp, pesan, {template_type:'villa_promo', promo_batch_id:batch.id});
-      const {error:insErr} = await supabase.from('villa_promo_sends').insert({
-        batch_id:batch.id, promo_id:batch.promo_id, guest_id, tujuan:hp, status:'terkirim',
+      const berhasil = await sendWa(hp, pesan, {template_type:'villa_promo'});
+      await supabase.from('villa_promo_sends').insert({
+        batch_id:batch.id, promo_id:batch.promo_id, guest_id, tujuan:hp,
+        status: berhasil ? 'terkirim' : 'gagal',
+        error: berhasil ? null : 'jembatan WhatsApp tidak menjawab sukses',
       });
-      if(insErr) gagal++; else terkirim++;
-      if(guest_id){
+      if(berhasil) terkirim++; else gagal++;
+      // Penanda "baru saja dikirimi promo" hanya dipasang kalau pesannya
+      // memang terkirim -- kalau tidak, tamu ini akan terkunci dari kiriman
+      // berikutnya selama 30 hari karena pesan yang tidak pernah sampai.
+      if(guest_id && berhasil){
         await supabase.from('villa_guest_marketing').upsert(
           {guest_id, terakhir_dikirimi_promo:new Date().toISOString(), updated_at:new Date().toISOString()},
           {onConflict:'guest_id'});
@@ -1744,7 +1776,7 @@ Deno.serve(async (req)=>{
     const notifySetting = await getSetting('villa_notify');
     await sendWa(notifySetting?.owner_hp ?? null,
       `Usulan kirim promo\n\n${alasan}.\n\nPromo: ${promo.nama} (${promo.kode})\nPenerima: ${penerima.length} tamu yang pernah menginap\n\nIsi pesannya:\n"${pesan.replace('{nama}','Bapak/Ibu')}"\n\nKalau setuju, balas:\nPROMO ${kodeKonfirmasi}\n\nKalau tidak, balas:\nTOLAK ${kodeKonfirmasi}\n(usulan ini kedaluwarsa sendiri dalam 48 jam)`,
-      {template_type:'villa_promo_proposal', promo_batch_id:batch.id});
+      {template_type:'villa_promo_proposal'});
 
     return json({diusulkan:true, kode_konfirmasi:kodeKonfirmasi, okupansi_persen:okupansi, jumlah_penerima:penerima.length});
   }
