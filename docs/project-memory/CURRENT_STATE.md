@@ -2,6 +2,33 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-12 — form web kini menanyakan email + jumlah tamu; Cloudbeds berhenti menerima data karangan (villa-api v58)
+Pemesanan lewat loonars.id **sudah** masuk Cloudbeds sebelum ini, tapi dengan
+data yang dikarang `pushBookingToCloudbeds` sendiri, karena formnya tidak
+pernah menanyakannya: `guestEmail` = `booking-<8 hex>@guest.loonars.id`,
+`adults` = 1, `children` = 0 — dipatok. Jadi setiap pemesanan web tampil di
+Cloudbeds, dan lewat Cloudbeds di semua OTA, sebagai satu dewasa tanpa anak.
+
+Sekarang: form menanyakan **Email (wajib)**, **Dewasa (1–8, default 2)** dan
+**Anak (0–6)**; email disimpan ke `guests.email`, jumlah tamu ke kolom baru
+`bookings.adults`/`children` (lihat DATABASE.md — migrasi disetujui owner).
+`putReservation` (pindah kamar) ikut membawa jumlah tamu, supaya memindahkan
+kamar tidak sekalian menurunkannya jadi 1/0.
+
+**Risiko yang sengaja diterima:** dulu 1/0 selalu diterima Cloudbeds; sekarang
+tamu bisa memilih 8 dewasa dan itu bisa melebihi kapasitas tipe kamar, yang
+membuat Cloudbeds menolak seluruh push dengan `Invalid Parameters` — kamar
+tidak terblokir dan tetap dijual di OTA. Penangkalnya varian pamungkas
+`room_type_only_occupancy_fallback_1_0` yang mundur ke 1/0 agar kamarnya tetap
+terblokir; varian yang dipakai tercatat di `cloudbeds_events_log`.
+`villa_room_types.capacity` masih `null` untuk kedua tipe, jadi batas tamu
+sebenarnya tidak bisa divalidasi di sisi kita.
+
+Terverifikasi di produksi lewat pg_net (uji negatif, tidak membuat booking):
+tanpa email → 400 `Email tidak valid`; email ngawur → 400 sama; `adults: 0` →
+400 `Jumlah dewasa tidak valid`. **Belum pernah diuji ke Cloudbeds sungguhan** —
+push pertama dari pemesanan asli perlu dilihat di `cloudbeds_events_log`.
+
 ## 2026-09-12 — booking website yang tidak dibayar 1 jam kini DIBATALKAN, bukan cuma disembunyikan
 Sebelumnya `PENDING_PAYMENT_HOLD_MINUTES = 60` di
 `src/app/front-desk/booking/page.tsx` hanyalah aturan **tampilan**: booking
