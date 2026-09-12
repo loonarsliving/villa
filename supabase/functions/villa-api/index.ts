@@ -884,7 +884,7 @@ Deno.serve(async (req)=>{
     if(!/^[0-9a-f-]{36}$/i.test(booking_id)) return err('booking_id tidak valid');
 
     const {data:booking} = await supabase.from('bookings')
-      .select('id,unit_id,unit_nomor,cloudbeds_reservation_id').eq('id',booking_id).maybeSingle();
+      .select('id,unit_id,unit_nomor,tgl_checkin,tgl_checkout,cloudbeds_reservation_id').eq('id',booking_id).maybeSingle();
     if(!booking) return err('Booking tidak ditemukan',404);
     if(!booking.cloudbeds_reservation_id) return json({success:false, reason:'not_pushed_yet'});
 
@@ -907,9 +907,18 @@ Deno.serve(async (req)=>{
     }
     if(!roomTypeID) return json({success:false, reason:'room_type_not_found_for_mapped_room'});
 
+    // The spec is explicit here in a way PostReservationRequest never was:
+    // once `rooms` is sent, roomTypeID, checkinDate, checkoutDate, adults
+    // and children are each "Mandatory if rooms are sent". Sending only
+    // the room type got "Parameter checkinDate is required"; the rest are
+    // included now rather than discovered one rejection at a time.
     const form = new URLSearchParams();
     form.set('reservationID', String(booking.cloudbeds_reservation_id));
     form.set('rooms[0][roomTypeID]', String(roomTypeID));
+    form.set('rooms[0][checkinDate]', String(booking.tgl_checkin));
+    form.set('rooms[0][checkoutDate]', String(booking.tgl_checkout ?? booking.tgl_checkin));
+    form.set('rooms[0][adults]', '1');
+    form.set('rooms[0][children]', '0');
     const propertyId = (Deno.env.get('CLOUDBEDS_PROPERTY_ID') ?? '').trim();
     if(propertyId) form.set('propertyID', propertyId);
 
