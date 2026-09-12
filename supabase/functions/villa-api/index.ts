@@ -7,15 +7,6 @@ const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPAB
 const SESSION_SECRET = Deno.env.get('VILLA_SESSION_SECRET') ?? '';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 
-// Outbound Cloudbeds sync (villa -> Cloudbeds), added 2026-09-10 so a
-// walk-in/direct booking created in Front Desk blocks the room in
-// Cloudbeds too, matching the existing inbound webhook that brings
-// Cloudbeds/OTA reservations into `bookings`. Separate secret from the
-// frontend's CLOUDBEDS_API_KEY (Vercel) -- this one lives in this Edge
-// Function's own secrets, set via `supabase secrets set` or the Supabase
-// dashboard, never in this file. Contract verified against Cloudbeds'
-// published OpenAPI spec (pms-v1.2, POST /postReservation, GET /getRooms,
-// GET /getSources) -- not guessed.
 const CLOUDBEDS_API_BASE = 'https://api.cloudbeds.com/api/v1.2';
 function cloudbedsApiKey(){ return (Deno.env.get('CLOUDBEDS_API_KEY') ?? '').trim(); }
 
@@ -100,6 +91,30 @@ function redact(value){
   return out;
 }
 
+// Kode konfirmasi pembayaran yang dibalas owner lewat WhatsApp
+// (permintaan owner 2026-09-12: tamu tidak perlu upload bukti transfer lagi
+// -- owner yang melihat notifikasi QRIS masuk di HP-nya, lalu membalas WA,
+// dan sistem yang mengunci unitnya).
+//
+// Diturunkan dari booking_id, BUKAN disimpan di kolom baru: tidak perlu
+// perubahan skema, dan kodenya selalu bisa dihitung ulang dari booking mana
+// pun. Diambil dari EKOR uuid supaya tidak bentrok dengan voucher tamu di
+// situs publik, yang memakai 6 karakter pertama.
+//
+// Balasan bebas seperti "sudah masuk" sengaja TIDAK didukung: kalau ada dua
+// tamu menunggu pembayaran bersamaan -- hal biasa di akhir pekan -- sistem
+// tidak punya cara tahu yang mana, dan salah tebak berarti mengunci unit
+// yang salah sekaligus menandai tamu yang salah sudah lunas.
+function paymentCode(bookingId){
+  return bookingId.replace(/-/g,'').slice(-6).toUpperCase();
+}
+
+function invoiceNoFor(booking){
+  const d = new Date(booking.created_at);
+  const ymd = d.toISOString().slice(0,10).replace(/-/g,'');
+  return `INV-LV-${ymd}-${String(booking.id).slice(0,8).toUpperCase()}`;
+}
+
 async function notif(unit_id, role, tipe, judul, pesan, ref_id){
   await supabase.from('notifications').insert({unit_id:unit_id??null,target_role:role,tipe,judul,pesan,ref_id:ref_id??null});
 }
@@ -108,16 +123,9 @@ async function getVercelBridge(){
   return await getSetting('vercel_bridge');
 }
 
-// Pushes a villa-created booking (walk-in/direct, never one that already
-// came FROM Cloudbeds -- caller must check that) out to Cloudbeds as a real
-// reservation, so the room is blocked there too and OTAs stop seeing it as
-// available. Best-effort: any failure is logged to cloudbeds_events_log and
-// swallowed -- villa's own booking must never fail or roll back because
-// Cloudbeds is unreachable or misconfigured, same fail-soft philosophy as
-// the inbound webhook and the WA bridge.
 async function pushBookingToCloudbeds(booking){
   const apiKey = cloudbedsApiKey();
-  if(!apiKey) return; // CLOUDBEDS_API_KEY not set for this function -- outbound sync just not configured yet.
+  if(!apiKey) return;
 
   const logOutbound = async (matched, extra) => {
     await supabase.from('cloudbeds_events_log').insert({
@@ -260,6 +268,35 @@ function isValidDateStr(s){
   return !Number.isNaN(d.getTime());
 }
 
+// Shared pricing logic for a 'harian' stay: per-night villa_rates override
+// when planned, falling back to the unit's flat tarif_harian otherwise. Used
+// by both the actual booking commit (POST /public/bookings) and the public
+// price preview (GET /public/availability), so the quote a guest sees before
+// booking always matches what they'll actually be charged.
+async function computeStayTarif(unit, tgl_checkin, nights){
+  const flatTarif = Number(unit.tarif_harian ?? 0);
+  let computedTarif = flatTarif * nights;
+  if(unit.room_type_id){
+    const nightDates=[];
+    for(let i=0;i<nights;i++){
+      const d=new Date(`${tgl_checkin}T00:00:00Z`); d.setUTCDate(d.getUTCDate()+i);
+      nightDates.push(d.toISOString().slice(0,10));
+    }
+    const {data:plannedRates} = await supabase.from('villa_rates').select('date,rate')
+      .eq('room_type_id',unit.room_type_id).in('date',nightDates);
+    const plannedByDate = new Map((plannedRates??[]).map(r=>[r.date, Number(r.rate)]));
+    if(plannedByDate.size>0){
+      computedTarif = 0;
+      for(let i=0;i<nights;i++){
+        const d=new Date(`${tgl_checkin}T00:00:00Z`); d.setUTCDate(d.getUTCDate()+i);
+        const dateStr=d.toISOString().slice(0,10);
+        computedTarif += plannedByDate.has(dateStr) ? plannedByDate.get(dateStr) : flatTarif;
+      }
+    }
+  }
+  return computedTarif;
+}
+
 async function computeWalkinIncome(periode){
   const [y,mo] = periode.split('-').map(Number);
   const start = new Date(Date.UTC(y, mo-1, 1)).toISOString();
@@ -276,8 +313,6 @@ async function countActiveInvestors(){
   return count ?? 0;
 }
 
-// FROZEN per docs/revenue-engine/PHASE0-BASELINE.md §2. Do not modify
-// without a separate, explicit, owner-approved change.
 async function computeReport(unit_id, periode){
   let q=supabase.from('transactions').select('tipe,jumlah').eq('periode_bulan',periode).eq('tipe','income');
   if(unit_id) q=q.eq('unit_id',unit_id);
@@ -311,16 +346,6 @@ async function computeReport(unit_id, periode){
   };
 }
 
-// Real per-OTA commission breakdown for investor reporting, added
-// 2026-09-10 (owner request). Groups actual booking revenue by sumber
-// (walk-in/airbnb/booking.com/agoda/tiket/cloudbeds/website/whatsapp/
-// other -- see bookings_sumber_check) for the period, then applies the
-// REAL commission percentage each OTA charges as configured on the
-// Cloudbeds account itself (GET /getSources' `commission` field) -- never
-// an invented/estimated %. A sumber with no matching live Cloudbeds
-// source (walk-in, website, whatsapp, other, or 'cloudbeds' when the
-// specific OTA inside it couldn't be identified) gets 0% here, which is
-// correct for direct channels and honest (not a guess) for the rest.
 async function computeOtaBreakdown(periode){
   const [y, mo] = periode.split('-').map(Number);
   const start = `${periode}-01`;
@@ -405,21 +430,6 @@ Deno.serve(async (req)=>{
     return json({token, user:u});
   }
 
-  // ---------------------------------------------------------------------
-  // PUBLIC booking routes (loonars.id website) -- unauthenticated by
-  // design. Added 2026-09-09 so the public site can offer real-time,
-  // self-service villa booking. Deliberately reuse the exact same
-  // `bookings`/`units` tables and the exact same conflict-check logic as
-  // the staff POST /bookings below, so a website booking can NEVER
-  // collide with a Cloudbeds-synced or staff-entered booking -- they all
-  // read/write the same rows. Every booking created here is tagged
-  // sumber:'website' and carries a note asking staff to verify the QRIS
-  // payment proof, since there is no automated online payment
-  // verification wired up yet (only the staff walk-in QRIS/iPaymu flow
-  // has that, and only for cafe/spa walkin_payments -- see
-  // /api/webhooks/ipaymu in the frontend repo).
-  // ---------------------------------------------------------------------
-
   if(path==='/public/room-types' && m==='GET'){
     const {data,error} = await supabase.from('villa_room_types')
       .select('code,name,description,min_rate,max_rate').eq('active',true).order('min_rate');
@@ -435,25 +445,43 @@ Deno.serve(async (req)=>{
     if(!checkout || !isValidDateStr(checkout)) return err('checkout wajib diisi (YYYY-MM-DD)');
     if(new Date(checkout) <= new Date(checkin)) return err('checkout harus setelah checkin');
 
-    const {data:units, error:unitsErr} = await supabase.from('units').select('id,room_type_id');
+    const {data:units, error:unitsErr} = await supabase.from('units').select('id,room_type_id,tarif_harian');
     if(unitsErr) return err(unitsErr.message);
     const {data:roomTypes} = await supabase.from('villa_room_types').select('id,code,name').eq('active',true);
     const rtById = new Map((roomTypes??[]).map(r=>[r.id,r]));
 
     const {data:bookings} = await supabase.from('bookings').select('unit_id,tgl_checkin,tgl_checkout').in('status',['terjadwal','checkin']);
     const conflicts = findConflicts(bookings??[], checkin, checkout);
+    const nights = Math.max(1, Math.round((new Date(checkout).getTime() - new Date(checkin).getTime())/86400000));
 
     const byType = new Map();
     for(const u of units??[]){
       const rt = rtById.get(u.room_type_id);
       const code = rt?.code ?? 'unknown';
       if(room_type && code !== room_type) continue;
-      if(!byType.has(code)) byType.set(code, {code, name: rt?.name ?? code, total:0, available:0});
+      if(!byType.has(code)) byType.set(code, {code, name: rt?.name ?? code, total:0, available:0, sampleFreeUnit:null});
       const entry = byType.get(code);
       entry.total++;
-      if(!conflicts.has(u.id)) entry.available++;
+      if(!conflicts.has(u.id)){
+        entry.available++;
+        // Real price actually charged depends on the specific unit assigned
+        // at booking time, but every unit within a room type shares the same
+        // tarif_harian/villa_rates lookup -- so any one free unit gives the
+        // exact price a guest booking this type for these dates will pay.
+        if(!entry.sampleFreeUnit) entry.sampleFreeUnit = u;
+      }
     }
-    const room_types_result = Array.from(byType.values());
+    const room_types_result = [];
+    for(const entry of byType.values()){
+      let price_total = null;
+      if(entry.sampleFreeUnit){
+        price_total = await computeStayTarif(entry.sampleFreeUnit, checkin, nights);
+      }
+      room_types_result.push({
+        code: entry.code, name: entry.name, total: entry.total, available: entry.available,
+        nights, price_total, price_per_night_avg: price_total != null ? Math.round(price_total / nights) : null,
+      });
+    }
     return json({
       checkin, checkout,
       available: room_types_result.some(r=>r.available>0),
@@ -462,7 +490,12 @@ Deno.serve(async (req)=>{
   }
 
   if(path==='/public/payment-info' && m==='GET'){
-    const setting = await getSetting('public_booking_qris');
+    // Sengaja pakai key yang sama dengan kasir walk-in (integration_settings
+    // 'walkin_qris', diisi lewat halaman Payment Gateway staff) supaya QRIS
+    // yang ditampilkan ke tamu booking online SELALU sama dengan yang dipakai
+    // di lokasi -- 'public_booking_qris' dulu tidak punya UI admin sama
+    // sekali, jadi tidak pernah benar-benar terisi.
+    const setting = await getSetting('walkin_qris');
     return json({
       qris_data_url: setting?.data_url ?? null,
       note: setting?.note ?? 'QRIS pembayaran belum tersedia -- silakan hubungi kami di WhatsApp untuk info pembayaran.',
@@ -504,50 +537,250 @@ Deno.serve(async (req)=>{
     if(!freeUnit) return err('Maaf, villa sudah penuh untuk tanggal yang dipilih. Silakan pilih tanggal lain atau hubungi kami di WhatsApp.', 409);
 
     const nights = Math.max(1, Math.round((new Date(tgl_checkout).getTime() - new Date(tgl_checkin).getTime())/86400000));
-    const flatTarif = Number(freeUnit.tarif_harian ?? 0);
-    let computedTarif = flatTarif * nights;
-    if(freeUnit.room_type_id){
-      const nightDates=[];
-      for(let i=0;i<nights;i++){
-        const d=new Date(`${tgl_checkin}T00:00:00Z`); d.setUTCDate(d.getUTCDate()+i);
-        nightDates.push(d.toISOString().slice(0,10));
-      }
-      const {data:plannedRates} = await supabase.from('villa_rates').select('date,rate')
-        .eq('room_type_id',freeUnit.room_type_id).in('date',nightDates);
-      const plannedByDate = new Map((plannedRates??[]).map(r=>[r.date, Number(r.rate)]));
-      if(plannedByDate.size>0){
-        computedTarif = 0;
-        for(let i=0;i<nights;i++){
-          const d=new Date(`${tgl_checkin}T00:00:00Z`); d.setUTCDate(d.getUTCDate()+i);
-          const dateStr=d.toISOString().slice(0,10);
-          computedTarif += plannedByDate.has(dateStr) ? plannedByDate.get(dateStr) : flatTarif;
-        }
-      }
-    }
+    const computedTarif = await computeStayTarif(freeUnit, tgl_checkin, nights);
     if(computedTarif<=0) return err('Tarif unit belum diatur, hubungi kami langsung', 409);
 
     const {data:g} = await supabase.from('guests').insert({nama, hp}).select('id').single();
 
+    // Status starts as 'menunggu_pembayaran' -- deliberately OUTSIDE the
+    // bookings_no_overlap_active exclusion constraint (which only covers
+    // 'terjadwal'/'checkin'), so the unit is NOT locked and does not appear
+    // in the staff calendar yet. It only becomes a real, unit-locking
+    // 'terjadwal' booking once the guest uploads proof of transfer via
+    // /public/bookings/confirm-payment (owner's explicit instruction,
+    // 2026-09-11 -- booking used to lock the unit immediately on submit).
     const {data:booking, error:bookErr} = await supabase.from('bookings').insert({
       unit_id: freeUnit.id, unit_nomor: freeUnit.nomor, guest_id: g?.id ?? null, guest_nama: nama,
       tipe: 'harian', sumber: 'website', tgl_checkin, tgl_checkout,
       durasi_malam: nights, checkin_time: '14:00:00',
-      tarif: computedTarif, total_bayar: computedTarif, status: 'terjadwal',
-      catatan: catatan ? `[Website] ${catatan}` : '[Website] Booking mandiri dari loonars.id -- mohon verifikasi bukti pembayaran QRIS via WhatsApp.',
+      tarif: computedTarif, total_bayar: computedTarif, status: 'menunggu_pembayaran',
+      catatan: catatan ? `[Website] ${catatan}` : '[Website] Booking mandiri dari loonars.id -- menunggu bukti pembayaran QRIS.',
     }).select().single();
     if(bookErr){
       if(bookErr.code === '23P01') return err('Maaf, unit baru saja dibooking tamu lain. Silakan pilih tanggal/tipe lain.', 409);
       return err(bookErr.message);
     }
 
-    await notif(freeUnit.id, 'all', 'booking', `Booking baru dari Website -- Unit ${freeUnit.nomor}`,
-      `${nama} (${hp}) - ${tgl_checkin} s/d ${tgl_checkout} - Rp ${Math.round(computedTarif).toLocaleString('id-ID')} -- mohon cek bukti pembayaran`, booking.id);
+    const kode = paymentCode(booking.id);
+    await notif(freeUnit.id, 'all', 'booking', `Booking baru dari Website (menunggu pembayaran) -- Unit ${freeUnit.nomor}`,
+      `${nama} (${hp}) - ${tgl_checkin} s/d ${tgl_checkout} - Rp ${Math.round(computedTarif).toLocaleString('id-ID')} -- unit belum terkunci, menunggu konfirmasi pembayaran (kode ${kode})`, booking.id);
+
+    // WA ke owner supaya dia bisa mengunci unit hanya dengan membalas kode
+    // ini begitu notifikasi QRIS masuk di HP-nya. Nomornya dari
+    // integration_settings.villa_notify.owner_hp -- kalau belum diisi,
+    // sendWa() mencatat 'skipped_no_phone' dan booking tetap berjalan
+    // normal, jadi fitur ini tidak pernah bisa menggagalkan pemesanan.
+    const notifySetting = await getSetting('villa_notify');
+    await sendWa(notifySetting?.owner_hp ?? null,
+      `Booking baru dari website\n\n${nama} (${hp})\nUnit ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\nTotal: Rp ${Math.round(computedTarif).toLocaleString('id-ID')}\n\nKalau dana sudah masuk, balas:\nLUNAS ${kode}`,
+      {booking_id: booking.id, unit_id: freeUnit.id, template_type:'website_booking_awaiting_payment'});
 
     return json({
       booking_id: booking.id, unit_nomor: freeUnit.nomor,
       tgl_checkin, tgl_checkout, durasi_malam: nights,
       tarif: computedTarif, total_bayar: computedTarif, status: booking.status,
     }, 201);
+  }
+
+  // Konfirmasi pembayaran (upload bukti transfer) dari tamu di public booking
+  // site. QRIS pembayaran tetap statis (tidak ada verifikasi otomatis via
+  // payment gateway) -- tamu dianggap sudah bayar begitu mereka mengupload
+  // bukti transfer di sini, lalu tombol "Cetak Invoice" di frontend terbuka.
+  // Cocokkan booking_id + hp supaya orang lain tidak bisa mengisi bukti untuk
+  // booking milik tamu lain.
+  //
+  // Ini juga titik di mana booking benar-benar "mengunci" unit: status
+  // berubah dari 'menunggu_pembayaran' -> 'terjadwal' di sini, BUKAN saat
+  // booking pertama kali dibuat (owner's explicit instruction, 2026-09-11).
+  // Karena exclusion constraint bookings_no_overlap_active hanya berlaku
+  // untuk status 'terjadwal'/'checkin', UPDATE status ini otomatis gagal
+  // (23P01) kalau ternyata unit sudah keburu dikunci booking lain untuk
+  // tanggal yang sama -- jadi tidak perlu app-level conflict re-check
+  // terpisah yang rawan race condition, Postgres yang menjaminnya.
+  if(path==='/public/bookings/confirm-payment' && m==='POST'){
+    const b = await req.json().catch(()=>null);
+    if(!b) return err('Body tidak valid');
+    const booking_id = String(b.booking_id??'').trim();
+    const hp = String(b.hp??'').trim();
+    const dataUrl = String(b.dataUrl??'');
+    if(!/^[0-9a-f-]{36}$/i.test(booking_id)) return err('booking_id tidak valid');
+    if(!hp) return err('Nomor WhatsApp wajib diisi');
+    const match = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/);
+    if(!match) return err('Bukti transfer harus berupa gambar (JPG/PNG)');
+    const [, ext, base64] = match;
+    let bytes;
+    try{ bytes = Uint8Array.from(atob(base64), c=>c.charCodeAt(0)); } catch { return err('Bukti transfer tidak valid'); }
+    if(bytes.length > 8*1024*1024) return err('Bukti transfer terlalu besar (maks 8MB)');
+
+    const {data:booking} = await supabase.from('bookings').select('id,guest_id,sumber,invoice_no,created_at,status,unit_nomor,tgl_checkin,tgl_checkout').eq('id',booking_id).maybeSingle();
+    if(!booking) return err('Booking tidak ditemukan', 404);
+    if(booking.sumber !== 'website') return err('Booking ini tidak bisa dikonfirmasi lewat jalur ini', 403);
+    let guestHp = null;
+    if(booking.guest_id){
+      const {data:g} = await supabase.from('guests').select('hp').eq('id',booking.guest_id).maybeSingle();
+      guestHp = g?.hp ?? null;
+    }
+    if(!guestHp || guestHp.trim() !== hp) return err('Nomor WhatsApp tidak cocok dengan booking ini', 403);
+
+    const path = `bukti-bayar/${booking_id}-${Date.now()}.${ext}`;
+    const {error:upErr} = await supabase.storage.from('guest-documents').upload(path, bytes, {contentType:`image/${ext}`, upsert:false});
+    if(upErr) return err(upErr.message, 500);
+
+    let invoice_no = booking.invoice_no;
+    if(!invoice_no){
+      const d = new Date(booking.created_at);
+      const ymd = d.toISOString().slice(0,10).replace(/-/g,'');
+      invoice_no = `INV-LV-${ymd}-${booking_id.slice(0,8).toUpperCase()}`;
+    }
+
+    const shouldLockUnit = booking.status === 'menunggu_pembayaran';
+    const basePatch = { bukti_pembayaran_path: path, bukti_pembayaran_at: new Date().toISOString(), invoice_no };
+    let unitLocked = booking.status === 'terjadwal';
+
+    if(shouldLockUnit){
+      const {error:lockErr} = await supabase.from('bookings').update({...basePatch, status:'terjadwal'}).eq('id', booking_id);
+      if(lockErr && lockErr.code !== '23P01') return err(lockErr.message, 500);
+      unitLocked = !lockErr;
+    }
+    if(!unitLocked){
+      // Unit sudah dikunci booking lain untuk tanggal yang sama duluan --
+      // tetap simpan bukti pembayarannya (tamu sudah bayar) dan tetap
+      // terbitkan invoice, tapi status booking dibiarkan 'menunggu_pembayaran'
+      // (tidak masuk kalender) sampai staff menjadwalkan ulang secara manual.
+      const {error:saveErr} = await supabase.from('bookings').update(basePatch).eq('id', booking_id);
+      if(saveErr) return err(saveErr.message, 500);
+      await notif(null, 'all', 'transfer', `KONFLIK UNIT -- Booking Website perlu dijadwalkan ulang`,
+        `Booking ${booking_id.slice(0,8)} (Unit ${booking.unit_nomor}, ${booking.tgl_checkin} s/d ${booking.tgl_checkout}) sudah bayar tapi unit sudah terisi booking lain -- mohon segera hubungi tamu untuk reschedule/unit pengganti.`, booking_id);
+      return json({success:true, invoice_no});
+    }
+
+    await notif(null, 'all', 'transfer', `Pembayaran dikonfirmasi -- Unit ${booking.unit_nomor} terkunci`,
+      `Booking ${booking_id.slice(0,8)} (${booking.tgl_checkin} s/d ${booking.tgl_checkout}) sudah upload bukti transfer, unit sudah masuk kalender.`, booking_id);
+
+    return json({success:true, invoice_no});
+  }
+
+  // Tamu menanyakan apakah pembayarannya sudah dikonfirmasi owner. Dipanggil
+  // berkala oleh halaman booking di loonars.id supaya tombol Cetak Invoice
+  // terbuka sendiri begitu owner membalas WA -- tamu tidak perlu upload
+  // bukti transfer apa pun lagi.
+  if(path==='/public/bookings/status' && m==='GET'){
+    const booking_id = url.searchParams.get('booking_id') ?? '';
+    const hp = (url.searchParams.get('hp') ?? '').trim();
+    if(!/^[0-9a-f-]{36}$/i.test(booking_id)) return err('booking_id tidak valid');
+    if(!hp) return err('Nomor WhatsApp wajib diisi');
+
+    const {data:booking} = await supabase.from('bookings')
+      .select('id,guest_id,sumber,status,invoice_no').eq('id',booking_id).maybeSingle();
+    if(!booking) return err('Booking tidak ditemukan', 404);
+    if(booking.sumber !== 'website') return err('Booking ini tidak bisa dicek lewat jalur ini', 403);
+
+    // Nomor WA tamu adalah kuncinya, sama seperti confirm-payment dan
+    // invoice: tanpa ini siapa pun yang menebak sebuah uuid bisa mengintip
+    // status booking orang lain.
+    let guestHp = null;
+    if(booking.guest_id){
+      const {data:g} = await supabase.from('guests').select('hp').eq('id',booking.guest_id).maybeSingle();
+      guestHp = g?.hp ?? null;
+    }
+    if(!guestHp || guestHp.trim() !== hp) return err('Nomor WhatsApp tidak cocok dengan booking ini', 403);
+
+    return json({
+      status: booking.status,
+      confirmed: booking.status === 'terjadwal',
+      invoice_no: booking.invoice_no ?? null,
+    });
+  }
+
+  // Owner mengonfirmasi dana QRIS sudah masuk, dengan membalas WA
+  // "LUNAS <kode>". Dipanggil server-to-server oleh Mkhsistem (penerima WA
+  // masuk), memakai shared secret yang sama dengan jembatan lain.
+  //
+  // Pencocokannya lewat kode yang diturunkan dari booking_id, dan HANYA di
+  // antara booking website yang masih menunggu pembayaran -- jadi balasan
+  // tidak pernah bisa mengunci booking yang salah, dan kode lama yang sudah
+  // dipakai tidak melakukan apa-apa selain melaporkan sudah dikonfirmasi.
+  if(path==='/bridge/confirm-payment' && m==='POST'){
+    const bridge = await getVercelBridge();
+    if(!bridge.secret) return err('Jembatan belum dikonfigurasi (integration_settings.vercel_bridge.secret)',503);
+    const provided = req.headers.get('x-internal-secret') ?? '';
+    if(!await secretsMatch(provided, bridge.secret)) return err('Unauthorized',401);
+
+    const b = await req.json().catch(()=>null);
+    const code = String(b?.code ?? '').trim().toUpperCase();
+    if(!/^[0-9A-F]{6}$/.test(code)) return json({success:false, reason:'invalid_code'});
+
+    const {data:pending} = await supabase.from('bookings')
+      .select('id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,total_bayar,created_at,status,invoice_no')
+      .eq('sumber','website').eq('status','menunggu_pembayaran');
+    const booking = (pending ?? []).find(x => paymentCode(x.id) === code) ?? null;
+
+    if(!booking){
+      // Mungkin sudah dikonfirmasi sebelumnya -- balasan ganda dari owner
+      // harus aman, bukan error.
+      const {data:already} = await supabase.from('bookings')
+        .select('id,unit_nomor,guest_nama,invoice_no,status').eq('sumber','website').eq('status','terjadwal');
+      const done = (already ?? []).find(x => paymentCode(x.id) === code) ?? null;
+      if(done) return json({success:true, already_confirmed:true, unit_nomor:done.unit_nomor, guest_nama:done.guest_nama, invoice_no:done.invoice_no});
+      return json({success:false, reason:'not_found'});
+    }
+
+    const invoice_no = booking.invoice_no ?? invoiceNoFor(booking);
+    const patch = { bukti_pembayaran_at: new Date().toISOString(), invoice_no };
+
+    const {error:lockErr} = await supabase.from('bookings')
+      .update({...patch, status:'terjadwal'}).eq('id', booking.id);
+
+    if(lockErr){
+      if(lockErr.code !== '23P01') return err(lockErr.message, 500);
+      // Unit keburu dikunci booking lain untuk tanggal yang sama. Tamu sudah
+      // membayar, jadi pembayarannya tetap dicatat dan invoice tetap terbit;
+      // yang tidak dilakukan hanyalah memaksa unitnya masuk kalender.
+      await supabase.from('bookings').update(patch).eq('id', booking.id);
+      await notif(null, 'all', 'transfer', 'KONFLIK UNIT -- Booking Website perlu dijadwalkan ulang',
+        `Booking ${String(booking.id).slice(0,8)} (Unit ${booking.unit_nomor}, ${booking.tgl_checkin} s/d ${booking.tgl_checkout}) sudah dikonfirmasi lunas tapi unit sudah terisi booking lain -- mohon segera hubungi tamu untuk reschedule/unit pengganti.`, booking.id);
+      return json({success:false, reason:'unit_conflict', unit_nomor:booking.unit_nomor, guest_nama:booking.guest_nama, invoice_no});
+    }
+
+    await notif(null, 'all', 'transfer', `Pembayaran dikonfirmasi -- Unit ${booking.unit_nomor} terkunci`,
+      `Booking ${String(booking.id).slice(0,8)} (${booking.tgl_checkin} s/d ${booking.tgl_checkout}) dikonfirmasi lunas oleh owner via WhatsApp, unit sudah masuk kalender.`, booking.id);
+
+    return json({
+      success:true, unit_nomor:booking.unit_nomor, guest_nama:booking.guest_nama,
+      tgl_checkin:booking.tgl_checkin, tgl_checkout:booking.tgl_checkout,
+      total_bayar:booking.total_bayar, invoice_no,
+    });
+  }
+
+  if(path==='/public/bookings/invoice' && m==='GET'){
+    const booking_id = url.searchParams.get('booking_id') ?? '';
+    const hp = (url.searchParams.get('hp') ?? '').trim();
+    if(!/^[0-9a-f-]{36}$/i.test(booking_id)) return err('booking_id tidak valid');
+    const {data:booking} = await supabase.from('bookings')
+      .select('id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,durasi_malam,tarif,total_bayar,status,invoice_no,bukti_pembayaran_at,created_at')
+      .eq('id', booking_id).maybeSingle();
+    if(!booking) return err('Booking tidak ditemukan', 404);
+    let guestHp = null;
+    if(booking.guest_id){
+      const {data:g} = await supabase.from('guests').select('hp').eq('id',booking.guest_id).maybeSingle();
+      guestHp = g?.hp ?? null;
+    }
+    if(!hp || !guestHp || guestHp.trim() !== hp) return err('Nomor WhatsApp tidak cocok dengan booking ini', 403);
+    if(!booking.invoice_no || !booking.bukti_pembayaran_at) return err('Bukti pembayaran belum diupload untuk booking ini', 409);
+    return json({
+      invoice_no: booking.invoice_no,
+      booking_id: booking.id,
+      unit_nomor: booking.unit_nomor,
+      guest_nama: booking.guest_nama,
+      guest_hp: guestHp,
+      tgl_checkin: booking.tgl_checkin,
+      tgl_checkout: booking.tgl_checkout,
+      durasi_malam: booking.durasi_malam,
+      tarif: Number(booking.tarif),
+      total_bayar: Number(booking.total_bayar ?? booking.tarif),
+      paid_at: booking.bukti_pembayaran_at,
+      created_at: booking.created_at,
+    });
   }
 
   if(path==='/me/password' && m==='POST'){
@@ -946,22 +1179,11 @@ Deno.serve(async (req)=>{
   }
 
   if(path==='/admin/investors' && m==='GET'){
-    // Switched 2026-09-10 (owner request: complete "daftar rekening"
-    // module) from investor_profiles -- which only has a row once an
-    // investor has submitted the onboarding form at least once, so a
-    // never-touched account was invisible here -- to villa_users itself,
-    // which every active investor account has regardless of whether
-    // they've filled anything in. Same shape (id/unit_nomor/nama/hp/
-    // bank_nama/no_rekening/nama_pemilik_rekening/created_at) the
-    // frontend already expects.
     const {data,error} = await supabase.from('villa_users')
       .select('id,unit_id,unit_nomor,nama,hp,bank_nama,no_rekening,nama_pemilik_rekening,created_at')
       .eq('role','owner').order('unit_nomor');
     if(error) return err(error.message);
 
-    // Merged in JS (rather than an embedded units(...) select) to avoid
-    // any ambiguity over whether the client returns that as an object or
-    // an array -- same defensive pattern used elsewhere in this file.
     const unitIds = (data ?? []).map(r=>r.unit_id).filter(Boolean);
     const {data:unitsData} = unitIds.length
       ? await supabase.from('units').select('id,lunas_pembayaran').in('id', unitIds)
@@ -1105,8 +1327,6 @@ Deno.serve(async (req)=>{
     return json(data);
   }
 
-  // Phase 6: deterministic Revenue Engine recommendations (see
-  // supabase/functions/villa-api/phase6-draft/CHANGES.md).
   if(path==='/admin/pricing-recommendations' && m==='GET'){
     const status = url.searchParams.get('status');
     let q = supabase.from('villa_pricing_recommendations')
@@ -1135,13 +1355,6 @@ Deno.serve(async (req)=>{
       return json(data);
     }
 
-    // approved -> record the rate in villa_rates (our own internal
-    // calendar-rate table, full history via its existing trigger). Since
-    // 2026-09-04, POST /bookings reads villa_rates per-night for
-    // 'harian' bookings (falling back to tarif_harian when no rate is
-    // planned for a given date), so this now DOES change what a guest is
-    // charged for that room_type+date going forward. Never touches
-    // units.tarif_harian itself or any already-created booking.
     const {error: rateErr} = await supabase.from('villa_rates').upsert({
       room_type_id: rec.room_type_id, rate_plan_id: null, date: rec.target_date,
       rate: rec.recommended_rate, source: 'rule_engine', reason: b.review_note ?? null, updated_by: session.email,
@@ -1287,12 +1500,6 @@ Deno.serve(async (req)=>{
         : 1;
       const flatTarif = Number(unit.tarif_harian ?? 0);
 
-      // Revenue Engine (owner request 2026-09-04): price each night off
-      // villa_rates when a rate is planned for that room_type+date
-      // (weekend surcharge, high-season, or an approved rule-engine
-      // recommendation), falling back to the flat tarif_harian for any
-      // night with no planned rate. Only applies to 'harian' bookings --
-      // villa_rates is a per-day table, monthly stays keep tarif_bulanan.
       let plannedByDate = new Map();
       if(unit.room_type_id){
         const nightDates = [];
@@ -1339,11 +1546,6 @@ Deno.serve(async (req)=>{
       return err(error.message);
     }
     await notif(b.unit_id,'all','booking',`Booking baru — Unit ${b.unit_nomor}`,`${b.guest_nama} · ${b.tipe} · ${b.sumber}`,data.id);
-    // Sync out to Cloudbeds so OTAs see this room as taken too -- never for
-    // a booking whose sumber is 'cloudbeds' (that came FROM Cloudbeds via
-    // the webhook route already, pushing it back would create a duplicate
-    // reservation there). Awaited so the outbound log write completes
-    // before responding, but never blocks/fails this endpoint itself.
     if(data.sumber !== 'cloudbeds'){
       await pushBookingToCloudbeds(data);
     }
