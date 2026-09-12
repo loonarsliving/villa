@@ -478,7 +478,20 @@ export async function decideRatesForRoomType(
     // price, and the median alone does not prevent that (the three Sawah
     // View comparables median to Rp809,281, below our own Rp850,000
     // Saturday). Hence max() against structuralRate.
-    if (competitorMedian !== null) {
+    //
+    // And it does not apply on a certain peak at all. villa_competitor_
+    // rates holds an ORDINARY nightly price: the research prompt asks for
+    // "harga per malam publik" with no stay date, so the sample describes
+    // a normal night, not New Year. Capping a New Year price with it
+    // compares two different things -- and did: Sawah View's whole
+    // Christmas/New Year period came out at Rp809,281, with Fri/Sat
+    // getting no uplift whatsoever because the cap landed exactly on the
+    // ordinary weekend price. Everybody raises rates over New Year, so an
+    // off-peak observation is not evidence about that date. min_rate,
+    // max_rate and the movement clamp still bound these dates; the cap
+    // resumes on every ordinary night, which is what it is for.
+    const competitorCapApplies = competitorMedian !== null && !(highSeasonPeriod && appliesWithoutPickup(highSeasonPeriod.created_by));
+    if (competitorCapApplies && competitorMedian !== null) {
       const cap = Math.max(Math.round(competitorMedian), structuralRate);
       if (decidedRate > cap) {
         decidedRate = cap;
