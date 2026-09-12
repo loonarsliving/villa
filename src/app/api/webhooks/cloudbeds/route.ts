@@ -1,4 +1,5 @@
 import { timingSafeEqual, createHash } from "node:crypto";
+import { getCloudbedsReservationTotals, nightlyRateFromTotals } from "@/lib/cloudbedsApi";
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
@@ -102,7 +103,6 @@ const ReservationSchema = z
     checkin_date: z.string().optional(),
     checkOutDate: z.string().nullable().optional(),
     checkout_date: z.string().nullable().optional(),
-    total: z.number().optional(),
     sourceName: z.string().nullable().optional(),
     source_name: z.string().nullable().optional(),
   })
@@ -247,6 +247,27 @@ export async function POST(request: Request) {
           guestId = g?.id ?? null;
         }
 
+        // The webhook payload's own `total` is unreliable (it is absent
+        // for several event types, and getReservations -- the other place
+        // this app reads reservations -- has no total field at all), so
+        // the money is fetched from getReservationsWithRateDetails by id.
+        // Falls back to 0 rather than failing the webhook: a missing
+        // total must never stop a booking from being recorded.
+        const tglCheckin = reservation.checkInDate ?? reservation.checkin_date ?? null;
+        const tglCheckout = reservation.checkOutDate ?? reservation.checkout_date ?? null;
+        const nights = tglCheckin && tglCheckout ? Math.round((Date.parse(`${tglCheckout}T00:00:00Z`) - Date.parse(`${tglCheckin}T00:00:00Z`)) / 86400000) : 0;
+        let nightlyRate = 0;
+        let grandTotal = 0;
+        try {
+          const totals = reservationId ? (await getCloudbedsReservationTotals({ reservationIDs: [reservationId] })).get(reservationId) : null;
+          if (totals && tglCheckin) {
+            nightlyRate = nightlyRateFromTotals(totals, tglCheckin, tglCheckout);
+            grandTotal = totals.grandTotal;
+          }
+        } catch {
+          // leave both at 0
+        }
+
         const sumber = mapSourceNameToSumber(reservation.sourceName ?? reservation.source_name);
 
         const { error: bookingUpsertError } = await supabase.from("bookings").upsert(
@@ -257,10 +278,11 @@ export async function POST(request: Request) {
             guest_nama: guestNama,
             tipe: (reservation.los ?? 0) > 27 ? "bulanan" : "harian",
             sumber,
-            tgl_checkin: reservation.checkInDate ?? reservation.checkin_date,
-            tgl_checkout: reservation.checkOutDate ?? reservation.checkout_date,
-            tarif: reservation.total ?? 0,
-            total_bayar: reservation.total ?? 0,
+            tgl_checkin: tglCheckin,
+            tgl_checkout: tglCheckout,
+            durasi_malam: nights > 0 ? nights : null,
+            tarif: nightlyRate,
+            total_bayar: grandTotal,
             status: "terjadwal",
             cloudbeds_reservation_id: reservationId,
           },
