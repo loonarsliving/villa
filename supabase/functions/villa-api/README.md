@@ -18,7 +18,21 @@ deploy rights on project `svcmybsziaelwwdrnzcv`. Until that secret exists,
 the workflow will fail (visible in the Actions tab) rather than deploying
 nothing silently.
 
-## 2026-09-12: the CI deploy has never once worked, and this file has drifted 10 versions
+## 2026-09-12: re-synced from v44 — it is now safe to add the deploy secret
+
+The drift described below is **fixed**: this file was re-fetched from the
+deployed v44 via Supabase MCP `get_edge_function` and the owner-requested
+WhatsApp payment-confirmation changes applied on top. The diff against
+deployed v44 is 128 added lines and exactly one modified line (the wording of
+the "booking baru" notification), so merging this no longer rolls anything
+back.
+
+**The remaining step is the owner's:** add the `SUPABASE_ACCESS_TOKEN` repo
+secret (Settings → Secrets and variables → Actions) with deploy rights on
+project `svcmybsziaelwwdrnzcv`. Once it exists, this workflow deploys on the
+next push here, or immediately via a manual `workflow_dispatch` run.
+
+## 2026-09-12: the CI deploy has never once worked, and this file had drifted 10 versions
 
 All four runs of `.github/workflows/deploy-villa-api.yml` since it was added
 on 2026-09-10 have **failed** — the one-time `SUPABASE_ACCESS_TOKEN` repo
@@ -34,9 +48,8 @@ silently rolling production back ten versions and taking out the public
 booking flow, payment confirmation, PDF invoices and per-date pricing in
 `/public/availability` with it.
 
-**Until this file is re-synced from the deployed v44, do not add the
-`SUPABASE_ACCESS_TOKEN` secret.** Adding the secret and re-syncing the file
-have to happen together, in that order: sync first, secret second.
+The ordering that makes this safe is sync first, secret second — the sync is
+now done (see the section above), so the secret can go in.
 
 And whatever the Actions tab says, check it — a green-looking push here has
 so far never meant a deploy actually happened.
