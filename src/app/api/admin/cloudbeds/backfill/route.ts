@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { getCloudbedsReservationTotals, nightlyRateFromTotals } from "@/lib/cloudbedsApi";
+import { getCloudbedsReservationTotals } from "@/lib/cloudbedsApi";
 import { NextResponse } from "next/server";
 import { isAdminToken } from "@/lib/villaApiAuth";
 
@@ -140,8 +140,15 @@ export async function POST(request: Request) {
     const checkIn = room.roomCheckIn ?? resv.startDate;
     const checkOut = room.roomCheckOut ?? resv.endDate;
     const nights = checkOut ? Math.round((Date.parse(`${checkOut}T00:00:00Z`) - Date.parse(`${checkIn}T00:00:00Z`)) / 86400000) : 0;
+    // `tarif` holds the WHOLE-STAY amount in this schema, not a nightly
+    // rate: villa-api writes `tarif: computedTarif, total_bayar:
+    // computedTarif` for every website booking, the Payment Gateway page
+    // does the same, and the UI reads `total_bayar ?? tarif` as the
+    // amount owed. A per-night figure here would read as a stay that
+    // cost a third of what it did. durasi_malam is stored alongside, so
+    // the nightly rate stays derivable.
     const totals = totalsById.get(resv.reservationID) ?? null;
-    const nightlyRate = totals ? nightlyRateFromTotals(totals, checkIn, checkOut) : 0;
+    const stayTotal = totals ? totals.grandTotal : 0;
 
     const guestDetail = room.guestID ? resv.guestList?.[room.guestID] : undefined;
     const guestNama =
@@ -172,8 +179,8 @@ export async function POST(request: Request) {
           tgl_checkin: checkIn,
           tgl_checkout: checkOut,
           durasi_malam: nights > 0 ? nights : null,
-          tarif: nightlyRate,
-          total_bayar: totals ? totals.grandTotal : 0,
+          tarif: stayTotal,
+          total_bayar: stayTotal,
           status: statusToVilla(resv.status),
           cloudbeds_reservation_id: resv.reservationID,
         },
