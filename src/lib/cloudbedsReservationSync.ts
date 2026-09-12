@@ -92,6 +92,8 @@ export interface ReservationSyncSummary {
   matched: number;
   inserted: number;
   skipped_unmapped: number;
+  /** Reservations that originated on our side and were deliberately not written back. */
+  skipped_own: number;
   unmapped_room_ids: string[];
   errors: string[];
 }
@@ -114,6 +116,37 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
     // A missing total must never block a booking from being recorded.
   }
 
+  // Bookings that started HERE and were pushed out must never be written
+  // back from Cloudbeds. They come back as ordinary reservations, and this
+  // upsert would overwrite the whole row from Cloudbeds' copy: sumber
+  // flipped from 'website' to 'cloudbeds', the unit replaced by whichever
+  // room Cloudbeds assigned within the type, the guest name rebuilt from
+  // the synthetic first/last split -- and the price replaced by whatever
+  // Cloudbeds calculated, because postReservation carries no amount and
+  // Cloudbeds prices the stay itself.
+  //
+  // That is not hypothetical. On 2026-09-12 it silently raised a paid
+  // guest's total from Rp1,466,500 to Rp1,680,000, minutes after the
+  // outbound push went live: she booked at the old New Year rate, we
+  // pushed the booking without a price, Cloudbeds priced it at the new
+  // one, and this sync copied that back over what she had already paid.
+  //
+  // A reservation id already attached to a booking whose sumber is not
+  // 'cloudbeds' is ours. Skipped outright: OUR record is the authority for
+  // a booking we created, not the mirror of it.
+  const reservationIds = reservations.map((r) => r.reservationID);
+  const ownReservationIds = new Set<string>();
+  if (reservationIds.length > 0) {
+    const { data: existing } = await supabase
+      .from("bookings")
+      .select("cloudbeds_reservation_id, sumber")
+      .in("cloudbeds_reservation_id", reservationIds)
+      .neq("sumber", "cloudbeds");
+    for (const b of existing ?? []) {
+      if (b.cloudbeds_reservation_id) ownReservationIds.add(String(b.cloudbeds_reservation_id));
+    }
+  }
+
   const { data: mappings } = await supabase.from("cloudbeds_room_mapping").select("cloudbeds_room_id, unit_id, units(nomor)");
   type MappingRow = { unit_id: string; units: { nomor: string }[] | { nomor: string } | null };
   const mappingByRoomId = new Map(
@@ -126,7 +159,12 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
   const unmappedRoomIds: string[] = [];
   const errors: string[] = [];
 
+  let skippedOwn = 0;
   for (const resv of reservations) {
+    if (ownReservationIds.has(resv.reservationID)) {
+      skippedOwn++;
+      continue;
+    }
     const room = (resv.rooms ?? []).find((r) => r.roomID && mappingByRoomId.has(String(r.roomID)));
     if (!room?.roomID) {
       skippedUnmapped++;
@@ -204,6 +242,7 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
     matched,
     inserted,
     skipped_unmapped: skippedUnmapped,
+    skipped_own: skippedOwn,
     unmapped_room_ids: [...new Set(unmappedRoomIds)].slice(0, 20),
     errors: errors.slice(0, 20),
   }));
@@ -216,6 +255,7 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
     matched,
     inserted,
     skipped_unmapped: skippedUnmapped,
+    skipped_own: skippedOwn,
     unmapped_room_ids: [...new Set(unmappedRoomIds)].slice(0, 20),
     errors: errors.slice(0, 20),
   };
