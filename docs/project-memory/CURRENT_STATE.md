@@ -2,6 +2,42 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-12 — booking website yang tidak dibayar 1 jam kini DIBATALKAN, bukan cuma disembunyikan
+Sebelumnya `PENDING_PAYMENT_HOLD_MINUTES = 60` di
+`src/app/front-desk/booking/page.tsx` hanyalah aturan **tampilan**: booking
+`menunggu_pembayaran` yang lewat sejam berhenti digambar di kalender, tapi
+barisnya tetap `menunggu_pembayaran` selamanya dan halaman tamu di loonars.id
+terus menampilkan QRIS seolah unitnya masih ditahan. Owner menemukannya di
+HP-nya: layar "Selesaikan Pembayaran" untuk booking yang barisnya sudah tidak
+ada sama sekali (diverifikasi lewat Supabase MCP — nol baris
+`menunggu_pembayaran`, dan villa-api v56 tidak punya logika kedaluwarsa apa
+pun).
+
+Sekarang, sejak villa-api **v57**:
+- `POST /cron/expire-pending-bookings` (dijaga `x-cron-secret`) mengubah
+  booking website `menunggu_pembayaran` yang lebih tua dari 60 menit menjadi
+  `batal`, menulis penanda `[Kedaluwarsa otomatis] <ISO>` ke `catatan`, dan
+  memberi notifikasi staf. Dibatalkan, **tidak dihapus**.
+- Dijadwalkan pg_cron **jobid 107 `villa-expire-pending-bookings`, `*/5 * * * *`**,
+  lewat `public.villa_cron_post('/cron/expire-pending-bookings')`. Terverifikasi
+  jalan: uji ujung-ke-ujung dengan satu baris uji (dibuat, dibatalkan mesin,
+  lalu dihapus) mengembalikan `{"expired":1}`, dan jalan terjadwal pertama
+  15:30 UTC 2026-09-12 `succeeded`.
+- `/bridge/confirm-payment` masih bisa **menghidupkan kembali** booking yang
+  dibatalkan mesin (hanya yang berpenanda itu), supaya balasan `LUNAS` owner
+  yang datang setelah batas waktu tidak menolak tamu yang uangnya sudah masuk.
+  Yang dibatalkan manusia tetap batal.
+- `/public/bookings/status` kini mengirim `cancelled`, `expired`,
+  `hold_expires_at`, `hold_minutes`.
+- Sisi tamu (repo `loonars`, PR #5): 404 dan `cancelled` mengakhiri layar
+  pembayaran, `localStorage` dibersihkan, muncul layar "Pemesanan Kedaluwarsa"
+  + tombol Pesan Ulang, dan sisa waktu tahanan ditampilkan selama masih
+  berlaku.
+
+Catatan: aturan 60 menit sekarang ada di **dua** tempat — konstanta tampilan di
+kalender front-desk dan `PENDING_PAYMENT_HOLD_MINUTES` di villa-api. Kalau
+angkanya diubah, ubah keduanya.
+
 ## 2026-09-10 — Cloudbeds sync is now two-way (villa → Cloudbeds added; NOT YET ACTIVE — needs one-time secret)
 `villa-api`'s `POST /bookings` now also pushes walk-in/direct bookings out
 to Cloudbeds (`POST /postReservation`) so a room booked at Front Desk shows

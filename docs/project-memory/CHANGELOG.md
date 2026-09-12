@@ -4,6 +4,11 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-09-12 — pembatalan otomatis booking yang tidak dibayar (villa-api v57)
+- **Booking website yang tidak dibayar 1 jam kini benar-benar dibatalkan.** Angka 60 menit sebelumnya hanya aturan tampilan di kalender front-desk; barisnya tetap `menunggu_pembayaran` selamanya dan halaman tamu terus menampilkan QRIS. Ditambahkan `POST /cron/expire-pending-bookings` (x-cron-secret) + pg_cron jobid 107 `*/5 * * * *`. Status jadi `batal` dengan penanda `[Kedaluwarsa otomatis]`, bukan dihapus.
+- **Konfirmasi `LUNAS` yang terlambat tetap berlaku.** `/bridge/confirm-payment` bisa menghidupkan kembali booking yang dibatalkan mesin — tanpa ini, tamu yang membayar di menit ke-59 akan ditolak "kode tidak ditemukan" saat owner membalas di menit ke-70.
+- **`/public/bookings/status` diperluas** dengan `cancelled`, `expired`, `hold_expires_at`, `hold_minutes`.
+
 ### 2026-09-12 (branch `claude/serene-cori-ne0rhb`, not yet on `main`)
 - **Pricing — an event no longer raises price on its own.** After 16, 22 and 23 Sep were pushed to the ceiling (Standard Rp1,000,000, Sawah View Rp1,055,546) live on every OTA purely because an AI-detected event fell on those dates, `decideRatesForRoomType` was rewritten to the order a revenue manager actually reasons in: anchor → weekend → **realised demand (pickup)** → event uplift **only as far as occupancy has earned it** → competitor median as a cap → near-arrival guard → movement clamp → min/max. Owner instruction: *"jangan hanya karena ada event dinaikkan drastis, perhatikan semua indikator yang membuat harga naik"*.
   - Event uplift now requires pickup on that same date (≥50% = full, ≥25% = half, below that = none) and is held entirely during cold start, mirroring the existing `cold_start_hold` discipline on the discount side.
