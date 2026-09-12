@@ -1688,6 +1688,23 @@ Deno.serve(async (req)=>{
     const cfg = await getSetting('villa_promo_auto');
     if(cfg?.aktif !== true) return json({dilewati:'villa_promo_auto.aktif belum disetel true'});
 
+    // Dua mode, dan bawaannya yang paling aman.
+    //
+    // 'pantau'  -- hitung dan laporkan saja. Tidak ada usulan yang dibuat,
+    //              tidak ada WA ke owner, apalagi ke tamu.
+    // 'usul'    -- baru membuat usulan dan mengirim WA ke owner untuk
+    //              disetujui.
+    //
+    // Dipisah karena permintaan owner 2026-09-12: "nyalakan tapi, promonya
+    // nti saja, kt mesti dpt data pemesanan dulu". Mesinnya perlu hidup dan
+    // mulai mencatat sekarang, tapi promonya menunggu database tamu punya
+    // isi yang layak dikirimi -- saat ini baru 7 tamu yang pernah menginap.
+    //
+    // Bawaannya sengaja 'pantau': kalau suatu hari pengaturannya rusak atau
+    // separuh terisi, yang terjadi adalah tidak mengirim apa-apa, bukan
+    // mengirim ke seluruh database tamu.
+    const mode = String(cfg.mode ?? 'pantau').trim().toLowerCase() === 'usul' ? 'usul' : 'pantau';
+
     const ambangOkupansi = Number(cfg.ambang_okupansi_persen ?? 40);
     const horizonHari = Math.max(3, Math.trunc(Number(cfg.horizon_hari ?? 14)));
     const jedaHari = Math.max(0, Math.trunc(Number(cfg.jeda_hari ?? 30)));
@@ -1725,7 +1742,7 @@ Deno.serve(async (req)=>{
     const kapasitas = totalUnit * horizonHari;
     const okupansi = kapasitas > 0 ? Math.round((malamTerisi / kapasitas) * 1000)/10 : 0;
     if(okupansi >= ambangOkupansi){
-      return json({dilewati:'okupansi masih di atas ambang', okupansi_persen:okupansi, ambang:ambangOkupansi});
+      return json({dilewati:'okupansi masih di atas ambang', okupansi_persen:okupansi, ambang:ambangOkupansi, mode});
     }
 
     // Calon penerima: pernah menginap, punya nomor, belum berhenti
@@ -1740,7 +1757,21 @@ Deno.serve(async (req)=>{
     ).slice(0, Math.min(500, Math.max(1, Math.trunc(Number(cfg.maks_penerima ?? 200)))))
      .map(r => ({guest_id:r.guest_id, nama:r.nama, hp:r.hp}));
 
-    if(!penerima.length) return json({dilewati:'tidak ada calon penerima', okupansi_persen:okupansi});
+    if(!penerima.length) return json({dilewati:'tidak ada calon penerima', okupansi_persen:okupansi, mode});
+
+    // Mode pantau berhenti di sini -- setelah semua perhitungan selesai,
+    // sebelum apa pun dikirim. Jawabannya tersimpan di net._http_response,
+    // jadi rekaman okupansi hariannya tetap bisa dibaca ulang nanti tanpa
+    // tabel baru.
+    if(mode === 'pantau'){
+      return json({
+        mode:'pantau', okupansi_persen:okupansi, ambang:ambangOkupansi,
+        akan_diusulkan_kalau_mode_usul: true,
+        calon_penerima: penerima.length,
+        promo: promo.kode,
+        catatan: 'mode pantau -- tidak ada usulan dibuat dan tidak ada pesan dikirim',
+      });
+    }
 
     // Pesan ke tamu TIDAK boleh menyebut low season, sepi, atau alasan
     // internal apa pun (instruksi owner 2026-09-12: "jgan tulis low season
