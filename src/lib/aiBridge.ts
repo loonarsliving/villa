@@ -176,6 +176,20 @@ export interface MarketDemandResult {
   demand_trend: DemandTrend;
   trend_note: string;
   events: MarketDemandEvent[];
+  /**
+   * Minat pencarian pasar per bulan, 0-100, mis. { "2026-10": 62 }.
+   *
+   * Opsional dengan sengaja: jembatan AI yang belum diperbarui tidak
+   * mengirimkannya, dan mesin harga memperlakukan ketiadaannya sebagai
+   * "sinyal ini tidak ikut bicara" -- bukan sebagai nol.
+   *
+   * Ini versi berangka dari `demand_trend` di atas, yang hanya satu kata
+   * untuk seluruh tahun. Satu kata tidak bisa membedakan Juli dari
+   * Februari, padahal justru perbedaan antarbulan itulah yang berguna
+   * untuk harga. `demand_trend` tetap ada sebagai cadangan ketika
+   * jembatannya belum mengirim angka.
+   */
+  search_index_by_month?: Record<string, number>;
 }
 
 /**
@@ -210,9 +224,26 @@ export async function researchMarketDemand(locationLabel: string): Promise<Marke
     throw new Error(`AI bridge failed: ${data?.error || res.status}`);
   }
   const trend: DemandTrend = data.demand_trend === "naik" || data.demand_trend === "turun" ? data.demand_trend : "stabil";
+  // Disaring di sini, bukan dipercaya apa adanya: keluaran AI bisa
+  // mengandung bulan berformat aneh atau angka di luar 0-100, dan angka
+  // liar yang lolos akan langsung menggerakkan harga tamu. Di bawah tiga
+  // bulan, rata-ratanya bukan baseline yang berarti, jadi seluruh indeks
+  // dibuang daripada dipakai setengah-setengah.
+  const rawIndex = data.search_index_by_month;
+  let searchIndex: Record<string, number> | undefined;
+  if (rawIndex && typeof rawIndex === "object") {
+    const cleaned: Record<string, number> = {};
+    for (const [k, v] of Object.entries(rawIndex as Record<string, unknown>)) {
+      const n = Number(v);
+      if (/^\d{4}-\d{2}$/.test(k) && Number.isFinite(n) && n >= 0 && n <= 100) cleaned[k] = n;
+    }
+    if (Object.keys(cleaned).length >= 3) searchIndex = cleaned;
+  }
+
   return {
     demand_trend: trend,
     trend_note: typeof data.trend_note === "string" ? data.trend_note : "",
     events: Array.isArray(data.events) ? data.events : [],
+    search_index_by_month: searchIndex,
   };
 }
