@@ -239,6 +239,23 @@ async function pushBookingToCloudbeds(booking){
       return;
     }
 
+    // Cloudbeds requires guestEmail on postReservation, but this villa's
+    // booking form only ever asks for a name and a WhatsApp number --
+    // deliberately, since that is how guests here actually communicate.
+    // So a synthetic address stands in, derived from the booking id.
+    //
+    // It is never mailed: sendEmailConfirmation is 'false' below, and the
+    // address lives on a subdomain of the owner's own domain rather than
+    // anywhere that could reach a stranger. The real WhatsApp number goes
+    // in guestPhone, so staff opening the reservation in Cloudbeds can
+    // still contact the guest -- which is the thing that actually matters.
+    let guestHp = null;
+    if(booking.guest_id){
+      const {data:g} = await supabase.from('guests').select('hp').eq('id', booking.guest_id).maybeSingle();
+      guestHp = g?.hp ?? null;
+    }
+    const guestEmail = `booking-${String(booking.id).slice(0,8)}@guest.loonars.id`;
+
     const nama = (booking.guest_nama ?? 'Tamu Villa').trim();
     const spaceIdx = nama.indexOf(' ');
     const guestFirstName = spaceIdx === -1 ? nama : nama.slice(0, spaceIdx);
@@ -253,6 +270,8 @@ async function pushBookingToCloudbeds(booking){
     form.set('guestFirstName', guestFirstName);
     form.set('guestLastName', guestLastName || guestFirstName);
     form.set('guestCountry', guestCountry);
+    form.set('guestEmail', guestEmail);
+    if(guestHp) form.set('guestPhone', guestHp);
     form.set('rooms[0][roomTypeID]', String(roomTypeID));
     form.set('rooms[0][roomID]', String(mapping.cloudbeds_room_id));
     form.set('rooms[0][quantity]', '1');
@@ -789,7 +808,7 @@ Deno.serve(async (req)=>{
 
     const today = new Date().toISOString().slice(0,10);
     const {data:pending} = await supabase.from('bookings')
-      .select('id,unit_id,unit_nomor,guest_nama,tgl_checkin,tgl_checkout,status,sumber,cloudbeds_reservation_id')
+      .select('id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,status,sumber,cloudbeds_reservation_id')
       .is('cloudbeds_reservation_id', null)
       .neq('sumber', 'cloudbeds')
       .in('status', ['terjadwal','checkin'])
