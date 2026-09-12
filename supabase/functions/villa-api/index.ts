@@ -1710,10 +1710,20 @@ Deno.serve(async (req)=>{
 
     if(!penerima.length) return json({dilewati:'tidak ada calon penerima', okupansi_persen:okupansi});
 
+    // Pesan ke tamu TIDAK boleh menyebut low season, sepi, atau alasan
+    // internal apa pun (instruksi owner 2026-09-12: "jgan tulis low season
+    // dong kasi sj mereka kode promo"). Memberi tahu tamu bahwa villa
+    // sedang kosong adalah undangan untuk menawar, dan membuat harga
+    // khususnya terbaca sebagai keputusasaan, bukan penghargaan.
+    //
+    // Nama internal promo juga sengaja TIDAK ikut dikirim: admin bisa saja
+    // menamainya "Promo Low Season" di dashboard, dan nama itu akan bocor
+    // ke tamu lewat pesan ini. Yang dikirim hanya kodenya.
     const pesan = String(cfg.template ?? '').trim() ||
-      `Halo {nama}, salam dari Loonars Private Living.\n\n` +
-      `Kami sedang membuka ${promo.nama}. Pesan langsung di loonars.id dan masukkan kode ${promo.kode} untuk mendapatkan harga khususnya.\n\n` +
-      `Balas pesan ini kalau ada yang ingin ditanyakan. Kalau tidak ingin menerima info seperti ini lagi, balas BERHENTI.`;
+      `Halo {nama}, terima kasih pernah menginap di Loonars Private Living.\n\n` +
+      `Kami menyiapkan kode khusus untuk Anda: *${promo.kode}*\n\n` +
+      `Masukkan kode ini saat memesan di loonars.id untuk mendapatkan harga spesialnya.\n\n` +
+      `Balas pesan ini kalau ingin kami bantu memesankan. Kalau tidak ingin menerima info seperti ini lagi, balas BERHENTI.`;
 
     let kodeKonfirmasi = '';
     for(let coba=0; coba<5; coba++){
@@ -1733,7 +1743,7 @@ Deno.serve(async (req)=>{
 
     const notifySetting = await getSetting('villa_notify');
     await sendWa(notifySetting?.owner_hp ?? null,
-      `Usulan promo low season\n\n${alasan}.\n\nPromo: ${promo.nama} (${promo.kode})\nPenerima: ${penerima.length} tamu yang pernah menginap\n\nIsi pesannya:\n"${pesan.replace('{nama}','Bapak/Ibu')}"\n\nKalau setuju, balas:\nPROMO ${kodeKonfirmasi}\n\nKalau tidak, balas:\nTOLAK ${kodeKonfirmasi}\n(usulan ini kedaluwarsa sendiri dalam 48 jam)`,
+      `Usulan kirim promo\n\n${alasan}.\n\nPromo: ${promo.nama} (${promo.kode})\nPenerima: ${penerima.length} tamu yang pernah menginap\n\nIsi pesannya:\n"${pesan.replace('{nama}','Bapak/Ibu')}"\n\nKalau setuju, balas:\nPROMO ${kodeKonfirmasi}\n\nKalau tidak, balas:\nTOLAK ${kodeKonfirmasi}\n(usulan ini kedaluwarsa sendiri dalam 48 jam)`,
       {template_type:'villa_promo_proposal', promo_batch_id:batch.id});
 
     return json({diusulkan:true, kode_konfirmasi:kodeKonfirmasi, okupansi_persen:okupansi, jumlah_penerima:penerima.length});
