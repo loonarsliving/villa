@@ -134,16 +134,28 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
   // A reservation id already attached to a booking whose sumber is not
   // 'cloudbeds' is ours. Skipped outright: OUR record is the authority for
   // a booking we created, not the mirror of it.
+  // Matched on TWO markers, not one. The obvious test is sumber !=
+  // 'cloudbeds' -- but the very overwrite this guard exists to prevent is
+  // what flips sumber to 'cloudbeds', so by the time it has happened once
+  // that marker is gone and the guard would wave the booking straight
+  // through on every run afterwards. Dewirinanti's row was already in
+  // exactly that state when this was written.
+  //
+  // catatan survives, because this sync never writes it: villa-api stamps
+  // every website booking with "[Website] Booking mandiri dari
+  // loonars.id". So a booking is ours if EITHER marker still says so, and
+  // losing one no longer costs the protection.
   const reservationIds = reservations.map((r) => r.reservationID);
   const ownReservationIds = new Set<string>();
   if (reservationIds.length > 0) {
     const { data: existing } = await supabase
       .from("bookings")
-      .select("cloudbeds_reservation_id, sumber")
-      .in("cloudbeds_reservation_id", reservationIds)
-      .neq("sumber", "cloudbeds");
+      .select("cloudbeds_reservation_id, sumber, catatan")
+      .in("cloudbeds_reservation_id", reservationIds);
     for (const b of existing ?? []) {
-      if (b.cloudbeds_reservation_id) ownReservationIds.add(String(b.cloudbeds_reservation_id));
+      if (!b.cloudbeds_reservation_id) continue;
+      const madeHere = b.sumber !== "cloudbeds" || String(b.catatan ?? "").includes("[Website]");
+      if (madeHere) ownReservationIds.add(String(b.cloudbeds_reservation_id));
     }
   }
 
