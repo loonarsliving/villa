@@ -64,36 +64,61 @@ bukan sesuai namanya — dan tanyakan lagi kalau maksudnya ternyata dibagikan.
 - Dashboard investor sudah ada: `src/app/investor/` (`page`, `laporan`,
   `opex`, `pendapatan`, `profil`, `notifikasi`).
 
-**Pertanyaan yang harus dijawab owner sebelum dibangun:**
-1. **"weekedn highseason" itu satu syarat atau dua?** Apakah terlarang di
-   SETIAP weekend DAN setiap high season (dua larangan terpisah), atau hanya
-   di weekend YANG jatuh di high season? Bedanya besar: tafsir pertama
-   membuang hampir semua Jumat-Sabtu sepanjang tahun.
-2. **Weekend itu hari apa?** Jumat+Sabtu (pola menginap Indonesia) atau
-   Sabtu+Minggu?
-3. **"Sebulan sekali" dihitung bagaimana?** Satu kali per bulan kalender, atau
-   minimal 30 hari antar pemakaian?
-4. **Gratis itu untuk berapa malam, dan tipe unit apa?** Satu malam? Unitnya
-   sendiri saja, atau tipe apa pun termasuk Sawah View?
-5. **Setahun dihitung dari kapan?** Dan poin yang tidak terpakai hangus atau
-   berlanjut?
+**JAWABAN OWNER (2026-09-12) — aturan mainnya sudah pasti:**
 
-**Dua bahaya yang sudah terlihat dari sekarang:**
-- **Menginap gratis = `total_bayar` 0.** Itu masuk ke perhitungan pendapatan
-  dan pembagian dividen. Rumus keuangan di
-  `docs/revenue-engine/PHASE0-BASELINE.md` §2 DIBEKUKAN dan menyentuhnya butuh
-  izin owner. Putuskan lebih dulu: apakah malam gratis ini dihitung sebagai
-  okupansi dengan pendapatan nol (menurunkan rata-rata tarif dan bisa memicu
-  mesin harga menurunkan harga), atau dikeluarkan dari perhitungan pendapatan.
-- **Push ke Cloudbeds.** Booking gratis tetap harus memblokir kamar di semua
-  OTA, tapi `pushBookingToCloudbeds` tidak mengirim nominal sama sekali —
-  Cloudbeds akan memberi harganya sendiri. Ini persis lubang yang pada
-  2026-09-12 sempat mengubah harga tamu yang sudah membayar.
+1. **Weekend dan high season adalah DUA larangan terpisah.** Kode tidak bisa
+   dipakai di weekend mana pun, DAN tidak bisa dipakai di high season mana pun.
+   Bukan "weekend yang jatuh di high season".
+2. **Weekend = Jumat, Sabtu, Minggu** (tiga hari, bukan dua).
+3. **Satu kode = satu bulan kalender.** Kode mulai berlaku **Oktober**, jadi 12
+   kode = Okt 2026 s/d Sep 2027, satu kode per bulan. Kode yang tidak dipakai
+   sampai bulannya lewat **hangus**, otomatis **tercoret di dashboard**, dan
+   tidak bisa dipakai lagi. Jadi "tercoret" punya dua sebab: sudah terpakai,
+   atau bulannya sudah lewat.
+4. 12 poin setahun, maksimal satu kali per bulan.
+
+**Pemakaian kode gratis TIDAK masuk ke mana-mana** (kata owner: *"otomatis
+tidak trcatat di cloudbeds, laporan keuangan, rumus deviden smua tidak masuk,
+dia hanya akan langsung keep di kalender booking"*):
+- tidak didorong ke Cloudbeds,
+- tidak masuk laporan keuangan,
+- tidak masuk rumus dividen,
+- **hanya** mengunci unit di kalender booking villa.
+
+Artinya rumus keuangan yang dibekukan di `PHASE0-BASELINE.md` §2 tidak perlu
+diubah sama sekali — yang perlu dipastikan adalah baris booking ini punya
+PENANDA yang jelas, lalu setiap kueri pendapatan/dividen mengecualikannya.
+Penanda itu harus ada sejak baris pertama dibuat, bukan ditambahkan belakangan.
+
+**RISIKO YANG SUDAH SAYA SAMPAIKAN KE OWNER, MENUNGGU KEPUTUSANNYA:**
+Tidak mendorong ke Cloudbeds berarti OTA (Airbnb, Booking, Agoda) **tidak tahu
+unit itu terpakai dan tetap menjualnya** — persis kebalikan dari yang dikejar
+owner pada 2026-09-12 ("agar cloudbeds mngetahui berapa kamar yg ada isi dan
+kosong"). Akibat terburuknya: tamu berbayar dari OTA datang dan unitnya sudah
+ditempati investor. Jalan tengah yang saya usulkan: tetap blokir unitnya di
+Cloudbeds supaya OTA berhenti menjual, TAPI tetap keluarkan dari laporan
+keuangan dan dividen — dua hal itu perhitungan kita sendiri dan tidak
+bergantung pada Cloudbeds. **Jangan bangun bagian ini sebelum owner memutuskan.**
+
+**Satu hal yang belum ditanyakan dan perlu ditanyakan:** malam gratis investor
+ikut dihitung sebagai okupansi oleh mesin harga AI atau tidak? Owner baru
+menjawab soal laporan keuangan dan dividen. Kalau ikut dihitung, okupansi
+terlihat lebih tinggi dan mesin bisa MENAIKKAN harga; kalau tidak, okupansi
+terlihat lebih rendah dan mesin bisa MENURUNKAN harga. Dua-duanya salah kalau
+dipilih tanpa sadar.
 
 ### 2. WhatsApp API sendiri untuk repo villa
 
 Kata-kata owner: *"saya berniat menyiapkn 1 whatsapp api baru khusus untuk repo
-villa agar tidak perlu memanggil mkhsistem lagi hanya untuk wa"*.
+villa agar tidak perlu memanggil mkhsistem lagi hanya untuk wa"*, dan menyusul:
+*"kt akan coba whastapp api mengganti semua proses yg menggunakan wa di repo
+villa dan loonars"*.
+
+**Cakupannya dua repo, bukan satu:** villa DAN loonars. Di loonars, WhatsApp
+saat ini hanya berupa tautan `wa.me/6282228885223` (tombol chat mengambang,
+"Kirim Bukti Pembayaran", "Konsultasi") — itu tautan biasa, bukan API, jadi
+yang berubah di sana kemungkinan cuma nomornya. Periksa ulang sebelum
+mengasumsikan ada pemanggilan API di loonars.
 
 Keadaan sekarang — **dua arah** lewat Mkhsistem, dan keduanya harus pindah,
 bukan cuma yang keluar:
