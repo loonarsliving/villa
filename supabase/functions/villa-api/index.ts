@@ -175,7 +175,7 @@ async function pushBookingToCloudbeds(booking){
 
     let sourceSetting = await getSetting('cloudbeds_outbound');
     let sourceID = sourceSetting?.source_id ?? null;
-    let sourceNames = null;
+    let sourceNames = null; // raw getSources diagnostics, only read on failure
     if(!sourceID){
       // The OpenAPI spec calls isThirdParty and status booleans, but this
       // API is known to send booleans and numbers as STRINGS -- that exact
@@ -202,14 +202,26 @@ async function pushBookingToCloudbeds(booking){
         ?? rows.find(x => truthy(x.status) && /website|direct|walk|phone|front\s*desk/i.test(String(x.sourceName ?? '')));
       sourceID = direct?.sourceID ?? null;
 
-      // Kept for the failure log: without seeing what Cloudbeds actually
-      // returned, "no source resolved" is undiagnosable.
-      sourceNames = rows.map(x => ({id: x.sourceID, name: x.sourceName, isThirdParty: x.isThirdParty, status: x.status})).slice(0, 25);
+      // Log the RAW response, not a projection of it. The first version
+      // mapped each row to {id, name, isThirdParty, status}; when those
+      // keys were absent every row serialised to a bare {} and the log
+      // could not distinguish "Cloudbeds returned nothing" from
+      // "Cloudbeds returned rows whose fields are named differently" --
+      // which were exactly the two possibilities worth telling apart.
+      sourceNames = {
+        http_status: sourcesRes.status,
+        success: sourcesBody?.success ?? null,
+        message: sourcesBody?.message ?? null,
+        body_keys: sourcesBody && typeof sourcesBody === 'object' ? Object.keys(sourcesBody) : null,
+        data_type: Array.isArray(sourcesBody?.data) ? 'array' : typeof sourcesBody?.data,
+        row_count: rows.length,
+        raw_rows: JSON.stringify(rows).slice(0, 1500),
+      };
     }
     if(!sourceID){
       await logOutbound(false, {
         error: 'no_direct_source_id_resolved -- set integration_settings.cloudbeds_outbound.source_id manually',
-        sources_seen: sourceNames,
+        getsources_raw: sourceNames,
       });
       return;
     }
