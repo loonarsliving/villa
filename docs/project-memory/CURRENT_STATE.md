@@ -2,6 +2,50 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-12 — modul database tamu + promo LIVE, tapi pengiriman promo masih MODE PANTAU
+villa-api **v61**. Tiga repo ikut: villa (skema, API, halaman admin), loonars
+(kolom kode promo), Mkhsistem (routing balasan `PROMO`/`TOLAK`/`BERHENTI`).
+
+**Harga promo tidak pernah menembus lantai.** Promo tidak menyimpan angka
+diskon; ia mengaktifkan `villa_room_types.min_rate` (Standard 600rb, Sawah View
+700rb). `hitungHargaPromo()` menjepit ke min_rate **termasuk** untuk
+`mode_harga='harga_tetap'`, dan menolak promo yang lebih mahal dari harga
+normal. `villa_rates` tidak disentuh, jadi harga OTA tidak berubah.
+
+**Keadaan sekarang (per 2026-09-12):**
+- `integration_settings.villa_promo_auto` = `{aktif:true, mode:'pantau',
+  ambang_okupansi_persen:40, horizon_hari:14, jeda_hari:30, promo_kode:'TAMUSETIA'}`
+- pg_cron **jobid 108 `villa-promo-low-season`, `0 2 * * *`** (09:00 WIB)
+- Mode `pantau` menghitung dan melaporkan saja — **nol usulan, nol WA**.
+  Terverifikasi: okupansi 1,1%, 6 calon penerima, tidak ada yang dikirim.
+- Promo `TAMUSETIA` aktif (batas bawah, kuota 20, pesan s/d 2026-10-12,
+  menginap s/d 2026-11-11), **0 kali dipakai**.
+- Untuk mulai mengusulkan: ubah `mode` ke `'usul'`. Owner menahannya karena
+  datanya belum cukup — dari 103 baris tamu, hanya **7 yang pernah menginap**,
+  6 yang layak dikirimi, 1 tamu berulang, 2 punya email.
+
+**Sudah pernah dikirim WA sungguhan?** Ya, tapi hanya ke nomor owner
+(`085872222777`), dua kali, sebagai uji. Belum ada satu pun tamu asli yang
+dikirimi.
+
+**Jalur balasan WA belum pernah diuji manusia.** `LUNAS` maupun `PROMO`
+memakai jalur yang sama (Mkhsistem webhook-handler). Batch `1DE5AA` disiapkan
+berisi hanya nomor owner supaya dia bisa membalas `PROMO 1DE5AA` dan
+membuktikannya. Kalau tidak ada balasan, berarti jalur balasan memang belum
+pernah bekerja — dan itu juga berarti `LUNAS` belum pernah bekerja.
+
+**Dua bug saya sendiri yang ketahuan dan sudah diperbaiki di sini:**
+1. `sendWa` menerima kunci yang tidak ada kolomnya (`promo_batch_id`) →
+   SELURUH insert `wa_messages_log` gagal diam-diam. Sekarang meta disaring
+   ke kolom yang ada dan kegagalan insert dicatat ke console.
+2. `sendWa` tidak melaporkan berhasil/gagal → `villa_promo_sends` mengklaim
+   'terkirim' untuk pesan yang belum tentu sampai. Sekarang mengembalikan
+   boolean; status dicatat apa adanya, dan penanda "baru dikirimi promo"
+   hanya dipasang kalau memang terkirim.
+3. Usulan yang didiamkan memblokir cron promo selamanya (kedaluwarsa 48 jam
+   hanya dihitung saat ada yang mencoba menyetujui). Sekarang dikedaluwarsakan
+   di dalam cron, dan penjaganya hanya berlaku untuk mode `usul`.
+
 ## 2026-09-12 — form web kini menanyakan email + jumlah tamu; Cloudbeds berhenti menerima data karangan (villa-api v58)
 Pemesanan lewat loonars.id **sudah** masuk Cloudbeds sebelum ini, tapi dengan
 data yang dikarang `pushBookingToCloudbeds` sendiri, karena formnya tidak
