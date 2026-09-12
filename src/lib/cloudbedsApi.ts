@@ -354,18 +354,3 @@ export async function getCloudbedsReservationTotals(params: {
   }
 }
 
-/**
- * Nightly rate to record on a booking: the average of Cloudbeds' own
- * per-date rates across the stay when it gives them, otherwise
- * subTotal (room charges only, excluding taxes/extras) divided by the
- * number of nights. `total_bayar` should use grandTotal instead -- that
- * is what the guest actually pays.
- */
-export function nightlyRateFromTotals(totals: ReservationTotals, checkIn: string, checkOut: string | null): number {
-  const perDate = Object.values(totals.detailedRates);
-  if (perDate.length > 0) return Math.round(perDate.reduce((a, b) => a + b, 0) / perDate.length);
-
-  const nights = checkOut ? Math.round((Date.parse(`${checkOut}T00:00:00Z`) - Date.parse(`${checkIn}T00:00:00Z`)) / 86400000) : 1;
-  const base = totals.subTotal > 0 ? totals.subTotal : totals.grandTotal;
-  return nights > 0 ? Math.round(base / nights) : Math.round(base);
-}

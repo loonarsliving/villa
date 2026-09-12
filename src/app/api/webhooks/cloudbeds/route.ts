@@ -1,5 +1,5 @@
 import { timingSafeEqual, createHash } from "node:crypto";
-import { getCloudbedsReservationTotals, nightlyRateFromTotals } from "@/lib/cloudbedsApi";
+import { getCloudbedsReservationTotals } from "@/lib/cloudbedsApi";
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
@@ -256,12 +256,12 @@ export async function POST(request: Request) {
         const tglCheckin = reservation.checkInDate ?? reservation.checkin_date ?? null;
         const tglCheckout = reservation.checkOutDate ?? reservation.checkout_date ?? null;
         const nights = tglCheckin && tglCheckout ? Math.round((Date.parse(`${tglCheckout}T00:00:00Z`) - Date.parse(`${tglCheckin}T00:00:00Z`)) / 86400000) : 0;
-        let nightlyRate = 0;
+        // `tarif` is the whole-stay amount here, same as total_bayar --
+        // see the note in the Cloudbeds backfill route.
         let grandTotal = 0;
         try {
           const totals = reservationId ? (await getCloudbedsReservationTotals({ reservationIDs: [reservationId] })).get(reservationId) : null;
           if (totals && tglCheckin) {
-            nightlyRate = nightlyRateFromTotals(totals, tglCheckin, tglCheckout);
             grandTotal = totals.grandTotal;
           }
         } catch {
@@ -281,7 +281,7 @@ export async function POST(request: Request) {
             tgl_checkin: tglCheckin,
             tgl_checkout: tglCheckout,
             durasi_malam: nights > 0 ? nights : null,
-            tarif: nightlyRate,
+            tarif: grandTotal,
             total_bayar: grandTotal,
             status: "terjadwal",
             cloudbeds_reservation_id: reservationId,
