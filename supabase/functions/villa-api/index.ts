@@ -292,25 +292,34 @@ async function pushBookingToCloudbeds(booking){
       return f;
     };
 
+    // Order settled by the 2026-09-12 probe against this property, logged
+    // in cloudbeds_events_log: roomID was rejected with "Invalid
+    // Parameters" both with and without thirdPartyIdentifier, and room
+    // type alone was accepted (reservation 5TY684XCEB). Pinning an
+    // individual room needs that feature enabled in MyBookings settings;
+    // without it Cloudbeds rejects the parameter rather than ignoring it.
+    //
+    // The known-good shape therefore goes FIRST, so an ordinary push costs
+    // one API call rather than three failures and a success. The rejected
+    // shapes stay as fallbacks: if MyBookings is switched on later, the
+    // first variant starts working and the reservation lands on the exact
+    // room instead of one Cloudbeds picks within the type.
     const variants = [
-      // As sent today, plus the pinned room and our own booking id.
+      {name: 'room_type_only', build: () => baseForm()},
+      // Retried only if the above ever fails. Both were rejected in the
+      // probe; kept because the reason is a property setting, not the
+      // payload, and that setting can change.
+      {name: 'with_roomID_only', build: () => {
+        const f = baseForm();
+        f.set('rooms[0][roomID]', String(mapping.cloudbeds_room_id));
+        return f;
+      }},
       {name: 'with_roomID_and_thirdPartyIdentifier', build: () => {
         const f = baseForm();
         f.set('rooms[0][roomID]', String(mapping.cloudbeds_room_id));
         f.set('thirdPartyIdentifier', String(booking.id));
         return f;
       }},
-      // thirdPartyIdentifier is documented for CHANNEL identifiers; a uuid
-      // from us may simply not be accepted here.
-      {name: 'with_roomID_only', build: () => {
-        const f = baseForm();
-        f.set('rooms[0][roomID]', String(mapping.cloudbeds_room_id));
-        return f;
-      }},
-      // Pinning an individual room requires the feature to be enabled in
-      // MyBookings settings; without it, roomID is invalid rather than
-      // ignored. Room type alone still blocks inventory correctly.
-      {name: 'room_type_only', build: () => baseForm()},
       // Last resort: some deployments reject a zero-quantity children row.
       {name: 'room_type_only_no_children_row', build: () => {
         const f = baseForm();
