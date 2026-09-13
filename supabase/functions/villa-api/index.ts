@@ -1427,12 +1427,61 @@ Deno.serve(async (req)=>{
     // dan tidak ada catatan siapa saja. Sisanya dikirim oleh panggilan
     // berikutnya, dan indeks unik (batch_id, guest_id) membuat pengulangan
     // tidak pernah mengirim dua kali ke orang yang sama.
-    const MAKS_PER_PANGGILAN = 40;
+    // ANGKA INI PERNAH 40, DAN ITU TERLALU BANYAK.
+    //
+    // Pada 13 Sep 2026 nomor WhatsApp villa kena tanda spam lalu terputus
+    // lima jam -- padahal promo massal belum pernah sekali pun dinyalakan.
+    // Yang membuat nomor diblokir bukan jumlah pesan per bulan, tapi
+    // ledakan pesan ke nomor yang belum pernah mengajak bicara duluan.
+    // Empat puluh sekaligus persis berbentuk seperti itu. Kalau nomor villa
+    // sampai diblokir permanen, yang mati bukan cuma promo: konfirmasi
+    // pembayaran, notifikasi booking, dan seluruh balasan LUNAS ikut mati.
+    //
+    // Karena itu ada DUA batas, bukan satu:
+    //  - per panggilan: sedikit saja, sisanya menunggu owner membalas
+    //    PROMO lagi -- jeda manusiawi yang tidak bisa ditiru mesin.
+    //  - per hari: batas keras lintas SEMUA batch, supaya membalas PROMO
+    //    sepuluh kali berturut-turut tetap tidak bisa menembusnya.
+    const cfgPromo = await getSetting('villa_promo_auto');
+    const angkaAman = (nilai, bawaan, maks) => {
+      const n = Math.trunc(Number(nilai));
+      return Number.isFinite(n) && n > 0 ? Math.min(n, maks) : bawaan;
+    };
+    const MAKS_PER_PANGGILAN = angkaAman(cfgPromo?.maks_per_panggilan, 12, 25);
+    const MAKS_PER_HARI = angkaAman(cfgPromo?.maks_per_hari, 15, 40);
+
     const semua = Array.isArray(batch.hasil?.penerima) ? batch.hasil.penerima : [];
     const {data:sudah} = await supabase.from('villa_promo_sends').select('guest_id').eq('batch_id', batch.id);
     const sudahSet = new Set((sudah ?? []).map(r => String(r.guest_id)));
     const antre = semua.filter(r => !sudahSet.has(String(r.guest_id)));
-    const giliran = antre.slice(0, MAKS_PER_PANGGILAN);
+
+    // Dihitung lintas batch, bukan hanya batch ini -- batas harian yang
+    // hanya melihat satu batch bisa ditembus dengan membuat batch baru.
+    // Kolomnya sent_at, bukan created_at -- tabel ini tidak punya created_at.
+    // Salah nama kolom di sini tidak melempar galat yang terlihat: count
+    // kembali null, batasnya terbaca 0 terpakai, dan pengamannya diam-diam
+    // mati. Karena itu galatnya diperiksa dan pengiriman DIBATALKAN kalau
+    // jumlahnya tidak bisa dipastikan -- pengaman yang tidak bisa menghitung
+    // harus menutup, bukan membuka.
+    const sejak24Jam = new Date(Date.now() - 24*3600*1000).toISOString();
+    const {count:terkirim24Jam, error:galatHitung} = await supabase.from('villa_promo_sends')
+      .select('id', {count:'exact', head:true})
+      .eq('status','terkirim')
+      .gte('sent_at', sejak24Jam);
+    if(galatHitung){
+      console.error('[promo-approve] jatah harian tidak bisa dihitung', galatHitung.message);
+      return json({success:false, reason:'batas_harian_tidak_terbaca', error:galatHitung.message});
+    }
+    const sisaJatahHarian = Math.max(0, MAKS_PER_HARI - Number(terkirim24Jam ?? 0));
+    if(sisaJatahHarian === 0){
+      return json({
+        success:false, reason:'batas_harian',
+        maks_per_hari:MAKS_PER_HARI, terkirim_24_jam:Number(terkirim24Jam ?? 0),
+        sisa:antre.length,
+      });
+    }
+
+    const giliran = antre.slice(0, Math.min(MAKS_PER_PANGGILAN, sisaJatahHarian));
 
     let terkirim = 0, gagal = 0;
     for(const penerima of giliran){
@@ -1453,6 +1502,12 @@ Deno.serve(async (req)=>{
         }
       }
       const pesan = String(batch.pesan).replace(/\{nama\}/g, String(penerima?.nama ?? 'Bapak/Ibu'));
+      // Jeda acak antar pesan. Pengiriman beruntun dengan jarak yang persis
+      // sama adalah pola yang paling mudah dikenali sebagai mesin. Sengaja
+      // kecil (1,2-2,8 detik) supaya seluruh giliran tetap selesai jauh di
+      // bawah batas waktu permintaan -- yang menjaga nomor adalah batas
+      // jumlahnya, jeda ini hanya membuat iramanya tidak seragam.
+      if(terkirim + gagal > 0) await new Promise(r => setTimeout(r, 1200 + Math.floor(Math.random()*1600)));
       const berhasil = await sendWa(hp, pesan, {template_type:'villa_promo'});
       await supabase.from('villa_promo_sends').insert({
         batch_id:batch.id, promo_id:batch.promo_id, guest_id, tujuan:hp,
