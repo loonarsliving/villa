@@ -171,6 +171,13 @@ export interface Report {
   walkin_income?: { cafe: number; spa: number; lainnya: number; total: number };
   investor_count?: number;
   per_investor_amount?: number;
+  /** Diisi hanya kalau yang memanggil adalah investor. Lihat /report di villa-api. */
+  unit_dimiliki?: number;
+  /** Angka pasti tiap bulan untuk investor berskema khusus; null untuk bagi hasil biasa. */
+  pemasukan_tetap?: number | null;
+  pemasukan_tetap_sampai?: string | null;
+  /** Yang benar-benar diterima investor ini bulan ini, sudah memperhitungkan jumlah unit dan skema khususnya. */
+  bagian_anda?: number;
 }
 
 export interface OtaBreakdownSource {

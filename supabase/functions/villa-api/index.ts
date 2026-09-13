@@ -669,8 +669,25 @@ async function computeWalkinIncome(periode){
   return { cafe, spa, lainnya, total: cafe+spa+lainnya };
 }
 
+/**
+ * Pembagi dividen: JUMLAH UNIT, bukan jumlah akun.
+ *
+ * Dulu ini menghitung akun investor aktif, dan selama satu akun = satu unit
+ * keduanya memberi angka yang sama. Begitu Bu Mega menggabungkan A4 dan A5
+ * jadi satu akun (13 Sep 2026), keduanya berpisah: akun turun jadi 12
+ * sementara unit tetap 13 -- dan pembagi yang mengecil akan MENAIKKAN
+ * dividen sebelas investor lain tanpa ada seorang pun yang mengubah formula.
+ *
+ * Yang sebenarnya dibagi memang selalu unit, bukan akun. Kepemilikan akun
+ * bisa digabung, dipisah, atau dinonaktifkan; jumlah unit yang menghasilkan
+ * uang tidak ikut berubah karenanya. Owner menegaskan ini 13 Sep 2026:
+ * "pembagi ttp 13, mmg ada 1 investor yg belum masuk" -- unit yang belum ada
+ * pemiliknya pun tetap satu bagian.
+ *
+ * Hari ini hasilnya identik dengan sebelumnya: 13.
+ */
 async function countActiveInvestors(){
-  const {count} = await supabase.from('villa_users').select('id',{count:'exact',head:true}).eq('role','owner').eq('is_active',true);
+  const {count} = await supabase.from('units').select('id',{count:'exact',head:true});
   return count ?? 0;
 }
 
@@ -756,17 +773,56 @@ async function computeOtaBreakdown(periode){
   };
 }
 
+/**
+ * Unit yang boleh dilihat sebuah akun investor.
+ *
+ * villa_users.unit_id hanya memuat SATU unit, dan itu cukup selama satu akun
+ * memang satu unit. Sejak akun bisa memiliki lebih dari satu (Bu Mega, A4 +
+ * A5), memakai kolom itu untuk menyaring berarti separuh miliknya hilang dari
+ * layarnya sendiri -- tanpa galat, tanpa tanda apa pun.
+ */
+async function unitIdsForSession(session){
+  const {data} = await supabase.from('villa_investor_units').select('unit_id').eq('user_id', session.uid);
+  const ids = (data ?? []).map(r => r.unit_id).filter(Boolean);
+  if(ids.length) return ids;
+  // Akun lama yang belum terpetakan tetap dilayani lewat kolom warisannya.
+  return session.unit_id ? [session.unit_id] : [];
+}
+
 async function computeDividendList(periode){
   const report = await computeReport(undefined, periode);
   const {data:investors, error} = await supabase.from('villa_users')
     .select('id,nama,hp,unit_nomor,bank_nama,no_rekening,nama_pemilik_rekening')
     .eq('role','owner').eq('is_active',true).order('unit_nomor');
   if(error) throw new Error(error.message);
-  const list = (investors ?? []).map(inv => ({
-    ...inv,
-    jumlah: report.per_investor_amount,
-    rekening_lengkap: !!(inv.bank_nama && inv.no_rekening),
-  }));
+
+  // Jumlah unit per akun: akun yang memiliki dua unit menerima dua bagian.
+  // Tanpa ini, menggabungkan dua akun jadi satu diam-diam memotong setengah
+  // hak pemiliknya.
+  const {data:kepemilikan} = await supabase.from('villa_investor_units').select('user_id');
+  const jumlahUnit = new Map();
+  for(const r of kepemilikan ?? []) jumlahUnit.set(String(r.user_id), (jumlahUnit.get(String(r.user_id)) ?? 0) + 1);
+
+  // Kekhususan per investor: angka pasti yang menggantikan bagi hasil DAN
+  // jaminan minimal untuk akun itu saja. Sengaja tidak memengaruhi
+  // per_investor_amount maupun pembagi, jadi hitungan investor lain tidak
+  // bergeser sedikit pun karenanya.
+  const {data:terms} = await supabase.from('villa_investor_terms')
+    .select('user_id,pemasukan_tetap,mulai,selesai')
+    .lte('mulai', `${periode}-01`).gte('selesai', `${periode}-01`);
+  const tetap = new Map((terms ?? []).map(t => [String(t.user_id), Number(t.pemasukan_tetap)]));
+
+  const list = (investors ?? []).map(inv => {
+    const nTetap = tetap.get(String(inv.id));
+    const unit = jumlahUnit.get(String(inv.id)) ?? 1;
+    return {
+      ...inv,
+      unit_dimiliki: unit,
+      pemasukan_tetap: nTetap !== undefined,
+      jumlah: nTetap !== undefined ? nTetap : report.per_investor_amount * unit,
+      rekening_lengkap: !!(inv.bank_nama && inv.no_rekening),
+    };
+  });
   return { periode, per_investor_amount: report.per_investor_amount, investor_count: report.investor_count, investors: list };
 }
 
@@ -2197,7 +2253,8 @@ Deno.serve(async (req)=>{
       const rek = inv.rekening_lengkap
         ? `${inv.bank_nama} ${inv.no_rekening} a.n ${inv.nama_pemilik_rekening || inv.nama}`
         : 'REKENING BELUM DIISI';
-      return `• Unit ${inv.unit_nomor} — ${inv.nama}: Rp ${Math.round(inv.jumlah).toLocaleString('id-ID')} → ${rek}`;
+      const tanda = inv.pemasukan_tetap ? ' (pemasukan tetap)' : inv.unit_dimiliki > 1 ? ` (${inv.unit_dimiliki} unit)` : '';
+      return `• Unit ${inv.unit_nomor} — ${inv.nama}: Rp ${Math.round(inv.jumlah).toLocaleString('id-ID')}${tanda} → ${rek}`;
     }).join('\n');
     const message = `*Daftar Transfer Dividen — Periode ${periode}*\n\nBagian per investor: Rp ${Math.round(list.per_investor_amount).toLocaleString('id-ID')} (${list.investor_count} investor aktif)\n\n${lines || '(belum ada investor aktif)'}\n\nMohon proses transfer dividen bulan ini ke masing-masing rekening di atas.`;
 
@@ -2861,7 +2918,10 @@ Deno.serve(async (req)=>{
     const blok=url.searchParams.get('blok');
     const owner_id=url.searchParams.get('owner_id');
     let q=supabase.from('units').select('*');
-    if(isOwner) q=q.eq('id', session.unit_id ?? '00000000-0000-0000-0000-000000000000');
+    if(isOwner){
+      const milik = await unitIdsForSession(session);
+      q = q.in('id', milik.length ? milik : ['00000000-0000-0000-0000-000000000000']);
+    }
     else { if(blok) q=q.eq('blok',blok); if(owner_id) q=q.eq('owner_id',owner_id); }
     const {data,error}=await q.order('nomor');
     if(error) return err(error.message);
@@ -2900,10 +2960,12 @@ Deno.serve(async (req)=>{
     let unit_id=url.searchParams.get('unit_id');
     const date_from=url.searchParams.get('date_from');
     const date_to=url.searchParams.get('date_to');
-    if(isOwner) unit_id = session.unit_id;
+    let milikOwner = null;
+    if(isOwner){ milikOwner = await unitIdsForSession(session); unit_id = null; }
     let q=supabase.from('bookings').select('*');
     if(status) q=q.eq('status',status);
-    if(unit_id) q=q.eq('unit_id',unit_id);
+    if(milikOwner) q=q.in('unit_id', milikOwner.length ? milikOwner : ['00000000-0000-0000-0000-000000000000']);
+    else if(unit_id) q=q.eq('unit_id',unit_id);
     if(date_from || date_to){
       const {data,error}=await q.order('tgl_checkin',{ascending:true});
       if(error) return err(error.message);
@@ -3156,7 +3218,28 @@ Deno.serve(async (req)=>{
     const periode=url.searchParams.get('periode')??new Date().toISOString().slice(0,7);
     let unit_id=url.searchParams.get('unit_id');
     if(isOwner) unit_id = undefined;
-    return json(await computeReport(unit_id, periode));
+    const laporan = await computeReport(unit_id, periode);
+
+    // Bagian investor yang sedang login, kalau memang investor. Dihitung di
+    // server, bukan di halaman: dashboard yang menghitung sendiri "5 juta"
+    // atau "satu dari 13" akan terus menampilkan angka itu kepada investor
+    // yang skemanya berbeda, dan investorlah yang percaya pada layar.
+    if(isOwner){
+      const {count:unitDimiliki} = await supabase.from('villa_investor_units')
+        .select('unit_id',{count:'exact',head:true}).eq('user_id', session.uid);
+      const {data:term} = await supabase.from('villa_investor_terms')
+        .select('pemasukan_tetap,mulai,selesai').eq('user_id', session.uid)
+        .lte('mulai', `${periode}-01`).gte('selesai', `${periode}-01`).maybeSingle();
+      const unit = Math.max(1, Number(unitDimiliki ?? 1));
+      laporan.unit_dimiliki = unit;
+      laporan.pemasukan_tetap = term ? Number(term.pemasukan_tetap) : null;
+      laporan.pemasukan_tetap_sampai = term?.selesai ?? null;
+      laporan.bagian_anda = term ? Number(term.pemasukan_tetap) : laporan.per_investor_amount * unit;
+      // Jaminan minimal tidak berlaku untuk akun berpemasukan tetap: angkanya
+      // sudah pasti, jadi tidak ada yang perlu ditambal.
+      if(term){ laporan.jaminan_aktif = false; laporan.jaminan_topup = 0; }
+    }
+    return json(laporan);
   }
 
   if(path==='/report/ota-breakdown' && m==='GET'){
