@@ -49,6 +49,12 @@ export default function PendapatanPage() {
   const lo = report?.pengelola_amount ?? report?.loonars_amount ?? 0;
   const perInvestor = report?.per_investor_amount ?? 0;
   const investorCount = report?.investor_count ?? 0;
+  // Investor berskema tetap tidak ikut pembagian itu. Menampilkan
+  // "1 dari 13 investor" kepadanya bukan cuma tidak relevan -- angkanya
+  // memang bukan angka yang dia terima.
+  const pemasukanTetap = report?.pemasukan_tetap ?? null;
+  const unitDimiliki = report?.unit_dimiliki ?? 1;
+  const bagianAnda = report?.bagian_anda ?? perInvestor;
   const opexPct = Math.round((report?.opex_pct ?? 0.25) * 100);
   const mkPct = Math.round((report?.marketing_pct ?? 0.275) * 100);
 
@@ -59,19 +65,35 @@ export default function PendapatanPage() {
     ["Net Profit", Math.round((gp / g || 0) * 100), fmtCurrency(gp), false, true],
     ["Pool Investor (70%)", 70, fmtCurrency(ow), false, false, true],
     ["Loonars (30%)", 30, fmtCurrency(lo), false],
-    [`Bagian Anda (1 dari ${investorCount || "?"} investor, dibagi rata)`, 70, fmtCurrency(perInvestor), false, false, true],
+    pemasukanTetap !== null
+      ? ["Pemasukan Anda (angka tetap sesuai skema pembelian)", 70, fmtCurrency(bagianAnda), false, false, true]
+      : [
+          `Bagian Anda (${unitDimiliki} dari ${investorCount || "?"} unit, dibagi rata)`,
+          70,
+          fmtCurrency(bagianAnda),
+          false,
+          false,
+          true,
+        ],
   ];
 
   return (
     <InvestorShell pageTitle="Pendapatan" pageSub="Alur bagi hasil kolektif seluruh villa">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3.5">
-        <StatCard label="Bagian Anda" value={fmtCurrency(perInvestor)} accent="sage" />
+        <StatCard label={pemasukanTetap !== null ? "Pemasukan Anda" : "Bagian Anda"} value={fmtCurrency(bagianAnda)} accent="sage" />
         <StatCard label="Gross Revenue" value={fmtCurrency(g)} sub="Seluruh villa" />
         <StatCard label="Opex + Marketing" value={fmtCurrency(o + mk)} sub={`${opexPct}% + ${mkPct}%`} accent="gold" />
         <StatCard label="Net Profit" value={fmtCurrency(gp)} />
       </div>
       <Card>
-        <CardHeader title="Alur Bagi Hasil" subtitle={`${periodLabel()} — kolektif, dibagi rata ke semua investor`} />
+        <CardHeader
+          title="Alur Bagi Hasil"
+          subtitle={
+            pemasukanTetap !== null
+              ? `${periodLabel()} — pemasukan Anda tetap, tidak mengikuti alur di bawah`
+              : `${periodLabel()} — kolektif, dibagi rata ke semua investor`
+          }
+        />
         {loading ? (
           <Loading />
         ) : (
