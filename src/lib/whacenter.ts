@@ -167,47 +167,94 @@ export function normalizeInbound(rawPayload: unknown): NormalizedInbound | null 
  * tidak terdokumentasi dengan benar (putRate, postReservation) pada
  * 2026-09-12.
  */
-export async function setWebhookUrl(webhookUrl: string): Promise<{ success: boolean; param?: string; tersimpan?: string; attempts: { param: string; http: number }[]; error?: string }> {
+export async function setWebhookUrl(webhookUrl: string): Promise<{ success: boolean; cara?: string; tersimpan?: string; attempts: { cara: string; http: number }[]; mentah?: unknown; error?: string }> {
   const deviceId = whacenterDeviceId();
   if (!deviceId) return { success: false, attempts: [], error: "WHACENTER_DEVICE_ID belum diisi" };
 
-  const kandidat = ["url", "webhook", "webhook_url", "urlwebhook"];
-  const attempts: { param: string; http: number }[] = [];
+  const namaParam = ["url", "webhook", "webhook_url", "urlwebhook"];
+  const attempts: { cara: string; http: number }[] = [];
 
-  for (const param of kandidat) {
+  // Percobaan pertama (POST + query string) dijawab HTTP 200 untuk KEEMPAT
+  // nama parameter, tapi tidak satu pun benar-benar tersimpan. Itu bukan
+  // keanehan baru: konektor Mkhsistem sudah mencatat bahwa WhaCenter
+  // menjawab 200 untuk permintaan yang sebenarnya tidak ia kerjakan.
+  //
+  // Petunjuk yang saya lewatkan: contoh resmi WhaCenter memakai PHP
+  // file_get_contents(), dan itu GET, bukan POST. Jadi urutannya sekarang
+  // dimulai dari GET + query string, lalu turun ke bentuk lain.
+  const cara: { nama: string; jalankan: () => Promise<{ status: number }> }[] = [];
+  for (const p of namaParam) {
+    const qs = `device_id=${encodeURIComponent(deviceId)}&${p}=${encodeURIComponent(webhookUrl)}`;
+    cara.push({ nama: `GET ?${p}`, jalankan: () => request("GET", `/setWebhook?${qs}`) });
+  }
+  for (const p of namaParam) {
+    cara.push({ nama: `POST body ${p}`, jalankan: () => request("POST", "/setWebhook", { device_id: deviceId, [p]: webhookUrl }) });
+  }
+  for (const p of namaParam) {
+    cara.push({ nama: `POST form ${p}`, jalankan: () => requestForm("/setWebhook", { device_id: deviceId, [p]: webhookUrl }) });
+  }
+
+  for (const c of cara) {
     try {
-      const qs = `device_id=${encodeURIComponent(deviceId)}&${param}=${encodeURIComponent(webhookUrl)}`;
-      const res = await request("POST", `/setWebhook?${qs}`);
-      attempts.push({ param, http: res.status });
-
+      const res = await c.jalankan();
+      attempts.push({ cara: c.nama, http: res.status });
       const tersimpan = await getWebhookUrl();
       if (tersimpan.url && tersimpan.url.trim() === webhookUrl.trim()) {
-        return { success: true, param, tersimpan: tersimpan.url, attempts };
+        return { success: true, cara: c.nama, tersimpan: tersimpan.url, attempts };
       }
-    } catch (e) {
-      attempts.push({ param, http: 0 });
-      if (kandidat.indexOf(param) === kandidat.length - 1) {
-        return { success: false, attempts, error: e instanceof Error ? e.message : String(e) };
-      }
+    } catch {
+      attempts.push({ cara: c.nama, http: 0 });
     }
   }
 
+  // Jawaban getWebhook yang MENTAH ikut dikembalikan, bukan hasil olahan.
+  // Pelajaran dari insiden getSources Cloudbeds 2026-09-12: saat itu yang
+  // dicatat hanya proyeksi, sehingga kunci yang tidak ada berubah jadi {}
+  // dan "tidak menjawab apa-apa" tidak bisa dibedakan dari "menjawab dengan
+  // nama kunci yang berbeda" -- padahal justru itu dua kemungkinan yang
+  // perlu dipisahkan.
   const akhir = await getWebhookUrl();
-  return { success: false, attempts, tersimpan: akhir.url ?? undefined, error: "tidak ada nama parameter yang terbukti tersimpan" };
+  return { success: false, attempts, tersimpan: akhir.url ?? undefined, mentah: akhir.mentah, error: "tidak ada cara yang terbukti tersimpan" };
 }
 
-export async function getWebhookUrl(): Promise<{ url: string | null; error?: string }> {
+/** Sebagian API PHP lama hanya menerima form-encoded, bukan JSON. */
+async function requestForm(path: string, fields: Record<string, string>) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${whacenterBaseUrl()}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(fields).toString(),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    return { status: res.status, ok: res.ok, json: await res.json().catch(() => null) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function getWebhookUrl(): Promise<{ url: string | null; mentah?: unknown; error?: string }> {
   const deviceId = whacenterDeviceId();
   if (!deviceId) return { url: null, error: "WHACENTER_DEVICE_ID belum diisi" };
   try {
     const res = await request("GET", `/getWebhook?device_id=${encodeURIComponent(deviceId)}`);
     const root = asRecord(res.json);
     const data = asRecord(root?.data) ?? root;
-    for (const k of ["webhook", "url", "webhook_url", "urlwebhook"]) {
+
+    // Nama kuncinya tidak terdokumentasi, jadi yang dicari BENTUKNYA --
+    // string yang terlihat seperti URL -- bukan nama yang kebetulan saya
+    // tebak benar.
+    for (const k of ["webhook", "url", "webhook_url", "urlwebhook", "webhookUrl"]) {
       const v = data?.[k];
-      if (typeof v === "string" && v.length > 0) return { url: v };
+      if (typeof v === "string" && v.length > 0) return { url: v, mentah: res.json };
     }
-    return { url: null };
+    if (typeof root?.data === "string" && (root.data as string).length > 0) return { url: root.data as string, mentah: res.json };
+    for (const v of Object.values(data ?? {})) {
+      if (typeof v === "string" && /^https?:\/\//i.test(v)) return { url: v, mentah: res.json };
+    }
+    return { url: null, mentah: res.json };
   } catch (e) {
     return { url: null, error: e instanceof Error ? e.message : String(e) };
   }
