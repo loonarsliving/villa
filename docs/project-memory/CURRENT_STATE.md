@@ -2,6 +2,106 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-13 — pembagi dividen kini JUMLAH UNIT, dan satu akun boleh punya dua unit
+
+**Pembagi dividen berubah dari "jumlah akun investor aktif" menjadi
+"jumlah unit". Hari ini hasilnya identik: 13.** Ini bukan perubahan
+angka, tapi perubahan definisi — dan tanpa itu, penggabungan akun di
+bawah akan diam-diam MENAIKKAN dividen sebelas investor lain, karena
+pembagi ikut mengecil jadi 12. Owner menegaskan 13 Sep 2026: *"pembagi
+ttp 13, mmg ada 1 investor yg belum masuk"* — unit yang belum ada
+pemiliknya pun tetap satu bagian. `countActiveInvestors()` sekarang
+menghitung `units`.
+
+Rumus beku di `PHASE0-BASELINE.md` §2 lainnya TIDAK disentuh: 27,5%
+marketing, 25% opex, 70/30, jaminan Rp 5 juta untuk 12 investor biasa.
+
+**Bu Mega: satu akun untuk A4 + A5, pemasukan tetap.** Ia membeli dengan
+skema harga berbeda, jadi menerima **Rp 7.600.000 pasti tiap bulan,
+Okt 2026 – Sep 2031** — bukan jaminan minimal, bukan bagi hasil. Akun
+`a4@haluoleo.id` dan `a5@haluoleo.id` DIHAPUS; penggantinya
+`mega@haluoleo.id` (`unit_nomor` = "A4 & A5"). **Password hash-nya
+disalin dari akun A5**, jadi ia login dengan kata sandi yang sudah
+dikenalnya dan tidak ada kata sandi baru yang perlu dikirimkan.
+
+Skema khususnya hidup di `villa_investor_terms` (satu baris). Akun
+dengan baris di sana: jaminan minimal dimatikan (`jaminan_aktif=false`),
+`bagian_anda` = angka tetapnya, dan dashboard menampilkan "Pemasukan
+Tetap", bukan "Jaminan Pendapatan Minimal". Akun tanpa baris di sana
+sama sekali tidak terpengaruh.
+
+**Kepemilikan unit sekarang di `villa_investor_units`** (13 baris, unique
+per unit). `villa_users.unit_id` tetap ada sebagai warisan dan masih
+dipakai sebagai fallback untuk akun yang belum terpetakan, tapi yang
+menentukan sekarang tabel itu. `/units` dan `/bookings` untuk investor
+menyaring dengan `unitIdsForSession()`, bukan `session.unit_id` — kalau
+tidak, separuh milik Bu Mega hilang dari layarnya sendiri tanpa galat.
+Yang menerima dividen dua bagian juga dibaca dari sana.
+
+**Voucher kini melekat pada UNIT, bukan akun** (`villa_investor_vouchers.unit_id`,
+unique `(unit_id, periode)`). 12 poin per unit berarti pemilik dua unit
+punya 24 — mustahil di bawah kunci lama `(user_id, periode)`. Bu Mega
+memegang 24 kode di satu akun.
+
+**Baris kembar `investor_profiles` sudah dibersihkan** (14 → 10, satu per
+unit). Penyebabnya: halaman profil investor MEMBUAT baris baru saat
+menyimpan rekening, bukan memperbarui. **Penyebab itu BELUM diperbaiki**
+— duplikatnya akan muncul lagi setiap ada investor mengisi rekening.
+Ketiga rekening yang sudah terisi (BNI/BRI/CIMB Niaga) utuh.
+
+## 2026-09-13 — kode menginap gratis investor (156 kode, Okt 2026–Sep 2027)
+
+156 kode sudah ADA di database (13 investor aktif x 12 bulan). Sisi
+villa sudah lengkap; **form loonars.id belum** — sampai itu dibuat,
+kode belum bisa ditukar siapa pun.
+
+**Jangkarnya `villa_users` (role `owner`, aktif) = tepat 13 baris**, satu
+per unit A1–A5/B1–B4/C1–C4. Catatan lama "13 investor vs 11 profil"
+sudah tidak berlaku: `investor_profiles` TIDAK bisa dipakai sebagai
+jangkar — isinya 14 baris dengan duplikat (A5 3x, C4 2x, C2 2x) dan 3
+investor aktif (B2, B3, C1) tidak punya baris di sana sama sekali.
+Duplikat itu belum dibereskan dan mungkin mengganggu hal lain (mis.
+daftar rekening dividen).
+
+**Keputusan owner 13 Sep 2026** (melengkapi jawaban 12 Sep):
+- kode boleh dipakai di **unit mana saja yang kosong**, tidak terkunci
+  ke unit investor sendiri;
+- **12 poin per unit**, bukan per orang — pemilik dua unit (Ibu Mega,
+  A4+A5) dapat 24;
+- **staf front desk tetap melihat unit TERISI**; pengecualian okupansi
+  hanya untuk harga AI, promo, dan laporan.
+
+**Asumsi yang saya ambil sendiri dan belum dikonfirmasi: 1 kode = 1
+malam.** "12 poin setahun, sebulan sekali" dibaca sebagai 12 malam.
+Menginap 2 malam ditolak, bukan dipotong satu malam.
+
+**Yang menjaga aturannya adalah database, bukan kode aplikasi:**
+- `unique (user_id, periode)` — "sebulan sekali" tidak bisa dilanggar;
+- `unique index bookings_voucher_sekali_pakai` pada `bookings.voucher_id`
+  — satu kode hanya bisa menempel pada satu booking, selamanya, walau dua
+  permintaan kembar datang bersamaan;
+- `check (is_free_stay = (voucher_id is not null))` — penanda tidak bisa
+  lepas dari vouchernya.
+Status voucher sengaja TIDAK disimpan sebagai kolom: "terpakai" dibaca
+dari booking yang menunjuknya, "hangus" dihitung dari periode terhadap
+bulan berjalan.
+
+**Pengecualian dari uang dan okupansi** — cari `is_free_stay`:
+`src/lib/aiPricingEngine.ts`, `api/cron/generate-pricing-recommendations`,
+`api/cron/daily-inventory-snapshot` (ini sumber okupansi/ADR/RevPAR semua
+laporan, jadi pengecualiannya terjadi sekali di sini),
+`api/admin/revenue-metrics`, dan villa-api `/cron/promo-low-season`.
+Laporan keuangan & dividen tidak perlu disentuh sama sekali: villa-api
+tidak pernah membuat baris `transactions` dari booking, dan malam gratis
+bertarif 0. Rumus beku di `PHASE0-BASELINE.md` §2 tidak berubah.
+`/bridge/occupancy` (kartu front desk) sengaja TIDAK dikecualikan.
+
+**Endpoint baru:** `GET /public/voucher` (pratinjau untuk form loonars,
+tidak membocorkan nama investor), `POST /public/bookings` menerima
+`voucher_code` (langsung `terjadwal`, tarif 0, didorong ke Cloudbeds),
+`GET /investor/vouchers`. Halaman
+`src/app/investor/menginap-gratis/page.tsx`.
+
 ## 2026-09-13 — WhatsApp villa lepas dari Mkhsistem, pakai perangkat sendiri
 
 Sejak hari ini villa **tidak lagi menumpang WhatsApp Mkhsistem**. Seluruh

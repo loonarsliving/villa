@@ -104,11 +104,16 @@ async function computeMetrics(supabase: ReturnType<typeof supabaseAdmin>, from: 
   // Booking-level metrics -- cohort is every booking whose stay (tgl_checkin)
   // falls in the requested range, any status (so cancellations in-range
   // are counted in the denominator).
+  // PENGECUALIAN MALAM GRATIS INVESTOR (cari: is_free_stay). Yang dipengaruhi
+  // di sini hanya metrik tingkat booking -- jumlah booking, tingkat
+  // pembatalan, ALOS, lead time. Okupansi/ADR/RevPAR datang dari
+  // villa_daily_inventory_snapshot, yang sudah mengecualikannya di sumbernya.
   const { data: bookingRows } = await supabase
     .from("bookings")
     .select("status, tgl_checkin, tgl_checkout, created_at")
     .gte("tgl_checkin", from)
-    .lte("tgl_checkin", to);
+    .lte("tgl_checkin", to)
+    .eq("is_free_stay", false);
   const bookings = bookingRows ?? [];
   const totalBookings = bookings.length;
   const cancelledBookings = bookings.filter((b) => b.status === "batal").length;

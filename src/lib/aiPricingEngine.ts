@@ -1023,10 +1023,15 @@ export async function decideRatesForRoomType(
   targetDates: string[],
   settings: PricingSettings,
 ): Promise<DatePriceDecision[]> {
+  // PENGECUALIAN MALAM GRATIS INVESTOR (cari: is_free_stay).
+  // Malam gratis mengunci unit dan tetap masuk Cloudbeds, tapi tidak membawa
+  // satu rupiah pun. Ikut menghitungnya membuat villa terlihat lebih laku
+  // daripada kenyataan berbayarnya, lalu menaikkan harga untuk tamu sungguhan.
   const { data: allBookings } = await supabase
     .from("bookings")
     .select("unit_id, tgl_checkin, tgl_checkout, status, created_at")
-    .neq("status", "batal");
+    .neq("status", "batal")
+    .eq("is_free_stay", false);
   const { data: units } = await supabase.from("units").select("id").eq("room_type_id", roomType.id);
   const unitIds = new Set((units ?? []).map((u) => u.id));
 

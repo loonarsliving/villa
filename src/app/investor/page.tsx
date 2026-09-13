@@ -37,6 +37,12 @@ export default function InvestorBerandaPage() {
 
   const owner = report?.owner_amount || 0;
   const jaminanAktif = report?.jaminan_aktif;
+  // Skema khusus: sebagian investor membeli dengan harga berbeda dan
+  // menerima angka pasti tiap bulan, bukan bagi hasil dengan jaminan minimal.
+  // Angkanya datang dari server; halaman ini tidak menghitung apa pun sendiri.
+  const pemasukanTetap = report?.pemasukan_tetap ?? null;
+  const unitDimiliki = report?.unit_dimiliki ?? 1;
+  const bagianAnda = report?.bagian_anda ?? report?.per_investor_amount ?? owner;
 
   return (
     <InvestorShell pageTitle="Beranda" pageSub={`Poin menginap Unit ${unitNomor} · ${periodLabel()}`}>
@@ -46,25 +52,43 @@ export default function InvestorBerandaPage() {
         <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-gold-500 to-transparent" />
         <div>
           <div className="text-[9px] text-gold-500 tracking-[0.2em] uppercase font-semibold mb-2">
-            Jaminan Pendapatan Minimal
+            {pemasukanTetap !== null ? "Pemasukan Tetap" : "Jaminan Pendapatan Minimal"}
           </div>
           <div className="font-serif text-xl sm:text-[22px] font-light text-ink leading-snug">
-            Anda selalu dapat minimal
-            <br />
-            Rp 5.000.000 per bulan
+            {pemasukanTetap !== null ? (
+              <>
+                Anda menerima
+                <br />
+                {fmtCurrency(pemasukanTetap)} per bulan
+              </>
+            ) : (
+              <>
+                Anda selalu dapat minimal
+                <br />
+                Rp 5.000.000 per bulan
+              </>
+            )}
           </div>
           <div className="text-[11px] text-ink/30 mt-2 leading-relaxed max-w-xs">
             {loading
               ? "Memuat data..."
-              : jaminanAktif
-                ? `Bagian Anda rendah bulan ini — Loonars menambah ${fmtCurrency(report?.jaminan_topup)} per investor agar Anda tetap terima Rp 5 juta.`
-                : `Villa berjalan normal — jaminan tidak aktif, bagi hasil penuh untuk Anda.`}
+              : pemasukanTetap !== null
+                ? `Angka pasti setiap bulan sesuai skema pembelian Anda${
+                    report?.pemasukan_tetap_sampai ? `, berlaku sampai ${report.pemasukan_tetap_sampai}` : ""
+                  } — tidak naik-turun mengikuti okupansi villa.`
+                : jaminanAktif
+                  ? `Bagian Anda rendah bulan ini — Loonars menambah ${fmtCurrency(report?.jaminan_topup)} per investor agar Anda tetap terima Rp 5 juta.`
+                  : `Villa berjalan normal — jaminan tidak aktif, bagi hasil penuh untuk Anda.`}
           </div>
         </div>
         <div className="text-left sm:text-right">
-          <div className="font-serif text-3xl sm:text-[38px] font-light text-gold-500 leading-none">{fmtCurrency(report?.per_investor_amount ?? owner)}</div>
+          <div className="font-serif text-3xl sm:text-[38px] font-light text-gold-500 leading-none">{fmtCurrency(bagianAnda)}</div>
           <div className="text-[9.5px] text-ink/30 mt-1">
-            Bagian Anda bulan ini{report?.investor_count ? ` (1 dari ${report.investor_count} investor)` : ""}
+            {pemasukanTetap !== null
+              ? "Pemasukan Anda bulan ini"
+              : `Bagian Anda bulan ini${
+                  report?.investor_count ? ` (${unitDimiliki} dari ${report.investor_count} unit)` : ""
+                }`}
           </div>
           <div
             className={`inline-flex items-center gap-1.5 text-[9.5px] font-semibold px-2.5 py-1 rounded-full mt-2.5 ${

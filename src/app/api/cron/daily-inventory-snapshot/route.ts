@@ -45,10 +45,16 @@ export async function GET(request: Request) {
     const { data: units, error: unitsErr } = await supabase.from("units").select("id, status, room_type_id");
     if (unitsErr) throw new Error(`Failed to load units: ${unitsErr.message}`);
 
+    // PENGECUALIAN MALAM GRATIS INVESTOR (cari: is_free_stay).
+    // Ini rekaman historis yang jadi sumber okupansi, ADR, dan RevPAR di
+    // seluruh laporan -- jadi pengecualiannya harus terjadi DI SINI, sekali,
+    // bukan di tiap laporan yang membacanya. Malam gratis mengunci unit dan
+    // tetap masuk Cloudbeds, tapi tidak membawa satu rupiah pun.
     const { data: activeBookings, error: bookingsErr } = await supabase
       .from("bookings")
       .select("unit_id, tgl_checkin, tgl_checkout")
-      .in("status", ["terjadwal", "checkin"]);
+      .in("status", ["terjadwal", "checkin"])
+      .eq("is_free_stay", false);
     if (bookingsErr) throw new Error(`Failed to load bookings: ${bookingsErr.message}`);
 
     const onBooksUnitIds = new Set(

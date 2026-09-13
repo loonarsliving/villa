@@ -25,6 +25,7 @@ export function InvestorShell({
       items: [
         { href: "/investor", label: "Beranda", icon: "◈" },
         { href: "/investor/pendapatan", label: "Pendapatan", icon: "◎" },
+        { href: "/investor/menginap-gratis", label: "Menginap Gratis", icon: "✦" },
       ],
     },
     {
