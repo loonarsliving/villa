@@ -33,6 +33,9 @@ export async function GET(request: Request) {
     base_url: whacenterBaseUrl(),
     perangkat: status,
     webhook_tersimpan: webhook.url,
+    // Jawaban mentah ikut ditampilkan, bukan cuma hasil olahan: kalau nama
+    // kuncinya ternyata lain, ini satu-satunya cara mengetahuinya.
+    getwebhook_mentah: webhook.mentah,
     webhook_seharusnya: new URL("/api/wa/webhook", request.url).toString(),
   });
 }
