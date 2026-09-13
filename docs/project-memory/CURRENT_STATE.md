@@ -14,7 +14,16 @@ pemiliknya pun tetap satu bagian. `countActiveInvestors()` sekarang
 menghitung `units`.
 
 Rumus beku di `PHASE0-BASELINE.md` §2 lainnya TIDAK disentuh: 27,5%
-marketing, 25% opex, 70/30, jaminan Rp 5 juta untuk 12 investor biasa.
+marketing, 25% opex, 70/30, jaminan Rp 5 juta untuk **11** investor bagi
+hasil. (Sebelas, bukan dua belas: 13 unit dikurangi dua unit Bu Mega yang
+kini satu akun berskema tetap. Angka ini sempat saya tulis salah.)
+
+**Bentuk akhirnya, ditegaskan owner 13 Sep 2026** (*"akun mega kluar, tp
+investor ttp 13 ini yg betul"*): pembagi **13** (jumlah unit), Bu Mega
+**di luar** pembagian itu dengan angka tetap Rp 7.600.000, dan 11
+investor lain masing-masing menerima owner_pool ÷ 13. Dua bagian milik
+unit A4 dan A5 karena itu tidak dibayarkan sebagai dividen — itu memang
+maksudnya, bukan kebocoran.
 
 **Bu Mega: satu akun untuk A4 + A5, pemasukan tetap.** Ia membeli dengan
 skema harga berbeda, jadi menerima **Rp 7.600.000 pasti tiap bulan,
