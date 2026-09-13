@@ -53,9 +53,13 @@ create unique index if not exists bookings_voucher_sekali_pakai
 -- voucher berarti ada malam yang hilang dari pendapatan tanpa alasan yang
 -- bisa ditelusuri; voucher tanpa penanda berarti malam gratis diam-diam ikut
 -- terhitung sebagai pendapatan dan okupansi.
+-- Voucher menggratiskan SATU malam; menginapnya boleh lebih lama, dan malam
+-- sisanya dibayar penuh. Booking seperti itu BUKAN malam gratis -- pendapatan
+-- malam keduanya nyata dan harus ikut terhitung. Jadi hubungannya "kalau
+-- gratis, pasti ada vouchernya", bukan "sama dengan".
 alter table public.bookings drop constraint if exists bookings_free_stay_konsisten;
 alter table public.bookings add constraint bookings_free_stay_konsisten
-  check (is_free_stay = (voucher_id is not null));
+  check (not is_free_stay or voucher_id is not null);
 
 comment on column public.bookings.is_free_stay is
   'Malam gratis investor (voucher). Dikecualikan dari laporan keuangan, rumus dividen, dan okupansi yang dipakai AI/promo -- TAPI tetap tampil terisi di kartu front desk dan tetap didorong ke Cloudbeds.';

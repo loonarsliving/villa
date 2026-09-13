@@ -533,9 +533,14 @@ async function periksaVoucherInvestor(kode, tgl_checkin, tgl_checkout){
   if(!isValidDateStr(tgl_checkin)) return {ok:false, alasan:'Tanggal checkin tidak valid.'};
   if(!isValidDateStr(tgl_checkout)) return {ok:false, alasan:'Tanggal checkout tidak valid.'};
 
-  // Satu poin = satu malam. Dua belas poin setahun, satu per bulan.
+  // Satu poin = satu malam, tapi menginapnya boleh lebih lama (keputusan
+  // owner 13 Sep 2026): "boleh 2 malam tp vouchernya hanya berlaku semalam,
+  // malam kedua otomatis harus bayar". Yang digratiskan selalu MALAM
+  // PERTAMA, dan semua larangan di bawah diperiksa terhadap malam itu --
+  // bukan terhadap seluruh menginapnya. Menginap Kamis-Sabtu tetap boleh:
+  // yang gratis malam Kamis, malam Jumat dibayar penuh.
   const malam = Math.round((new Date(tgl_checkout).getTime() - new Date(tgl_checkin).getTime())/86400000);
-  if(malam !== 1) return {ok:false, alasan:'Satu kode berlaku untuk satu malam menginap.'};
+  if(malam < 1) return {ok:false, alasan:'Tanggal menginap tidak valid.'};
 
   // Bulan kode, bukan bulan hari ini: kode Oktober yang belum dipakai tetap
   // hanya bisa dipakai untuk menginap DI Oktober.
@@ -547,10 +552,11 @@ async function periksaVoucherInvestor(kode, tgl_checkin, tgl_checkout){
       : `Kode ini hanya berlaku untuk menginap di bulan ${bulanKode}.`};
   }
 
-  // Jumat, Sabtu, Minggu. getUTCDay(): 0=Minggu, 5=Jumat, 6=Sabtu.
+  // Jumat, Sabtu, Minggu -- diperiksa pada MALAM PERTAMA, yaitu malam yang
+  // digratiskan. getUTCDay(): 0=Minggu, 5=Jumat, 6=Sabtu.
   const hari = new Date(tgl_checkin + 'T00:00:00Z').getUTCDay();
   if(hari === 5 || hari === 6 || hari === 0){
-    return {ok:false, alasan:'Kode tidak berlaku untuk menginap Jumat, Sabtu, atau Minggu.'};
+    return {ok:false, alasan:'Malam gratis tidak berlaku Jumat, Sabtu, atau Minggu. Silakan mulai menginap di hari lain.'};
   }
 
   // High season SAJA -- bukan baris musim sepi. villa_high_season_periods
@@ -564,7 +570,7 @@ async function periksaVoucherInvestor(kode, tgl_checkin, tgl_checkout){
     .lte('start_date', tgl_checkin)
     .gte('end_date', tgl_checkin);
   const ramai = (musim ?? []).find(r => Number(r.suggested_adjustment_pct ?? 0) > 0);
-  if(ramai) return {ok:false, alasan:`Kode tidak berlaku di periode ramai (${ramai.label}).`};
+  if(ramai) return {ok:false, alasan:`Malam gratis tidak berlaku di periode ramai (${ramai.label}).`};
 
   return {ok:true, voucher:v, pemilik, malam};
 }
@@ -872,9 +878,32 @@ Deno.serve(async (req)=>{
     const checkout = url.searchParams.get('checkout') ?? '';
     if(!kode) return err('Kode wajib diisi');
     const cek = await periksaVoucherInvestor(kode, checkin, checkout);
-    return json(cek.ok
-      ? {berlaku:true, malam:cek.malam, keterangan:'Menginap gratis 1 malam. Tidak ada yang perlu dibayar.'}
-      : {berlaku:false, alasan:cek.alasan});
+    if(!cek.ok) return json({berlaku:false, alasan:cek.alasan});
+
+    // Nilai malam gratisnya ikut dihitung kalau tipe unitnya sudah dipilih,
+    // supaya ringkasan harga di form menampilkan angka yang sama dengan yang
+    // nanti ditagih -- bukan angka yang dikira-kira browser.
+    const roomTypeCode = String(url.searchParams.get('room_type') ?? '').trim();
+    let hemat = null, total = null, hargaNormalPratinjau = null;
+    if(roomTypeCode){
+      const {data:rt} = await supabase.from('villa_room_types').select('id').eq('code', roomTypeCode).maybeSingle();
+      const {data:unitContoh} = rt
+        ? await supabase.from('units').select('id,tarif_harian,room_type_id').eq('room_type_id', rt.id).order('nomor').limit(1).maybeSingle()
+        : {data:null};
+      if(unitContoh){
+        hargaNormalPratinjau = await computeStayTarif(unitContoh, checkin, cek.malam);
+        hemat = await computeStayTarif(unitContoh, checkin, 1);
+        total = Math.max(0, hargaNormalPratinjau - hemat);
+      }
+    }
+
+    return json({
+      berlaku:true, malam:cek.malam, malam_gratis:1,
+      harga_normal:hargaNormalPratinjau, hemat, total,
+      keterangan: cek.malam > 1
+        ? 'Malam pertama gratis. Malam selanjutnya dibayar seperti biasa.'
+        : 'Menginap gratis 1 malam. Tidak ada yang perlu dibayar.',
+    });
   }
 
   if(path==='/public/promo' && m==='GET'){
@@ -981,18 +1010,27 @@ Deno.serve(async (req)=>{
     if(!freeUnit) return err('Maaf, villa sudah penuh untuk tanggal yang dipilih. Silakan pilih tanggal lain atau hubungi kami di WhatsApp.', 409);
 
     const nights = Math.max(1, Math.round((new Date(tgl_checkout).getTime() - new Date(tgl_checkin).getTime())/86400000));
-    // Menginap gratis investor tidak perlu tarif sama sekali. Sengaja
-    // dilewati, bukan dihitung lalu dinolkan: unit yang tarifnya belum
-    // diatur tidak boleh menggagalkan penukaran voucher, karena tidak ada
-    // rupiah yang sedang dipertaruhkan.
-    const hargaNormal = voucherTerpakai ? 0 : await computeStayTarif(freeUnit, tgl_checkin, nights);
-    if(!voucherTerpakai && hargaNormal<=0) return err('Tarif unit belum diatur, hubungi kami langsung', 409);
+    // Voucher menggratiskan MALAM PERTAMA saja. Nilainya dihitung dengan
+    // fungsi yang sama yang memberi harga seluruh menginap, lalu dikurangkan
+    // -- bukan dengan membagi total per malam, karena tarif tiap malam bisa
+    // berbeda (akhir pekan, high season). Menginap semalam berarti sisanya
+    // nol, dan itu jatuh dengan sendirinya tanpa cabang khusus.
+    const hargaNormal = await computeStayTarif(freeUnit, tgl_checkin, nights);
+    let nilaiMalamGratis = 0;
+    if(voucherTerpakai){
+      nilaiMalamGratis = await computeStayTarif(freeUnit, tgl_checkin, 1);
+    }
+    // Tarif yang belum diatur hanya menggagalkan pemesanan berbayar. Untuk
+    // menginap yang seluruhnya gratis tidak ada rupiah yang dipertaruhkan,
+    // jadi tidak ada alasan menolaknya.
+    const seluruhnyaGratis = !!voucherTerpakai && nights === 1;
+    if(!seluruhnyaGratis && hargaNormal<=0) return err('Tarif unit belum diatur, hubungi kami langsung', 409);
 
     // Promo, kalau tamu membawa kodenya. Harganya dihitung ulang DI SINI --
     // bukan dipercaya dari yang dikirim browser -- oleh fungsi yang sama
     // dengan pratinjaunya, jadi tidak ada celah untuk menitipkan harga
     // sendiri lewat body permintaan.
-    let computedTarif = hargaNormal;
+    let computedTarif = voucherTerpakai ? Math.max(0, hargaNormal - nilaiMalamGratis) : hargaNormal;
     let promoTerpakai = null;
     if(promo_code){
       const {data:promo} = await supabase.from('villa_promos').select('*').eq('kode', promo_code).maybeSingle();
@@ -1022,7 +1060,7 @@ Deno.serve(async (req)=>{
     // membiarkannya dibatalkan mesin sejam kemudian. Kata owner: "dia hanya
     // akan langsung keep di kalender booking".
     const {data:booking, error:bookErr} = await supabase.from('bookings').insert(
-      voucherTerpakai ? {
+      seluruhnyaGratis ? {
         unit_id: freeUnit.id, unit_nomor: freeUnit.nomor, guest_id: g?.id ?? null, guest_nama: nama,
         tipe: 'harian', sumber: 'investor', tgl_checkin, tgl_checkout,
         durasi_malam: nights, checkin_time: '14:00:00', adults, children,
@@ -1031,10 +1069,20 @@ Deno.serve(async (req)=>{
         catatan: `[Menginap gratis investor] Kode ${voucherTerpakai.voucher.kode} atas nama ${voucherTerpakai.pemilik.nama}. Tidak masuk laporan keuangan, dividen, maupun hitungan okupansi.${catatan ? ` -- ${catatan}` : ''}`,
       } : {
         unit_id: freeUnit.id, unit_nomor: freeUnit.nomor, guest_id: g?.id ?? null, guest_nama: nama,
-        tipe: 'harian', sumber: 'website', tgl_checkin, tgl_checkout,
+        tipe: 'harian', sumber: voucherTerpakai ? 'investor' : 'website', tgl_checkin, tgl_checkout,
         durasi_malam: nights, checkin_time: '14:00:00', adults, children,
         tarif: computedTarif, total_bayar: computedTarif, status: 'menunggu_pembayaran',
-        catatan: catatan ? `[Website] ${catatan}` : '[Website] Booking mandiri dari loonars.id -- menunggu bukti pembayaran QRIS.',
+        // Menginap lebih dari semalam bukan menginap gratis: hanya SATU
+        // malamnya yang ditanggung voucher, sisanya dibayar seperti tamu
+        // lain. Karena itu is_free_stay tetap false -- malam-malam yang
+        // dibayar memang pendapatan sungguhan dan harus ikut terhitung.
+        // voucher_id tetap dipasang supaya kodenya tercoret dan tidak bisa
+        // dipakai dua kali.
+        voucher_id: voucherTerpakai ? voucherTerpakai.voucher.id : null,
+        is_free_stay: false,
+        catatan: voucherTerpakai
+          ? `[Menginap investor] Kode ${voucherTerpakai.voucher.kode} atas nama ${voucherTerpakai.pemilik.nama} -- malam pertama gratis (Rp ${Math.round(nilaiMalamGratis).toLocaleString('id-ID')}), sisanya dibayar.${catatan ? ` -- ${catatan}` : ''}`
+          : (catatan ? `[Website] ${catatan}` : '[Website] Booking mandiri dari loonars.id -- menunggu bukti pembayaran QRIS.'),
       }
     ).select().single();
     if(bookErr){
@@ -1069,7 +1117,7 @@ Deno.serve(async (req)=>{
     // pesan "balas LUNAS", dan unitnya langsung didorong ke Cloudbeds supaya
     // OTA berhenti menjualnya (keputusan owner 12 Sep 2026, setelah risiko
     // tabrakan dengan tamu berbayar dijelaskan).
-    if(voucherTerpakai){
+    if(seluruhnyaGratis){
       await pushBookingToCloudbeds(booking);
       await notif(freeUnit.id, 'all', 'booking', `Menginap gratis investor -- Unit ${freeUnit.nomor}`,
         `${nama} (${hp}) - ${tgl_checkin} s/d ${tgl_checkout} - kode ${voucherTerpakai.voucher.kode} atas nama ${voucherTerpakai.pemilik.nama}. Unit terkunci; tidak masuk pendapatan, dividen, maupun okupansi.`, booking.id);
@@ -1097,7 +1145,7 @@ Deno.serve(async (req)=>{
     // normal, jadi fitur ini tidak pernah bisa menggagalkan pemesanan.
     const notifySetting = await getSetting('villa_notify');
     await sendWa(notifySetting?.owner_hp ?? null,
-      `Booking baru dari website\n\n${nama} (${hp})\nUnit ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\nTotal: Rp ${Math.round(computedTarif).toLocaleString('id-ID')}${promoTerpakai ? `\nPromo ${promoTerpakai.promo.kode} (normal Rp ${Math.round(promoTerpakai.hasil.harga_normal).toLocaleString('id-ID')})` : ''}\n\nKalau dana sudah masuk, balas:\nLUNAS ${kode}`,
+      `Booking baru dari website\n\n${nama} (${hp})\nUnit ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\nTotal: Rp ${Math.round(computedTarif).toLocaleString('id-ID')}${promoTerpakai ? `\nPromo ${promoTerpakai.promo.kode} (normal Rp ${Math.round(promoTerpakai.hasil.harga_normal).toLocaleString('id-ID')})` : ''}${voucherTerpakai ? `\nKode investor ${voucherTerpakai.voucher.kode} (${voucherTerpakai.pemilik.nama}) -- malam pertama gratis Rp ${Math.round(nilaiMalamGratis).toLocaleString('id-ID')}` : ''}\n\nKalau dana sudah masuk, balas:\nLUNAS ${kode}`,
       {booking_id: booking.id, unit_id: freeUnit.id, template_type:'website_booking_awaiting_payment'});
 
     return json({
@@ -1105,6 +1153,7 @@ Deno.serve(async (req)=>{
       tgl_checkin, tgl_checkout, durasi_malam: nights,
       tarif: computedTarif, total_bayar: computedTarif, status: booking.status,
       promo: promoTerpakai ? {kode: promoTerpakai.promo.kode, nama: promoTerpakai.promo.nama, harga_normal: promoTerpakai.hasil.harga_normal, hemat: promoTerpakai.hasil.hemat} : null,
+      menginap_gratis: voucherTerpakai ? {kode: voucherTerpakai.voucher.kode, malam_gratis: 1, hemat: nilaiMalamGratis} : null,
     }, 201);
   }
 
@@ -2804,7 +2853,7 @@ Deno.serve(async (req)=>{
 
     return json({
       vouchers: hasil, tersedia, terpakai, hangus,
-      aturan: 'Satu kode berlaku untuk satu malam gratis di bulan yang tertera. Tidak berlaku Jumat, Sabtu, Minggu, dan tidak berlaku di periode ramai. Kode yang tidak dipakai sampai bulannya lewat akan hangus.',
+      aturan: 'Satu kode menggratiskan satu malam di bulan yang tertera, dan boleh dipakai di unit mana saja yang kosong. Menginap lebih dari semalam tetap boleh -- malam selanjutnya dibayar seperti biasa. Malam gratisnya tidak berlaku Jumat, Sabtu, Minggu, dan tidak berlaku di periode ramai. Kode yang tidak dipakai sampai bulannya lewat akan hangus.',
     });
   }
 
