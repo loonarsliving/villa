@@ -41,7 +41,6 @@ export default function InvestorBerandaPage() {
   // menerima angka pasti tiap bulan, bukan bagi hasil dengan jaminan minimal.
   // Angkanya datang dari server; halaman ini tidak menghitung apa pun sendiri.
   const pemasukanTetap = report?.pemasukan_tetap ?? null;
-  const unitDimiliki = report?.unit_dimiliki ?? 1;
   const bagianAnda = report?.bagian_anda ?? report?.per_investor_amount ?? owner;
 
   return (
@@ -83,12 +82,12 @@ export default function InvestorBerandaPage() {
         </div>
         <div className="text-left sm:text-right">
           <div className="font-serif text-3xl sm:text-[38px] font-light text-gold-500 leading-none">{fmtCurrency(bagianAnda)}</div>
+          {/* Jumlah investor dan kata "dibagi rata" sengaja tidak ditampilkan
+              ke investor mana pun (instruksi owner 13 Sep 2026). Yang perlu
+              dilihat investor adalah pemasukan villa dan haknya sendiri --
+              bukan mekanisme pembagian di antara mereka. */}
           <div className="text-[9.5px] text-ink/30 mt-1">
-            {pemasukanTetap !== null
-              ? "Pemasukan Anda bulan ini"
-              : `Bagian Anda bulan ini${
-                  report?.investor_count ? ` (${unitDimiliki} dari ${report.investor_count} unit)` : ""
-                }`}
+            {pemasukanTetap !== null ? "Pemasukan Anda bulan ini" : "Bagian Anda bulan ini"}
           </div>
           {/* Lencana jaminan disembunyikan untuk investor berskema tetap:
               tidak ada jaminan yang aktif atau tidak aktif baginya, dan
@@ -110,10 +109,10 @@ export default function InvestorBerandaPage() {
         <StatCard
           label={pemasukanTetap !== null ? "Pemasukan Anda" : "Bagian Anda"}
           value={fmtCurrency(bagianAnda)}
-          sub={pemasukanTetap !== null ? "Bulan ini (angka tetap)" : "Bulan ini (dibagi rata)"}
+          sub={pemasukanTetap !== null ? "Bulan ini (angka tetap)" : "Bulan ini"}
           accent="sage"
         />
-        <StatCard label="Pool Investor (70%)" value={fmtCurrency(owner)} sub="Seluruh villa, sebelum dibagi" />
+        <StatCard label="Pool Investor (70%)" value={fmtCurrency(owner)} sub="Seluruh villa" />
         <StatCard label="Gross Revenue" value={fmtCurrency(report?.gross_revenue)} sub="Seluruh villa" />
         <StatCard label="Net Profit" value={fmtCurrency(report?.net ?? report?.gross_profit)} sub="Dasar bagi hasil 70/30" />
       </div>
