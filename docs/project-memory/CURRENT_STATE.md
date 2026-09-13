@@ -2,6 +2,59 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-13 — kode menginap gratis investor (156 kode, Okt 2026–Sep 2027)
+
+156 kode sudah ADA di database (13 investor aktif x 12 bulan). Sisi
+villa sudah lengkap; **form loonars.id belum** — sampai itu dibuat,
+kode belum bisa ditukar siapa pun.
+
+**Jangkarnya `villa_users` (role `owner`, aktif) = tepat 13 baris**, satu
+per unit A1–A5/B1–B4/C1–C4. Catatan lama "13 investor vs 11 profil"
+sudah tidak berlaku: `investor_profiles` TIDAK bisa dipakai sebagai
+jangkar — isinya 14 baris dengan duplikat (A5 3x, C4 2x, C2 2x) dan 3
+investor aktif (B2, B3, C1) tidak punya baris di sana sama sekali.
+Duplikat itu belum dibereskan dan mungkin mengganggu hal lain (mis.
+daftar rekening dividen).
+
+**Keputusan owner 13 Sep 2026** (melengkapi jawaban 12 Sep):
+- kode boleh dipakai di **unit mana saja yang kosong**, tidak terkunci
+  ke unit investor sendiri;
+- **12 poin per unit**, bukan per orang — pemilik dua unit (Ibu Mega,
+  A4+A5) dapat 24;
+- **staf front desk tetap melihat unit TERISI**; pengecualian okupansi
+  hanya untuk harga AI, promo, dan laporan.
+
+**Asumsi yang saya ambil sendiri dan belum dikonfirmasi: 1 kode = 1
+malam.** "12 poin setahun, sebulan sekali" dibaca sebagai 12 malam.
+Menginap 2 malam ditolak, bukan dipotong satu malam.
+
+**Yang menjaga aturannya adalah database, bukan kode aplikasi:**
+- `unique (user_id, periode)` — "sebulan sekali" tidak bisa dilanggar;
+- `unique index bookings_voucher_sekali_pakai` pada `bookings.voucher_id`
+  — satu kode hanya bisa menempel pada satu booking, selamanya, walau dua
+  permintaan kembar datang bersamaan;
+- `check (is_free_stay = (voucher_id is not null))` — penanda tidak bisa
+  lepas dari vouchernya.
+Status voucher sengaja TIDAK disimpan sebagai kolom: "terpakai" dibaca
+dari booking yang menunjuknya, "hangus" dihitung dari periode terhadap
+bulan berjalan.
+
+**Pengecualian dari uang dan okupansi** — cari `is_free_stay`:
+`src/lib/aiPricingEngine.ts`, `api/cron/generate-pricing-recommendations`,
+`api/cron/daily-inventory-snapshot` (ini sumber okupansi/ADR/RevPAR semua
+laporan, jadi pengecualiannya terjadi sekali di sini),
+`api/admin/revenue-metrics`, dan villa-api `/cron/promo-low-season`.
+Laporan keuangan & dividen tidak perlu disentuh sama sekali: villa-api
+tidak pernah membuat baris `transactions` dari booking, dan malam gratis
+bertarif 0. Rumus beku di `PHASE0-BASELINE.md` §2 tidak berubah.
+`/bridge/occupancy` (kartu front desk) sengaja TIDAK dikecualikan.
+
+**Endpoint baru:** `GET /public/voucher` (pratinjau untuk form loonars,
+tidak membocorkan nama investor), `POST /public/bookings` menerima
+`voucher_code` (langsung `terjadwal`, tarif 0, didorong ke Cloudbeds),
+`GET /investor/vouchers`. Halaman
+`src/app/investor/menginap-gratis/page.tsx`.
+
 ## 2026-09-13 — WhatsApp villa lepas dari Mkhsistem, pakai perangkat sendiri
 
 Sejak hari ini villa **tidak lagi menumpang WhatsApp Mkhsistem**. Seluruh

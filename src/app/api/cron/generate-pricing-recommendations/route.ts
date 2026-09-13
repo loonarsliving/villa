@@ -111,10 +111,16 @@ export async function GET(request: Request) {
     }
 
     const { data: units } = await supabase.from("units").select("id, room_type_id, tarif_harian");
+      // PENGECUALIAN MALAM GRATIS INVESTOR (cari: is_free_stay).
+      // Malam gratis mengunci unit dan tetap masuk Cloudbeds, tapi tidak
+      // membawa satu rupiah pun. Ikut menghitungnya membuat villa terlihat
+      // lebih laku daripada kenyataan berbayarnya, lalu menaikkan harga
+      // untuk tamu sungguhan.
     const { data: allBookings } = await supabase
       .from("bookings")
       .select("unit_id, tgl_checkin, tgl_checkout, status, created_at")
-      .neq("status", "batal");
+      .neq("status", "batal")
+      .eq("is_free_stay", false);
 
     const toDate = addDays(today, WINDOW_DAYS - 1);
     const { data: highSeasonPeriods } = await supabase

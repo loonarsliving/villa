@@ -490,6 +490,85 @@ function isValidDateStr(s){
 // by both the actual booking commit (POST /public/bookings) and the public
 // price preview (GET /public/availability), so the quote a guest sees before
 // booking always matches what they'll actually be charged.
+/**
+ * Voucher menginap gratis investor -- satu tempat, satu jawaban.
+ *
+ * Semua aturannya diperiksa DI SINI supaya pratinjau di form loonars.id dan
+ * pembuatan booking sungguhan tidak pernah bisa berbeda pendapat. Kalau
+ * pemeriksaannya disalin ke dua tempat, yang satu pasti akan tertinggal saat
+ * aturannya berubah, dan tamu akan melihat "kode berlaku" lalu ditolak
+ * setelah menekan pesan.
+ *
+ * Aturan owner (12 Sep 2026):
+ *  - satu kode = satu bulan kalender tertentu, hangus kalau bulannya lewat;
+ *  - tidak berlaku Jumat/Sabtu/Minggu;
+ *  - tidak berlaku di high season -- larangan TERPISAH dari weekend;
+ *  - satu kode sekali pakai.
+ *
+ * Yang TIDAK diperiksa di sini: apakah kodenya sudah terpakai oleh booking
+ * lain. Itu dijaga unique index pada bookings.voucher_id, karena pemeriksaan
+ * di aplikasi selalu bisa kalah balapan dengan permintaan kembar. Di sini
+ * hanya dibaca untuk pesan yang ramah; keputusan akhirnya ada di database.
+ */
+async function periksaVoucherInvestor(kode, tgl_checkin, tgl_checkout){
+  const bersih = String(kode ?? '').trim().toUpperCase();
+  if(!/^[A-Z0-9]{8}$/.test(bersih)) return {ok:false, alasan:'Format kode tidak dikenali.'};
+
+  const {data:v} = await supabase.from('villa_investor_vouchers')
+    .select('id,user_id,kode,periode').eq('kode', bersih).maybeSingle();
+  if(!v) return {ok:false, alasan:'Kode tidak ditemukan.'};
+
+  const {data:pemilik} = await supabase.from('villa_users')
+    .select('id,nama,is_active,role').eq('id', v.user_id).maybeSingle();
+  if(!pemilik || pemilik.is_active !== true || pemilik.role !== 'owner'){
+    return {ok:false, alasan:'Kode ini sudah tidak berlaku.'};
+  }
+
+  const {data:dipakai} = await supabase.from('bookings')
+    .select('id,tgl_checkin,status').eq('voucher_id', v.id).maybeSingle();
+  if(dipakai && dipakai.status !== 'batal'){
+    return {ok:false, alasan:`Kode ini sudah dipakai untuk menginap ${dipakai.tgl_checkin}.`};
+  }
+
+  if(!isValidDateStr(tgl_checkin)) return {ok:false, alasan:'Tanggal checkin tidak valid.'};
+  if(!isValidDateStr(tgl_checkout)) return {ok:false, alasan:'Tanggal checkout tidak valid.'};
+
+  // Satu poin = satu malam. Dua belas poin setahun, satu per bulan.
+  const malam = Math.round((new Date(tgl_checkout).getTime() - new Date(tgl_checkin).getTime())/86400000);
+  if(malam !== 1) return {ok:false, alasan:'Satu kode berlaku untuk satu malam menginap.'};
+
+  // Bulan kode, bukan bulan hari ini: kode Oktober yang belum dipakai tetap
+  // hanya bisa dipakai untuk menginap DI Oktober.
+  const bulanKode = String(v.periode).slice(0,7);
+  if(tgl_checkin.slice(0,7) !== bulanKode){
+    const lewat = tgl_checkin.slice(0,7) > bulanKode;
+    return {ok:false, alasan: lewat
+      ? `Kode ini hanya berlaku untuk menginap di bulan ${bulanKode}, dan bulan itu sudah lewat.`
+      : `Kode ini hanya berlaku untuk menginap di bulan ${bulanKode}.`};
+  }
+
+  // Jumat, Sabtu, Minggu. getUTCDay(): 0=Minggu, 5=Jumat, 6=Sabtu.
+  const hari = new Date(tgl_checkin + 'T00:00:00Z').getUTCDay();
+  if(hari === 5 || hari === 6 || hari === 0){
+    return {ok:false, alasan:'Kode tidak berlaku untuk menginap Jumat, Sabtu, atau Minggu.'};
+  }
+
+  // High season SAJA -- bukan baris musim sepi. villa_high_season_periods
+  // dipakai bersama oleh dua hal yang berlawanan: periode ramai (persen
+  // positif) dan palung permintaan buatan AI (persen negatif,
+  // created_by='ai_low_season'). Menyaring seluruh tabel akan membuat kode
+  // ini ikut ditolak justru di bulan-bulan sepi -- kebalikan dari maksudnya.
+  const {data:musim} = await supabase.from('villa_high_season_periods')
+    .select('label,start_date,end_date,suggested_adjustment_pct,active')
+    .eq('active', true)
+    .lte('start_date', tgl_checkin)
+    .gte('end_date', tgl_checkin);
+  const ramai = (musim ?? []).find(r => Number(r.suggested_adjustment_pct ?? 0) > 0);
+  if(ramai) return {ok:false, alasan:`Kode tidak berlaku di periode ramai (${ramai.label}).`};
+
+  return {ok:true, voucher:v, pemilik, malam};
+}
+
 async function computeStayTarif(unit, tgl_checkin, nights){
   const flatTarif = Number(unit.tarif_harian ?? 0);
   let computedTarif = flatTarif * nights;
@@ -781,6 +860,23 @@ Deno.serve(async (req)=>{
   // Pratinjau promo sebelum memesan, supaya angka yang dilihat tamu di
   // loonars.id sama persis dengan yang akan ditagih -- dihitung di sini,
   // bukan di browser, karena harga tidak boleh punya dua sumber kebenaran.
+  // Pratinjau kode menginap gratis untuk form pemesanan loonars.id.
+  //
+  // Sengaja TIDAK membocorkan apa pun tentang investornya. Kode ini diketik
+  // di halaman publik yang bisa dibuka siapa saja, jadi jawaban "berlaku"
+  // atau "tidak berlaku" sudah cukup; nama pemilik kode tidak ada urusannya
+  // dengan pengunjung yang mengetiknya.
+  if(path==='/public/voucher' && m==='GET'){
+    const kode = String(url.searchParams.get('code') ?? '').trim().toUpperCase();
+    const checkin = url.searchParams.get('checkin') ?? '';
+    const checkout = url.searchParams.get('checkout') ?? '';
+    if(!kode) return err('Kode wajib diisi');
+    const cek = await periksaVoucherInvestor(kode, checkin, checkout);
+    return json(cek.ok
+      ? {berlaku:true, malam:cek.malam, keterangan:'Menginap gratis 1 malam. Tidak ada yang perlu dibayar.'}
+      : {berlaku:false, alasan:cek.alasan});
+  }
+
   if(path==='/public/promo' && m==='GET'){
     const kode = String(url.searchParams.get('code') ?? '').trim().toUpperCase();
     const checkin = url.searchParams.get('checkin') ?? '';
@@ -829,6 +925,7 @@ Deno.serve(async (req)=>{
     const catatan = String(b.catatan??'').trim();
     const email = String(b.email??'').trim();
     const promo_code = String(b.promo_code??'').trim().toUpperCase() || null;
+    const voucher_code = String(b.voucher_code??'').trim().toUpperCase() || null;
 
     // Jumlah tamu. Cloudbeds minta adults[] dan children[] per tipe kamar,
     // dan sebelum ini villa-api mengirim angka tetap 1 dewasa 0 anak untuk
@@ -853,6 +950,18 @@ Deno.serve(async (req)=>{
     if(!isValidDateStr(tgl_checkout)) return err('Tanggal checkout tidak valid');
     if(new Date(tgl_checkout) <= new Date(tgl_checkin)) return err('Tanggal checkout harus setelah checkin');
 
+    // Voucher investor diperiksa SEBELUM unit dicari: menolak setelah unit
+    // terpilih berarti sempat ada baris booking yang dibuat lalu harus
+    // dibatalkan, dan itu jalan paling mudah menuju unit yang terkunci oleh
+    // pemesanan yang tidak pernah jadi.
+    let voucherTerpakai = null;
+    if(voucher_code){
+      if(promo_code) return err('Kode promo dan kode menginap gratis tidak bisa dipakai bersamaan', 409);
+      const cek = await periksaVoucherInvestor(voucher_code, tgl_checkin, tgl_checkout);
+      if(!cek.ok) return err(cek.alasan, 409);
+      voucherTerpakai = cek;
+    }
+
     let unitsQ = supabase.from('units').select('id,nomor,tarif_harian,room_type_id');
     if(room_type){
       const {data:rt} = await supabase.from('villa_room_types').select('id').eq('code',room_type).maybeSingle();
@@ -872,8 +981,12 @@ Deno.serve(async (req)=>{
     if(!freeUnit) return err('Maaf, villa sudah penuh untuk tanggal yang dipilih. Silakan pilih tanggal lain atau hubungi kami di WhatsApp.', 409);
 
     const nights = Math.max(1, Math.round((new Date(tgl_checkout).getTime() - new Date(tgl_checkin).getTime())/86400000));
-    const hargaNormal = await computeStayTarif(freeUnit, tgl_checkin, nights);
-    if(hargaNormal<=0) return err('Tarif unit belum diatur, hubungi kami langsung', 409);
+    // Menginap gratis investor tidak perlu tarif sama sekali. Sengaja
+    // dilewati, bukan dihitung lalu dinolkan: unit yang tarifnya belum
+    // diatur tidak boleh menggagalkan penukaran voucher, karena tidak ada
+    // rupiah yang sedang dipertaruhkan.
+    const hargaNormal = voucherTerpakai ? 0 : await computeStayTarif(freeUnit, tgl_checkin, nights);
+    if(!voucherTerpakai && hargaNormal<=0) return err('Tarif unit belum diatur, hubungi kami langsung', 409);
 
     // Promo, kalau tamu membawa kodenya. Harganya dihitung ulang DI SINI --
     // bukan dipercaya dari yang dikirim browser -- oleh fungsi yang sama
@@ -904,15 +1017,33 @@ Deno.serve(async (req)=>{
     // 'terjadwal' booking once the guest uploads proof of transfer via
     // /public/bookings/confirm-payment (owner's explicit instruction,
     // 2026-09-11 -- booking used to lock the unit immediately on submit).
-    const {data:booking, error:bookErr} = await supabase.from('bookings').insert({
-      unit_id: freeUnit.id, unit_nomor: freeUnit.nomor, guest_id: g?.id ?? null, guest_nama: nama,
-      tipe: 'harian', sumber: 'website', tgl_checkin, tgl_checkout,
-      durasi_malam: nights, checkin_time: '14:00:00', adults, children,
-      tarif: computedTarif, total_bayar: computedTarif, status: 'menunggu_pembayaran',
-      catatan: catatan ? `[Website] ${catatan}` : '[Website] Booking mandiri dari loonars.id -- menunggu bukti pembayaran QRIS.',
-    }).select().single();
+    // Menginap gratis langsung 'terjadwal' -- tidak ada yang perlu dibayar,
+    // jadi tidak ada alasan menahannya di 'menunggu_pembayaran' lalu
+    // membiarkannya dibatalkan mesin sejam kemudian. Kata owner: "dia hanya
+    // akan langsung keep di kalender booking".
+    const {data:booking, error:bookErr} = await supabase.from('bookings').insert(
+      voucherTerpakai ? {
+        unit_id: freeUnit.id, unit_nomor: freeUnit.nomor, guest_id: g?.id ?? null, guest_nama: nama,
+        tipe: 'harian', sumber: 'investor', tgl_checkin, tgl_checkout,
+        durasi_malam: nights, checkin_time: '14:00:00', adults, children,
+        tarif: 0, total_bayar: 0, status: 'terjadwal',
+        voucher_id: voucherTerpakai.voucher.id, is_free_stay: true,
+        catatan: `[Menginap gratis investor] Kode ${voucherTerpakai.voucher.kode} atas nama ${voucherTerpakai.pemilik.nama}. Tidak masuk laporan keuangan, dividen, maupun hitungan okupansi.${catatan ? ` -- ${catatan}` : ''}`,
+      } : {
+        unit_id: freeUnit.id, unit_nomor: freeUnit.nomor, guest_id: g?.id ?? null, guest_nama: nama,
+        tipe: 'harian', sumber: 'website', tgl_checkin, tgl_checkout,
+        durasi_malam: nights, checkin_time: '14:00:00', adults, children,
+        tarif: computedTarif, total_bayar: computedTarif, status: 'menunggu_pembayaran',
+        catatan: catatan ? `[Website] ${catatan}` : '[Website] Booking mandiri dari loonars.id -- menunggu bukti pembayaran QRIS.',
+      }
+    ).select().single();
     if(bookErr){
       if(bookErr.code === '23P01') return err('Maaf, unit baru saja dibooking tamu lain. Silakan pilih tanggal/tipe lain.', 409);
+      // Unique index bookings_voucher_sekali_pakai. Inilah penjaga
+      // sesungguhnya untuk "sekali pakai": dua permintaan kembar dengan kode
+      // yang sama sama-sama lolos pemeriksaan di atas, tapi hanya satu yang
+      // bisa melewati database.
+      if(bookErr.code === '23505' && /voucher/i.test(bookErr.message||'')) return err('Kode ini baru saja dipakai.', 409);
       return err(bookErr.message);
     }
 
@@ -932,6 +1063,27 @@ Deno.serve(async (req)=>{
       await supabase.from('villa_promos')
         .update({terpakai: Number(promoTerpakai.promo.terpakai ?? 0) + 1, updated_at: new Date().toISOString()})
         .eq('id', promoTerpakai.promo.id);
+    }
+
+    // Menginap gratis berhenti di sini: tidak ada kode pembayaran, tidak ada
+    // pesan "balas LUNAS", dan unitnya langsung didorong ke Cloudbeds supaya
+    // OTA berhenti menjualnya (keputusan owner 12 Sep 2026, setelah risiko
+    // tabrakan dengan tamu berbayar dijelaskan).
+    if(voucherTerpakai){
+      await pushBookingToCloudbeds(booking);
+      await notif(freeUnit.id, 'all', 'booking', `Menginap gratis investor -- Unit ${freeUnit.nomor}`,
+        `${nama} (${hp}) - ${tgl_checkin} s/d ${tgl_checkout} - kode ${voucherTerpakai.voucher.kode} atas nama ${voucherTerpakai.pemilik.nama}. Unit terkunci; tidak masuk pendapatan, dividen, maupun okupansi.`, booking.id);
+      const notifyVoucher = await getSetting('villa_notify');
+      await sendWa(notifyVoucher?.owner_hp ?? null,
+        `Menginap gratis investor\n\n${voucherTerpakai.pemilik.nama}\nKode ${voucherTerpakai.voucher.kode}\nUnit ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (1 malam)\n\nUnit sudah terkunci di kalender. Tidak dihitung sebagai pendapatan, dividen, atau okupansi.`,
+        {booking_id: booking.id, unit_id: freeUnit.id, template_type:'investor_free_stay'});
+      return json({
+        booking_id: booking.id, unit_nomor: freeUnit.nomor,
+        tgl_checkin, tgl_checkout, durasi_malam: nights,
+        tarif: 0, total_bayar: 0, status: booking.status,
+        menginap_gratis: {kode: voucherTerpakai.voucher.kode, atas_nama: voucherTerpakai.pemilik.nama},
+        promo: null,
+      }, 201);
     }
 
     const kode = paymentCode(booking.id);
@@ -1800,9 +1952,14 @@ Deno.serve(async (req)=>{
     const totalUnit = (units ?? []).length;
     if(!totalUnit) return json({dilewati:'tidak ada unit'});
 
+    // is_free_stay dikecualikan: malam gratis investor memang mengunci unit,
+    // tapi tidak membawa satu rupiah pun. Membiarkannya ikut terhitung akan
+    // membuat villa terlihat lebih laku daripada kenyataan berbayarnya --
+    // persis di ambang yang dipakai memutuskan perlu-tidaknya promo.
     const {data:bk} = await supabase.from('bookings')
       .select('tgl_checkin,tgl_checkout')
       .in('status',['terjadwal','checkin'])
+      .eq('is_free_stay', false)
       .lt('tgl_checkin', akhir).gte('tgl_checkout', hariIni);
 
     let malamTerisi = 0;
@@ -2602,6 +2759,53 @@ Deno.serve(async (req)=>{
     if(!b.phone||!b.message) return err('phone dan message wajib diisi');
     await sendWa(b.phone, b.message, {booking_id:b.booking_id??null, unit_id:b.unit_id??null, template_type:b.template_type??'manual'});
     return json({success:true});
+  }
+
+  // Dua belas kode milik investor yang sedang login, untuk dashboardnya.
+  //
+  // Statusnya dihitung di sini, tidak disimpan. "Terpakai" dibaca dari
+  // booking yang menunjuk kode itu; "hangus" dari bulan kodenya terhadap
+  // bulan berjalan. Dua-duanya tampil tercoret di dashboard, persis seperti
+  // yang diminta owner -- tapi dengan sebab yang berbeda, dan investor
+  // berhak tahu bedanya.
+  if(path==='/investor/vouchers' && m==='GET'){
+    if(!isOwner) return forbidden();
+
+    const {data:vouchers} = await supabase.from('villa_investor_vouchers')
+      .select('id,kode,periode').eq('user_id', session.uid).order('periode');
+    if(!vouchers?.length) return json({vouchers:[], tersedia:0, terpakai:0, hangus:0});
+
+    const {data:terpakaiRows} = await supabase.from('bookings')
+      .select('voucher_id,tgl_checkin,unit_nomor,status')
+      .in('voucher_id', vouchers.map(v=>v.id));
+    const pemakaian = new Map();
+    for(const r of terpakaiRows ?? []){
+      if(r.status !== 'batal') pemakaian.set(String(r.voucher_id), r);
+    }
+
+    const bulanIni = new Date().toISOString().slice(0,7);
+    let tersedia=0, terpakai=0, hangus=0;
+    const hasil = vouchers.map(v => {
+      const dipakai = pemakaian.get(String(v.id));
+      const bulanKode = String(v.periode).slice(0,7);
+      let status;
+      if(dipakai){ status='terpakai'; terpakai++; }
+      else if(bulanKode < bulanIni){ status='hangus'; hangus++; }
+      else { status='tersedia'; tersedia++; }
+      return {
+        kode: v.kode,
+        bulan: bulanKode,
+        status,
+        dicoret: status !== 'tersedia',
+        dipakai_pada: dipakai?.tgl_checkin ?? null,
+        unit: dipakai?.unit_nomor ?? null,
+      };
+    });
+
+    return json({
+      vouchers: hasil, tersedia, terpakai, hangus,
+      aturan: 'Satu kode berlaku untuk satu malam gratis di bulan yang tertera. Tidak berlaku Jumat, Sabtu, Minggu, dan tidak berlaku di periode ramai. Kode yang tidak dipakai sampai bulannya lewat akan hangus.',
+    });
   }
 
   if(path==='/units' && m==='GET'){
