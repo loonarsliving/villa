@@ -143,6 +143,12 @@ export async function POST(request: Request) {
       if (sisa > 0) reply += `\n\nMasih ada ${sisa} tamu dalam antrean — balas PROMO ${kode} sekali lagi untuk melanjutkan.`;
     } else {
       const alasan: Record<string, string> = {
+        batas_harian:
+          `Batas kiriman promo hari ini sudah penuh (${b.terkirim_24_jam ?? "-"} dari ${b.maks_per_hari ?? "-"} pesan), ` +
+          `jadi ${kode} belum dilanjutkan.\n\nMasih ada ${b.sisa ?? 0} tamu dalam antrean — balas PROMO ${kode} lagi besok. ` +
+          `Batas ini yang menjaga nomor villa tidak diblokir WhatsApp.`,
+        batas_harian_tidak_terbaca:
+          `Jumlah kiriman hari ini tidak bisa dipastikan, jadi ${kode} saya hentikan dulu daripada berisiko mengirim melebihi batas. Tidak ada pesan yang dikirim.`,
         not_found: `Kode ${kode} tidak ditemukan.`,
         kedaluwarsa: `Usulan ${kode} sudah kedaluwarsa (lewat 48 jam), jadi tidak dikirim.`,
         ditolak: `Usulan ${kode} sudah ditolak sebelumnya.`,
