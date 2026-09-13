@@ -2,6 +2,37 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-13 — A4 dan A5 akan diisi dua investor baru (belum terjadi)
+
+Owner: *"akan ada 2 orng baru yg mngisi a4 dan a5"*. Belum terjadi; ini
+catatan supaya langkahnya tidak ditebak-tebak waktu harinya tiba.
+
+**Dua bagian dividen milik A4 dan A5 memang sedang tidak dibayarkan**
+(Bu Mega menerima angka tetap, bukan bagi hasil). Dua bagian itulah yang
+nanti diambil dua investor baru. Jadi pembagi 13 sudah benar sejak
+sekarang, dan TIDAK perlu diubah lagi saat mereka masuk.
+
+**Kode menginap gratis: pemilik baru dapat kodenya sendiri, Bu Mega tetap
+memegang kodenya** (keputusan owner 13 Sep 2026: *"buatkan kode baru jga
+untuk mereka, mega ttp ada kode jga"*). Karena itu kunci unik voucher
+dipindah dari `(unit_id, periode)` ke `(user_id, unit_id, periode)` —
+di bawah kunci lama, pemilik baru A4 tidak akan bisa diberi kode Oktober
+sama sekali selama kode Oktober Bu Mega untuk A4 masih ada, dan galatnya
+hanya berupa unique violation tanpa penjelasan.
+
+`villa_investor_vouchers.unit_id` karena itu berarti **"kode ini
+diberikan atas dasar unit mana"**, bukan "hanya boleh dipakai di unit
+ini" — menginapnya tetap boleh di unit mana saja yang kosong.
+
+**Langkah saat investor baru masuk** (jangan tulis ulang loop kode acak):
+1. buat/aktifkan akun `villa_users` role `owner` untuk unit itu;
+2. `insert into villa_investor_units (user_id, unit_id, unit_nomor)` —
+   unique per unit, jadi kepemilikan lama harus dilepas dulu;
+3. `select villa_terbitkan_voucher_investor(user_id, unit_id);` — aman
+   diulang, mengembalikan jumlah kode yang benar-benar dibuat.
+
+Pembagi tidak perlu disentuh: ia menghitung `units`, bukan akun.
+
 ## 2026-09-13 — pembagi dividen kini JUMLAH UNIT, dan satu akun boleh punya dua unit
 
 **Pembagi dividen berubah dari "jumlah akun investor aktif" menjadi
