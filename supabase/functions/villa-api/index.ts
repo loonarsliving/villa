@@ -546,9 +546,13 @@ async function periksaVoucherInvestor(kode, tgl_checkin, tgl_checkout){
   // hanya bisa dipakai untuk menginap DI Oktober.
   const bulanKode = String(v.periode).slice(0,7);
   if(tgl_checkin.slice(0,7) !== bulanKode){
-    const lewat = tgl_checkin.slice(0,7) > bulanKode;
-    return {ok:false, alasan: lewat
-      ? `Kode ini hanya berlaku untuk menginap di bulan ${bulanKode}, dan bulan itu sudah lewat.`
+    // "Sudah lewat" ditentukan oleh bulan HARI INI, bukan oleh tanggal yang
+    // diminta. Membandingkannya dengan tanggal menginap membuat permintaan
+    // untuk November dijawab "bulan Oktober sudah lewat" -- padahal Oktober
+    // belum mulai, dan kodenya masih utuh.
+    const bulanIni = new Date().toISOString().slice(0,7);
+    return {ok:false, alasan: bulanKode < bulanIni
+      ? `Kode ini berlaku untuk bulan ${bulanKode}, dan bulan itu sudah lewat sehingga kodenya hangus.`
       : `Kode ini hanya berlaku untuk menginap di bulan ${bulanKode}.`};
   }
 
