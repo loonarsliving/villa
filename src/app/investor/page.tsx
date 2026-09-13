@@ -90,18 +90,29 @@ export default function InvestorBerandaPage() {
                   report?.investor_count ? ` (${unitDimiliki} dari ${report.investor_count} unit)` : ""
                 }`}
           </div>
-          <div
-            className={`inline-flex items-center gap-1.5 text-[9.5px] font-semibold px-2.5 py-1 rounded-full mt-2.5 ${
-              jaminanAktif ? "bg-ruby-500/15 text-ruby-400" : "bg-sage-500/15 text-sage-400"
-            }`}
-          >
-            {jaminanAktif ? "⚠ Jaminan aktif" : "✓ Jaminan tidak aktif"}
-          </div>
+          {/* Lencana jaminan disembunyikan untuk investor berskema tetap:
+              tidak ada jaminan yang aktif atau tidak aktif baginya, dan
+              "✓ Jaminan tidak aktif" hanya akan membuatnya bertanya-tanya
+              soal aturan yang tidak berlaku untuknya. */}
+          {pemasukanTetap === null && (
+            <div
+              className={`inline-flex items-center gap-1.5 text-[9.5px] font-semibold px-2.5 py-1 rounded-full mt-2.5 ${
+                jaminanAktif ? "bg-ruby-500/15 text-ruby-400" : "bg-sage-500/15 text-sage-400"
+              }`}
+            >
+              {jaminanAktif ? "⚠ Jaminan aktif" : "✓ Jaminan tidak aktif"}
+            </div>
+          )}
         </div>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3.5">
-        <StatCard label="Bagian Anda" value={fmtCurrency(report?.per_investor_amount ?? owner)} sub="Bulan ini (dibagi rata)" accent="sage" />
+        <StatCard
+          label={pemasukanTetap !== null ? "Pemasukan Anda" : "Bagian Anda"}
+          value={fmtCurrency(bagianAnda)}
+          sub={pemasukanTetap !== null ? "Bulan ini (angka tetap)" : "Bulan ini (dibagi rata)"}
+          accent="sage"
+        />
         <StatCard label="Pool Investor (70%)" value={fmtCurrency(owner)} sub="Seluruh villa, sebelum dibagi" />
         <StatCard label="Gross Revenue" value={fmtCurrency(report?.gross_revenue)} sub="Seluruh villa" />
         <StatCard label="Net Profit" value={fmtCurrency(report?.net ?? report?.gross_profit)} sub="Dasar bagi hasil 70/30" />
