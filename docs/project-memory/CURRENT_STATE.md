@@ -2,6 +2,67 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-13 — WhatsApp villa lepas dari Mkhsistem, pakai perangkat sendiri
+
+Sejak hari ini villa **tidak lagi menumpang WhatsApp Mkhsistem**. Seluruh
+WA villa (notifikasi booking, konfirmasi pembayaran, balasan `LUNAS` /
+`PROMO` / `TOLAK` / `BERHENTI`) lewat perangkat WhaCenter milik villa
+sendiri.
+
+**Yang diubah hanya SATU nilai di database:**
+`integration_settings.vercel_bridge.base_url`:
+`https://mkh.haluoleo.id` → `https://living.haluoleo.id`.
+`sendWa()` di villa-api membaca nilai ini setiap kali dipanggil (tidak
+di-cache), jadi perpindahan berlaku seketika tanpa deploy — dan
+mengembalikannya juga cukup satu nilai itu. Tidak ada satu baris pun kode
+villa-api yang diubah untuk perpindahan ini; itu memang tujuan kontrak
+`/api/wa/send` villa dibuat sama persis dengan milik Mkhsistem.
+
+**Yang TIDAK ikut pindah:** repo loonars masih memakai Mkhsistem, dan
+`integration_settings.mkh_finance_bridge` (jembatan keuangan) tidak
+disentuh sama sekali. Modul villa yang sekarang menganggur di Mkhsistem
+belum dibersihkan.
+
+**Komponen di repo villa** (PR #66 dan #67, sudah di `main`):
+`src/lib/whacenter.ts` (kontrak WhaCenter), `src/app/api/wa/send/route.ts`
+(jalur keluar), `src/app/api/wa/webhook/route.ts` (jalur masuk +
+pengenalan perintah), `src/app/api/admin/wa/route.ts` (diagnostik).
+Env var di project villa di Vercel: `WHACENTER_DEVICE_ID` dan
+`VILLA_BRIDGE_SECRET` (nilainya harus sama dengan
+`integration_settings.vercel_bridge.secret`).
+
+**Dibuktikan nyata, bukan diasumsikan** (13 Sep 2026):
+- perangkat `CONNECTED` dibaca dari produksi lewat `GET /api/admin/wa`;
+- pesan masuk benar-benar diantar WhaCenter ke
+  `/api/wa/webhook` (terlihat di log runtime Vercel);
+- `LUNAS 000000` dijawab villa dengan "Kode 000000 tidak ditemukan…",
+  membuktikan parsing perintah, panggilan `/bridge/confirm-payment`, dan
+  balasan keluar lewat perangkat villa — tanpa mengubah data apa pun;
+- `POST /api/wa/send` menjawab `200 {"success":true}` **dan** pesannya
+  benar-benar sampai ke HP owner (dikonfirmasi owner).
+
+**Dua hal yang harus diingat:**
+1. **WhaCenter mengantar pesan masuk DUA KALI untuk satu pesan** (terlihat
+   jelas di log: dua `POST /api/wa/webhook` pada detik yang sama). Perintah
+   karena itu wajib idempoten. `LUNAS` (`already_confirmed`) dan `PROMO`
+   (`already_sent`) sudah aman; perintah baru apa pun harus dibuat aman
+   dengan cara yang sama.
+2. **Nomor villa sempat kena tanda spam WhatsApp dan terputus 5 jam —
+   padahal belum sekali pun mengirim promo massal.** Ini peringatan untuk
+   modul promo: rencana lama (satu `PROMO <kode>` → 40 pesan sekaligus ke
+   nomor yang belum pernah chat duluan) berisiko memblokir nomor villa
+   permanen, dan kalau itu terjadi SELURUH alur WA villa mati. Promo tetap
+   `mode: 'pantau'`; sebelum dinyalakan perlu batas harian jauh lebih kecil
+   dan jeda antar pesan. Belum dikerjakan.
+
+**Diagnostik kalau WA villa bermasalah:** `GET /api/admin/wa` (header
+`Authorization: Bearer <integration_settings.cron.secret>`) memberi status
+perangkat dan alamat webhook yang seharusnya. Catatan: `getWebhook` milik
+WhaCenter tidak pernah mengembalikan JSON yang bisa dibaca, jadi
+`webhook_tersimpan` selalu `null` — itu **bukan** tanda webhook belum
+terdaftar. Satu-satunya pembuktian yang sahih adalah mengirim pesan nyata
+dan melihat hit di log runtime Vercel.
+
 ## 2026-09-12 — dua garapan paralel disatukan: permintaan kini dibaca dari EMPAT sinyal
 
 Dua sesi menggarap `src/lib/aiPricingEngine.ts` bersamaan. Branch
