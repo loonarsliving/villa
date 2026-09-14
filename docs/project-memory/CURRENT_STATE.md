@@ -2,15 +2,40 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
-## 2026-09-14 — 14–18 Sep tidak bisa dipesan: ketersediaan disetel NOL di Cloudbeds
+## 2026-09-14 — alat periksa ketersediaan Cloudbeds (dan satu salah tafsir saya)
 
-Owner bertanya kenapa pemesanan turun. Pemeriksaan langsung ke Cloudbeds
-menemukan hal yang **tidak terlihat sama sekali dari data villa**: untuk
-14–18 September, `roomsAvailable = 0` untuk kedua tipe unit — padahal
-tidak ada satu pun reservasi di tanggal itu, tidak ada room block, dan
-tidak ada pembatasan (`closedToArrival: false`, `blocked: false`,
-`minLos: 1`, `cutOff: 0`). Harga terpasang normal. Akibatnya villa tidak
-muncul di kanal mana pun selama lima malam.
+Owner bertanya kenapa pemesanan turun untuk **20 September ke atas**.
+
+**PENTING, jangan diulangi:** pemeriksaan menemukan 14–18 September
+`roomsAvailable = 0` dan saya melaporkannya sebagai masalah mendesak.
+**Itu salah — villa memang baru dibuka dari tanggal 20**, jadi tertutupnya
+tanggal-tanggal sebelum itu disengaja. Owner mengoreksi: *"mmg bukanya
+dari tgl 20 keatas"*. Pelajarannya: angka dari Cloudbeds tidak pernah
+memberitahu apa yang DIMAKSUDKAN; tanyakan dulu apakah suatu keadaan
+disengaja sebelum menyebutnya kerugian berjalan.
+
+Untuk 20 Sep ke atas, sisi pengaturan **bersih**: semua tanggal bisa
+dipesan, `closedToArrival: false`, `blocked: false`, `minLos: 1`,
+`cutOff: 0`, harga normal 650/750 ribu (akhir pekan 750/850), tidak ada
+room block, dan mesin harga AI masih mati. Jadi sepinya pemesanan di
+rentang itu bukan soal pengaturan.
+
+**TEMUAN UTAMA (belum diperbaiki, perlu tangan owner di dashboard):
+Cloudbeds hanya menjual 8 unit dari 13.** Setiap tanggal yang belum ada
+pemesanannya menunjukkan pola yang sama persis: **3 Sawah View + 5
+Regular**. Sawah View lengkap (3 dari 3), tapi Regular hanya 5 dari 10 —
+lima unit Regular tidak pernah ditawarkan, di tanggal mana pun. Bukan
+terjual, bukan diblokir (`getRoomBlocks` kosong): memang tidak masuk
+hitungan yang dijual. `getRooms` tetap melaporkan 13 kamar terdaftar.
+
+Terkonfirmasi silang oleh tanggal yang ADA pemesanannya: 26 Sep, 4 unit
+Regular terjual, sisa 1 — kalau 10 yang dijual, sisanya 6.
+
+Artinya **38% kapasitas villa tidak pernah muncul di kanal mana pun.**
+Ini jawaban paling masuk akal atas pertanyaan owner "kenapa pemesanan
+kurang" — bukan harga, bukan permintaan. Dua kemungkinan yang harus
+dicek di dashboard: lima unit itu belum aktif / out of service, atau
+alokasi inventaris tipe "Regular Room with pool" disetel 5, bukan 10.
 
 **Pelajaran yang lebih besar dari kejadiannya: villa hanya menyimpan
 HARGA, tidak pernah menyimpan KETERSEDIAAN.** Tabel `villa_rates` tetap
