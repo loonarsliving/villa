@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getCloudbedsAvailabilityForDate, getCloudbedsRoomBlocks, getCloudbedsRooms, CloudbedsApiError } from "@/lib/cloudbedsApi";
+import { getCloudbedsAvailabilityForDate, getCloudbedsRatePlans, getCloudbedsRoomBlocks, getCloudbedsRooms, CloudbedsApiError } from "@/lib/cloudbedsApi";
 import { isAuthorizedCronRequest } from "@/lib/cronAuth";
 
 export const runtime = "nodejs";
@@ -81,6 +81,18 @@ export async function GET(request: Request) {
       blokir = { error: e instanceof Error ? e.message : String(e) };
     }
 
+    // Rate plan yang berlaku untuk tanggal PERTAMA yang diperiksa. Kalau
+    // daftarnya kosong padahal kamarnya jelas tidak penuh, penyebabnya bukan
+    // ketersediaan sama sekali -- melainkan tidak ada rate plan yang terjual
+    // untuk tanggal itu, dan itu hal yang sama sekali berbeda untuk
+    // diperbaiki.
+    let ratePlan: unknown[] | { error: string };
+    try {
+      ratePlan = await getCloudbedsRatePlans(mulai, tambahHari(mulai, malam));
+    } catch (e) {
+      ratePlan = { error: e instanceof Error ? e.message : String(e) };
+    }
+
     const tidakBisaDipesan = harian.filter((h) => !h.bookable && !h.error);
     const gagalDibaca = harian.filter((h) => h.error);
 
@@ -94,6 +106,7 @@ export async function GET(request: Request) {
         tanggal_tidak_bisa_dipesan: tidakBisaDipesan.map((h) => h.date),
       },
       blokir_kamar: blokir,
+      rate_plan_tanggal_pertama: ratePlan,
       harian,
     });
   } catch (e) {
