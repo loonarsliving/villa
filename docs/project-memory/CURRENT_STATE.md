@@ -2,6 +2,45 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-14 — 14–18 Sep tidak bisa dipesan: ketersediaan disetel NOL di Cloudbeds
+
+Owner bertanya kenapa pemesanan turun. Pemeriksaan langsung ke Cloudbeds
+menemukan hal yang **tidak terlihat sama sekali dari data villa**: untuk
+14–18 September, `roomsAvailable = 0` untuk kedua tipe unit — padahal
+tidak ada satu pun reservasi di tanggal itu, tidak ada room block, dan
+tidak ada pembatasan (`closedToArrival: false`, `blocked: false`,
+`minLos: 1`, `cutOff: 0`). Harga terpasang normal. Akibatnya villa tidak
+muncul di kanal mana pun selama lima malam.
+
+**Pelajaran yang lebih besar dari kejadiannya: villa hanya menyimpan
+HARGA, tidak pernah menyimpan KETERSEDIAAN.** Tabel `villa_rates` tetap
+terlihat sehat sementara tanggalnya tidak bisa dipesan siapa pun. Dua
+keadaan yang sangat berbeda itu tampak identik dari sisi kita, dan
+perbedaannya persis yang menentukan ada tidaknya pemesanan. Tidak ada
+satu pun laporan atau cron yang akan memperingatkan kalau ini terulang.
+
+**Alat periksanya: `GET /api/admin/cloudbeds/health`** (header
+`Authorization: Bearer <integration_settings.cron.secret>`), parameter
+`mulai`, `hari` (maks 45), `malam` (maks 14). Murni baca — tidak menulis
+apa pun ke Cloudbeds maupun database. Mengembalikan per tanggal: bisa
+dipesan atau tidak, tipe unit, sisa kamar, harga; plus `blokir_kamar`
+(getRoomBlocks) dan `rate_plan_tanggal_pertama` (getRatePlans, yang
+membawa minLos/closedToArrival/cutOff sehingga penyebabnya bisa disebut
+dengan namanya, bukan ditebak).
+
+**Urutan diagnosis yang terbukti berguna** (tiga tersangka, dua gugur):
+1. blokir kamar → `getRoomBlocks` kosong;
+2. minimum menginap → tetap tertutup untuk 1, 2, DAN 3 malam. Menguji
+   satu malam saja hampir membuat saya salah lapor: tanggal ber-minLos 2
+   akan terbaca persis seperti "tertutup";
+3. ketersediaan → `roomsAvailable: 0`. Inilah penyebabnya.
+
+**Belum terjawab:** untuk 20 Sep, `getAvailableRoomTypes` melaporkan 10
+unit Regular tersedia sementara `getRatePlans` melaporkan 5, padahal ke-10
+unit Regular kosong. Kalau angka 5 yang benar, sebagian kamar juga tidak
+dijual untuk tanggal setelah 19 Sep — kehilangan yang lebih luas tapi
+tidak sejelas karena tidak nol. Perlu dipastikan di kalender Cloudbeds.
+
 ## 2026-09-14 — login menolak email berhuruf besar (bug lama, mengenai semua pengguna)
 
 `villa_login` membandingkan `email = p_email` apa adanya. Investor yang
