@@ -20,22 +20,34 @@ dipesan, `closedToArrival: false`, `blocked: false`, `minLos: 1`,
 room block, dan mesin harga AI masih mati. Jadi sepinya pemesanan di
 rentang itu bukan soal pengaturan.
 
-**TEMUAN UTAMA (belum diperbaiki, perlu tangan owner di dashboard):
-Cloudbeds hanya menjual 8 unit dari 13.** Setiap tanggal yang belum ada
-pemesanannya menunjukkan pola yang sama persis: **3 Sawah View + 5
-Regular**. Sawah View lengkap (3 dari 3), tapi Regular hanya 5 dari 10 —
-lima unit Regular tidak pernah ditawarkan, di tanggal mana pun. Bukan
-terjual, bukan diblokir (`getRoomBlocks` kosong): memang tidak masuk
-hitungan yang dijual. `getRooms` tetap melaporkan 13 kamar terdaftar.
+**FAKTA, BUKAN MASALAH: hanya 8 dari 13 unit yang dibuka untuk dijual,
+dan itu DISENGAJA owner** (*"saya sngaja membuka 8 unit dulu"*, 14 Sep
+2026). Susunannya 3 Sawah View (lengkap) + 5 dari 10 Regular. Sama
+seperti tertutupnya 14–18 September, ini keputusan bisnis, bukan
+kerusakan. Saya sempat melaporkan keduanya sebagai kerugian berjalan —
+**dua kali salah dengan cara yang sama**, dan itu sebabnya dicatat
+sebagai fakta di sini: jangan "perbaiki" apa pun yang membuat angkanya
+bukan 8 tanpa bertanya lebih dulu.
 
-Terkonfirmasi silang oleh tanggal yang ADA pemesanannya: 26 Sep, 4 unit
-Regular terjual, sisa 1 — kalau 10 yang dijual, sisanya 6.
+**KONSEKUENSI YANG BELUM DITANGANI, dan ini menyentuh harga.** Semua
+hitungan okupansi memakai `count(units)` = **13** sebagai penyebut,
+padahal yang benar-benar dijual **8**. Jadi setiap angka okupansi
+sistem ini **terlalu rendah sekitar 38%**:
 
-Artinya **38% kapasitas villa tidak pernah muncul di kanal mana pun.**
-Ini jawaban paling masuk akal atas pertanyaan owner "kenapa pemesanan
-kurang" — bukan harga, bukan permintaan. Dua kemungkinan yang harus
-dicek di dashboard: lima unit itu belum aktif / out of service, atau
-alokasi inventaris tipe "Regular Room with pool" disetel 5, bukan 10.
+| | Versi sistem (÷13) | Sebenarnya (÷8) |
+|---|---|---|
+| 26 Sep, 5 unit terisi | 38,5% | 62,5% |
+
+Yang terpengaruh: sinyal permintaan mesin harga AI (villa terbaca lebih
+sepi daripada kenyataannya → dorongan menurunkan harga), ambang promo
+low season (`villa_promo_auto.ambang_okupansi_persen` = 40 — 62,5% yang
+sesungguhnya terbaca 38,5%, yaitu DI BAWAH ambang, sehingga promo bisa
+terpicu justru saat villa sedang laku), serta ADR/RevPAR dan
+`villa_daily_inventory_snapshot`.
+
+Belum diubah: penyebut okupansi menyentuh keputusan harga, jadi perlu
+persetujuan owner lebih dulu. Kalau disetujui, penyebutnya harus
+mengikuti unit yang BENAR-BENAR dijual, bukan jumlah unit yang dimiliki.
 
 **Pelajaran yang lebih besar dari kejadiannya: villa hanya menyimpan
 HARGA, tidak pernah menyimpan KETERSEDIAAN.** Tabel `villa_rates` tetap
