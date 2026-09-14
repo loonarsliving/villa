@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getCloudbedsAvailabilityForDate, getCloudbedsRooms, CloudbedsApiError } from "@/lib/cloudbedsApi";
+import { getCloudbedsAvailabilityForDate, getCloudbedsRoomBlocks, getCloudbedsRooms, CloudbedsApiError } from "@/lib/cloudbedsApi";
 import { isAuthorizedCronRequest } from "@/lib/cronAuth";
 
 export const runtime = "nodejs";
@@ -64,6 +64,16 @@ export async function GET(request: Request) {
       harian.push(await getCloudbedsAvailabilityForDate(t, tambahHari(t, 1)));
     }
 
+    // Blokir kamar: tersangka pertama untuk tanggal yang harganya terpasang
+    // tapi tidak bisa dipesan. Kegagalan membacanya tidak boleh menggagalkan
+    // seluruh pemeriksaan -- bagian yang sudah terbaca tetap berguna.
+    let blokir: unknown[] | { error: string };
+    try {
+      blokir = await getCloudbedsRoomBlocks(mulai, tambahHari(mulai, Math.min(34, jumlahHari - 1)));
+    } catch (e) {
+      blokir = { error: e instanceof Error ? e.message : String(e) };
+    }
+
     const tidakBisaDipesan = harian.filter((h) => !h.bookable && !h.error);
     const gagalDibaca = harian.filter((h) => h.error);
 
@@ -76,6 +86,7 @@ export async function GET(request: Request) {
         gagal_dibaca: gagalDibaca.length,
         tanggal_tidak_bisa_dipesan: tidakBisaDipesan.map((h) => h.date),
       },
+      blokir_kamar: blokir,
       harian,
     });
   } catch (e) {
