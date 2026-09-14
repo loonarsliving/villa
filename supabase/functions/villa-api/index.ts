@@ -3245,6 +3245,18 @@ Deno.serve(async (req)=>{
   }
 
   if(path==='/opex' && m==='GET'){
+    // Staf/admin saja. Rincian opex per item adalah catatan belanja
+    // operasional -- nota, nama vendor, jumlah per pos -- dan itu bukan
+    // yang dilihat investor. Bagi investor, opex adalah persentase baku
+    // dari omzet sesuai akad (25%), bukan daftar pengeluaran.
+    //
+    // Halaman /investor/opex memang hanya menampilkan persentase itu, tapi
+    // endpoint ini sebelumnya sama sekali tidak menjaga peran: token
+    // investor mana pun mendapat 200 dan seluruh isi opex_bulanan.
+    // Diverifikasi 14 Sep 2026 dengan token investor sungguhan. Yang
+    // menyelamatkan sejauh ini cuma kebetulan -- tabelnya masih kosong.
+    // Tampilan yang rapi bukan pengamanan.
+    if(!isStaff) return forbidden();
     const bulan=url.searchParams.get('bulan')??new Date().toISOString().slice(0,7);
     const {data,error}=await supabase.from('opex_bulanan').select('*').eq('periode',bulan).order('created_at');
     if(error) return err(error.message);
