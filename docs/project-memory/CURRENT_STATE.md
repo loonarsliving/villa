@@ -2,6 +2,29 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-14 — login menolak email berhuruf besar (bug lama, mengenai semua pengguna)
+
+`villa_login` membandingkan `email = p_email` apa adanya. Investor yang
+mengetik `Mega@haluoleo.id` dijawab **"Email atau password salah"**
+padahal akunnya ada dan aktif. **Papan ketik ponsel mengawali setiap
+kolom dengan huruf besar secara bawaan**, jadi ini bukan kecerobohan satu
+orang — siapa pun yang login dari HP bisa kena, dan pesan galatnya justru
+menuduh passwordnya yang salah sehingga orang mengejar hal yang keliru
+berjam-jam. Bug ini sudah ada sejak lama, bukan akibat perubahan akun
+kemarin; baru terlihat sekarang karena ada yang mengirim tangkapan layar.
+
+Diperbaiki: `lower(email) = lower(btrim(p_email))`, plus unique index
+pada `lower(email)` — tanpa indeks itu, dua akun yang hanya berbeda besar
+kecilnya huruf akan sama-sama cocok dan `limit 1` memilih salah satunya
+sewenang-wenang, yang berarti orang bisa masuk ke akun yang bukan
+miliknya. Diuji: huruf besar, huruf kecil, dan KAPITAL SEMUA sama-sama
+berhasil; password salah tetap ditolak.
+
+**Catatan terpisah:** password Bu Mega di akun gabungan disetel ulang
+(`must_change_password = true`). Menyalin hash dari akun A5 ternyata
+tidak membantu — passwordnya memang tidak diingat siapa pun, jadi
+"login dengan password lamanya" tidak pernah bisa terjadi.
+
 ## 2026-09-13 — A4 dan A5 akan diisi dua investor baru (belum terjadi)
 
 Owner: *"akan ada 2 orng baru yg mngisi a4 dan a5"*. Belum terjadi; ini
