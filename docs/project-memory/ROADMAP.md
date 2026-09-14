@@ -23,6 +23,49 @@ UNKNOWN — NEEDS CONFIRMATION. No prioritized "next up" list exists in the repo
 ## PLANNED
 UNKNOWN — NEEDS CONFIRMATION. A handful of other `claude/*` branches exist (`file-hub-repo-integration`, `repo-overview`, `security-audit-repos`, `tampilan-design-request`, `villa-system-no-receptionist`) whose branch names suggest topics (file hub, another repo-overview/audit, additional security review, a design request, and a "no receptionist" system variant) but whose content was outside this audit's deep-dive scope. Their existence is evidence of exploratory/candidate work, not a confirmed plan.
 
+## DITUNDA ke Oktober 2026 (owner, 14 Sep): analisa ulang pemesanan
+
+Owner: *"nti bulan 10 kt cba analisa lg"*. Yang sudah diketahui supaya
+bulan Oktober tidak mulai dari nol:
+
+**Pengaturan Cloudbeds bersih.** Untuk 20 Sep ke atas semua tanggal bisa
+dipesan, tanpa pembatasan, harga normal. Dua hal yang sempat saya
+laporkan sebagai masalah ternyata keputusan owner: 14–18 Sep ditutup
+(villa baru buka tanggal 20), dan hanya 8 dari 13 unit dijual (sisanya
+menyusul). **Okupansi tetap dihitung terhadap 13 atas permintaan owner**
+— jangan diubah.
+
+**Gambaran permintaan per tanggal menginap (per 14 Sep):** 26 Sep (Sabtu)
+terisi 5 dari 8 — permintaan terbukti ada. Selebihnya nyaris kosong:
+20–23 Sep nol, 29 Sep–16 Okt nol selama 18 malam, dan **semua Sabtu
+Oktober (3, 10, 24) nol** padahal Sabtu hari terkuat villa. Tarif Sabtu
+Oktober 850/750 ribu vs hari biasa 750/650 ribu.
+
+**Yang belum terjawab: apakah harganya yang membuat sepi.** Data
+`villa_competitor_rates` BELUM BISA menjawabnya — hanya 5 baris dari satu
+riset 11 Sep, mencampur harga villa utuh (Dhanastri Rp 1 jt untuk 3
+kamar = ±333 rb/kamar) dengan harga per unit, dan tidak terikat tanggal.
+Membandingkannya langsung dengan tarif kita per unit akan menyesatkan.
+Yang dibutuhkan: riset kompetitor PER TANGGAL, dengan mencatat apakah
+harganya per unit atau villa utuh.
+
+**Alat yang sudah ada untuk analisa Oktober** (semuanya murni baca,
+header `Authorization: Bearer <integration_settings.cron.secret>`):
+- `GET /api/admin/cloudbeds/health?mulai=&hari=&malam=` — per tanggal:
+  bisa dipesan atau tidak, sisa unit, harga, blokir kamar, rate plan
+  (minLos/closedToArrival/cutOff).
+- `GET /api/admin/cloudbeds/pace?sejak=` — pace pemesanan berdasarkan
+  `dateCreated` Cloudbeds dan sumber kanalnya. **Jangan memakai
+  `bookings.created_at` untuk ini**: kolom itu waktu sinkronisasi
+  memasukkan baris, bukan waktu tamu memesan, dan menghasilkan grafik
+  menurun palsu.
+
+**Pelajaran yang paling mahal hari ini:** tiga kali saya hampir (dan dua
+kali benar-benar) melaporkan keputusan bisnis owner sebagai kerusakan
+sistem. Angka dari Cloudbeds tidak pernah memberitahu apa yang
+DIMAKSUDKAN. Tanyakan dulu apakah suatu keadaan disengaja sebelum
+menyebutnya kerugian.
+
 ## PLANNED (eksplisit, dari owner, 2026-09-12) — dua pekerjaan berikutnya
 
 Dicatat atas permintaan owner sendiri ("saya ingin km catat baik2 ini besok kt
