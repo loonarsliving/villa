@@ -48,6 +48,13 @@ export async function GET(request: Request) {
   // Dibatasi 45 hari: tiap tanggal satu panggilan API, dan permintaan yang
   // berjalan menit-menitan akan mati di tengah jalan tanpa hasil apa pun.
   const jumlahHari = Math.min(45, Math.max(1, Number(url.searchParams.get("hari") ?? 30)));
+  // Lama menginap yang diuji. PENTING: pemeriksaan satu malam saja bisa
+  // menipu. Kalau sebuah tanggal punya aturan minimum menginap 2 atau 3
+  // malam, pencarian satu malam mengembalikan kosong -- dan itu terbaca
+  // persis seperti "tanggalnya tertutup", padahal tanggalnya terbuka lebar
+  // bagi tamu yang menginap lebih lama. Membedakan keduanya menentukan
+  // tindakan yang sama sekali berbeda.
+  const malam = Math.min(14, Math.max(1, Number(url.searchParams.get("malam") ?? 1)));
 
   try {
     const rooms = await getCloudbedsRooms();
@@ -61,7 +68,17 @@ export async function GET(request: Request) {
     // ingin dihindari alat ini.
     const harian = [];
     for (const t of tanggal) {
-      harian.push(await getCloudbedsAvailabilityForDate(t, tambahHari(t, 1)));
+      harian.push(await getCloudbedsAvailabilityForDate(t, tambahHari(t, malam)));
+    }
+
+    // Blokir kamar: tersangka pertama untuk tanggal yang harganya terpasang
+    // tapi tidak bisa dipesan. Kegagalan membacanya tidak boleh menggagalkan
+    // seluruh pemeriksaan -- bagian yang sudah terbaca tetap berguna.
+    let blokir: unknown[] | { error: string };
+    try {
+      blokir = await getCloudbedsRoomBlocks(mulai, tambahHari(mulai, Math.min(34, jumlahHari - 1)));
+    } catch (e) {
+      blokir = { error: e instanceof Error ? e.message : String(e) };
     }
 
     // Blokir kamar: tersangka pertama untuk tanggal yang harganya terpasang
@@ -79,7 +96,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       properti: { jumlah_kamar_terdaftar: rooms.length },
-      periode: { mulai, hari: jumlahHari, sampai: tambahHari(mulai, jumlahHari - 1) },
+      periode: { mulai, hari: jumlahHari, sampai: tambahHari(mulai, jumlahHari - 1), malam_diuji: malam },
       ringkasan: {
         bisa_dipesan: harian.length - tidakBisaDipesan.length - gagalDibaca.length,
         tidak_bisa_dipesan: tidakBisaDipesan.length,
