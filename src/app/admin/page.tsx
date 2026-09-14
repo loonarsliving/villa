@@ -1,80 +1,97 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AdminShell } from "./_shell";
-import { useAuth } from "@/lib/auth";
+import Link from "next/link";
+
+import { AppHome, type TabItem } from "@/components/AppHome";
 import { api } from "@/lib/api";
 import { fmtCurrency } from "@/lib/format";
-import { Loading } from "@/components/Card";
-import { StatCard } from "@/components/StatCard";
 import type { AdminOverview } from "@/lib/types";
 
-export default function AdminOverviewPage() {
-  const { user } = useAuth();
+/**
+ * Beranda admin bergaya aplikasi (permintaan owner 14 Sep 2026).
+ *
+ * Tata letaknya ada di AppHome, dipakai bersama beranda investor. Yang
+ * ditambahkan di sini adalah dua hal yang hanya berarti bagi admin:
+ * pendapatan bulan berjalan, dan daftar hal yang PERLU DITINDAKLANJUTI --
+ * Cloudbeds yang belum terpetakan dan WhatsApp yang gagal terkirim.
+ *
+ * Keduanya sengaja ditampilkan hanya ketika angkanya di atas nol. Baris
+ * "0 gagal" yang selalu ada akan berhenti dibaca dalam seminggu, dan setelah
+ * itu angka yang bukan nol pun ikut tidak terlihat.
+ */
+
+const TABS: TabItem[] = [
+  { href: "/admin", label: "Beranda", icon: "⌂" },
+  { href: "/admin/revenue", label: "Revenue", icon: "◎" },
+  { href: "/admin/pricing-calendar", label: "Harga", icon: "🗓" },
+  { href: "/admin/guests", label: "Tamu", icon: "◍" },
+  { href: "/admin/users", label: "Pengguna", icon: "⚙" },
+];
+
+export default function AdminHomePage() {
   const [ov, setOv] = useState<AdminOverview | null>(null);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     api
       .get<AdminOverview>("/admin/overview")
       .then(setOv)
-      .finally(() => setLoading(false));
+      .catch(() => setOv(null));
   }, []);
 
+  const perluTindakan = [
+    { label: "Cloudbeds belum dipetakan", nilai: ov?.cloudbeds_belum_dipetakan ?? 0, href: "/admin/cloudbeds" },
+    { label: "WhatsApp gagal terkirim", nilai: ov?.wa_gagal_terkirim ?? 0, href: "/admin/wa-log" },
+  ].filter((x) => x.nilai > 0);
+
   return (
-    <AdminShell pageTitle="Beranda" pageSub="Ringkasan seluruh properti">
-      <div className="mb-5">
-        <div className="text-[11px] text-ink/40">Melihat laporan</div>
-        <div className="font-serif text-2xl sm:text-3xl font-medium text-ink">
-          Halo, {user?.nama || "Administrator"}
-        </div>
-      </div>
-
-      <div className="relative mb-5">
-        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-ink/30">⌕</span>
-        <input
-          placeholder="Cari unit, transaksi, atau pengguna…"
-          className="w-full bg-gold-500/10 rounded-2xl py-3 pl-10 pr-4 text-[13px] text-ink placeholder:text-ink/40 outline-none"
-        />
-      </div>
-
-      {loading ? (
-        <Loading />
-      ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <StatCard label="Pemasukan" value={fmtCurrency(ov?.gross_revenue_bulan_ini)} sub="Bulan ini" accent="azure" icon="↓" />
-          <StatCard label="Pengeluaran" value={String(ov?.wa_gagal_terkirim ?? 0)} sub="WA gagal terkirim" accent="ruby" icon="↑" />
-          <StatCard label="Total Unit" value={String(ov?.total_unit ?? 0)} sub={`${ov?.available ?? 0} tersedia`} accent="gold" icon="▤" />
-          <StatCard label="Terisi" value={String(ov?.occupied ?? 0)} sub="dari total unit" accent="sage" icon="✓" />
-          <StatCard label="Total Pengguna" value={String(ov?.total_user ?? 0)} accent="neutral" />
-          <StatCard label="Pengguna Aktif" value={String(ov?.user_aktif ?? 0)} accent="sage" />
-          <StatCard
-            label="Cloudbeds Belum Dipetakan"
-            value={String(ov?.cloudbeds_belum_dipetakan ?? 0)}
-            accent={ov?.cloudbeds_belum_dipetakan ? "ruby" : "sage"}
-          />
-          <StatCard
-            label="WA Gagal Terkirim"
-            value={String(ov?.wa_gagal_terkirim ?? 0)}
-            accent={ov?.wa_gagal_terkirim ? "ruby" : "sage"}
-          />
-        </div>
-      )}
-
-      {!loading && (
-        <div className="mt-3.5 bg-base-900 border border-ink/[0.06] rounded-2xl shadow-sm shadow-ink/[0.04] p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div className="font-serif text-base font-medium text-ink">Total Penghuni Aktif</div>
+    <AppHome tabs={TABS} tautanReservasi="/front-desk/booking">
+      <section className="rounded-2xl border border-slate-200 overflow-hidden mb-4">
+        <div className="px-4 py-3 bg-slate-50 text-[13px] font-semibold text-slate-700">Pendapatan Bulan Ini</div>
+        <div className="px-4 py-4">
+          <div className="text-[28px] font-light text-slate-900 leading-none">
+            {fmtCurrency(ov?.gross_revenue_bulan_ini)}
           </div>
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-full bg-gold-500/15 flex items-center justify-center text-xl shrink-0">👥</div>
-            <div>
-              <div className="font-serif text-3xl font-medium text-ink leading-none">{ov?.occupied ?? 0}</div>
-              <div className="text-[11px] text-ink/40 mt-1">Unit terisi dari {ov?.total_unit ?? 0} total unit</div>
+          <div className="text-[11.5px] text-slate-500 mt-1.5">Seluruh properti</div>
+        </div>
+        <div className="grid grid-cols-2 border-t border-slate-100">
+          <div className="px-4 py-3">
+            <div className="text-[10.5px] text-slate-400 mb-0.5">Unit terisi</div>
+            <div className="text-[14px] font-medium text-slate-800">
+              {ov ? `${ov.occupied} / ${ov.total_unit}` : "—"}
+            </div>
+          </div>
+          <div className="px-4 py-3 border-l border-slate-100">
+            <div className="text-[10.5px] text-slate-400 mb-0.5">Pengguna aktif</div>
+            <div className="text-[14px] font-medium text-slate-800">
+              {ov ? `${ov.user_aktif} / ${ov.total_user}` : "—"}
             </div>
           </div>
         </div>
+      </section>
+
+      {perluTindakan.length > 0 && (
+        <section className="rounded-2xl border border-amber-200 bg-amber-50 overflow-hidden mb-4">
+          <div className="px-4 py-3 text-[13px] font-semibold text-amber-800">Perlu Ditindaklanjuti</div>
+          {perluTindakan.map((x) => (
+            <Link
+              key={x.href}
+              href={x.href}
+              className="flex items-center gap-3 px-4 py-3 border-t border-amber-200/60 text-amber-900"
+            >
+              <span className="text-[18px] font-semibold tabular-nums w-7">{x.nilai}</span>
+              <span className="grow text-[13.5px]">{x.label}</span>
+              <span className="text-amber-500">›</span>
+            </Link>
+          ))}
+        </section>
       )}
-    </AdminShell>
+
+      <div className="flex justify-center">
+        <Link href="/admin/revenue" className="text-[12.5px] text-blue-700 font-medium py-2">
+          Lihat laporan lengkap →
+        </Link>
+      </div>
+    </AppHome>
   );
 }
