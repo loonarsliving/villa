@@ -2844,6 +2844,46 @@ Deno.serve(async (req)=>{
     return json(data);
   }
 
+  // Ringkasan satu hari untuk halaman depan (gaya aplikasi Cloudbeds):
+  // okupansi, kedatangan, dan keberangkatan pada TANGGAL yang diminta.
+  //
+  // Dihitung dari bookings, bukan dari units.status, supaya tanggal mana pun
+  // bisa ditanyakan -- bukan hanya hari ini. units.status hanya tahu keadaan
+  // sekarang, dan halaman depannya punya tombol maju-mundur tanggal.
+  //
+  // Terbuka untuk semua peran yang sudah login, termasuk investor: owner
+  // memutuskan (14 Sep 2026) investor melihat okupansi villa yang sama
+  // dengan admin. Tidak ada data per-unit atau identitas tamu yang keluar
+  // dari sini, hanya angka ringkas.
+  if(path==='/dashboard/hari-ini' && m==='GET'){
+    const tanggal = url.searchParams.get('tanggal') ?? new Date().toISOString().slice(0,10);
+    if(!isValidDateStr(tanggal)) return err('Tanggal tidak valid');
+
+    const {data:units} = await supabase.from('units').select('id');
+    const totalUnit = units?.length ?? 0;
+
+    const {data:bk} = await supabase.from('bookings')
+      .select('id,tgl_checkin,tgl_checkout')
+      .in('status',['terjadwal','checkin'])
+      .lte('tgl_checkin', tanggal).gt('tgl_checkout', tanggal);
+    const terisi = bk?.length ?? 0;
+
+    const {data:datang} = await supabase.from('bookings').select('id')
+      .in('status',['terjadwal','checkin']).eq('tgl_checkin', tanggal);
+    const {data:pergi} = await supabase.from('bookings').select('id')
+      .in('status',['terjadwal','checkin','checkout']).eq('tgl_checkout', tanggal);
+
+    return json({
+      tanggal,
+      total_unit: totalUnit,
+      terisi,
+      kosong: Math.max(0, totalUnit - terisi),
+      kedatangan: datang?.length ?? 0,
+      keberangkatan: pergi?.length ?? 0,
+      okupansi_persen: totalUnit > 0 ? Math.round(terisi / totalUnit * 100) : 0,
+    });
+  }
+
   if(path==='/admin/overview' && m==='GET'){
     const bulan = new Date().toISOString().slice(0,7);
     const {data:units} = await supabase.from('units').select('status');

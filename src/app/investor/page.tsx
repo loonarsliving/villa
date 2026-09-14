@@ -2,194 +2,95 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { InvestorShell } from "./_shell";
-import { useAuth } from "@/lib/auth";
-import { api } from "@/lib/api";
-import { fmtCurrency, fmtDate, currentPeriod, periodLabel } from "@/lib/format";
-import { Card, CardHeader, Loading } from "@/components/Card";
-import { StatCard } from "@/components/StatCard";
-import type { Report, Transaction, Notification } from "@/lib/types";
 
-export default function InvestorBerandaPage() {
+import { AppHome, type TabItem } from "@/components/AppHome";
+import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { fmtCurrency } from "@/lib/format";
+import type { Report } from "@/lib/types";
+
+/**
+ * Beranda investor bergaya aplikasi (permintaan owner 14 Sep 2026).
+ *
+ * Tata letaknya ada di AppHome dan dipakai bersama dengan beranda admin;
+ * berkas ini hanya menyiapkan tab bar dan satu kartu tambahan berisi angka
+ * yang benar-benar dicari investor saat membuka aplikasi: berapa yang ia
+ * terima bulan ini.
+ *
+ * Aturan yang tetap berlaku di sini, sama seperti versi lama: investor
+ * berskema pemasukan tetap TIDAK melihat jaminan Rp 5 juta, dan tidak ada
+ * investor yang melihat pembagian antar-investor.
+ */
+
+const TABS: TabItem[] = [
+  { href: "/investor", label: "Beranda", icon: "⌂" },
+  { href: "/investor/pendapatan", label: "Pendapatan", icon: "◎" },
+  { href: "/investor/menginap-gratis", label: "Menginap", icon: "✦" },
+  { href: "/investor/laporan", label: "Laporan", icon: "▤" },
+  { href: "/investor/notifikasi", label: "Notifikasi", icon: "◉" },
+];
+
+function periodeBulanIni(): string {
+  return new Date().toISOString().slice(0, 7);
+}
+
+export default function InvestorHomePage() {
   const { user } = useAuth();
   const unitId = user?.unit_id || "";
-  const unitNomor = user?.unit_nomor || "—";
   const [report, setReport] = useState<Report | null>(null);
-  const [txs, setTxs] = useState<Transaction[]>([]);
-  const [notifs, setNotifs] = useState<Notification[]>([]);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!unitId) return;
-    const bulan = currentPeriod();
-    Promise.all([
-      api.get<Report>(`/report?unit_id=${unitId}&periode=${bulan}`),
-      api.get<Transaction[]>(`/transactions?unit_id=${unitId}&bulan=${bulan}`),
-      api.get<Notification[]>(`/notifications?unit_id=${unitId}&role=owner`),
-    ])
-      .then(([r, t, n]) => {
-        setReport(r);
-        setTxs(t || []);
-        setNotifs(n || []);
-      })
-      .finally(() => setLoading(false));
+    api
+      .get<Report>(`/report?unit_id=${unitId}&periode=${periodeBulanIni()}`)
+      .then(setReport)
+      .catch(() => setReport(null));
   }, [unitId]);
 
-  const owner = report?.owner_amount || 0;
-  const jaminanAktif = report?.jaminan_aktif;
-  // Skema khusus: sebagian investor membeli dengan harga berbeda dan
-  // menerima angka pasti tiap bulan, bukan bagi hasil dengan jaminan minimal.
-  // Angkanya datang dari server; halaman ini tidak menghitung apa pun sendiri.
   const pemasukanTetap = report?.pemasukan_tetap ?? null;
-  const bagianAnda = report?.bagian_anda ?? report?.per_investor_amount ?? owner;
+  const bagianAnda = report?.bagian_anda ?? report?.per_investor_amount ?? report?.owner_amount ?? 0;
 
   return (
-    <InvestorShell pageTitle="Beranda" pageSub={`Poin menginap Unit ${unitNomor} · ${periodLabel()}`}>
-      <div
-        className="relative bg-gradient-to-br from-base-800 to-base-900 border border-gold-500/25 rounded-md p-5 sm:p-7 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5 mb-3.5 overflow-hidden"
-      >
-        <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-gold-500 to-transparent" />
-        <div>
-          <div className="text-[9px] text-gold-500 tracking-[0.2em] uppercase font-semibold mb-2">
-            {pemasukanTetap !== null ? "Pemasukan Tetap" : "Jaminan Pendapatan Minimal"}
-          </div>
-          <div className="font-serif text-xl sm:text-[22px] font-light text-ink leading-snug">
-            {pemasukanTetap !== null ? (
-              <>
-                Anda menerima
-                <br />
-                {fmtCurrency(pemasukanTetap)} per bulan
-              </>
-            ) : (
-              <>
-                Anda selalu dapat minimal
-                <br />
-                Rp 5.000.000 per bulan
-              </>
-            )}
-          </div>
-          <div className="text-[11px] text-ink/30 mt-2 leading-relaxed max-w-xs">
-            {loading
-              ? "Memuat data..."
-              : pemasukanTetap !== null
-                ? `Angka pasti setiap bulan sesuai skema pembelian Anda${
-                    report?.pemasukan_tetap_sampai ? `, berlaku sampai ${report.pemasukan_tetap_sampai}` : ""
-                  } — tidak naik-turun mengikuti okupansi villa.`
-                : jaminanAktif
-                  ? `Bagian Anda rendah bulan ini — Loonars menambah ${fmtCurrency(report?.jaminan_topup)} per investor agar Anda tetap terima Rp 5 juta.`
-                  : `Villa berjalan normal — jaminan tidak aktif, bagi hasil penuh untuk Anda.`}
+    <AppHome tabs={TABS} tautanReservasi="/investor/laporan">
+      <section className="rounded-2xl border border-slate-200 overflow-hidden mb-4">
+        <div className="px-4 py-3 bg-slate-50 text-[13px] font-semibold text-slate-700">
+          {pemasukanTetap !== null ? "Pemasukan Anda" : "Bagian Anda"}
+        </div>
+        <div className="px-4 py-4">
+          <div className="text-[28px] font-light text-slate-900 leading-none">{fmtCurrency(bagianAnda)}</div>
+          <div className="text-[11.5px] text-slate-500 mt-1.5">
+            {pemasukanTetap !== null
+              ? "Angka tetap setiap bulan sesuai skema pembelian Anda"
+              : "Bulan ini"}
           </div>
         </div>
-        <div className="text-left sm:text-right">
-          <div className="font-serif text-3xl sm:text-[38px] font-light text-gold-500 leading-none">{fmtCurrency(bagianAnda)}</div>
-          {/* Jumlah investor dan kata "dibagi rata" sengaja tidak ditampilkan
-              ke investor mana pun (instruksi owner 13 Sep 2026). Yang perlu
-              dilihat investor adalah pemasukan villa dan haknya sendiri --
-              bukan mekanisme pembagian di antara mereka. */}
-          <div className="text-[9.5px] text-ink/30 mt-1">
-            {pemasukanTetap !== null ? "Pemasukan Anda bulan ini" : "Bagian Anda bulan ini"}
-          </div>
-          {/* Lencana jaminan disembunyikan untuk investor berskema tetap:
-              tidak ada jaminan yang aktif atau tidak aktif baginya, dan
-              "✓ Jaminan tidak aktif" hanya akan membuatnya bertanya-tanya
-              soal aturan yang tidak berlaku untuknya. */}
-          {pemasukanTetap === null && (
-            <div
-              className={`inline-flex items-center gap-1.5 text-[9.5px] font-semibold px-2.5 py-1 rounded-full mt-2.5 ${
-                jaminanAktif ? "bg-ruby-500/15 text-ruby-400" : "bg-sage-500/15 text-sage-400"
-              }`}
-            >
-              {jaminanAktif ? "⚠ Jaminan aktif" : "✓ Jaminan tidak aktif"}
-            </div>
-          )}
+        <div className="grid grid-cols-2 border-t border-slate-100">
+          <AngkaKecil label="Pendapatan villa" nilai={report?.gross_revenue} />
+          <AngkaKecil label="Laba bersih" nilai={report?.net ?? report?.gross_profit} garisKiri />
         </div>
-      </div>
+      </section>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3.5">
-        <StatCard
-          label={pemasukanTetap !== null ? "Pemasukan Anda" : "Bagian Anda"}
-          value={fmtCurrency(bagianAnda)}
-          sub={pemasukanTetap !== null ? "Bulan ini (angka tetap)" : "Bulan ini"}
-          accent="sage"
-        />
-        <StatCard label="Pool Investor (70%)" value={fmtCurrency(owner)} sub="Seluruh villa" />
-        <StatCard label="Gross Revenue" value={fmtCurrency(report?.gross_revenue)} sub="Seluruh villa" />
-        <StatCard label="Net Profit" value={fmtCurrency(report?.net ?? report?.gross_profit)} sub="Dasar bagi hasil 70/30" />
+      <div className="flex justify-center">
+        <Link href="/investor/pendapatan" className="text-[12.5px] text-blue-700 font-medium py-2">
+          Lihat rincian pendapatan →
+        </Link>
       </div>
+    </AppHome>
+  );
+}
 
-      {!loading && report?.walkin_income && (
-        <Card className="mb-3.5">
-          <CardHeader
-            title="Pemasukan Cafe & Spa (Walk-in)"
-            subtitle="Info seluruh properti — belum termasuk bagi hasil 70/30 di atas"
-          />
-          <div className="grid grid-cols-3 gap-3 p-4 sm:p-5">
-            <div>
-              <div className="text-[10px] text-ink/40 mb-1">☕ Cafe</div>
-              <div className="font-serif text-base font-medium text-ink">{fmtCurrency(report.walkin_income.cafe)}</div>
-            </div>
-            <div>
-              <div className="text-[10px] text-ink/40 mb-1">💆 Spa</div>
-              <div className="font-serif text-base font-medium text-ink">{fmtCurrency(report.walkin_income.spa)}</div>
-            </div>
-            <div>
-              <div className="text-[10px] text-ink/40 mb-1">Total</div>
-              <div className="font-serif text-base font-medium text-gold-500">{fmtCurrency(report.walkin_income.total)}</div>
-            </div>
-          </div>
-          <div className="px-4 sm:px-5 pb-4 sm:pb-5 -mt-1 text-[10px] text-ink/30 leading-relaxed">
-            Pemasukan ini di luar sewa unit dan belum dibagikan ke investor — ditampilkan untuk transparansi karena rencananya akan ikut dibagi dari pendapatan bersih ke depannya.
-          </div>
-        </Card>
-      )}
-
-      <div className="grid lg:grid-cols-[2fr_1fr] gap-3.5">
-        <Card>
-          <CardHeader title="Transaksi Terbaru" action={<Link href="/investor/pendapatan" className="text-[10.5px] text-gold-500">Lihat semua →</Link>} />
-          {loading ? (
-            <Loading />
-          ) : txs.length === 0 ? (
-            <Loading label="Belum ada transaksi bulan ini" />
-          ) : (
-            txs.slice(0, 5).map((t) => (
-              <div key={t.id} className="flex items-center gap-3 px-4 sm:px-5 py-3 border-b border-ink/[0.05] last:border-0">
-                <div className={`w-8 h-8 rounded flex items-center justify-center text-sm shrink-0 ${t.tipe === "transfer_owner" ? "bg-gold-500/10" : "bg-sage-500/15"}`}>
-                  {t.tipe === "transfer_owner" ? "🏦" : "💳"}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs font-medium text-ink/80 truncate">{t.deskripsi}</div>
-                  <div className="text-[10px] text-ink/30 mt-0.5">
-                    {fmtDate(t.created_at)} · {t.kategori || ""}
-                  </div>
-                </div>
-                <div className="text-right shrink-0">
-                  <div className="font-mono text-xs font-medium text-sage-400">+ {fmtCurrency(t.jumlah)}</div>
-                </div>
-              </div>
-            ))
-          )}
-        </Card>
-        <Card>
-          <CardHeader title="Notifikasi" action={<Link href="/investor/notifikasi" className="text-[10.5px] text-gold-500">Lihat semua →</Link>} />
-          {loading ? (
-            <Loading />
-          ) : notifs.length === 0 ? (
-            <Loading label="Tidak ada notifikasi" />
-          ) : (
-            notifs.slice(0, 4).map((n) => (
-              <div key={n.id} className="flex gap-2.5 px-4 sm:px-5 py-3 border-b border-ink/[0.05] last:border-0 items-start">
-                <div className="w-1.5 h-1.5 rounded-full bg-gold-500 shrink-0 mt-1.5" />
-                <div>
-                  <div className="text-[11.5px] text-ink/50 leading-relaxed">
-                    <b className="text-ink">{n.judul}</b> — {n.pesan}
-                  </div>
-                  <div className="text-[9.5px] text-ink/30 mt-0.5">{fmtDate(n.created_at)}</div>
-                </div>
-              </div>
-            ))
-          )}
-        </Card>
-      </div>
-    </InvestorShell>
+function AngkaKecil({
+  label,
+  nilai,
+  garisKiri,
+}: {
+  label: string;
+  nilai: number | undefined;
+  garisKiri?: boolean;
+}) {
+  return (
+    <div className={`px-4 py-3 ${garisKiri ? "border-l border-slate-100" : ""}`}>
+      <div className="text-[10.5px] text-slate-400 mb-0.5">{label}</div>
+      <div className="text-[14px] font-medium text-slate-800">{fmtCurrency(nilai)}</div>
+    </div>
   );
 }
