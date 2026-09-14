@@ -302,6 +302,68 @@ export interface ReservationTotals {
  * Returns an empty map rather than throwing when the call comes back
  * empty: a missing total must never block a booking from being recorded.
  */
+export interface CloudbedsDateAvailability {
+  date: string;
+  bookable: boolean;
+  roomTypes: { name: string; available: number; rate: number | null }[];
+  error?: string;
+}
+
+/**
+ * "Kalau tamu membuka Booking.com hari ini, apakah tanggal ini muncul?"
+ *
+ * getAvailableRoomTypes adalah satu-satunya endpoint yang menjawab itu apa
+ * adanya: ia sudah memperhitungkan kamar terjual, kamar yang ditutup, dan
+ * SEMUA pembatasan (minimum menginap, closed-to-arrival, stop-sell). Membaca
+ * tabel rate saja tidak cukup -- harga bisa terpasang rapi sementara
+ * tanggalnya tidak bisa dipesan siapa pun, dan dari sisi kita keduanya
+ * terlihat sama-sama sehat.
+ *
+ * Murni baca: tidak ada satu pun nilai yang diubah di Cloudbeds.
+ */
+export async function getCloudbedsAvailabilityForDate(
+  date: string,
+  nextDate: string,
+  adults = 2,
+): Promise<CloudbedsDateAvailability> {
+  const key = apiKey();
+  const propertyId = (process.env.CLOUDBEDS_PROPERTY_ID ?? "").trim();
+  const url = new URL(`${CLOUDBEDS_API_BASE}/getAvailableRoomTypes`);
+  if (propertyId) url.searchParams.set("propertyIDs", propertyId);
+  url.searchParams.set("startDate", date);
+  url.searchParams.set("endDate", nextDate);
+  url.searchParams.set("rooms", "1");
+  url.searchParams.set("adults", String(adults));
+  url.searchParams.set("children", "0");
+
+  const res = await fetch(url, { headers: { "x-api-key": key }, cache: "no-store" });
+  const body = await res.json().catch(() => null);
+  if (!res.ok || body?.success === false) {
+    return {
+      date,
+      bookable: false,
+      roomTypes: [],
+      error: body?.message || body?.error || `HTTP ${res.status}`,
+    };
+  }
+
+  // Jawabannya dibungkus per properti: data[].propertyRooms[].
+  const properties = Array.isArray(body?.data) ? body.data : [];
+  const roomTypes: { name: string; available: number; rate: number | null }[] = [];
+  for (const prop of properties) {
+    for (const rt of prop?.propertyRooms ?? []) {
+      const available = Number(rt?.roomsAvailable ?? 0);
+      const rate = Number(rt?.roomRate);
+      roomTypes.push({
+        name: String(rt?.roomTypeName ?? rt?.roomTypeNameShort ?? "?"),
+        available: Number.isFinite(available) ? available : 0,
+        rate: Number.isFinite(rate) ? rate : null,
+      });
+    }
+  }
+  return { date, bookable: roomTypes.some((r) => r.available > 0), roomTypes };
+}
+
 export async function getCloudbedsReservationTotals(params: {
   checkOutFrom?: string;
   reservationIDs?: string[];
