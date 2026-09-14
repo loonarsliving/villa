@@ -364,6 +364,29 @@ export async function getCloudbedsAvailabilityForDate(
   return { date, bookable: roomTypes.some((r) => r.available > 0), roomTypes };
 }
 
+/**
+ * Blokir kamar (room block) di rentang tanggal tertentu.
+ *
+ * Kalau sebuah tanggal tidak bisa dipesan padahal harganya terpasang, blokir
+ * kamar adalah tersangka pertama -- dan satu-satunya yang bisa dilihat lewat
+ * API, bukan hanya di dashboard. Batas Cloudbeds: rentang maksimal 35 hari.
+ */
+export async function getCloudbedsRoomBlocks(startDate: string, endDate: string): Promise<unknown[]> {
+  const key = apiKey();
+  const propertyId = (process.env.CLOUDBEDS_PROPERTY_ID ?? "").trim();
+  const url = new URL(`${CLOUDBEDS_API_BASE}/getRoomBlocks`);
+  if (propertyId) url.searchParams.set("propertyID", propertyId);
+  url.searchParams.set("startDate", startDate);
+  url.searchParams.set("endDate", endDate);
+
+  const res = await fetch(url, { headers: { "x-api-key": key }, cache: "no-store" });
+  const body = await res.json().catch(() => null);
+  if (!res.ok || body?.success === false) {
+    throw new CloudbedsApiError(body?.message || body?.error || `Cloudbeds getRoomBlocks error (HTTP ${res.status})`, res.status >= 400 ? res.status : 502);
+  }
+  return Array.isArray(body?.data) ? body.data : [];
+}
+
 export async function getCloudbedsReservationTotals(params: {
   checkOutFrom?: string;
   reservationIDs?: string[];
