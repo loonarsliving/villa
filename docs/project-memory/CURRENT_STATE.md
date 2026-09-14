@@ -2,6 +2,70 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-14 — alat periksa ketersediaan Cloudbeds (dan satu salah tafsir saya)
+
+Owner bertanya kenapa pemesanan turun untuk **20 September ke atas**.
+
+**PENTING, jangan diulangi:** pemeriksaan menemukan 14–18 September
+`roomsAvailable = 0` dan saya melaporkannya sebagai masalah mendesak.
+**Itu salah — villa memang baru dibuka dari tanggal 20**, jadi tertutupnya
+tanggal-tanggal sebelum itu disengaja. Owner mengoreksi: *"mmg bukanya
+dari tgl 20 keatas"*. Pelajarannya: angka dari Cloudbeds tidak pernah
+memberitahu apa yang DIMAKSUDKAN; tanyakan dulu apakah suatu keadaan
+disengaja sebelum menyebutnya kerugian berjalan.
+
+Untuk 20 Sep ke atas, sisi pengaturan **bersih**: semua tanggal bisa
+dipesan, `closedToArrival: false`, `blocked: false`, `minLos: 1`,
+`cutOff: 0`, harga normal 650/750 ribu (akhir pekan 750/850), tidak ada
+room block, dan mesin harga AI masih mati. Jadi sepinya pemesanan di
+rentang itu bukan soal pengaturan.
+
+**TEMUAN UTAMA (belum diperbaiki, perlu tangan owner di dashboard):
+Cloudbeds hanya menjual 8 unit dari 13.** Setiap tanggal yang belum ada
+pemesanannya menunjukkan pola yang sama persis: **3 Sawah View + 5
+Regular**. Sawah View lengkap (3 dari 3), tapi Regular hanya 5 dari 10 —
+lima unit Regular tidak pernah ditawarkan, di tanggal mana pun. Bukan
+terjual, bukan diblokir (`getRoomBlocks` kosong): memang tidak masuk
+hitungan yang dijual. `getRooms` tetap melaporkan 13 kamar terdaftar.
+
+Terkonfirmasi silang oleh tanggal yang ADA pemesanannya: 26 Sep, 4 unit
+Regular terjual, sisa 1 — kalau 10 yang dijual, sisanya 6.
+
+Artinya **38% kapasitas villa tidak pernah muncul di kanal mana pun.**
+Ini jawaban paling masuk akal atas pertanyaan owner "kenapa pemesanan
+kurang" — bukan harga, bukan permintaan. Dua kemungkinan yang harus
+dicek di dashboard: lima unit itu belum aktif / out of service, atau
+alokasi inventaris tipe "Regular Room with pool" disetel 5, bukan 10.
+
+**Pelajaran yang lebih besar dari kejadiannya: villa hanya menyimpan
+HARGA, tidak pernah menyimpan KETERSEDIAAN.** Tabel `villa_rates` tetap
+terlihat sehat sementara tanggalnya tidak bisa dipesan siapa pun. Dua
+keadaan yang sangat berbeda itu tampak identik dari sisi kita, dan
+perbedaannya persis yang menentukan ada tidaknya pemesanan. Tidak ada
+satu pun laporan atau cron yang akan memperingatkan kalau ini terulang.
+
+**Alat periksanya: `GET /api/admin/cloudbeds/health`** (header
+`Authorization: Bearer <integration_settings.cron.secret>`), parameter
+`mulai`, `hari` (maks 45), `malam` (maks 14). Murni baca — tidak menulis
+apa pun ke Cloudbeds maupun database. Mengembalikan per tanggal: bisa
+dipesan atau tidak, tipe unit, sisa kamar, harga; plus `blokir_kamar`
+(getRoomBlocks) dan `rate_plan_tanggal_pertama` (getRatePlans, yang
+membawa minLos/closedToArrival/cutOff sehingga penyebabnya bisa disebut
+dengan namanya, bukan ditebak).
+
+**Urutan diagnosis yang terbukti berguna** (tiga tersangka, dua gugur):
+1. blokir kamar → `getRoomBlocks` kosong;
+2. minimum menginap → tetap tertutup untuk 1, 2, DAN 3 malam. Menguji
+   satu malam saja hampir membuat saya salah lapor: tanggal ber-minLos 2
+   akan terbaca persis seperti "tertutup";
+3. ketersediaan → `roomsAvailable: 0`. Inilah penyebabnya.
+
+**Belum terjawab:** untuk 20 Sep, `getAvailableRoomTypes` melaporkan 10
+unit Regular tersedia sementara `getRatePlans` melaporkan 5, padahal ke-10
+unit Regular kosong. Kalau angka 5 yang benar, sebagian kamar juga tidak
+dijual untuk tanggal setelah 19 Sep — kehilangan yang lebih luas tapi
+tidak sejelas karena tidak nol. Perlu dipastikan di kalender Cloudbeds.
+
 ## 2026-09-14 — login menolak email berhuruf besar (bug lama, mengenai semua pengguna)
 
 `villa_login` membandingkan `email = p_email` apa adanya. Investor yang
