@@ -387,6 +387,38 @@ export async function getCloudbedsRoomBlocks(startDate: string, endDate: string)
   return Array.isArray(body?.data) ? body.data : [];
 }
 
+/**
+ * Rate plan yang BENAR-BENAR terjual untuk rentang tanggal tertentu.
+ *
+ * Ini pertanyaan yang berbeda dari "berapa harganya" (getRate) dan dari
+ * "berapa kamar tersisa" (getAvailableRoomTypes). Sebuah tanggal bisa punya
+ * harga tersimpan rapi dan kamar kosong belas-belasan, tapi tetap tidak
+ * muncul di mana pun karena tidak ada satu pun rate plan yang berlaku untuk
+ * tanggal itu -- misalnya masa berlakunya baru mulai belakangan, atau ada
+ * pembatasan kedatangan. Jawabannya biasanya membawa minStay, maxStay, dan
+ * penanda closed-to-arrival, yang menyebut penyebabnya dengan namanya
+ * sendiri alih-alih menyisakan tebakan.
+ */
+export async function getCloudbedsRatePlans(startDate: string, endDate: string): Promise<unknown[]> {
+  const key = apiKey();
+  const propertyId = (process.env.CLOUDBEDS_PROPERTY_ID ?? "").trim();
+  const url = new URL(`${CLOUDBEDS_API_BASE}/getRatePlans`);
+  if (propertyId) url.searchParams.set("propertyIDs", propertyId);
+  url.searchParams.set("startDate", startDate);
+  url.searchParams.set("endDate", endDate);
+  url.searchParams.set("adults", "2");
+  url.searchParams.set("children", "0");
+  url.searchParams.set("rooms", "1");
+  url.searchParams.set("detailedRates", "true");
+
+  const res = await fetch(url, { headers: { "x-api-key": key }, cache: "no-store" });
+  const body = await res.json().catch(() => null);
+  if (!res.ok || body?.success === false) {
+    throw new CloudbedsApiError(body?.message || body?.error || `Cloudbeds getRatePlans error (HTTP ${res.status})`, res.status >= 400 ? res.status : 502);
+  }
+  return Array.isArray(body?.data) ? body.data : [];
+}
+
 export async function getCloudbedsReservationTotals(params: {
   checkOutFrom?: string;
   reservationIDs?: string[];
