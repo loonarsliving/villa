@@ -2,6 +2,31 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-15 — label "A4 & A5" Bu Mega diganti, owner menegaskan pemisahannya
+
+Owner menegaskan ulang setelah akun A4/A5 baru dibuat: *"a4&a5 dan
+investor trpisah itu 2 hal berbeda, investor trpisah itu masuk di 13
+unit, smntra a4&a5 ibu mega itu diluar 13 unit"*.
+
+Strukturnya sudah benar sejak awal (Bu Mega: `unit_id=null`, tidak ada
+baris di `villa_investor_units`, pembagi tetap 13). **Yang salah cuma
+LABEL**: `villa_users.unit_nomor` Bu Mega masih "A4 & A5", dan
+`/admin/investors` mengurutkan berdasarkan `unit_nomor` — jadi daftar
+investor menampilkan tiga baris berturut-turut menyebut A4/A5 (unit A4
+milik investor baru, "A4 & A5" milik Mega, unit A5 milik investor baru
+lain), terlihat seperti unit dobel padahal tidak.
+
+**Diganti jadi `unit_nomor = 'Pemasukan Tetap'`** — tidak menyebut unit
+sama sekali, karena dia memang di luar 13 unit. Ikut diperbaiki:
+`InvestorShell` menampilkan "Investor Unit {unit_nomor}" untuk semua
+investor; untuk yang `unit_id`-nya null sekarang menampilkan "Investor —
+{unit_nomor}" supaya tidak terbaca "Investor Unit Pemasukan Tetap".
+
+**Pelajaran:** benar secara struktur data tidak otomatis benar secara
+tampilan. Label yang dibiarkan dari sebelum penggabungan akun bisa
+membuat sesuatu yang sudah dipisahkan dengan benar terlihat masih
+tercampur.
+
 ## 2026-09-15 — akun A4 & A5 dibuat ulang untuk dua investor baru
 
 Konsekuensi dari penggabungan akun Bu Mega (14 Sep): `a4@haluoleo.id` dan
