@@ -2,6 +2,50 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-15 — akun A4 & A5 dibuat ulang untuk dua investor baru
+
+Konsekuensi dari penggabungan akun Bu Mega (14 Sep): `a4@haluoleo.id` dan
+`a5@haluoleo.id` sudah DIHAPUS saat itu, jadi investor baru yang membeli
+unit itu tidak bisa login — bukan lupa password, akunnya memang tidak
+ada. Ini sudah diantisipasi di catatan 14 Sep tapi belum dieksekusi.
+
+**Owner memilih: dua investor terpisah** (bukan satu orang dua unit), dan
+**mengisi profilnya sendiri** — akun dibuat dengan nama sementara
+("Investor Unit A4"/"A5", pola yang sama dengan B2/B3/C1), investor
+mengisi nama/HP/rekening asli lewat halaman "Profil & Rekening" saat
+login pertama (`POST /me/investor-profile`, yang juga menulis ke
+`villa_users.nama/hp` — bukan hanya `investor_profiles`).
+
+**Langkah yang dijalankan, dan urutannya penting:**
+1. Lepas pemetaan `villa_investor_units` milik Bu Mega untuk A4 dan A5
+   (unique index per unit_id membuat ini WAJIB sebelum investor baru bisa
+   dipetakan ke unit yang sama). Vouchernya (24 kode) dan skema pemasukan
+   tetapnya TIDAK ikut terhapus — keduanya tidak bergantung pada tabel
+   itu.
+2. `villa_users.unit_id` Bu Mega diset NULL (sebelumnya menunjuk A5) —
+   kalau tidak, kode lama yang jatuh ke `session.unit_id` sebagai
+   cadangan akan membuatnya kembali "memiliki" A5 begitu pemetaan
+   barunya kosong.
+3. Buat 2 akun baru (role `owner`, `must_change_password=true`), petakan
+   ke `villa_investor_units`, terbitkan 12 kode masing-masing lewat
+   `villa_terbitkan_voucher_investor()`.
+
+**Dibuktikan nyata:** login sungguhan untuk kedua akun berhasil (`200`
+dengan token), termasuk `A5@Haluoleo.id` berhuruf besar — bug login
+tidak-peka-huruf-besar (14 Sep) langsung teruji dari kasus nyata.
+Pembagi dividen tetap **13** (dihitung dari unit, bukan akun — tidak
+disentuh), dan `villa_investor_units` sekarang punya tepat 13 baris,
+satu per unit, tidak ada yang bentrok.
+
+**Efek pada dividen:** dua bagian yang sebelumnya tidak dibayarkan
+siapa pun (milik A4 & A5, sejak Mega dialihkan ke pemasukan tetap) mulai
+bulan ini akan dibagi ke dua investor baru ini — persis rencana yang
+dicatat 13 Sep: *"Dua bagian itulah yang nanti diambil dua investor
+baru."*
+
+**Password sementara ada di riwayat chat owner** (via WhatsApp/pesan),
+bukan di sini — keduanya wajib ganti password saat login pertama.
+
 ## 2026-09-14 — alat periksa ketersediaan Cloudbeds (dan satu salah tafsir saya)
 
 Owner bertanya kenapa pemesanan turun untuk **20 September ke atas**.
