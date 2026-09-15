@@ -48,7 +48,13 @@ export function InvestorShell({
     <DashboardShell
       brandTitle="Dashboard"
       brandSub="Investor"
-      roleLabel={`Investor Unit ${user?.unit_nomor || ""}`}
+      // "Unit X" hanya untuk investor yang memang memiliki unit. Investor
+      // berskema khusus (mis. pemasukan tetap, bukan pemilik unit fisik)
+      // punya unit_nomor berupa label bebas seperti "Pemasukan Tetap" --
+      // menyisipkannya ke belakang kata "Unit" akan terbaca "Investor Unit
+      // Pemasukan Tetap", yang justru menegaskan kekeliruan yang baru saja
+      // diperbaiki (dia BUKAN pemilik unit tertentu).
+      roleLabel={user?.unit_id ? `Investor Unit ${user.unit_nomor || ""}` : `Investor — ${user?.unit_nomor || "Skema Khusus"}`}
       sections={sections}
       pageTitle={pageTitle}
       pageSub={pageSub}
