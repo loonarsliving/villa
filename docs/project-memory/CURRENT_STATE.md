@@ -2,6 +2,41 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-16 — Standard: weekday diturunkan ke Rp550.000, weekend TETAP Rp750.000 (owner-approved)
+
+Owner minta harga weekday Standard diturunkan ke Rp550.000, tapi harga
+weekend (Jumat/Sabtu) dipertahankan seperti sekarang (Rp750.000) karena
+pemesanan weekend tetap ada. Sawah View tidak disentuh (tetap 750rb
+weekday / 850rb weekend).
+
+**Kenapa ini bukan sekadar edit angka:** sebelum perubahan ini, weekend =
+anchor (`base_rate`) + `WEEKEND_SURCHARGE` konstanta tunggal Rp100.000
+untuk SEMUA tipe unit (`src/lib/aiPricingEngine.ts`). Menurunkan
+`base_rate` Standard ke 550rb tanpa mengubah kode akan otomatis
+menjatuhkan weekend Standard ke 650rb — bukan yang diminta. Diubah jadi
+`WEEKEND_SURCHARGE_BY_ROOM_TYPE_CODE`, per kode tipe unit; Standard
+sekarang punya surcharge weekend Rp200.000 (550rb + 200rb = 750rb tetap),
+tipe lain tetap pakai default Rp100.000. Ditambah 2 tes baru
+(`aiPricingEngine.test.ts`), total 53 tes hijau; `tsc --noEmit` bersih.
+
+**`min_rate` (lantai AI) Standard juga diturunkan** dari Rp600.000 ke
+Rp550.000 (owner-approved) — kalau tidak, mesin harga tidak akan pernah
+benar-benar menjual di 550rb saat okupansi rendah, karena lantai lama
+600rb membenturnya lebih dulu. `max_rate` (1.000.000) tidak disentuh.
+
+**Diubah langsung di `villa_room_types`** (Supabase, bukan lewat
+migrasi — tidak ada `supabase/migrations` di repo ini, lihat
+DEVELOPMENT_WORKFLOW.md): `code='standard'` → `base_rate=550000,
+min_rate=550000`.
+
+**`ai_autopush_enabled` sedang aktif (`true`, sejak 2026-09-11).** Efeknya
+langsung nyata di semua OTA pada cron malam berikutnya (`10 17 * * *` UTC
+/ 00:10 WIB) lewat `putRate` ke Cloudbeds — bukan dry run. Belum
+diverifikasi hasil push malam pertamanya di sesi ini; cek `villa_rates`
+(`room_type_id` Standard) atau `villa_rate_history` setelah 00:10 WIB
+untuk memastikan tanggal weekday keluar di ~550rb (bisa naik/turun sedikit
+kalau ada sinyal permintaan) dan weekend tetap ~750rb.
+
 ## 2026-09-15 — label "A4 & A5" Bu Mega diganti, owner menegaskan pemisahannya
 
 Owner menegaskan ulang setelah akun A4/A5 baru dibuat: *"a4&a5 dan
