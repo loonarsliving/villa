@@ -26,7 +26,17 @@ import { researchCompetitorRates, researchMarketDemand, type DemandTrend } from 
 
 const COMPETITOR_STALE_DAYS = 7;
 const MARKET_DEMAND_STALE_DAYS = 7;
-const WEEKEND_SURCHARGE = 100000;
+const DEFAULT_WEEKEND_SURCHARGE = 100000;
+/**
+ * Owner instruction (2026-09-16): Standard's weekday base rate was cut to
+ * Rp550.000 while the weekend price stays Rp750.000 -- the surcharge is no
+ * longer a fixed delta over the anchor for every room type, so it must be
+ * looked up per room type code instead of read as one global constant.
+ * Anything not listed here keeps the original Rp100.000 delta.
+ */
+const WEEKEND_SURCHARGE_BY_ROOM_TYPE_CODE: Record<string, number> = {
+  standard: 200000,
+};
 const MARKET_DEMAND_CREATED_BY = "ai_jogja_events_research";
 /** Declared here because AI_PERIOD_CREATED_BY below needs it; see SIGNAL 1. */
 const LOW_SEASON_CREATED_BY = "ai_low_season";
@@ -654,6 +664,8 @@ export interface SeasonPeriod {
 export interface DateDecisionInput {
   targetDate: string;
   anchorRate: number;
+  /** villa_room_types.code, used to look up this room type's weekend surcharge. Defaults to Rp100.000 if omitted/unknown. */
+  roomTypeCode?: string;
   occupancyPct: number;
   /** Nights between the run date and the stay date. 0 = tonight. */
   daysToArrival: number;
@@ -743,7 +755,7 @@ export function decideRateForDate(input: DateDecisionInput): DatePriceDecision {
 
   // --- 2. Day-of-week seasonality (a known, permanent pattern) ---
   if (isWeekendJakarta(targetDate)) {
-    decidedRate += WEEKEND_SURCHARGE;
+    decidedRate += WEEKEND_SURCHARGE_BY_ROOM_TYPE_CODE[input.roomTypeCode ?? ""] ?? DEFAULT_WEEKEND_SURCHARGE;
     reasonCodes.push("weekend");
   }
 
@@ -1112,6 +1124,7 @@ export async function decideRatesForRoomType(
     return decideRateForDate({
       targetDate,
       anchorRate,
+      roomTypeCode: roomType.code,
       occupancyPct,
       daysToArrival,
       coldStart,

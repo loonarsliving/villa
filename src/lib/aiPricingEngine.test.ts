@@ -60,6 +60,16 @@ describe("anchor and weekend", () => {
     const second = decide({ liveRate: first.decided_rate });
     expect(second.decided_rate).toBe(first.decided_rate);
   });
+
+  it("uses Standard's larger weekend surcharge so the weekend price holds when the weekday base is cut (owner 2026-09-16)", () => {
+    const d = decide({ targetDate: FRIDAY, anchorRate: 550000, minRate: 550000, roomTypeCode: "standard" });
+    expect(d.decided_rate).toBe(750000);
+  });
+
+  it("falls back to the Rp100.000 surcharge for a room type with no override", () => {
+    const d = decide({ targetDate: FRIDAY, roomTypeCode: "sawah_view" });
+    expect(d.decided_rate).toBe(750000);
+  });
 });
 
 describe("lead time (SIGNAL 3)", () => {
