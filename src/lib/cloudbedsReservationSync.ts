@@ -102,6 +102,8 @@ export interface ReservationSyncSummary {
   skipped_own: number;
   unmapped_room_ids: string[];
   errors: string[];
+  /** Bookings closed out because Cloudbeds now reports the reservation as canceled -- see cancelStaleBookings. */
+  cancelled_closed: number;
 }
 
 export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey: string): Promise<ReservationSyncSummary> {
@@ -281,6 +283,49 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
     }
   }
 
+  // Owner report (2026-09-17): a reservation cancelled on Cloudbeds stayed
+  // 'terjadwal' in villa indefinitely and kept showing on the Front Desk
+  // calendar. Root cause: the loop above only ever upserts reservations
+  // CURRENTLY in ACTIVE_STATUSES -- once Cloudbeds reports one as
+  // "canceled" it silently drops out of that list, but nothing ever goes
+  // back to close the booking row this sync itself created earlier.
+  //
+  // Fixed here, not in the webhook: the webhook has never delivered a
+  // single event (see the file header), so this periodic pull is the only
+  // path that actually sees real cancellations. `allReservations` (not the
+  // ACTIVE_STATUSES-filtered `reservations`) is used since a cancelled one
+  // is exactly what got filtered out.
+  //
+  // Deliberately scoped to "canceled" only, not "no_show" -- a no-show
+  // still owes the no-show charge per Cloudbeds' own policy and is a
+  // different business decision than a cancellation freeing the room;
+  // left alone until the owner asks for it explicitly.
+  let cancelledClosed = 0;
+  const cancelledReservationIds = allReservations.filter((r) => r.status === "canceled").map((r) => r.reservationID);
+  if (cancelledReservationIds.length > 0) {
+    const { data: toClose } = await supabase
+      .from("bookings")
+      .select("id, unit_id, unit_nomor, guest_nama, status, cloudbeds_reservation_id")
+      .in("cloudbeds_reservation_id", cancelledReservationIds)
+      .not("status", "in", "(batal,checkout)");
+    for (const b of toClose ?? []) {
+      const { error } = await supabase.from("bookings").update({ status: "batal" }).eq("id", b.id);
+      if (error) {
+        errors.push(`${b.cloudbeds_reservation_id}: gagal menutup booking dibatalkan (${error.message})`);
+        continue;
+      }
+      cancelledClosed++;
+      await supabase.from("notifications").insert({
+        unit_id: b.unit_id,
+        target_role: "all",
+        tipe: "booking",
+        judul: `Booking dibatalkan (Cloudbeds) — Unit ${b.unit_nomor}`,
+        pesan: `${b.guest_nama} — reservasi dibatalkan di Cloudbeds, terdeteksi lewat sinkron berkala.`,
+        ref_id: b.cloudbeds_reservation_id,
+      });
+    }
+  }
+
   console.log("[cloudbeds-reservation-sync]", JSON.stringify({
     property_id_used: (process.env.CLOUDBEDS_PROPERTY_ID ?? "").trim() || null,
     fetched_total: allReservations.length,
@@ -291,6 +336,7 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
     skipped_unmapped: skippedUnmapped,
     skipped_own: skippedOwn,
     unmapped_room_ids: [...new Set(unmappedRoomIds)].slice(0, 20),
+    cancelled_closed: cancelledClosed,
     errors: errors.slice(0, 20),
   }));
 
@@ -304,6 +350,7 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
     skipped_unmapped: skippedUnmapped,
     skipped_own: skippedOwn,
     unmapped_room_ids: [...new Set(unmappedRoomIds)].slice(0, 20),
+    cancelled_closed: cancelledClosed,
     errors: errors.slice(0, 20),
   };
 }
