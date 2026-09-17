@@ -2,6 +2,30 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-17 — investor A4 & A5 (13 unit) komplain tidak bisa login → password direset
+
+Owner melaporkan investor baru A4 dan A5 (`a4@haluoleo.id`, `a5@haluoleo.id`,
+akun yang dibuat 15 Sep, lihat catatan 15 Sep di bawah) tidak bisa login.
+Sempat dicek juga apakah maksudnya akun `mega@haluoleo.id` — **bukan**,
+akun Mega terkonfirmasi sehat (login sukses 17 Sep 06:42 UTC).
+
+**Dicek langsung ke database, bukan ditebak:** kedua akun A4/A5 sehat secara
+struktur — `is_active=true`, terpetakan benar ke unit A4/A5 di
+`villa_investor_units` (tetap 13 baris), `villa_login` RPC sudah pakai
+`lower(email)` jadi bug huruf besar (14 Sep) tidak relevan di sini.
+**Bukti nyata masalahnya:** `last_login` kedua akun persis sama dengan waktu
+akun dibuat (15 Sep, ± 34 detik) — itu login uji owner sendiri saat
+pembuatan akun; **belum pernah ada login sukses dari investornya sendiri**
+sejak itu. Kesimpulan: bukan bug sistem, investor tidak tahu/salah
+password sementara yang dikirim lewat WhatsApp.
+
+**Password direset** via `villa_set_password()` RPC (yang sudah ada, dipakai
+apa adanya — bukan diagram baru), `must_change_password` tetap `true`.
+Diverifikasi nyata: login lewat `villa_login()` RPC sukses untuk keduanya
+dengan password barunya. **Password baru TIDAK ditulis di sini** (aturan
+proyek: tidak ada secret di repo/project-memory) — dikirim langsung ke
+owner di chat sesi ini, untuk diteruskan ke kedua investor lewat WhatsApp.
+
 ## 2026-09-16 — Standard: weekday diturunkan ke Rp550.000, weekend TETAP Rp750.000 (owner-approved)
 
 Owner minta harga weekday Standard diturunkan ke Rp550.000, tapi harga
