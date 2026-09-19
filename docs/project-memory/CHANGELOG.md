@@ -4,6 +4,15 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-09-19 (branch `claude/receptionist-checkout-qris-payment-gvczm7`, lanjutan) — iPaymu dihapus + semua waktu jadi WIB
+- **Integrasi iPaymu dihapus** atas keputusan owner (*"Saya tidak pakai ipaymu saya pakai qris statis"*): `src/lib/ipaymuApi.ts`, `/api/payment-gateway/qris`, `/api/payment-gateway/qris/status`, `/api/webhooks/ipaymu`, dependensi `qrcode`. Tidak pernah punya kredensial di Vercel dan `walkin_payments` kosong — tidak ada transaksi sungguhan yang hilang. Kode tetap ada di riwayat git.
+- **Payment Gateway jadi murni QRIS statis**: QR villa ditampilkan lebih besar, nominal besar di bawahnya, langkah bayar ditulis eksplisit (tamu mengetik sendiri nominal), dan ditegaskan tidak ada konfirmasi otomatis — klik "Tandai Lunas" kasir itulah catatan pembayarannya. Peringatan merah kalau gambar QRIS belum diunggah.
+- **`src/lib/format.ts` memaksa `Asia/Jakarta`** di semua formatter; `fmtDateTime`/`fmtTime` baru selalu memberi label "WIB". `todayISO`/`currentPeriod` yang dulu memakai tanggal UTC (menjawab kemarin selama 00:00–07:00 WIB) kini memakai kalender WIB.
+- **Kalender booking front-desk bergeser satu hari** karena `addDays()` mengurai tanggal sebagai tengah malam lokal lalu menyerialkannya sebagai UTC — `addDays("2026-09-20", 1)` mengembalikan tanggal yang sama di WIB. Diganti `addDaysISO`.
+- **Daftar bulan laporan investor menunjuk bulan yang salah** (label "September 2026", periode dikirim `2026-08`). Diganti `recentPeriods()`. Angka di halaman Laporan Bulanan akan bergeser ke bulan yang benar — tidak ada formula yang diubah.
+- **Belum diubah, perlu persetujuan owner**: `villa_commit_checkin` (`periode_bulan`) dan `villa_commit_checkout` (`housekeeping.tgl`) masih memakai `now()`/`current_date` pada database ber-timezone UTC.
+- 8 tes baru (total 70 hijau), `tsc` bersih, build berhasil.
+
 ### 2026-09-19 (branch `claude/receptionist-checkout-qris-payment-gvczm7`, not yet on `main`)
 - **Booking 0 malam tidak bisa dibuat lagi dari layar kasir.** Bawaan check-out = check-in menghasilkan daterange kosong, yang lolos dari exclusion constraint `bookings_no_overlap_active`, dari `datesOverlap` villa-api, DAN dari `/availability` — tiga lapis pengaman double-booking sekaligus. Bawaan jadi satu malam + validasi rentang; logikanya di `src/lib/stayDates.ts` dengan 9 tes (total 62 tes hijau).
 - **KTP + tanda tangan tidak bisa lagi menempel ke tamu yang salah.** `capturedKtpSig` kini terikat ke `booking_id`.

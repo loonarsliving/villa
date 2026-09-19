@@ -3,23 +3,11 @@
 import { InvestorShell } from "../_shell";
 import { useAuth } from "@/lib/auth";
 import { Card, CardHeader } from "@/components/Card";
-
-function lastMonths(n: number) {
-  const out: { period: string; label: string }[] = [];
-  const now = new Date();
-  for (let i = 0; i < n; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    out.push({
-      period: d.toISOString().slice(0, 7),
-      label: d.toLocaleDateString("id-ID", { month: "long", year: "numeric" }),
-    });
-  }
-  return out;
-}
+import { recentPeriods } from "@/lib/format";
 
 export default function LaporanPage() {
   const { user } = useAuth();
-  const months = lastMonths(6);
+  const months = recentPeriods(6);
 
   return (
     <InvestorShell pageTitle="Laporan Bulanan" pageSub="Riwayat & unduhan">

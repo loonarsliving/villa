@@ -6,7 +6,7 @@ import Link from "next/link";
 import { AppHome, type TabItem } from "@/components/AppHome";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { fmtCurrency } from "@/lib/format";
+import { fmtCurrency, currentPeriod } from "@/lib/format";
 import type { Report } from "@/lib/types";
 
 /**
@@ -30,9 +30,9 @@ const TABS: TabItem[] = [
   { href: "/investor/notifikasi", label: "Notifikasi", icon: "◉" },
 ];
 
-function periodeBulanIni(): string {
-  return new Date().toISOString().slice(0, 7);
-}
+// Periode dihitung dari kalender WIB (lihat currentPeriod di format.ts);
+// versi UTC-nya menjawab bulan lalu selama 00:00-07:00 WIB tanggal 1.
+const periodeBulanIni = currentPeriod;
 
 export default function InvestorHomePage() {
   const { user } = useAuth();

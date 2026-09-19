@@ -6,8 +6,7 @@ import { FrontDeskShell } from "./_shell";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { useToast } from "@/lib/toast";
-import { fmtCurrencyFull, fmtDate } from "@/lib/format";
-import { todayLocalISO } from "@/lib/stayDates";
+import { fmtCurrencyFull, fmtDate, fmtDateTime, fmtFullDate, todayISO } from "@/lib/format";
 import { Card, CardHeader, Loading } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
@@ -221,7 +220,7 @@ export default function FrontDeskPage() {
    * baris, yang paling lama dibuat malah hilang dari daftar. Pengurutan dan
    * pencarian ini dilakukan di sisi klien, tanpa mengubah villa-api.
    */
-  const hariIni = todayLocalISO();
+  const hariIni = todayISO();
   const ciQuery = ciSearch.trim().toLowerCase();
   const sortedScheduled = [...scheduledBookings]
     .filter((b) => {
@@ -243,7 +242,7 @@ export default function FrontDeskPage() {
   return (
     <FrontDeskShell
       pageTitle="Front Desk"
-      pageSub={new Date().toLocaleDateString("id-ID", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })}
+      pageSub={fmtFullDate()}
       topBarExtra={
         <>
           <button onClick={openCheckin} className="text-[11px] bg-gold-500 text-base-950 font-semibold rounded px-3.5 py-2 whitespace-nowrap">

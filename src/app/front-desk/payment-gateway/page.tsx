@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { AdminShell } from "../../admin/_shell";
 import { FrontDeskShell } from "../_shell";
-import { api, ApiError, localApi } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
-import { fmtCurrencyFull, fmtDate } from "@/lib/format";
-import { addDaysISO, defaultCheckout, nightsBetween, todayLocalISO, validateStayRange } from "@/lib/stayDates";
+import { fmtCurrencyFull, fmtDate, fmtDateTime, fmtFullDate, todayISO } from "@/lib/format";
+import { addDaysISO, defaultCheckout, nightsBetween, validateStayRange } from "@/lib/stayDates";
 import { Card, CardHeader, CardBody, Loading, Badge } from "@/components/Card";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
 import { StatCard } from "@/components/StatCard";
@@ -102,11 +102,6 @@ export default function PaymentGatewayPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [activePayment, setActivePayment] = useState<DisplayPayment | null>(null);
   const [filterStatus, setFilterStatus] = useState<"all" | WalkinStatus>("all");
-  const [dynamicQr, setDynamicQr] = useState<string | null>(null);
-  const [qrLoading, setQrLoading] = useState(false);
-  const [qrError, setQrError] = useState<string | null>(null);
-  const [liveStatus, setLiveStatus] = useState<{ paid: boolean; statusRaw: string | null } | null>(null);
-  const [checkingStatus, setCheckingStatus] = useState(false);
   const [checkinCardOpen, setCheckinCardOpen] = useState(false);
   // "new": KTP+TTD captured BEFORE the booking exists yet -- confirming
   // creates the booking, then shows QRIS. "existing": fallback for when a
@@ -134,14 +129,9 @@ export default function PaymentGatewayPage() {
     signatureDataUrl: string;
   } | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  // QRIS yang sudah pernah dibuat untuk satu transaksi dipakai ulang selama
-  // halaman terbuka: setiap POST /payment/direct membuat transaksi baru di
-  // iPaymu, jadi membuka-tutup modal tidak boleh menumpuk transaksi kembar
-  // dengan referenceId yang sama.
-  const qrCacheRef = useRef<Map<string, string>>(new Map());
 
   const [form, setForm] = useState(() => {
-    const checkin = todayLocalISO();
+    const checkin = todayISO();
     return {
       guest_nama: "",
       guest_hp: "",
@@ -223,81 +213,14 @@ export default function PaymentGatewayPage() {
     };
   }, [form.kategori, form.checkin, form.checkout]);
 
-  useEffect(() => {
-    setDynamicQr(null);
-    setQrError(null);
-    setLiveStatus(null);
-    if (!activePayment || activePayment.status !== "pending") return;
-
-    const cacheKey = `${activePayment.source}_${activePayment.id}`;
-    const cached = qrCacheRef.current.get(cacheKey);
-    if (cached) {
-      setDynamicQr(cached);
-      return;
-    }
-
-    let cancelled = false;
-    setQrLoading(true);
-    localApi<{ qrImageDataUrl?: string }>("/api/payment-gateway/qris", {
-      method: "POST",
-      body: JSON.stringify({
-        kind: activePayment.source,
-        refId: activePayment.id,
-        amount: activePayment.jumlah,
-        guestName: activePayment.guest_nama,
-        guestPhone: activePayment.guest_hp,
-        product: activePayment.deskripsi,
-      }),
-    })
-      .then((body) => {
-        if (cancelled) return;
-        const url = body?.qrImageDataUrl ?? null;
-        if (url) qrCacheRef.current.set(cacheKey, url);
-        setDynamicQr(url);
-      })
-      .catch((e) => {
-        if (!cancelled) setQrError(e instanceof Error ? e.message : "Gagal memuat QRIS dinamis");
-      })
-      .finally(() => {
-        if (!cancelled) setQrLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activePayment?.id, activePayment?.source, activePayment?.status]);
-
-  async function checkLiveStatus() {
-    if (!activePayment) return;
-    setCheckingStatus(true);
-    try {
-      const body = await localApi<{ paid?: boolean; statusRaw?: string | null }>("/api/payment-gateway/qris/status", {
-        method: "POST",
-        body: JSON.stringify({ kind: activePayment.source, refId: activePayment.id }),
-      });
-      setLiveStatus({ paid: !!body?.paid, statusRaw: body?.statusRaw ?? null });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Terjadi kesalahan.";
-      const belumDikonfigurasi = e instanceof ApiError && e.status === 503;
-      toast(
-        "⚠",
-        "Gagal cek status",
-        belumDikonfigurasi
-          ? "Status bayar otomatis belum bisa dipakai karena iPaymu belum dikonfigurasi. Konfirmasi pembayaran lewat mutasi rekening/notifikasi QRIS villa dulu, baru tandai lunas."
-          : msg,
-        "ruby",
-      );
-    } finally {
-      setCheckingStatus(false);
-    }
-  }
-
   const filteredRows = useMemo(
     () => (filterStatus === "all" ? rows : rows.filter((r) => r.status === filterStatus)),
     [rows, filterStatus]
   );
 
-  const todayStr = new Date().toDateString();
-  const todayRows = rows.filter((r) => new Date(r.created_at).toDateString() === todayStr);
+  // "Hari ini" = hari kalender WIB, bukan hari menurut zona waktu perangkat.
+  const todayStr = todayISO();
+  const todayRows = rows.filter((r) => todayISO(new Date(r.created_at)) === todayStr);
   const todayLunas = todayRows.filter((r) => r.status === "lunas");
   const totalHariIni = todayLunas.reduce((s, r) => s + r.jumlah, 0);
   const pendingCount = rows.filter((r) => r.status === "pending").length + villaBookings.filter((b) => b.status === "terjadwal").length;
@@ -353,7 +276,7 @@ export default function PaymentGatewayPage() {
   }
 
   function resetForm(kategori: KasirKategori) {
-    const checkin = todayLocalISO();
+    const checkin = todayISO();
     setForm({
       guest_nama: "",
       guest_hp: "",
@@ -599,19 +522,29 @@ export default function PaymentGatewayPage() {
           <Card>
             <CardHeader
               title="Kasir Walk-in"
-              subtitle="Isi data tamu, lalu buat QRIS pembayaran"
+              subtitle="Isi data tamu, lalu tampilkan QRIS villa ke tamu"
               action={
                 <button onClick={() => setShowSettings((v) => !v)} className="text-[10.5px] font-semibold text-gold-500 border border-gold-500/25 rounded px-3 py-1.5 shrink-0">
                   {showSettings ? "Tutup" : "⚙ QRIS"}
                 </button>
               }
             />
+            {!qris && !showSettings && (
+              <button
+                onClick={() => setShowSettings(true)}
+                className="w-full text-left px-4 sm:px-5 py-3 border-b border-ruby-500/30 bg-ruby-500/5 text-[10.5px] leading-relaxed text-ruby-400"
+              >
+                <b>QRIS villa belum diunggah.</b> Semua pembayaran di halaman ini memakai QRIS statis villa — tanpa
+                gambarnya, tamu tidak punya apa pun untuk dipindai. Ketuk di sini untuk mengunggahnya.
+              </button>
+            )}
             {showSettings && (
               <div className="px-4 sm:px-5 py-4 border-b border-ink/[0.05] bg-base-800/40">
-                <div className="text-[10px] text-ink/40 mb-2">
-                  Unggah QRIS statis milik villa (gambar, atau PDF lembar QRIS dari bank/PSP — otomatis
-                  dikonversi jadi gambar). QRIS ini langsung tampil di layar bersama nominal setiap
-                  transaksi, tidak perlu diunduh manual lagi.
+                <div className="text-[10px] text-ink/40 mb-2 leading-relaxed">
+                  Unggah QRIS statis milik villa (gambar, atau PDF lembar QRIS dari bank/PSP — otomatis dikonversi jadi
+                  gambar). QRIS inilah yang dipakai untuk <b>semua</b> pembayaran di halaman ini: villa, cafe, spa.
+                  Karena QRIS statis tidak membawa nominal, tamu mengetik sendiri jumlahnya dan kasir yang memastikan
+                  uangnya masuk sebelum menandai lunas.
                 </div>
                 <div className="flex items-center gap-3">
                   {qris && <img src={qris} alt="QRIS" className="w-16 h-16 rounded object-cover border border-ink/10" />}
@@ -743,7 +676,7 @@ export default function PaymentGatewayPage() {
                 disabled={submitting || (form.kategori === "villa" && !stayRange.ok)}
                 className="w-full mt-1 bg-gold-500 text-base-950 rounded-lg py-3 text-[12.5px] font-semibold tracking-wide hover:opacity-90 active:scale-[0.99] transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {submitting ? "Memproses…" : form.kategori === "villa" ? "Lanjut: Foto KTP & Tanda Tangan →" : "Buat QRIS Pembayaran"}
+                {submitting ? "Memproses…" : form.kategori === "villa" ? "Lanjut: Foto KTP & Tanda Tangan →" : "Buat Tagihan & Tampilkan QRIS"}
               </button>
             </CardBody>
           </Card>
@@ -808,7 +741,7 @@ export default function PaymentGatewayPage() {
                     <div className="flex-1 min-w-0">
                       <div className="text-xs font-medium text-ink/80 truncate">{r.guest_nama}</div>
                       <div className="text-[10px] text-ink/30 mt-0.5 truncate">
-                        {r.deskripsi} · {fmtDate(r.created_at, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                        {r.deskripsi} · {fmtDateTime(r.created_at)}
                       </div>
                     </div>
                     <div className="text-right shrink-0">
@@ -833,9 +766,6 @@ export default function PaymentGatewayPage() {
               <Btn onClick={() => activePayment && setStatus(activePayment, "batal")} disabled={submitting}>
                 Batalkan
               </Btn>
-              <Btn onClick={checkLiveStatus} disabled={checkingStatus || submitting}>
-                {checkingStatus ? "Mengecek…" : "Cek Status"}
-              </Btn>
               <Btn variant="primary" onClick={() => activePayment && setStatus(activePayment, "lunas")} disabled={submitting}>
                 {submitting
                   ? "Memproses…"
@@ -854,51 +784,55 @@ export default function PaymentGatewayPage() {
         {activePayment && (
           <div className="text-center">
             <Badge tone={statusTone[activePayment.status]}>{statusLabel[activePayment.status]}</Badge>
-            {liveStatus && (
-              <div className="mt-2">
-                <Badge tone={liveStatus.paid ? "ok" : "pending"}>
-                  {liveStatus.paid ? "iPaymu: sudah dibayar" : `iPaymu: belum dibayar${liveStatus.statusRaw ? ` (${liveStatus.statusRaw})` : ""}`}
-                </Badge>
-              </div>
-            )}
-            <div className="mt-4 mb-2 flex justify-center">
-              {qrLoading ? (
-                <div className="w-56 h-56 rounded-lg border border-dashed border-ink/15 flex items-center justify-center text-[11px] text-ink/30 px-4 text-center">
-                  Membuat QRIS…
-                </div>
-              ) : dynamicQr ? (
-                <img src={dynamicQr} alt="QRIS" className="w-56 h-56 rounded-lg object-contain border border-ink/10 bg-white p-2" />
-              ) : qris ? (
-                <img src={qris} alt="QRIS statis villa" className="w-56 h-56 rounded-lg object-contain border border-ink/10 bg-white p-2" />
+
+            <div className="mt-4 mb-3 flex justify-center">
+              {qris ? (
+                <img
+                  src={qris}
+                  alt="QRIS statis villa"
+                  className="w-64 h-64 rounded-lg object-contain border border-ink/10 bg-white p-2"
+                />
               ) : (
-                <div className="w-56 h-56 rounded-lg border border-dashed border-ink/15 flex items-center justify-center text-[11px] text-ink/30 px-4 text-center">
-                  {qrError ? `QRIS dinamis gagal dibuat (${qrError}). ` : ""}QRIS belum diunggah. Buka pengaturan ⚙ QRIS untuk mengunggah gambar QRIS statis villa.
+                <div className="w-64 h-64 rounded-lg border border-dashed border-ruby-500/40 bg-ruby-500/5 flex items-center justify-center text-[11px] text-ruby-400 px-4 text-center leading-relaxed">
+                  QRIS villa belum diunggah. Buka pengaturan ⚙ QRIS di kartu Kasir Walk-in untuk mengunggah gambar/PDF
+                  QRIS villa — tanpa itu tamu tidak punya apa pun untuk dipindai.
                 </div>
               )}
             </div>
+
+            <div className="font-serif text-3xl font-medium text-ink">{fmtCurrencyFull(activePayment.jumlah)}</div>
+            <div className="text-xs text-ink/50 mt-1">{activePayment.deskripsi}</div>
+
             {/*
-              QRIS statis TIDAK membawa nominal. Sebelumnya, kalau QRIS
-              dinamis gagal dibuat (mis. iPaymu belum dikonfigurasi), modal
-              ini diam-diam menampilkan QRIS statis seolah semuanya normal --
-              kasir tidak punya cara tahu bahwa tamu harus mengetik sendiri
-              nominalnya, dan salah ketik nominal baru ketahuan belakangan.
+              QRIS statis tidak membawa nominal di dalam kodenya: tamu memindai
+              kode yang sama untuk transaksi apa pun, lalu mengetik sendiri
+              jumlahnya. Karena itu nominal ditampilkan besar di atas, dan
+              langkahnya ditulis terang-terangan -- tidak ada konfirmasi
+              otomatis dari mana pun, klik "Tandai Lunas" oleh kasir ITULAH
+              catatan pembayarannya.
             */}
-            {!dynamicQr && qris && !qrLoading && (
-              <div className="mb-3 text-left text-[10px] leading-relaxed text-gold-600 border border-gold-500/30 bg-gold-500/5 rounded px-3 py-2">
-                <b>QRIS statis — nominal TIDAK otomatis.</b> Minta tamu mengetik sendiri{" "}
-                <b>{fmtCurrencyFull(activePayment.jumlah)}</b> di aplikasi pembayarannya, lalu cocokkan bukti transfernya
-                sebelum menandai lunas.
-                {qrError ? <div className="mt-1 text-ink/40">QRIS dinamis tidak tersedia: {qrError}</div> : null}
+            {activePayment.status === "pending" && (
+              <div className="mt-4 text-left text-[10.5px] leading-relaxed text-ink/60 border border-gold-500/30 bg-gold-500/5 rounded-lg px-3.5 py-3">
+                <div className="font-semibold text-gold-600 mb-1.5">Cara bayar — QRIS statis</div>
+                <ol className="list-decimal ml-4 space-y-1">
+                  <li>Tamu memindai QRIS di atas.</li>
+                  <li>
+                    Tamu <b>mengetik sendiri</b> nominalnya: <b>{fmtCurrencyFull(activePayment.jumlah)}</b> — kode ini
+                    tidak membawa nominal.
+                  </li>
+                  <li>Cocokkan notifikasi masuk / mutasi rekening villa sebelum menekan Tandai Lunas.</li>
+                </ol>
+                <div className="mt-2 text-[9.5px] text-ink/35">
+                  Tidak ada konfirmasi otomatis. Status lunas ditentukan oleh klik Anda, jadi pastikan uangnya benar-benar
+                  masuk lebih dulu.
+                </div>
               </div>
             )}
-            <div className="font-serif text-2xl font-medium text-ink">{fmtCurrencyFull(activePayment.jumlah)}</div>
-            <div className="text-xs text-ink/50 mt-1">{activePayment.deskripsi}</div>
+
             <div className="text-[10px] text-ink/30 mt-3">
               {activePayment.guest_nama} {activePayment.guest_hp ? `· ${activePayment.guest_hp}` : ""}
             </div>
-            <div className="text-[10px] text-ink/20 mt-1">
-              {fmtDate(activePayment.created_at, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
-            </div>
+            <div className="text-[10px] text-ink/20 mt-1">{fmtDateTime(activePayment.created_at)}</div>
           </div>
         )}
       </Modal>
@@ -921,7 +855,7 @@ export default function PaymentGatewayPage() {
                   tipe: pendingCheckin.tipe ?? "harian",
                   // Tanggal booking yang sebenarnya, bukan "hari ini": kartu
                   // ini yang dibaca dan ditandatangani tamu.
-                  checkinDate: pendingCheckin.tgl_checkin ?? todayLocalISO(),
+                  checkinDate: pendingCheckin.tgl_checkin ?? todayISO(),
                   checkoutDate: pendingCheckin.tgl_checkout ?? null,
                 }
               : null

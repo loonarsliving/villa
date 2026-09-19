@@ -1,25 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  addDaysISO,
-  addMonthsISO,
-  defaultCheckout,
-  nightsBetween,
-  todayLocalISO,
-  validateStayRange,
-} from "./stayDates";
-
-describe("todayLocalISO", () => {
-  it("pakai tanggal lokal perangkat, bukan UTC", () => {
-    // 20 Sep 2026 pukul 01:00 WIB = 19 Sep 18:00 UTC. Resepsionis yang
-    // check-in tamu jam 1 pagi harus dapat tanggal 20, bukan 19.
-    const wibEarlyMorning = new Date("2026-09-19T18:00:00Z");
-    expect(todayLocalISO(wibEarlyMorning)).toBe(
-      `${wibEarlyMorning.getFullYear()}-${String(wibEarlyMorning.getMonth() + 1).padStart(2, "0")}-${String(
-        wibEarlyMorning.getDate(),
-      ).padStart(2, "0")}`,
-    );
-  });
-});
+import { addDaysISO, addMonthsISO, defaultCheckout, nightsBetween, validateStayRange } from "./stayDates";
 
 describe("addDaysISO / addMonthsISO", () => {
   it("menambah hari melewati batas bulan", () => {

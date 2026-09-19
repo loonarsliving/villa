@@ -7,16 +7,21 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
 import { fmtDate, todayISO } from "@/lib/format";
+import { addDaysISO } from "@/lib/stayDates";
 import { Card, CardHeader, Loading } from "@/components/Card";
 import type { Booking, Unit } from "@/lib/types";
 
 const RANGE_OPTIONS = [7, 14, 21] as const;
 
-function addDays(iso: string, n: number): string {
-  const d = new Date(`${iso}T00:00:00`);
-  d.setDate(d.getDate() + n);
-  return d.toISOString().split("T")[0];
-}
+/**
+ * Dulu tanggalnya diurai sebagai tengah malam WAKTU LOKAL lalu diserialkan
+ * ulang lewat toISOString() (UTC). Di WIB (UTC+7) tengah malam 20 Sep adalah
+ * 17:00 UTC tanggal 19 Sep, jadi addDays("2026-09-20", 1) mengembalikan
+ * "2026-09-20" lagi -- seluruh kolom kalender bergeser satu hari, termasuk
+ * penanda "Hari Ini" dan rentang yang diminta ke villa-api. addDaysISO
+ * bekerja sepenuhnya di UTC sehingga tanggal polos tidak pernah bergeser.
+ */
+const addDays = addDaysISO;
 
 function dateRange(start: string, days: number): string[] {
   return Array.from({ length: days }, (_, i) => addDays(start, i));

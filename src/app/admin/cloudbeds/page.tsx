@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { AdminShell } from "../_shell";
 import { api, ApiError, localApi } from "@/lib/api";
 import { useToast } from "@/lib/toast";
-import { fmtDate } from "@/lib/format";
+import { fmtDate, fmtDateTime, fmtTime } from "@/lib/format";
 import { Card, CardHeader, CardBody, Loading, Badge } from "@/components/Card";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
 import type { CloudbedsMapping, CloudbedsLogRow, Unit } from "@/lib/types";
@@ -336,7 +336,7 @@ export default function AdminCloudbedsPage() {
             </Badge>
             {lastChecked && (
               <span className="text-[10px] text-ink/30">
-                Dicek {fmtDate(lastChecked.toISOString(), { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                Dicek {fmtTime(lastChecked.toISOString(), { second: "2-digit" })}
               </span>
             )}
           </div>
@@ -421,7 +421,7 @@ export default function AdminCloudbedsPage() {
               <div className="flex-1 min-w-0">
                 <div className="text-xs text-ink/80">{l.event_type}</div>
                 <div className="text-[10px] text-ink/30 mt-0.5">
-                  {l.reservation_id || "—"} · {fmtDate(l.created_at, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                  {l.reservation_id || "—"} · {fmtDateTime(l.created_at)}
                 </div>
               </div>
               <Badge tone={l.matched ? "ok" : "danger"}>{l.matched ? "Matched" : "Tidak matched"}</Badge>

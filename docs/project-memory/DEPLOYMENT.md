@@ -64,11 +64,29 @@ The repo is ready to receive it with no further code changes. Steps for whoever 
 5. Verify as an admin: open `/admin/cloudbeds`, confirm the green "Terhubung ke Cloudbeds API — N room tersedia" banner replaces the amber "belum tersedia" one, and that "+ Petakan Room" shows a live dropdown instead of manual fields.
 6. `/api/admin/cloudbeds/rooms` requires a valid admin session token (hardened 2026-08-27) — if you get 401 while testing, confirm you're logged in as `admin` role, not just hitting the URL directly.
 
-### ADDING IPAYMU_VA / IPAYMU_API_KEY (prepared 2026-08-27, QRIS for Payment Gateway)
-Unlike the Cloudbeds work, this one has a real unknown to close before trusting it in production: **iPaymu's actual `/payment/direct` response shape was never confirmed** (their docs site was unreachable from the dev environment that built this) — `src/lib/ipaymuApi.ts` parses it defensively but has not been exercised against a live call.
-1. Get `IPAYMU_VA` and `IPAYMU_API_KEY` from the iPaymu dashboard (sandbox account is enough to start — no need to wait for production approval).
-2. Set `IPAYMU_VA`, `IPAYMU_API_KEY` in Vercel env vars, and leave `IPAYMU_ENV` unset or `sandbox` — do NOT set it to `production` yet.
-3. **Test on sandbox first**: as staff, open Payment Gateway, create a cafe/spa/lainnya transaction, and confirm a real scannable QR renders in the modal (not the "QRIS dinamis gagal dibuat" fallback message). If it fails, the response field names in `parsePaymentResponse` (`src/lib/ipaymuApi.ts`) likely need correcting against the real response — the route returns iPaymu's raw response body in its error JSON specifically to make this diagnosable.
-4. Use iPaymu's sandbox payment simulator to complete a test payment, and confirm the transaction in Payment Gateway's history flips to "Lunas" on its own within a few seconds (proves the webhook → `checkTransactionStatus` → DB update path works end to end).
-5. Only after that, switch `IPAYMU_ENV` to `production` and swap in production credentials.
-6. Reminder of the deliberate scope limit: villa bookings paid via QRIS still need a staff click on "Tandai Lunas & Check-In" — only cafe/spa/lainnya auto-flip to Lunas. This is intentional (see INTEGRATIONS.md), not a bug.
+### PEMBAYARAN QRIS — STATIS, TANPA PAYMENT GATEWAY (keputusan owner 2026-09-19)
+
+Owner menegaskan villa **tidak memakai iPaymu** (atau PSP mana pun): pembayaran
+tamu memakai **QRIS statis milik villa**. Integrasi iPaymu karena itu dihapus
+dari repo pada 2026-09-19 (`src/lib/ipaymuApi.ts`, `/api/payment-gateway/qris`,
+`/api/payment-gateway/qris/status`, `/api/webhooks/ipaymu`, plus dependensi
+`qrcode`). Kalau suatu saat berubah pikiran, kodenya masih ada di riwayat git
+sebelum commit penghapusan itu — jangan ditulis ulang dari nol.
+
+Konsekuensi yang harus dipahami siapa pun yang mengoperasikan Payment Gateway:
+1. **QRIS statis tidak membawa nominal.** Tamu memindai kode yang sama untuk
+   transaksi apa pun dan mengetik sendiri jumlahnya. Layar kasir menampilkan
+   nominalnya besar-besar dan menuliskan langkahnya, tapi tidak ada yang bisa
+   memaksa tamu mengetik angka yang benar.
+2. **Tidak ada konfirmasi otomatis.** Tidak ada webhook, tidak ada cek status.
+   Klik "Tandai Lunas" oleh kasir ITULAH catatan pembayarannya — untuk villa,
+   klik itu sekaligus menjalankan check-in (kirim PIN via WA, catat pemasukan
+   untuk bagi hasil 70/30, ubah status unit). Kasir wajib mencocokkan
+   notifikasi/mutasi rekening villa lebih dulu.
+3. **Gambar QRIS wajib diunggah.** Disimpan di `integration_settings.walkin_qris`
+   (`data_url`), diunggah lewat ⚙ QRIS di halaman Payment Gateway (gambar atau
+   PDF lembar QRIS dari bank — PDF dikonversi jadi PNG di browser). Tanpa itu
+   tamu tidak punya apa pun untuk dipindai; halaman sekarang menampilkan
+   peringatan merah kalau kosong. Per 2026-09-19 gambar ini SUDAH terisi.
+4. **Tidak ada env var yang perlu diset** untuk pembayaran.
+

@@ -2,6 +2,87 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-19 (lanjutan) — iPaymu dihapus, semua jam & tanggal jadi WIB
+
+Dua keputusan owner setelah audit di bawah: *"Saya tidak pakai ipaymu saya
+pakai qris statis, dan tolong rubah jdi wib untuk jam dan waktu"*.
+
+### iPaymu dihapus seluruhnya
+
+Dihapus: `src/lib/ipaymuApi.ts`, `/api/payment-gateway/qris`,
+`/api/payment-gateway/qris/status`, `/api/webhooks/ipaymu`, dan dependensi
+`qrcode`. Kredensialnya memang tidak pernah ada di Vercel dan
+`walkin_payments` kosong, jadi tidak ada satu pun transaksi sungguhan yang
+pernah melewatinya. Kodenya tetap ada di riwayat git.
+
+Halaman Payment Gateway sekarang **murni QRIS statis**: tidak ada percobaan
+membuat QR dinamis, tidak ada tombol "Cek Status", tidak ada lencana status
+iPaymu. Yang ditambahkan sebagai gantinya, karena sifat QRIS statis memang
+menuntutnya:
+- QRIS villa ditampilkan lebih besar (w-64) dengan nominal besar di bawahnya;
+- langkah bayar ditulis eksplisit — tamu **mengetik sendiri** nominalnya,
+  karena kode statis tidak membawa nominal;
+- ditegaskan tidak ada konfirmasi otomatis: **klik "Tandai Lunas" oleh kasir
+  itulah catatan pembayarannya**, dan untuk villa klik itu sekaligus
+  menjalankan check-in (kirim PIN WA, catat pemasukan bagi hasil, ubah status
+  unit);
+- peringatan merah di kartu Kasir kalau gambar QRIS belum diunggah — tanpa
+  itu seluruh alur kasir mati, dan dulu hal ini hanya terlihat setelah modal
+  dibuka.
+
+### Semua jam & tanggal jadi WIB
+
+`src/lib/format.ts` sekarang memaksa `timeZone: "Asia/Jakarta"` di semua
+formatter dan memberi label "WIB" pada setiap jam (`fmtDateTime`, `fmtTime`).
+Sebelumnya modul ini tidak menyebut zona waktu sama sekali, jadi hasilnya
+mengikuti pengaturan perangkat — HP yang zonanya salah atau laptop yang
+sedang di luar negeri menampilkan jam berbeda untuk kejadian yang sama,
+padahal jam di layar ini dipakai menghitung denda check-out (batas 12:00
+WIB).
+
+Tiga bug tanggal yang ikut ketahuan dan diperbaiki — semuanya akibat mencampur
+waktu lokal dengan UTC:
+
+1. **`todayISO()`/`currentPeriod()` memakai tanggal UTC.** Antara 00:00–07:00
+   WIB keduanya menjawab tanggal/bulan **kemarin**. Resepsionis shift malam
+   mendapat tanggal kemarin sebagai nilai bawaan form check-in.
+2. **Kalender booking front-desk bergeser satu hari.** `addDays()` mengurai
+   tanggal sebagai tengah malam **lokal** lalu menyerialkan ulang lewat
+   `toISOString()` (**UTC**). Di WIB, tengah malam 20 Sep = 17:00 UTC 19 Sep,
+   sehingga `addDays("2026-09-20", 1)` mengembalikan `"2026-09-20"` lagi —
+   seluruh kolom kalender, penanda "Hari Ini", dan rentang yang diminta ke
+   villa-api bergeser. Sekarang memakai `addDaysISO` yang murni UTC.
+3. **Daftar bulan di laporan investor menunjuk bulan yang salah.**
+   `new Date(tahun, bulan - i, 1).toISOString().slice(0,7)` di WIB
+   menghasilkan bulan **sebelumnya**, sementara labelnya memakai waktu lokal.
+   Jadi label tertulis "September 2026" tapi periode yang diminta ke API
+   `2026-08` — investor membaca laporan bulan yang bukan dipilihnya.
+   Diganti `recentPeriods()` yang murni aritmetika tahun/bulan.
+   **Perhatian: angka di halaman Laporan Bulanan investor akan bergeser ke
+   bulan yang benar setelah ini.** Tidak ada formula yang diubah — hanya
+   bulan yang diminta.
+
+Ditambah 8 tes baru untuk WIB (total 70 tes hijau).
+
+### Masih memakai UTC dan BELUM diubah — perlu persetujuan owner
+
+Ini di sisi database, bukan frontend, dan menyentuh uang/skema:
+- **`villa_commit_checkin` menulis `periode_bulan = to_char(now(),'YYYY-MM')`
+  dengan timezone database UTC** (dikonfirmasi: `current_setting('TimeZone')`
+  = UTC). Check-in antara 00:00–07:00 WIB pada tanggal 1 akan tercatat di
+  **bulan sebelumnya**, sehingga pemasukannya masuk ke laporan bagi hasil
+  bulan yang salah.
+- **`villa_commit_checkout` memakai `current_date`** untuk `housekeeping.tgl`
+  dengan masalah yang sama. Checkout yang diproses 00:00–07:00 WIB membuat
+  tugas housekeeping bertanggal kemarin, sehingga tidak muncul di halaman
+  Housekeeping yang menanyakan tanggal hari ini. Setelah `todayISO()` jadi
+  WIB, tugas seperti itu tidak akan muncul sama sekali (sebelumnya sempat
+  muncul selama 6 jam pertama). Jendelanya sempit — butuh checkout diproses
+  dini hari — tapi nyata.
+
+Perbaikannya sederhana (`(now() at time zone 'Asia/Jakarta')`), tapi keduanya
+mengubah fungsi database yang menyentuh pencatatan pemasukan investor.
+
 ## 2026-09-19 — audit halaman resepsionis (check-in + pembayaran QRIS)
 
 Owner minta halaman resepsionis untuk check-in dan pembayaran QRIS diperiksa
