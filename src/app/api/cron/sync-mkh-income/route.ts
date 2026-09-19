@@ -8,7 +8,7 @@ export const maxDuration = 30;
 const API_BASE = "https://svcmybsziaelwwdrnzcv.supabase.co/functions/v1/villa-api";
 
 /**
- * Vercel Cron target (see vercel.json, 1st of every month, 09:15 WITA).
+ * Vercel Cron target (see vercel.json, 1st of every month, `15 1 1 * *` UTC = 08:15 WIB).
  * Same CRON_SECRET guard as the other cron routes -- once past that, calls
  * villa-api's own POST /cron/sync-mkh-income (guarded separately by
  * integration_settings.cron.secret, same pattern as /cron/dividend-list),

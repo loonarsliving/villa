@@ -8,7 +8,7 @@ export const maxDuration = 30;
 const API_BASE = "https://svcmybsziaelwwdrnzcv.supabase.co/functions/v1/villa-api";
 
 /**
- * Vercel Cron target (see vercel.json, tanggal 25 tiap bulan jam 09:00 WITA).
+ * Vercel Cron target (see vercel.json, tanggal 25 tiap bulan, `0 1 25 * *` UTC = 08:00 WIB).
  * Same CRON_SECRET guard as the other cron routes -- once past that, calls
  * villa-api's own POST /cron/dividend-list (guarded separately by
  * integration_settings.cron.secret, same pattern as its existing

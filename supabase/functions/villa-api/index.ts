@@ -130,9 +130,39 @@ const PENDING_PAYMENT_HOLD_MINUTES = 60;
  */
 const EXPIRED_HOLD_MARK = '[Kedaluwarsa otomatis]';
 
+/**
+ * Tanggal dan bulan BISNIS villa selalu mengikuti kalender WIB
+ * (Asia/Jakarta), bukan UTC.
+ *
+ * Edge Function ini berjalan di UTC, jadi `new Date().toISOString()` menjawab
+ * tanggal/bulan KEMARIN selama pukul 00:00-07:00 WIB. Yang terkena bukan hal
+ * sepele: default periode `/report` dan `/admin/overview` (laporan bagi hasil
+ * investor), `/summary` dan `/housekeeping` (tugas "hari ini" resepsionis),
+ * masa berlaku voucher menginap investor, dan tanggal berlakunya promo.
+ *
+ * en-CA dipakai karena satu-satunya locale umum yang memformat tanggal persis
+ * sebagai YYYY-MM-DD, sehingga hasilnya bisa langsung dibandingkan sebagai
+ * string dengan kolom tanggal di database.
+ *
+ * Ini HANYA untuk "hari ini"/"bulan ini". Kolom timestamptz (paid_at,
+ * sent_at, dsb.) tetap ditulis sebagai new Date().toISOString() -- menyimpan
+ * titik waktu absolut memang benar, dan frontend sudah menampilkannya dalam
+ * WIB.
+ */
+const WIB_TZ = 'Asia/Jakarta';
+function todayWIB(d = new Date()){ return d.toLocaleDateString('en-CA', {timeZone: WIB_TZ}); }
+function monthWIB(d = new Date()){ return todayWIB(d).slice(0,7); }
+function prevMonthWIB(d = new Date()){
+  const [y, mo] = monthWIB(d).split('-').map(Number);
+  const total = y*12 + (mo-1) - 1;
+  return `${Math.floor(total/12)}-${String((total%12)+1).padStart(2,'0')}`;
+}
+
+// Nomor invoice dihitung sekali lalu DISIMPAN di bookings.invoice_no, jadi
+// memindahkan turunannya ke WIB tidak pernah menomori ulang invoice yang
+// sudah terbit -- hanya yang baru.
 function invoiceNoFor(booking){
-  const d = new Date(booking.created_at);
-  const ymd = d.toISOString().slice(0,10).replace(/-/g,'');
+  const ymd = todayWIB(new Date(booking.created_at)).replace(/-/g,'');
   return `INV-LV-${ymd}-${String(booking.id).slice(0,8).toUpperCase()}`;
 }
 
@@ -550,7 +580,7 @@ async function periksaVoucherInvestor(kode, tgl_checkin, tgl_checkout){
     // diminta. Membandingkannya dengan tanggal menginap membuat permintaan
     // untuk November dijawab "bulan Oktober sudah lewat" -- padahal Oktober
     // belum mulai, dan kodenya masih utuh.
-    const bulanIni = new Date().toISOString().slice(0,7);
+    const bulanIni = monthWIB();
     return {ok:false, alasan: bulanKode < bulanIni
       ? `Kode ini berlaku untuk bulan ${bulanKode}, dan bulan itu sudah lewat sehingga kodenya hangus.`
       : `Kode ini hanya berlaku untuk menginap di bulan ${bulanKode}.`};
@@ -624,7 +654,7 @@ async function computeStayTarif(unit, tgl_checkin, nights){
  * harga normal dan promonya tidak dipakai.
  */
 async function hitungHargaPromo(promo, roomTypeId, tgl_checkin, tgl_checkout, nights, hargaNormal){
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayWIB();
 
   if(!promo) return {ok:false, alasan:'Kode promo tidak ditemukan'};
   if(promo.aktif !== true) return {ok:false, alasan:'Promo sudah tidak aktif'};
@@ -1263,8 +1293,7 @@ Deno.serve(async (req)=>{
 
     let invoice_no = booking.invoice_no;
     if(!invoice_no){
-      const d = new Date(booking.created_at);
-      const ymd = d.toISOString().slice(0,10).replace(/-/g,'');
+      const ymd = todayWIB(new Date(booking.created_at)).replace(/-/g,'');
       invoice_no = `INV-LV-${ymd}-${booking_id.slice(0,8).toUpperCase()}`;
     }
 
@@ -1458,7 +1487,7 @@ Deno.serve(async (req)=>{
     const provided = req.headers.get('x-internal-secret') ?? '';
     if(!await secretsMatch(provided, bridge.secret)) return err('Unauthorized',401);
 
-    const today = new Date().toISOString().slice(0,10);
+    const today = todayWIB();
     const {data:pending} = await supabase.from('bookings')
       .select('id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,status,sumber,cloudbeds_reservation_id,adults,children')
       .is('cloudbeds_reservation_id', null)
@@ -1963,7 +1992,7 @@ Deno.serve(async (req)=>{
     if(!bridge.secret) return err('Jembatan belum dikonfigurasi (integration_settings.vercel_bridge.secret)',503);
     const provided = req.headers.get('x-internal-secret') ?? '';
     if(!await secretsMatch(provided, bridge.secret)) return err('Unauthorized',401);
-    const tanggal = new Date().toISOString().split('T')[0];
+    const tanggal = todayWIB();
     const {data:units} = await supabase.from('units').select('status');
     const {data:co} = await supabase.from('bookings').select('id').eq('status','checkin').eq('tgl_checkout',tanggal);
     const {data:ci} = await supabase.from('bookings').select('id').eq('status','terjadwal').eq('tgl_checkin',tanggal);
@@ -2055,8 +2084,8 @@ Deno.serve(async (req)=>{
 
     // Okupansi horizon: berapa persen malam-unit yang terisi sampai
     // horizonHari ke depan. Memakai bookings yang benar-benar mengunci unit.
-    const hariIni = new Date().toISOString().slice(0,10);
-    const akhir = new Date(Date.now() + horizonHari*86400000).toISOString().slice(0,10);
+    const hariIni = todayWIB();
+    const akhir = todayWIB(new Date(Date.now() + horizonHari*86400000));
     const {data:units} = await supabase.from('units').select('id');
     const totalUnit = (units ?? []).length;
     if(!totalUnit) return json({dilewati:'tidak ada unit'});
@@ -2216,7 +2245,7 @@ Deno.serve(async (req)=>{
 
   // Reminder WA to every active investor to fill/confirm their dividend
   // bank account, added 2026-09-10 (owner request). One-time send (11 Sep
-  // 2026, 13:05 WITA per vercel.json) -- not a recurring monthly cron, so
+  // 2026, 12:05 WIB per vercel.json) -- not a recurring monthly cron, so
   // this endpoint being callable again isn't itself a re-send risk, but
   // don't wire a recurring schedule to it without asking first.
   // Sent to ALL active investors regardless of payment status -- the
@@ -2249,7 +2278,7 @@ Deno.serve(async (req)=>{
     if(!cron.secret) return err('Cron belum dikonfigurasi (integration_settings.cron.secret)',503);
     if(!await secretsMatch(provided, cron.secret)) return err('Unauthorized',401);
 
-    const periode = new Date().toISOString().slice(0,7);
+    const periode = monthWIB();
     let list;
     try { list = await computeDividendList(periode); } catch(e){ return err(e.message,500); }
 
@@ -2278,11 +2307,7 @@ Deno.serve(async (req)=>{
     if(!await secretsMatch(provided, cron.secret)) return err('Unauthorized',401);
 
     let periode = url.searchParams.get('periode');
-    if(!periode){
-      const now = new Date();
-      const prev = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth()-1, 1));
-      periode = prev.toISOString().slice(0,7);
-    }
+    if(!periode) periode = prevMonthWIB();
 
     let report;
     try { report = await computeReport(undefined, periode); } catch(e){ return err(e.message,500); }
@@ -2669,7 +2694,7 @@ Deno.serve(async (req)=>{
   }
 
   if(path==='/admin/dividends' && m==='GET'){
-    const periode = url.searchParams.get('periode') ?? new Date().toISOString().slice(0,7);
+    const periode = url.searchParams.get('periode') ?? monthWIB();
     try {
       return json(await computeDividendList(periode));
     } catch(e){ return err(e.message,500); }
@@ -2856,7 +2881,7 @@ Deno.serve(async (req)=>{
   // dengan admin. Tidak ada data per-unit atau identitas tamu yang keluar
   // dari sini, hanya angka ringkas.
   if(path==='/dashboard/hari-ini' && m==='GET'){
-    const tanggal = url.searchParams.get('tanggal') ?? new Date().toISOString().slice(0,10);
+    const tanggal = url.searchParams.get('tanggal') ?? todayWIB();
     if(!isValidDateStr(tanggal)) return err('Tanggal tidak valid');
 
     const {data:units} = await supabase.from('units').select('id');
@@ -2885,7 +2910,7 @@ Deno.serve(async (req)=>{
   }
 
   if(path==='/admin/overview' && m==='GET'){
-    const bulan = new Date().toISOString().slice(0,7);
+    const bulan = monthWIB();
     const {data:units} = await supabase.from('units').select('status');
     const {data:txs} = await supabase.from('transactions').select('jumlah,tipe').eq('periode_bulan',bulan).eq('tipe','income');
     const {data:cbUnmatched} = await supabase.from('cloudbeds_events_log').select('id').eq('matched',false);
@@ -2933,7 +2958,7 @@ Deno.serve(async (req)=>{
       if(r.status !== 'batal') pemakaian.set(String(r.voucher_id), r);
     }
 
-    const bulanIni = new Date().toISOString().slice(0,7);
+    const bulanIni = monthWIB();
     let tersedia=0, terpakai=0, hangus=0;
     const hasil = vouchers.map(v => {
       const dipakai = pemakaian.get(String(v.id));
@@ -2982,7 +3007,7 @@ Deno.serve(async (req)=>{
   if(path==='/summary' && m==='GET'){
     if(isOwner) return forbidden();
     const {data:units}=await supabase.from('units').select('status,owner_id');
-    const tgl=new Date().toISOString().split('T')[0];
+    const tgl=todayWIB();
     const {data:hk}=await supabase.from('housekeeping').select('id,status').eq('tgl',tgl);
     const {data:co}=await supabase.from('bookings').select('id').eq('status','checkin').eq('tgl_checkout',tgl);
     const {data:ci}=await supabase.from('bookings').select('id').eq('status','terjadwal').eq('tgl_checkin',tgl);
@@ -3186,7 +3211,7 @@ Deno.serve(async (req)=>{
 
   if(path==='/housekeeping' && m==='GET'){
     if(!isStaff) return forbidden();
-    const tgl=url.searchParams.get('tgl')??new Date().toISOString().split('T')[0];
+    const tgl=url.searchParams.get('tgl')??todayWIB();
     const {data,error}=await supabase.from('housekeeping').select('*').eq('tgl',tgl).order('created_at');
     if(error) return err(error.message);
     return json(data);
@@ -3257,7 +3282,7 @@ Deno.serve(async (req)=>{
     // menyelamatkan sejauh ini cuma kebetulan -- tabelnya masih kosong.
     // Tampilan yang rapi bukan pengamanan.
     if(!isStaff) return forbidden();
-    const bulan=url.searchParams.get('bulan')??new Date().toISOString().slice(0,7);
+    const bulan=url.searchParams.get('bulan')??monthWIB();
     const {data,error}=await supabase.from('opex_bulanan').select('*').eq('periode',bulan).order('created_at');
     if(error) return err(error.message);
     return json(data);
@@ -3265,13 +3290,13 @@ Deno.serve(async (req)=>{
   if(path==='/opex' && m==='POST'){
     if(!isStaff) return forbidden();
     const b=await req.json();
-    const {data,error}=await supabase.from('opex_bulanan').insert({...b,periode:b.periode??new Date().toISOString().slice(0,7)}).select().single();
+    const {data,error}=await supabase.from('opex_bulanan').insert({...b,periode:b.periode??monthWIB()}).select().single();
     if(error) return err(error.message);
     return json(data,201);
   }
 
   if(path==='/report' && m==='GET'){
-    const periode=url.searchParams.get('periode')??new Date().toISOString().slice(0,7);
+    const periode=url.searchParams.get('periode')??monthWIB();
     let unit_id=url.searchParams.get('unit_id');
     if(isOwner) unit_id = undefined;
     const laporan = await computeReport(unit_id, periode);
@@ -3299,7 +3324,7 @@ Deno.serve(async (req)=>{
   }
 
   if(path==='/report/ota-breakdown' && m==='GET'){
-    const periode = url.searchParams.get('periode') ?? new Date().toISOString().slice(0,7);
+    const periode = url.searchParams.get('periode') ?? monthWIB();
     return json(await computeOtaBreakdown(periode));
   }
 

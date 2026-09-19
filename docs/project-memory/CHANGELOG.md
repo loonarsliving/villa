@@ -4,6 +4,12 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-09-19 (lanjutan 2) — WIB sampai ke database & villa-api (owner: "Ya perbaiki")
+- **Database, SUDAH di produksi** (migrasi `villa_checkin_checkout_wib_dates`): `villa_commit_checkin` menulis `periode_bulan` dari `to_char(now() at time zone 'Asia/Jakarta','YYYY-MM')`, `villa_commit_checkout` menulis `housekeeping.tgl` dari `(now() at time zone 'Asia/Jakarta')::date`. `checkin_at`/`checkout_at` tetap `now()` (timestamptz, memang benar). Diperiksa: tidak ada data lama yang salah periode.
+- **villa-api (di branch, aktif setelah merge)**: helper `todayWIB`/`monthWIB`/`prevMonthWIB` + 19 turunan "hari ini"/"bulan ini" dipindahkan ke WIB — default periode `/report`, `/admin/overview`, `/admin/dividends`, `/opex`, plus `/summary`, `/housekeeping`, `/dashboard/hari-ini`, masa berlaku voucher & promo, dan nomor invoice (aman: nomor disimpan sekali, tidak pernah dinomori ulang). Kolom timestamptz tidak disentuh.
+- **Mesin harga AI & snapshot inventori ternyata sudah benar** memakai `Asia/Jakarta`; yang salah hanya label komentar "WITA" (UTC+8) untuk zona yang sebenarnya WIB (UTC+7). Diperbaiki di lima route cron + villa-api — salah label yang sama pernah membuat jam pada dokumen yang ditandatangani tamu meleset satu jam.
+- **Hanya fungsi `villa_*` yang disentuh** — project Supabase ini dipakai bersama Mkhsistem.
+
 ### 2026-09-19 (branch `claude/receptionist-checkout-qris-payment-gvczm7`, lanjutan) — iPaymu dihapus + semua waktu jadi WIB
 - **Integrasi iPaymu dihapus** atas keputusan owner (*"Saya tidak pakai ipaymu saya pakai qris statis"*): `src/lib/ipaymuApi.ts`, `/api/payment-gateway/qris`, `/api/payment-gateway/qris/status`, `/api/webhooks/ipaymu`, dependensi `qrcode`. Tidak pernah punya kredensial di Vercel dan `walkin_payments` kosong — tidak ada transaksi sungguhan yang hilang. Kode tetap ada di riwayat git.
 - **Payment Gateway jadi murni QRIS statis**: QR villa ditampilkan lebih besar, nominal besar di bawahnya, langkah bayar ditulis eksplisit (tamu mengetik sendiri nominal), dan ditegaskan tidak ada konfirmasi otomatis — klik "Tandai Lunas" kasir itulah catatan pembayarannya. Peringatan merah kalau gambar QRIS belum diunggah.

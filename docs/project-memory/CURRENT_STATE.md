@@ -2,6 +2,90 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-19 (lanjutan 2) — WIB ditutup sampai ke database dan villa-api
+
+Owner menyetujui perbaikan yang sebelumnya ditahan ("Ya perbaiki"). Sekarang
+seluruh rantainya memakai kalender WIB, bukan hanya tampilan frontend.
+
+### Database — SUDAH diterapkan ke produksi
+
+Migrasi `villa_checkin_checkout_wib_dates` (lewat Supabase MCP; repo ini
+memang tidak punya `supabase/migrations`, lihat DEVELOPMENT_WORKFLOW.md).
+Dua ekspresi yang diubah, tidak lebih:
+
+- `villa_commit_checkin`: `to_char(now(), 'YYYY-MM')` →
+  `to_char(now() at time zone 'Asia/Jakarta', 'YYYY-MM')` untuk
+  `transactions.periode_bulan`.
+- `villa_commit_checkout`: `current_date` →
+  `(now() at time zone 'Asia/Jakarta')::date` untuk `housekeeping.tgl`.
+
+`checkin_at`/`checkout_at` sengaja TETAP `now()` — keduanya `timestamptz`,
+menyimpan titik waktu absolut memang benar, dan frontend sudah
+menampilkannya dalam WIB.
+
+**Tidak ada data lama yang rusak, dan ini diperiksa, bukan diasumsikan:**
+tidak ada satu pun baris `transactions` yang `periode_bulan`-nya berbeda dari
+bulan WIB `created_at`-nya, dan satu-satunya baris `housekeeping` hasil
+checkout sungguhan (A5, 28 Agu 13:45 WIB) tanggalnya sudah benar. Dua baris
+housekeeping lain yang tanggalnya berbeda adalah data uji bertanggal Desember,
+bukan korban bug ini.
+
+**Cakupannya diperiksa dulu:** project Supabase ini dipakai bersama
+Mkhsistem (ada ratusan fungsi `crm_*`, `hr_*`, `cm_*`, `construction_*`,
+`kpi_*`, `loonars_*`). Dari seluruh fungsi `villa_*`, hanya dua di atas yang
+menyentuh tanggal. Tidak ada fungsi milik sistem lain yang disentuh.
+
+### villa-api — ada di branch, BARU AKTIF SETELAH MERGE ke `main`
+
+Ditambahkan `todayWIB()` / `monthWIB()` / `prevMonthWIB()` di atas file, lalu
+19 turunan "hari ini"/"bulan ini" dipindahkan ke sana. Edge Function ini
+berjalan di UTC, jadi sebelumnya `new Date().toISOString()` menjawab
+tanggal/bulan KEMARIN selama 00:00–07:00 WIB. Yang terkena:
+
+- default periode `/report`, `/report/ota-breakdown`, `/admin/overview`,
+  `/admin/dividends`, `/opex` (GET dan POST) — laporan bagi hasil investor;
+- `/summary` dan `/housekeeping` — tugas "hari ini" resepsionis;
+- `/dashboard/hari-ini`, `/cron/laporan-harian`;
+- masa berlaku voucher menginap investor dan tanggal berlakunya promo;
+- nomor invoice (`INV-LV-<ymd>-…`). Aman diubah karena nomornya dihitung
+  sekali lalu DISIMPAN di `bookings.invoice_no` — invoice yang sudah terbit
+  tidak pernah dinomori ulang, hanya yang baru.
+
+`/cron/sync-mkh-income` (periode "bulan lalu") juga dipindahkan, tapi
+**bukan karena sedang rusak**: cron-nya `15 1 1 * *` UTC = 08:15 WIB, di luar
+jendela 00:00–07:00, jadi selama ini hasilnya kebetulan benar. Sekarang tidak
+lagi bergantung pada kebetulan itu.
+
+Kolom `timestamptz` (`paid_at`, `sent_at`, `bukti_pembayaran_at`, dst.) tetap
+`new Date().toISOString()` — sengaja.
+
+**Penting:** `supabase/functions/villa-api/index.ts` di repo sekarang BERBEDA
+dari v67 yang live. Deploy terjadi lewat `.github/workflows/deploy-villa-api.yml`
+saat branch ini di-merge ke `main`, bukan sekarang.
+
+### Label "WITA" di komentar diperbaiki jadi WIB
+
+Mesin harga AI dan snapshot inventori **ternyata sudah benar** — keduanya
+memakai `Asia/Jakarta` (`todayJakarta()`, `todayInJakarta()`), dan
+`toISOString().slice(0,10)` di sana hanyalah aritmetika UTC murni atas string
+tanggal (`${dateStr}T00:00:00Z`), yang memang tidak boleh bergeser. Yang salah
+cuma **labelnya**: beberapa komentar menyebut "WITA" (UTC+8) padahal
+Asia/Jakarta adalah WIB (UTC+7). Diperbaiki di `cctv-checkpoint` (11:00 WIB),
+`dividend-list` (08:00 WIB), `sync-mkh-income` (08:15 WIB),
+`investor-bank-reminder` (12:05 WIB), `daily-inventory-snapshot`, dan
+villa-api.
+
+Ini bukan kerapian belaka: salah label yang persis sama pernah membuat jam
+pada dokumen tata tertib yang DITANDATANGANI TAMU meleset satu jam
+(lihat catatan 2026-09-11 dan komentar di `CheckinCard.tsx`) — dan jam itulah
+dasar denda keterlambatan check-out.
+
+Sisa penyebutan "WITA" ada di `docs/revenue-engine/PHASE4-DESIGN.md` dan
+`PHASE6-DESIGN.md`; keduanya catatan desain bertanggal, sengaja tidak
+diubah. Yang benar: cron `55 15 * * *` = 22:55 WIB, dan cron mesin harga di
+`vercel.json` sekarang `10 17 * * *` = 00:10 WIB (dokumen itu masih menulis
+`10 16 * * *`).
+
 ## 2026-09-19 (lanjutan) — iPaymu dihapus, semua jam & tanggal jadi WIB
 
 Dua keputusan owner setelah audit di bawah: *"Saya tidak pakai ipaymu saya
