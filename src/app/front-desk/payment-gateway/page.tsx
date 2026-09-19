@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { AdminShell } from "../../admin/_shell";
 import { FrontDeskShell } from "../_shell";
 import { api, ApiError, localApi } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
-import { fmtCurrencyFull, fmtDate, todayISO } from "@/lib/format";
+import { fmtCurrencyFull, fmtDate } from "@/lib/format";
+import { addDaysISO, defaultCheckout, nightsBetween, todayLocalISO, validateStayRange } from "@/lib/stayDates";
 import { Card, CardHeader, CardBody, Loading, Badge } from "@/components/Card";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
 import { StatCard } from "@/components/StatCard";
@@ -39,6 +40,8 @@ interface DisplayPayment {
   unit_id?: string;
   unit_nomor?: string;
   tipe?: Booking["tipe"];
+  tgl_checkin?: string;
+  tgl_checkout?: string | null;
 }
 
 const kategoriLabel: Record<KasirKategori, string> = { cafe: "Cafe", spa: "Spa", villa: "Villa", lainnya: "Lainnya" };
@@ -82,6 +85,8 @@ function bookingToDisplay(b: Booking): DisplayPayment {
     unit_id: b.unit_id,
     unit_nomor: b.unit_nomor,
     tipe: b.tipe,
+    tgl_checkin: b.tgl_checkin,
+    tgl_checkout: b.tgl_checkout,
   };
 }
 
@@ -115,21 +120,44 @@ export default function PaymentGatewayPage() {
     tipe: Booking["tipe"];
     checkin: string;
     checkout: string;
-    tarif: number;
   } | null>(null);
   const [pendingCheckin, setPendingCheckin] = useState<DisplayPayment | null>(null);
-  const [capturedKtpSig, setCapturedKtpSig] = useState<{ ktpPhotoPath: string; signatureDataUrl: string } | null>(null);
+  // Terikat ke booking_id-nya. Sebelumnya hanya {ktpPhotoPath, signatureDataUrl}
+  // tanpa penanda milik siapa, jadi kalau kasir membuat booking tamu A lalu
+  // membuka booking tamu B yang masih pending dari daftar di bawah dan
+  // menekan "Tandai Lunas & Check-In", KTP dan TANDA TANGAN tamu A ikut
+  // tersimpan di booking tamu B -- dokumen persetujuan tata tertib jadi
+  // milik orang yang salah. Sekarang data hanya dipakai kalau id-nya cocok.
+  const [capturedKtpSig, setCapturedKtpSig] = useState<{
+    bookingId: string;
+    ktpPhotoPath: string;
+    signatureDataUrl: string;
+  } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  // QRIS yang sudah pernah dibuat untuk satu transaksi dipakai ulang selama
+  // halaman terbuka: setiap POST /payment/direct membuat transaksi baru di
+  // iPaymu, jadi membuka-tutup modal tidak boleh menumpuk transaksi kembar
+  // dengan referenceId yang sama.
+  const qrCacheRef = useRef<Map<string, string>>(new Map());
 
-  const [form, setForm] = useState({
-    guest_nama: "",
-    guest_hp: "",
-    kategori: "cafe" as KasirKategori,
-    deskripsi: "",
-    jumlah: "" as string,
-    unit_id: "",
-    tipe: "harian" as Booking["tipe"],
-    checkin: todayISO(),
-    checkout: todayISO(),
+  const [form, setForm] = useState(() => {
+    const checkin = todayLocalISO();
+    return {
+      guest_nama: "",
+      guest_hp: "",
+      kategori: "cafe" as KasirKategori,
+      deskripsi: "",
+      jumlah: "" as string,
+      unit_id: "",
+      tipe: "harian" as Booking["tipe"],
+      checkin,
+      // Bawaannya SATU MALAM, bukan tanggal yang sama. Check-out == check-in
+      // menghasilkan daterange kosong, dan rentang kosong lolos dari
+      // exclusion constraint `bookings_no_overlap_active` maupun dari
+      // pengecekan bentrok villa-api -- unit yang sudah terisi bisa
+      // dibooking dua kali. Lihat src/lib/stayDates.ts.
+      checkout: defaultCheckout(checkin, "harian"),
+    };
   });
 
   // Villa walk-in tarif is never staff-editable -- it must match the unit's
@@ -137,6 +165,12 @@ export default function PaymentGatewayPage() {
   // with), not a number the cashier types in.
   const selectedUnit = units.find((u) => u.id === form.unit_id);
   const villaTarif = selectedUnit ? (form.tipe === "harian" ? selectedUnit.tarif_harian : selectedUnit.tarif_bulanan) : 0;
+  const stayRange = validateStayRange(form.checkin, form.checkout);
+  const malam = nightsBetween(form.checkin, form.checkout);
+  // Perkiraan saja. Nominal final dihitung villa-api (POST /bookings), yang
+  // memakai tarif harian per tanggal dari `villa_rates` kalau ada -- jadi
+  // angka ini bisa berbeda dari tagihan akhir, dan memang dilabeli begitu.
+  const villaEstimasi = form.tipe === "harian" ? villaTarif * malam : villaTarif;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -194,6 +228,14 @@ export default function PaymentGatewayPage() {
     setQrError(null);
     setLiveStatus(null);
     if (!activePayment || activePayment.status !== "pending") return;
+
+    const cacheKey = `${activePayment.source}_${activePayment.id}`;
+    const cached = qrCacheRef.current.get(cacheKey);
+    if (cached) {
+      setDynamicQr(cached);
+      return;
+    }
+
     let cancelled = false;
     setQrLoading(true);
     localApi<{ qrImageDataUrl?: string }>("/api/payment-gateway/qris", {
@@ -209,7 +251,9 @@ export default function PaymentGatewayPage() {
     })
       .then((body) => {
         if (cancelled) return;
-        setDynamicQr(body?.qrImageDataUrl ?? null);
+        const url = body?.qrImageDataUrl ?? null;
+        if (url) qrCacheRef.current.set(cacheKey, url);
+        setDynamicQr(url);
       })
       .catch((e) => {
         if (!cancelled) setQrError(e instanceof Error ? e.message : "Gagal memuat QRIS dinamis");
@@ -232,7 +276,16 @@ export default function PaymentGatewayPage() {
       });
       setLiveStatus({ paid: !!body?.paid, statusRaw: body?.statusRaw ?? null });
     } catch (e) {
-      toast("⚠", "Gagal cek status", e instanceof Error ? e.message : "Terjadi kesalahan.", "ruby");
+      const msg = e instanceof Error ? e.message : "Terjadi kesalahan.";
+      const belumDikonfigurasi = e instanceof ApiError && e.status === 503;
+      toast(
+        "⚠",
+        "Gagal cek status",
+        belumDikonfigurasi
+          ? "Status bayar otomatis belum bisa dipakai karena iPaymu belum dikonfigurasi. Konfirmasi pembayaran lewat mutasi rekening/notifikasi QRIS villa dulu, baru tandai lunas."
+          : msg,
+        "ruby",
+      );
     } finally {
       setCheckingStatus(false);
     }
@@ -300,6 +353,7 @@ export default function PaymentGatewayPage() {
   }
 
   function resetForm(kategori: KasirKategori) {
+    const checkin = todayLocalISO();
     setForm({
       guest_nama: "",
       guest_hp: "",
@@ -308,13 +362,30 @@ export default function PaymentGatewayPage() {
       jumlah: "",
       unit_id: "",
       tipe: "harian",
-      checkin: todayISO(),
-      checkout: todayISO(),
+      checkin,
+      checkout: defaultCheckout(checkin, "harian"),
     });
     setAvailUnits(null);
   }
 
+  /**
+   * Mengganti tanggal/tipe sewa sambil menjaga rentangnya tetap sah.
+   * Check-out yang jadi lebih awal atau sama dengan check-in otomatis
+   * didorong ke minimal satu malam (atau satu bulan untuk sewa bulanan).
+   */
+  function setStay(patch: Partial<{ checkin: string; checkout: string; tipe: Booking["tipe"] }>) {
+    setForm((f) => {
+      const next = { ...f, ...patch };
+      const tipeBerubah = patch.tipe != null && patch.tipe !== f.tipe;
+      if (tipeBerubah || next.checkout <= next.checkin) {
+        next.checkout = defaultCheckout(next.checkin, next.tipe);
+      }
+      return next;
+    });
+  }
+
   async function createWalkinPayment() {
+    if (submitting) return;
     const jumlahNum = Number(form.jumlah.replace(/[^0-9]/g, ""));
     if (!form.guest_nama.trim()) {
       toast("⚠", "Lengkapi form", "Nama tamu wajib diisi.", "ruby");
@@ -324,6 +395,7 @@ export default function PaymentGatewayPage() {
       toast("⚠", "Lengkapi form", "Nominal pembayaran harus lebih dari 0.", "ruby");
       return;
     }
+    setSubmitting(true);
     try {
       const payment = await api.post<WalkinPayment>("/walkin-payments", {
         guest_nama: form.guest_nama.trim(),
@@ -337,6 +409,8 @@ export default function PaymentGatewayPage() {
       resetForm(form.kategori);
     } catch (e) {
       toast("⚠", "Gagal", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -345,9 +419,21 @@ export default function PaymentGatewayPage() {
   // opens the Check-In Card. The booking itself (and the QRIS that follows)
   // is only created once that capture is confirmed, in handleCheckinCardConfirm.
   function startVillaCheckin() {
+    if (submitting) return;
     const unit = units.find((u) => u.id === form.unit_id);
     if (!form.guest_nama.trim() || !unit) {
       toast("⚠", "Lengkapi form", "Isi nama tamu dan pilih unit.", "ruby");
+      return;
+    }
+    // Rentang tanggal diperiksa DULU: rentang 0 malam menembus semua
+    // pengaman double-booking (lihat src/lib/stayDates.ts), jadi tidak boleh
+    // lolos sampai ke pembuatan booking.
+    if (!stayRange.ok) {
+      toast("⚠", "Tanggal Menginap Tidak Valid", stayRange.message ?? "Periksa tanggal check-in dan check-out.", "ruby");
+      return;
+    }
+    if (availLoading) {
+      toast("⏳", "Tunggu sebentar", "Ketersediaan unit untuk tanggal ini masih dicek.", "gold");
       return;
     }
     const avail = availUnits?.find((u) => u.id === form.unit_id);
@@ -366,7 +452,6 @@ export default function PaymentGatewayPage() {
       tipe: form.tipe,
       checkin: form.checkin,
       checkout: form.checkout,
-      tarif: villaTarif,
     });
     setCheckinCardMode("new");
     setCheckinCardOpen(true);
@@ -378,6 +463,8 @@ export default function PaymentGatewayPage() {
   }
 
   async function setStatus(payment: DisplayPayment, status: WalkinStatus) {
+    if (submitting) return;
+    setSubmitting(true);
     try {
       if (payment.source === "walkin") {
         const updated = await api.patch<WalkinPayment>("/walkin-payments", { id: payment.id, status });
@@ -385,7 +472,9 @@ export default function PaymentGatewayPage() {
         setActivePayment(toDisplay(updated));
         if (status === "lunas") toast("✓", "Pembayaran lunas", "Transaksi walk-in berhasil dicatat sebagai lunas.", "sage");
       } else if (status === "lunas") {
-        if (capturedKtpSig) {
+        // Hanya dipakai kalau memang milik booking INI (lihat komentar pada
+        // state capturedKtpSig).
+        if (capturedKtpSig && capturedKtpSig.bookingId === payment.id) {
           // Happy path: KTP+TTD were already captured before this booking
           // was created (startVillaCheckin -> handleCheckinCardConfirm), so
           // check-in can commit immediately without asking again.
@@ -410,9 +499,9 @@ export default function PaymentGatewayPage() {
             toast("⚠", "Gagal", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby");
           }
         } else {
-          // Fallback: captured data isn't in memory anymore (e.g. page was
-          // refreshed between capture and payment) -- prompt again instead
-          // of silently checking in without KTP/signature on file.
+          // Fallback: tidak ada KTP+TTD milik booking ini di memori (halaman
+          // di-refresh, atau yang tersimpan milik tamu lain) -- minta ulang,
+          // jangan check-in memakai dokumen orang lain.
           setPendingCheckin(payment);
           setCheckinCardMode("existing");
           setActivePayment(null);
@@ -426,12 +515,19 @@ export default function PaymentGatewayPage() {
       }
     } catch (e) {
       toast("⚠", "Gagal", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby");
+    } finally {
+      setSubmitting(false);
     }
   }
 
   async function handleCheckinCardConfirm(data: { ktpPhotoPath: string; signatureDataUrl: string }) {
     if (checkinCardMode === "new" && pendingVillaForm) {
       try {
+        // tarif/total_bayar sengaja TIDAK dikirim: villa-api selalu
+        // menghitungnya sendiri di POST /bookings (tarif per tanggal dari
+        // `villa_rates` kalau ada, dikali jumlah malam) dan mengabaikan
+        // nilai dari klien. Mengirim angka satu malam dari form ini hanya
+        // membuat kode ini terbaca seolah kasir yang menentukan harga.
         const booking = await api.post<Booking>("/bookings", {
           unit_id: pendingVillaForm.unit.id,
           unit_nomor: pendingVillaForm.unit.nomor,
@@ -440,12 +536,10 @@ export default function PaymentGatewayPage() {
           sumber: "walk-in",
           tgl_checkin: pendingVillaForm.checkin,
           tgl_checkout: pendingVillaForm.checkout,
-          tarif: pendingVillaForm.tarif,
-          total_bayar: pendingVillaForm.tarif,
           guest_hp: pendingVillaForm.guest_hp || undefined,
         });
         setVillaBookings((prev) => [booking, ...prev]);
-        setCapturedKtpSig(data);
+        setCapturedKtpSig({ bookingId: booking.id, ...data });
         setActivePayment(bookingToDisplay(booking));
         resetForm("villa");
       } catch (e) {
@@ -576,7 +670,7 @@ export default function PaymentGatewayPage() {
                       </select>
                     </Field>
                     <Field label="Tipe">
-                      <select className={inputCls} value={form.tipe} onChange={(e) => setForm({ ...form, tipe: e.target.value as Booking["tipe"] })}>
+                      <select className={inputCls} value={form.tipe} onChange={(e) => setStay({ tipe: e.target.value as Booking["tipe"] })}>
                         <option value="harian">Harian</option>
                         <option value="bulanan">Bulanan</option>
                       </select>
@@ -584,16 +678,35 @@ export default function PaymentGatewayPage() {
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <Field label="Check-in">
-                      <input type="date" className={inputCls} value={form.checkin} onChange={(e) => setForm({ ...form, checkin: e.target.value })} />
+                      <input type="date" className={inputCls} value={form.checkin} onChange={(e) => setStay({ checkin: e.target.value })} />
                     </Field>
-                    <Field label="Check-out">
-                      <input type="date" className={inputCls} value={form.checkout} onChange={(e) => setForm({ ...form, checkout: e.target.value })} />
+                    <Field label={`Check-out${stayRange.ok ? ` — ${malam} malam` : ""}`}>
+                      <input
+                        type="date"
+                        className={inputCls}
+                        value={form.checkout}
+                        min={addDaysISO(form.checkin, 1)}
+                        onChange={(e) => setForm({ ...form, checkout: e.target.value })}
+                      />
                     </Field>
                   </div>
+                  {!stayRange.ok && (
+                    <div className="-mt-2 mb-4 text-[10px] leading-relaxed text-ruby-400 border border-ruby-500/30 bg-ruby-500/5 rounded px-3 py-2">
+                      {stayRange.message}
+                    </div>
+                  )}
                   <Field label="Tarif (Rp)">
                     <div className={`${inputCls} flex items-center justify-between text-ink/70`}>
-                      <span>{selectedUnit ? fmtCurrencyFull(villaTarif) : "Pilih unit dulu"}</span>
-                      {selectedUnit && <span className="text-[9px] text-ink/30">Tarif {form.tipe} Unit {selectedUnit.nomor} — tidak bisa diubah</span>}
+                      <span>{selectedUnit ? fmtCurrencyFull(villaEstimasi) : "Pilih unit dulu"}</span>
+                      {selectedUnit && (
+                        <span className="text-[9px] text-ink/30 text-right leading-snug">
+                          {form.tipe === "harian"
+                            ? `Perkiraan ${malam} malam × ${fmtCurrencyFull(villaTarif)} — Unit ${selectedUnit.nomor}`
+                            : `Tarif bulanan Unit ${selectedUnit.nomor}`}
+                          <br />
+                          Nominal final dihitung sistem saat booking dibuat
+                        </span>
+                      )}
                     </div>
                   </Field>
                 </>
@@ -625,8 +738,12 @@ export default function PaymentGatewayPage() {
                 </>
               )}
 
-              <button onClick={createPayment} className="w-full mt-1 bg-gold-500 text-base-950 rounded-lg py-3 text-[12.5px] font-semibold tracking-wide hover:opacity-90 active:scale-[0.99] transition">
-                {form.kategori === "villa" ? "Lanjut: Foto KTP & Tanda Tangan →" : "Buat QRIS Pembayaran"}
+              <button
+                onClick={createPayment}
+                disabled={submitting || (form.kategori === "villa" && !stayRange.ok)}
+                className="w-full mt-1 bg-gold-500 text-base-950 rounded-lg py-3 text-[12.5px] font-semibold tracking-wide hover:opacity-90 active:scale-[0.99] transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {submitting ? "Memproses…" : form.kategori === "villa" ? "Lanjut: Foto KTP & Tanda Tangan →" : "Buat QRIS Pembayaran"}
               </button>
             </CardBody>
           </Card>
@@ -713,10 +830,18 @@ export default function PaymentGatewayPage() {
         footer={
           activePayment && activePayment.status === "pending" ? (
             <>
-              <Btn onClick={() => activePayment && setStatus(activePayment, "batal")}>Batalkan</Btn>
-              <Btn onClick={checkLiveStatus}>{checkingStatus ? "Mengecek…" : "Cek Status"}</Btn>
-              <Btn variant="primary" onClick={() => activePayment && setStatus(activePayment, "lunas")}>
-                {activePayment.source === "villa" ? "Tandai Lunas & Check-In" : "Tandai Lunas"}
+              <Btn onClick={() => activePayment && setStatus(activePayment, "batal")} disabled={submitting}>
+                Batalkan
+              </Btn>
+              <Btn onClick={checkLiveStatus} disabled={checkingStatus || submitting}>
+                {checkingStatus ? "Mengecek…" : "Cek Status"}
+              </Btn>
+              <Btn variant="primary" onClick={() => activePayment && setStatus(activePayment, "lunas")} disabled={submitting}>
+                {submitting
+                  ? "Memproses…"
+                  : activePayment.source === "villa"
+                    ? "Tandai Lunas & Check-In"
+                    : "Tandai Lunas"}
               </Btn>
             </>
           ) : (
@@ -744,13 +869,28 @@ export default function PaymentGatewayPage() {
               ) : dynamicQr ? (
                 <img src={dynamicQr} alt="QRIS" className="w-56 h-56 rounded-lg object-contain border border-ink/10 bg-white p-2" />
               ) : qris ? (
-                <img src={qris} alt="QRIS" className="w-56 h-56 rounded-lg object-contain border border-ink/10 bg-white p-2" />
+                <img src={qris} alt="QRIS statis villa" className="w-56 h-56 rounded-lg object-contain border border-ink/10 bg-white p-2" />
               ) : (
                 <div className="w-56 h-56 rounded-lg border border-dashed border-ink/15 flex items-center justify-center text-[11px] text-ink/30 px-4 text-center">
-                  {qrError ? `QRIS dinamis gagal dibuat (${qrError}).` : ""} QRIS belum diunggah. Buka pengaturan ⚙ QRIS untuk mengunggah gambar QRIS statis villa.
+                  {qrError ? `QRIS dinamis gagal dibuat (${qrError}). ` : ""}QRIS belum diunggah. Buka pengaturan ⚙ QRIS untuk mengunggah gambar QRIS statis villa.
                 </div>
               )}
             </div>
+            {/*
+              QRIS statis TIDAK membawa nominal. Sebelumnya, kalau QRIS
+              dinamis gagal dibuat (mis. iPaymu belum dikonfigurasi), modal
+              ini diam-diam menampilkan QRIS statis seolah semuanya normal --
+              kasir tidak punya cara tahu bahwa tamu harus mengetik sendiri
+              nominalnya, dan salah ketik nominal baru ketahuan belakangan.
+            */}
+            {!dynamicQr && qris && !qrLoading && (
+              <div className="mb-3 text-left text-[10px] leading-relaxed text-gold-600 border border-gold-500/30 bg-gold-500/5 rounded px-3 py-2">
+                <b>QRIS statis — nominal TIDAK otomatis.</b> Minta tamu mengetik sendiri{" "}
+                <b>{fmtCurrencyFull(activePayment.jumlah)}</b> di aplikasi pembayarannya, lalu cocokkan bukti transfernya
+                sebelum menandai lunas.
+                {qrError ? <div className="mt-1 text-ink/40">QRIS dinamis tidak tersedia: {qrError}</div> : null}
+              </div>
+            )}
             <div className="font-serif text-2xl font-medium text-ink">{fmtCurrencyFull(activePayment.jumlah)}</div>
             <div className="text-xs text-ink/50 mt-1">{activePayment.deskripsi}</div>
             <div className="text-[10px] text-ink/30 mt-3">
@@ -779,8 +919,10 @@ export default function PaymentGatewayPage() {
                   guestName: pendingCheckin.guest_nama,
                   unitNomor: pendingCheckin.unit_nomor ?? "",
                   tipe: pendingCheckin.tipe ?? "harian",
-                  checkinDate: todayISO(),
-                  checkoutDate: null,
+                  // Tanggal booking yang sebenarnya, bukan "hari ini": kartu
+                  // ini yang dibaca dan ditandatangani tamu.
+                  checkinDate: pendingCheckin.tgl_checkin ?? todayLocalISO(),
+                  checkoutDate: pendingCheckin.tgl_checkout ?? null,
                 }
               : null
         }

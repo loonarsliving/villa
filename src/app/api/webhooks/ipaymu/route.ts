@@ -47,6 +47,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, matched: false });
   }
   const walkinId = referenceId.slice("walkin_".length);
+  // walkin_payments.id is a uuid: anything else makes Postgres reject the
+  // query outright, which would turn a junk callback from the open internet
+  // into a 500 that iPaymu then retries. Acknowledge and ignore instead.
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(walkinId)) {
+    return NextResponse.json({ success: true, matched: false });
+  }
 
   let confirmedPaid = false;
   let logError: string | null = null;

@@ -5,6 +5,7 @@ import { Modal, Btn } from "./Modal";
 import { fmtDate } from "@/lib/format";
 import { localApi } from "@/lib/api";
 import { useToast } from "@/lib/toast";
+import { dataUrlByteSize, shrinkImageForUpload, UPLOAD_MAX_DATA_URL_BYTES } from "@/lib/imageResize";
 
 export interface CheckinCardGuest {
   guestName: string;
@@ -69,31 +70,71 @@ export function CheckinCard({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawingRef = useRef(false);
   const [ktpPreview, setKtpPreview] = useState<string | null>(null);
-  const [ktpFile, setKtpFile] = useState<File | null>(null);
+  /** Sudah diperkecil saat dipilih, bukan berkas mentah dari kamera. */
+  const [ktpDataUrl, setKtpDataUrl] = useState<string | null>(null);
+  const [ktpBusy, setKtpBusy] = useState(false);
   const [hasSignature, setHasSignature] = useState(false);
   const [agreed, setAgreed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  /**
+   * Samakan ukuran buffer kanvas dengan ukuran tampilannya.
+   *
+   * Sebelumnya kanvas dipatok width=360/height=140 sementara CSS-nya
+   * `w-full`, jadi di layar yang lebarnya bukan 360px koordinat pena tidak
+   * pernah jatuh di titik yang sama dengan goresan yang tergambar: di HP
+   * (~288px) tanda tangan muncul melenceng ke kiri dan gepeng, di layar
+   * lebar ujung kanannya terpotong. Tanda tangan ini ikut disimpan sebagai
+   * bukti persetujuan tata tertib, jadi harus sesuai dengan yang ditulis
+   * tamu.
+   */
+  function fitCanvas() {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    canvas.width = Math.round(rect.width * dpr);
+    canvas.height = Math.round(rect.height * dpr);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, rect.width, rect.height);
+  }
+
   useEffect(() => {
     if (!open) return;
     setKtpPreview(null);
-    setKtpFile(null);
+    setKtpDataUrl(null);
+    setKtpBusy(false);
     setHasSignature(false);
     setAgreed(false);
     setSubmitting(false);
-    const canvas = canvasRef.current;
-    if (canvas) {
-      const ctx = canvas.getContext("2d");
-      ctx?.clearRect(0, 0, canvas.width, canvas.height);
-    }
+    // Kanvas baru ada di DOM setelah modal dirender.
+    const id = requestAnimationFrame(fitCanvas);
+    window.addEventListener("resize", fitCanvas);
+    return () => {
+      cancelAnimationFrame(id);
+      window.removeEventListener("resize", fitCanvas);
+    };
   }, [open]);
 
-  function onPickKtp(file: File | null) {
+  async function onPickKtp(file: File | null) {
     if (!file) return;
-    setKtpFile(file);
-    const reader = new FileReader();
-    reader.onload = () => setKtpPreview(reader.result as string);
-    reader.readAsDataURL(file);
+    setKtpBusy(true);
+    try {
+      const dataUrl = await shrinkImageForUpload(file);
+      if (dataUrlByteSize(dataUrl) > UPLOAD_MAX_DATA_URL_BYTES) {
+        toast("⚠", "Foto terlalu besar", "Foto KTP masih terlalu besar setelah diperkecil — ambil ulang dengan resolusi lebih rendah.", "ruby");
+        return;
+      }
+      setKtpDataUrl(dataUrl);
+      setKtpPreview(dataUrl);
+    } catch (e) {
+      toast("⚠", "Foto gagal dibaca", e instanceof Error ? e.message : "Coba ambil ulang fotonya.", "ruby");
+    } finally {
+      setKtpBusy(false);
+    }
   }
 
   function pointerPos(e: React.PointerEvent<HTMLCanvasElement>) {
@@ -103,6 +144,13 @@ export function CheckinCard({
 
   function startDraw(e: React.PointerEvent<HTMLCanvasElement>) {
     drawingRef.current = true;
+    // Pointer capture menjaga goresan tetap tersambung kalau jari tamu
+    // sempat keluar dari kotak tanda tangan lalu masuk lagi.
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* browser lama tanpa pointer capture -- gambar tetap jalan */
+    }
     const ctx = canvasRef.current?.getContext("2d");
     if (!ctx) return;
     const { x, y } = pointerPos(e);
@@ -121,28 +169,31 @@ export function CheckinCard({
     ctx.stroke();
     setHasSignature(true);
   }
-  function endDraw() {
+  function endDraw(e: React.PointerEvent<HTMLCanvasElement>) {
     drawingRef.current = false;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* pointer-nya memang tidak sedang di-capture */
+    }
   }
   function clearSignature() {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
-    if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (canvas && ctx) {
+      const rect = canvas.getBoundingClientRect();
+      ctx.clearRect(0, 0, rect.width || canvas.width, rect.height || canvas.height);
+    }
     setHasSignature(false);
   }
 
-  function dataUrlFromFile(): Promise<string> {
-    return new Promise((resolve, reject) => {
-      if (!ktpFile) return reject(new Error("no file"));
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(ktpFile);
-    });
-  }
-
   async function handleConfirm() {
-    if (!ktpFile) {
+    if (submitting) return;
+    if (ktpBusy) {
+      toast("⚠", "Tunggu sebentar", "Foto KTP masih diproses.", "gold");
+      return;
+    }
+    if (!ktpDataUrl) {
       toast("⚠", "Foto KTP wajib", "Foto KTP/paspor tamu dulu sebelum check-in.", "ruby");
       return;
     }
@@ -156,10 +207,9 @@ export function CheckinCard({
     }
     setSubmitting(true);
     try {
-      const dataUrl = await dataUrlFromFile();
       const body = await localApi<{ path: string }>("/api/checkin/upload-ktp", {
         method: "POST",
-        body: JSON.stringify({ dataUrl }),
+        body: JSON.stringify({ dataUrl: ktpDataUrl }),
       });
       const signatureDataUrl = canvasRef.current?.toDataURL("image/png") ?? "";
       await onConfirm({ ktpPhotoPath: body.path, signatureDataUrl });
@@ -177,9 +227,11 @@ export function CheckinCard({
       onClose={onClose}
       footer={
         <>
-          <Btn onClick={onClose}>Batal</Btn>
-          <Btn variant="primary" onClick={handleConfirm}>
-            {submitting ? "Memproses…" : "Konfirmasi & Check-In"}
+          <Btn onClick={onClose} disabled={submitting}>
+            Batal
+          </Btn>
+          <Btn variant="primary" onClick={handleConfirm} disabled={submitting || ktpBusy}>
+            {submitting ? "Memproses…" : ktpBusy ? "Memproses foto…" : "Konfirmasi & Check-In"}
           </Btn>
         </>
       }
@@ -200,15 +252,33 @@ export function CheckinCard({
           <div className="flex items-center gap-3">
             <img src={ktpPreview} alt="KTP" className="w-24 h-16 object-cover rounded border border-ink/10" />
             <label className="text-[10.5px] font-semibold text-gold-500 border border-gold-500/25 rounded px-3 py-1.5 cursor-pointer">
-              Ganti Foto
-              <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => onPickKtp(e.target.files?.[0] ?? null)} />
+              {ktpBusy ? "Memproses…" : "Ganti Foto"}
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={(e) => {
+                  void onPickKtp(e.target.files?.[0] ?? null);
+                  e.target.value = "";
+                }}
+              />
             </label>
           </div>
         ) : (
           <label className="flex flex-col items-center justify-center gap-1 w-full py-6 rounded-lg border border-dashed border-ink/15 text-ink/40 cursor-pointer">
-            <span className="text-lg">📷</span>
-            <span className="text-[10.5px]">Ambil / Unggah Foto KTP</span>
-            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => onPickKtp(e.target.files?.[0] ?? null)} />
+            <span className="text-lg">{ktpBusy ? "⏳" : "📷"}</span>
+            <span className="text-[10.5px]">{ktpBusy ? "Memproses foto…" : "Ambil / Unggah Foto KTP"}</span>
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={(e) => {
+                void onPickKtp(e.target.files?.[0] ?? null);
+                e.target.value = "";
+              }}
+            />
           </label>
         )}
       </div>
@@ -235,9 +305,7 @@ export function CheckinCard({
         <label className="block text-[9.5px] font-semibold text-ink/30 tracking-[0.12em] uppercase mb-1.5">Tanda Tangan Tamu</label>
         <canvas
           ref={canvasRef}
-          width={360}
-          height={140}
-          className="w-full rounded-lg border border-ink/15 bg-white touch-none"
+          className="w-full h-[140px] rounded-lg border border-ink/15 bg-white touch-none"
           style={{ touchAction: "none" }}
           onPointerDown={startDraw}
           onPointerMove={draw}

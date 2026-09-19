@@ -6,7 +6,8 @@ import { FrontDeskShell } from "./_shell";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { useToast } from "@/lib/toast";
-import { fmtCurrencyFull, fmtDate, todayISO } from "@/lib/format";
+import { fmtCurrencyFull, fmtDate } from "@/lib/format";
+import { todayLocalISO } from "@/lib/stayDates";
 import { Card, CardHeader, Loading } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
@@ -42,9 +43,11 @@ export default function FrontDeskPage() {
   const [ciTab, setCiTab] = useState<"existing" | "new">("existing");
   const [scheduledBookings, setScheduledBookings] = useState<Booking[]>([]);
   const [selectedBookingId, setSelectedBookingId] = useState("");
+  const [ciSearch, setCiSearch] = useState("");
   const [coUnitId, setCoUnitId] = useState("");
   const [coCond, setCoCond] = useState("Baik — tidak ada kerusakan");
   const [coNote, setCoNote] = useState("");
+  const [busy, setBusy] = useState(false);
   const [checkinCardOpen, setCheckinCardOpen] = useState(false);
   const [pendingCheckin, setPendingCheckin] = useState<{
     booking_id: string;
@@ -60,15 +63,23 @@ export default function FrontDeskPage() {
 
   async function load() {
     setLoading(true);
-    const [s, u, n] = await Promise.all([
-      api.get<Summary>("/summary"),
-      api.get<Unit[]>("/units"),
-      api.get<Notification[]>("/notifications?role=all"),
-    ]);
-    setSum(s);
-    setUnits(u || []);
-    setNotifs(n || []);
-    setLoading(false);
+    try {
+      const [s, u, n] = await Promise.all([
+        api.get<Summary>("/summary"),
+        api.get<Unit[]>("/units"),
+        api.get<Notification[]>("/notifications?role=all"),
+      ]);
+      setSum(s);
+      setUnits(u || []);
+      setNotifs(n || []);
+    } catch (e) {
+      // Tanpa ini, satu permintaan yang gagal membuat setLoading(false)
+      // tidak pernah dijalankan: halaman Front Desk berhenti di "Memuat…"
+      // selamanya tanpa memberi tahu apa pun ke resepsionis.
+      toast("⚠", "Gagal memuat data", e instanceof Error ? e.message : "Periksa koneksi internet, lalu muat ulang.", "ruby");
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -77,6 +88,7 @@ export default function FrontDeskPage() {
 
   function openCheckin() {
     setSelectedBookingId("");
+    setCiSearch("");
     setCiTab("existing");
     setCiOpen(true);
     api
@@ -116,7 +128,8 @@ export default function FrontDeskPage() {
   }
 
   async function finalizeCheckin(data: { ktpPhotoPath: string; signatureDataUrl: string }) {
-    if (!pendingCheckin) return;
+    if (!pendingCheckin || busy) return;
+    setBusy(true);
     try {
       await api.post("/checkin", {
         booking_id: pendingCheckin.booking_id,
@@ -137,6 +150,8 @@ export default function FrontDeskPage() {
       load();
     } catch (e) {
       toast("⚠", "Check-In Gagal", e instanceof Error ? e.message : "Terjadi kesalahan.", "ruby");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -152,28 +167,73 @@ export default function FrontDeskPage() {
   }
 
   async function doCheckout() {
+    if (busy) return;
     const unit = units.find((u) => u.id === coUnitId);
-    if (!unit) return;
-    const bks = await api.get<{ id: string; guest_nama: string }[]>(`/bookings?unit_id=${unit.id}&status=checkin`);
-    const bk = bks?.[0];
-    if (!bk) {
-      toast("⚠", "Error", "Tidak ada booking aktif untuk unit ini.", "ruby");
+    if (!unit) {
+      toast("⚠", "Pilih unit", "Pilih unit yang akan di-checkout dulu.", "ruby");
       return;
     }
-    await api.post("/checkout", {
-      booking_id: bk.id,
-      unit_id: unit.id,
-      unit_nomor: unit.nomor,
-      guest_nama: bk.guest_nama,
-      kondisi: coCond,
-      checkout_by: user?.nama || "Staff",
-    });
-    setCoOpen(false);
-    toast("👋", "Checkout Diproses", `Unit ${unit.nomor} checkout. Housekeeping dijadwalkan.`, "gold");
-    load();
+    setBusy(true);
+    try {
+      const bks = await api.get<{ id: string; guest_nama: string }[]>(`/bookings?unit_id=${unit.id}&status=checkin`);
+      const bk = bks?.[0];
+      if (!bk) {
+        toast("⚠", "Error", "Tidak ada booking aktif untuk unit ini.", "ruby");
+        return;
+      }
+      await api.post("/checkout", {
+        booking_id: bk.id,
+        unit_id: unit.id,
+        unit_nomor: unit.nomor,
+        guest_nama: bk.guest_nama,
+        // Catatan kondisi ikut dikirim di sini. Sebelumnya kolom "Catatan"
+        // diisi resepsionis lalu dibuang begitu saja -- villa-api hanya
+        // menerima `kondisi`, yang disimpan ke bookings.catatan, jadi
+        // keterangan kerusakan tidak pernah sampai ke mana pun.
+        kondisi: coNote.trim() ? `${coCond} — ${coNote.trim()}` : coCond,
+        checkout_by: user?.nama || "Staff",
+      });
+      setCoOpen(false);
+      setCoNote("");
+      toast("👋", "Checkout Diproses", `Unit ${unit.nomor} checkout. Housekeeping dijadwalkan.`, "gold");
+      load();
+    } catch (e) {
+      // Sebelumnya tidak ada try/catch sama sekali: checkout yang gagal
+      // (mis. booking sudah ter-checkout, koneksi putus) tidak memunculkan
+      // apa pun di layar, dan modal tetap terbuka seolah belum diklik.
+      toast("⚠", "Checkout Gagal", e instanceof Error ? e.message : "Terjadi kesalahan.", "ruby");
+    } finally {
+      setBusy(false);
+    }
   }
 
   const occupiedUnits = units.filter((u) => u.status === "occupied" || u.status === "checkout");
+
+  /**
+   * Daftar booking terjadwal diurutkan berdasarkan TANGGAL KEDATANGAN, dan
+   * tamu yang datang hari ini/sudah lewat ditaruh paling atas.
+   *
+   * villa-api mengembalikan `/bookings?status=terjadwal` terurut
+   * `created_at` menurun dan dipotong 50 baris. Artinya booking OTA yang
+   * dibuat berbulan-bulan lalu untuk kedatangan hari ini justru berada
+   * paling bawah -- resepsionis harus menyisir daftar untuk menemukan tamu
+   * yang sedang berdiri di depannya, dan begitu jumlah booking menembus 50
+   * baris, yang paling lama dibuat malah hilang dari daftar. Pengurutan dan
+   * pencarian ini dilakukan di sisi klien, tanpa mengubah villa-api.
+   */
+  const hariIni = todayLocalISO();
+  const ciQuery = ciSearch.trim().toLowerCase();
+  const sortedScheduled = [...scheduledBookings]
+    .filter((b) => {
+      if (!ciQuery) return true;
+      return (
+        b.guest_nama.toLowerCase().includes(ciQuery) ||
+        (b.unit_nomor ?? "").toLowerCase().includes(ciQuery) ||
+        (b.guest_hp ?? "").toLowerCase().includes(ciQuery)
+      );
+    })
+    .sort((a, b) => a.tgl_checkin.localeCompare(b.tgl_checkin));
+  const tibaHariIni = sortedScheduled.filter((b) => b.tgl_checkin <= hariIni).length;
 
   const agenda: { title: string; sub: string; time: string; dot: string }[] = [];
   units.filter((u) => u.status === "checkout").forEach((u) => agenda.push({ title: `Checkout — Unit ${u.nomor}`, sub: "Hari ini", time: "12:00", dot: "bg-ruby-500" }));
@@ -291,7 +351,7 @@ export default function FrontDeskPage() {
         footer={
           <>
             <Btn onClick={() => setCiOpen(false)}>Batal</Btn>
-            <Btn variant="primary" onClick={ciTab === "existing" ? doCheckinExisting : doCheckinNew}>
+            <Btn variant="primary" onClick={ciTab === "existing" ? doCheckinExisting : doCheckinNew} disabled={busy}>
               {ciTab === "new" ? "Lanjut ke Payment Gateway →" : "Proses Check-In"}
             </Btn>
           </>
@@ -321,27 +381,54 @@ export default function FrontDeskPage() {
             <div className="text-[10px] text-ink/40 mb-3 leading-relaxed">
               Untuk tamu yang bookingnya sudah ada di sistem (termasuk OTA/Cloudbeds yang masuk otomatis) — sudah dibayar lewat channel-nya, tinggal check-in.
             </div>
+            {scheduledBookings.length > 0 && (
+              <div className="mb-2.5">
+                <input
+                  className={inputCls}
+                  value={ciSearch}
+                  onChange={(e) => setCiSearch(e.target.value)}
+                  placeholder="Cari nama tamu / unit / no. HP…"
+                />
+                <div className="text-[9.5px] text-ink/30 mt-1">
+                  {tibaHariIni > 0
+                    ? `${tibaHariIni} tamu dijadwalkan tiba hari ini atau sebelumnya — ada di urutan atas.`
+                    : "Belum ada tamu yang dijadwalkan tiba hari ini."}
+                </div>
+              </div>
+            )}
             {scheduledBookings.length === 0 ? (
               <div className="text-[11px] text-ink/30 text-center py-6">Tidak ada booking terjadwal. Pakai tab &quot;Tamu Baru&quot; untuk tamu yang belum ada bookingnya.</div>
+            ) : sortedScheduled.length === 0 ? (
+              <div className="text-[11px] text-ink/30 text-center py-6">Tidak ada booking yang cocok dengan pencarian &quot;{ciSearch}&quot;.</div>
             ) : (
               <div className="max-h-[280px] overflow-y-auto -mx-1 space-y-1.5">
-                {scheduledBookings.map((bk) => (
-                  <button
-                    key={bk.id}
-                    onClick={() => setSelectedBookingId(bk.id)}
-                    className={`w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg border transition ${
-                      selectedBookingId === bk.id ? "border-gold-500 bg-gold-500/10" : "border-ink/10 hover:border-ink/20"
-                    }`}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[11.5px] font-medium text-ink/80 truncate">{bk.guest_nama}</div>
-                      <div className="text-[9.5px] text-ink/30 mt-0.5">
-                        Unit {bk.unit_nomor} · {fmtDate(bk.tgl_checkin)} · {bk.sumber === "cloudbeds" ? "☁ Cloudbeds" : bk.sumber}
+                {sortedScheduled.map((bk) => {
+                  const tiba = bk.tgl_checkin <= hariIni;
+                  return (
+                    <button
+                      key={bk.id}
+                      onClick={() => setSelectedBookingId(bk.id)}
+                      className={`w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg border transition ${
+                        selectedBookingId === bk.id ? "border-gold-500 bg-gold-500/10" : "border-ink/10 hover:border-ink/20"
+                      }`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[11.5px] font-medium text-ink/80 truncate">
+                          {bk.guest_nama}
+                          {tiba && (
+                            <span className="ml-1.5 text-[8.5px] font-semibold uppercase tracking-wide text-sage-700 bg-sage-500/15 border border-sage-500/30 rounded px-1.5 py-0.5">
+                              {bk.tgl_checkin === hariIni ? "Hari ini" : "Terlambat"}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[9.5px] text-ink/30 mt-0.5">
+                          Unit {bk.unit_nomor} · {fmtDate(bk.tgl_checkin)} · {bk.sumber === "cloudbeds" ? "☁ Cloudbeds" : bk.sumber}
+                        </div>
                       </div>
-                    </div>
-                    <div className="text-[10.5px] text-ink/50 shrink-0">{fmtCurrencyFull(bk.total_bayar ?? bk.tarif)}</div>
-                  </button>
-                ))}
+                      <div className="text-[10.5px] text-ink/50 shrink-0">{fmtCurrencyFull(bk.total_bayar ?? bk.tarif)}</div>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -357,7 +444,7 @@ export default function FrontDeskPage() {
         )}
       </Modal>
 
-      <Modal open={coOpen} title="Check-Out Tamu" onClose={() => setCoOpen(false)} footer={<><Btn onClick={() => setCoOpen(false)}>Batal</Btn><Btn variant="primary" onClick={doCheckout}>Proses Check-Out</Btn></>}>
+      <Modal open={coOpen} title="Check-Out Tamu" onClose={() => setCoOpen(false)} footer={<><Btn onClick={() => setCoOpen(false)} disabled={busy}>Batal</Btn><Btn variant="primary" onClick={doCheckout} disabled={busy}>{busy ? "Memproses…" : "Proses Check-Out"}</Btn></>}>
         <Field label="Pilih Unit">
           <select className={inputCls} value={coUnitId} onChange={(e) => setCoUnitId(e.target.value)}>
             {occupiedUnits.length === 0 && <option value="">Tidak ada unit terisi</option>}
@@ -373,7 +460,7 @@ export default function FrontDeskPage() {
             <option>Ada kerusakan signifikan</option>
           </select>
         </Field>
-        <Field label="Catatan"><input className={inputCls} value={coNote} onChange={(e) => setCoNote(e.target.value)} placeholder="Opsional..." /></Field>
+        <Field label="Catatan Kondisi (ikut tersimpan di booking)"><input className={inputCls} value={coNote} onChange={(e) => setCoNote(e.target.value)} placeholder="Cth: gorden robek di kamar utama" /></Field>
       </Modal>
 
       <CheckinCard

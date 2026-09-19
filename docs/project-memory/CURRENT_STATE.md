@@ -2,6 +2,119 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-19 — audit halaman resepsionis (check-in + pembayaran QRIS)
+
+Owner minta halaman resepsionis untuk check-in dan pembayaran QRIS diperiksa
+sampai tidak ada bug lagi. Yang diperiksa: `/front-desk`,
+`/front-desk/payment-gateway`, `CheckinCard`, `/api/checkin/upload-ktp`,
+`/api/payment-gateway/qris(+/status)`, `/api/webhooks/ipaymu`, dan
+`src/lib/ipaymuApi.ts` — semuanya dicocokkan ke villa-api v67 yang **live**
+(diverifikasi lewat Supabase MCP; snapshot di repo identik dengan yang live)
+serta ke skema `bookings` dan RPC `villa_commit_checkin/checkout`.
+
+### Temuan terberat: booking 0 malam menembus SEMUA pengaman double-booking
+
+Form kasir villa walk-in memberi nilai bawaan **check-out = check-in**. Itu
+menghasilkan `daterange(tgl_checkin, tgl_checkout, '[)')` yang **kosong**, dan
+rentang kosong tidak pernah bertabrakan dengan apa pun. Akibatnya booking
+seperti itu lolos dari ketiga lapis pengaman sekaligus:
+
+1. exclusion constraint `bookings_no_overlap_active` di database,
+2. pengecekan bentrok villa-api (`datesOverlap`) di `POST /bookings`,
+3. `GET /availability` yang dipakai dropdown unit di layar kasir.
+
+Artinya resepsionis yang tidak mengubah tanggal bawaan bisa membuat booking
+untuk unit yang **sedang terisi**, tanpa satu pun peringatan, dan unit itu
+tetap ditagih satu malam (`Math.max(1, ...)` di villa-api). Belum pernah
+terjadi di produksi — dicek, tidak ada satu pun baris `bookings` dengan
+`tgl_checkout <= tgl_checkin` — tapi keadaan bawaan form memang persis itu.
+
+Diperbaiki di sisi form: bawaan check-out sekarang satu malam (satu bulan
+untuk sewa bulanan), rentang divalidasi sebelum booking dibuat, dan tombolnya
+terkunci selama rentangnya tidak sah. Logika tanggalnya dipisah ke
+`src/lib/stayDates.ts` dengan 9 tes.
+
+**Belum ditutup di lapis bawah, dan ini sengaja:** villa-api dan constraint
+database masih menerima rentang kosong dari jalur lain (mis. pemanggil API
+langsung). Menutupnya menyentuh skema/constraint, yang butuh persetujuan
+owner lebih dulu.
+
+### iPaymu memang BELUM dikonfigurasi di produksi
+
+`IPAYMU_VA` dan `IPAYMU_API_KEY` **tidak ada** di environment variables
+Vercel (diperiksa langsung, hanya nama yang dilihat). Jadi setiap pembuatan
+QRIS dinamis menjawab 503, dan modal pembayaran diam-diam jatuh ke **QRIS
+statis** villa — yang tidak membawa nominal. Kasir tidak punya cara tahu
+bedanya: layarnya terlihat normal.
+
+Ini bukan sekadar teori: inilah cara halaman itu berjalan sekarang. Tamu
+harus mengetik sendiri nominalnya, dan salah ketik baru ketahuan belakangan.
+Modal sekarang menyatakannya terang-terangan (nominal yang harus diketik ikut
+ditampilkan), dan "Cek Status" menjelaskan kenapa status otomatis belum bisa
+dipakai alih-alih memunculkan galat mentah.
+
+`walkin_payments` masih **kosong sama sekali** — Payment Gateway belum pernah
+dipakai untuk transaksi sungguhan.
+
+### Bug lain yang ditemukan dan diperbaiki
+
+- **KTP + tanda tangan bisa menempel ke tamu yang salah.** `capturedKtpSig`
+  disimpan tanpa penanda milik siapa. Membuat booking tamu A lalu membuka
+  booking tamu B yang masih pending dan menekan "Tandai Lunas & Check-In"
+  menyimpan KTP dan tanda tangan **tamu A** ke booking **tamu B** — dokumen
+  persetujuan tata tertib jadi milik orang yang salah. Sekarang terikat ke
+  `booking_id`; kalau tidak cocok, kartu check-in diminta ulang.
+- **Kanvas tanda tangan melenceng.** `width=360/height=140` dipatok sementara
+  CSS-nya `w-full`, jadi koordinat pena tidak pernah jatuh di titik yang
+  digambar: di HP tanda tangan muncul bergeser dan gepeng, di layar lebar
+  ujung kanannya terpotong. Kanvas kini mengikuti ukuran tampilan + DPR.
+- **Foto KTP dari kamera HP bisa menembus batas body Vercel (~4,5MB).** Foto
+  3–6MB dikirim sebagai data URL base64 (membengkak ~1,37x) ke
+  `/api/checkin/upload-ktp`, dan check-in gagal dengan galat yang tidak
+  menjelaskan apa pun. Foto sekarang diperkecil di browser (maks 1600px,
+  JPEG) sebelum diunggah.
+- **Catatan kondisi saat check-out dibuang.** Kolom "Catatan" diisi
+  resepsionis lalu tidak pernah dikirim ke mana pun; villa-api hanya menerima
+  `kondisi` (disimpan ke `bookings.catatan`). Sekarang digabung ke sana.
+- **`load()` Front Desk tanpa penanganan galat** — satu permintaan gagal
+  membuat halaman berhenti di "Memuat…" selamanya tanpa pesan apa pun.
+  `doCheckout()` juga tanpa `try/catch`: checkout yang gagal tidak
+  memunculkan apa pun di layar.
+- **Dobel-klik.** Tidak ada satu pun tombol aksi yang terkunci saat aksinya
+  berjalan. Sekarang `Btn` punya `disabled`, dipakai di check-in, check-out,
+  tandai lunas, dan pembuatan transaksi.
+- **Tanggal bawaan memakai UTC.** `todayISO()` mengambil tanggal UTC, jadi
+  resepsionis yang bekerja sebelum pukul 07:00 WIB mendapat tanggal
+  **kemarin**. Alur check-in kini memakai `todayLocalISO()`.
+- **Daftar booking terjadwal diurutkan tanggal pembuatan.** villa-api
+  mengembalikan `created_at` menurun dan memotong 50 baris, jadi booking OTA
+  lama untuk kedatangan hari ini berada paling bawah. Diurutkan ulang di
+  klien berdasarkan tanggal kedatangan + penanda "Hari ini"/"Terlambat" +
+  kotak pencarian. Saat ini baru 11 booking `terjadwal`, jadi batas 50 belum
+  menggigit — tapi akan menggigit.
+- **QRIS dibuat ulang setiap modal dibuka**, padahal tiap `POST
+  /payment/direct` membuat transaksi baru di iPaymu dengan `referenceId` yang
+  sama. Sekarang di-cache selama halaman terbuka.
+- **Webhook iPaymu bisa 500 karena id sampah.** `referenceId` sembarang dari
+  internet membuat Postgres menolak query (kolom uuid) → 500 → iPaymu
+  mengulang. Sekarang divalidasi sebagai uuid dan diabaikan diam-diam.
+
+### Yang TIDAK diubah dan perlu keputusan owner
+
+- **Sewa bulanan lebih dari satu bulan hanya ditagih satu bulan.** villa-api
+  memakai `tarif_bulanan` apa adanya tanpa mengalikan jumlah bulan (berbeda
+  dari harian yang dikali malam). Ini perubahan harga, jadi tidak disentuh.
+- **Nominal QRIS dikirim dari klien.** `/api/payment-gateway/qris` memakai
+  `amount` dari body, bukan membacanya ulang dari booking/transaksi di
+  server. Untuk sekarang sumbernya selalu data server, jadi tidak ada
+  ketidakcocokan — tapi lapisannya belum ada.
+- **`timestamp()` di `ipaymuApi.ts` memakai UTC**, sedangkan pustaka resmi
+  iPaymu memakai waktu server (praktiknya WIB). Kalau iPaymu memvalidasi
+  jendela waktu, selisih 7 jam akan menolak semua permintaan. Belum bisa
+  dipastikan tanpa kredensial sandbox — jangan dianggap benar sampai diuji.
+- **Bentuk respons `/payment/direct` masih belum pernah diuji ke iPaymu
+  sungguhan** (catatan lama di DEPLOYMENT.md masih berlaku).
+
 ## 2026-09-16 — Standard: weekday diturunkan ke Rp550.000, weekend TETAP Rp750.000 (owner-approved)
 
 Owner minta harga weekday Standard diturunkan ke Rp550.000, tapi harga

@@ -4,6 +4,19 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-09-19 (branch `claude/receptionist-checkout-qris-payment-gvczm7`, not yet on `main`)
+- **Booking 0 malam tidak bisa dibuat lagi dari layar kasir.** Bawaan check-out = check-in menghasilkan daterange kosong, yang lolos dari exclusion constraint `bookings_no_overlap_active`, dari `datesOverlap` villa-api, DAN dari `/availability` — tiga lapis pengaman double-booking sekaligus. Bawaan jadi satu malam + validasi rentang; logikanya di `src/lib/stayDates.ts` dengan 9 tes (total 62 tes hijau).
+- **KTP + tanda tangan tidak bisa lagi menempel ke tamu yang salah.** `capturedKtpSig` kini terikat ke `booking_id`.
+- **Kanvas tanda tangan mengikuti ukuran tampilan + DPR** (sebelumnya dipatok 360×140 dengan CSS `w-full`, sehingga goresan melenceng di HP dan terpotong di layar lebar).
+- **Foto KTP diperkecil di browser** (maks 1600px, JPEG) sebelum diunggah — foto kamera HP bisa menembus batas body ~4,5MB Route Handler Vercel.
+- **Modal pembayaran menyatakan kalau yang tampil QRIS statis** (nominal tidak otomatis, ikut menampilkan nominal yang harus diketik tamu). Sebelumnya kegagalan QRIS dinamis disembunyikan. Catatan: `IPAYMU_VA`/`IPAYMU_API_KEY` memang belum ada di Vercel, jadi inilah keadaan yang sedang berjalan.
+- **Catatan kondisi check-out ikut tersimpan** (digabung ke `kondisi` → `bookings.catatan`); sebelumnya dibuang.
+- **Penanganan galat + kunci dobel-klik** di Front Desk dan Payment Gateway; `Btn` diberi prop `disabled`.
+- **Tanggal bawaan check-in pakai waktu lokal**, bukan UTC (`todayLocalISO`).
+- **Daftar booking terjadwal diurutkan tanggal kedatangan** + penanda "Hari ini"/"Terlambat" + pencarian.
+- **QRIS di-cache per transaksi** supaya membuka-tutup modal tidak menumpuk transaksi kembar di iPaymu; webhook iPaymu memvalidasi uuid sebelum query.
+- **Tidak ada perubahan skema, tidak ada perubahan villa-api, tidak ada perubahan harga.** Perbedaan angka yang terlihat di form hanyalah perkiraan total (malam × tarif) yang sebelumnya menampilkan tarif satu malam — nominal final tetap dihitung villa-api.
+
 ### 2026-09-13 — WhatsApp villa pindah ke perangkat sendiri (tanpa perubahan kode villa-api)
 - **`integration_settings.vercel_bridge.base_url` diubah dari `https://mkh.haluoleo.id` ke `https://living.haluoleo.id`.** Seluruh WA villa kini lewat perangkat WhaCenter milik villa, bukan menumpang Mkhsistem. `sendWa()` membaca nilai ini setiap panggilan (tidak di-cache) sehingga berlaku seketika tanpa deploy, dan bisa dikembalikan dengan mengubah satu nilai yang sama.
 - **Tidak ada baris villa-api yang diubah** — kontrak `/api/wa/send` villa (body `{phone, message}`, header `x-internal-secret`, balasan `{success}`) memang dibuat identik dengan milik Mkhsistem justru untuk ini.

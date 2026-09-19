@@ -61,19 +61,28 @@ export function Btn({
   onClick,
   variant = "ghost",
   type = "button",
+  disabled = false,
 }: {
   children: ReactNode;
   onClick?: () => void;
   variant?: "ghost" | "primary";
   type?: "button" | "submit";
+  /**
+   * Dipakai untuk mengunci tombol selama satu aksi sedang berjalan. Tanpa
+   * ini, dobel-klik pada tombol seperti "Konfirmasi & Check-In" atau
+   * "Tandai Lunas" mengirim aksi yang sama dua kali.
+   */
+  disabled?: boolean;
 }) {
   return (
     <button
       type={type}
       onClick={onClick}
+      disabled={disabled}
+      aria-disabled={disabled}
       className={`px-4 py-2 rounded text-[11.5px] font-semibold tracking-wide transition-opacity ${
         variant === "primary" ? "bg-gold-500 text-base-950 hover:opacity-90" : "bg-base-800 text-ink/50 border border-ink/10"
-      }`}
+      } ${disabled ? "opacity-50 cursor-not-allowed pointer-events-none" : ""}`}
     >
       {children}
     </button>
