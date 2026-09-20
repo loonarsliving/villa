@@ -247,7 +247,12 @@ export default function FinancePage() {
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
             <StatCard label="Gross Revenue" value={fmtCurrency(summary.gross_revenue)} accent="azure" />
             <StatCard label="Net Revenue" value={fmtCurrency(summary.net_revenue)} accent="azure" sub={summary.net_revenue_note} />
-            <StatCard label="Payment Received" value={fmtCurrency(summary.payment_received)} accent="sage" />
+            <StatCard
+              label="Payment Received"
+              value={fmtCurrency(summary.payment_received)}
+              accent="sage"
+              sub={`${summary.cloudbeds_balance_verified_count}/${summary.bookings_counted} booking terverifikasi dari Cloudbeds`}
+            />
             <StatCard label="Outstanding" value={fmtCurrency(summary.outstanding)} accent={summary.outstanding > 0 ? "ruby" : "sage"} />
             <StatCard label="OTA Receivable" value={fmtCurrency(summary.ota_receivable)} accent="gold" />
             <StatCard
@@ -383,6 +388,9 @@ export default function FinancePage() {
                         <Badge tone={b.payment_status === "PAID" ? "ok" : b.payment_status === "CANCELLED" ? "pending" : "danger"}>
                           {b.payment_status}
                         </Badge>
+                        <div className="text-ink/30 text-[9.5px] mt-0.5">
+                          {b.payment_status_source === "cloudbeds_balance" ? "dari Cloudbeds" : "perkiraan"}
+                        </div>
                       </td>
                       <td className="px-3 py-2.5">
                         {b.settlement_status ? (
@@ -538,6 +546,12 @@ function BookingDetailModal({
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-ink/70">
               <div>Status: {detail.payment.paid ? "Lunas" : "Belum lunas"}</div>
               <div>Outstanding: {fmtCurrencyFull(detail.payment.outstanding)}</div>
+              <div className="col-span-2 text-ink/40 text-[10.5px]">
+                Sumber:{" "}
+                {detail.payment.source === "cloudbeds_balance"
+                  ? `Saldo asli Cloudbeds (${fmtCurrencyFull(detail.payment.cloudbeds_balance)} belum dibayar)`
+                  : "Perkiraan dari status booking, belum tersinkron dari Cloudbeds"}
+              </div>
             </div>
           </section>
 

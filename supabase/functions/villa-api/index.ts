@@ -849,11 +849,28 @@ function normalizedChannel(sumber){
   return 'UNKNOWN'; // includes raw 'cloudbeds' (source not yet resolved to a named OTA) and anything unmapped.
 }
 
-/** PAID/UNPAID/CANCELLED -- see the module comment above for why this is workflow-status-based, not a Cloudbeds payment feed. */
+/**
+ * PAID/UNPAID/CANCELLED.
+ *
+ * Prefers bookings.cloudbeds_balance -- the REAL amount still owed, as
+ * reported by Cloudbeds' own getReservations.balance field (synced by
+ * cloudbedsReservationSync.ts) -- over the workflow-status guess. Only
+ * falls back to the guess (checkin/checkout = paid) when cloudbeds_balance
+ * is null: a non-Cloudbeds booking (direct/walk-in, which has its own
+ * local "Tandai Lunas" payment workflow), or a Cloudbeds booking synced
+ * before this column existed and not yet re-synced.
+ */
 function paymentStatusForBooking(b){
   if(b.status==='batal') return 'CANCELLED';
+  if(b.cloudbeds_balance != null) return Number(b.cloudbeds_balance) <= 0 ? 'PAID' : 'UNPAID';
   if(b.status==='checkin' || b.status==='checkout') return 'PAID';
   return 'UNPAID';
+}
+
+/** Real outstanding amount when Cloudbeds has reported one; otherwise the full stay amount if the workflow-status guess says unpaid. */
+function outstandingForBooking(b, amount){
+  if(b.cloudbeds_balance != null) return Math.max(0, Number(b.cloudbeds_balance));
+  return paymentStatusForBooking(b)==='UNPAID' ? amount : 0;
 }
 
 async function getSettlementConfigMap(){
@@ -2501,7 +2518,7 @@ Deno.serve(async (req)=>{
     if(!isFinance) return forbidden();
     const { from, to } = financeDateRange();
     const { data: rows, error } = await supabase.from('bookings')
-      .select('id,sumber,status,tgl_checkin,tgl_checkout,total_bayar,tarif')
+      .select('id,sumber,status,tgl_checkin,tgl_checkout,total_bayar,tarif,cloudbeds_balance')
       .gte('tgl_checkin', from).lte('tgl_checkin', to);
     if(error) return err(error.message);
     const bookings = rows ?? [];
@@ -2513,7 +2530,8 @@ Deno.serve(async (req)=>{
     const amountOf = b => Number(b.total_bayar ?? b.tarif ?? 0);
     const gross_revenue = active.reduce((s,b)=>s+amountOf(b),0);
     const payment_received = active.filter(b=>paymentStatusForBooking(b)==='PAID').reduce((s,b)=>s+amountOf(b),0);
-    const outstanding = active.filter(b=>paymentStatusForBooking(b)==='UNPAID').reduce((s,b)=>s+amountOf(b),0);
+    const outstanding = active.reduce((s,b)=>s+outstandingForBooking(b, amountOf(b)),0);
+    const cloudbedsVerifiedCount = active.filter(b=>b.cloudbeds_balance != null).length;
 
     const activeIds = active.map(b=>b.id);
     let otaReceivable = 0, alertsUnknown = 0, alertsOverdue = 0, alertsDueToday = 0;
@@ -2551,7 +2569,9 @@ Deno.serve(async (req)=>{
       gross_revenue, net_revenue: gross_revenue,
       net_revenue_note: 'Sama dengan Gross Revenue -- integrasi Cloudbeds ini hanya membawa total reservasi (grandTotal), tidak ada feed diskon/refund terpisah untuk dikurangkan.',
       payment_received,
-      payment_received_note: 'Dihitung dari status booking (checkin/checkout = sudah bayar penuh, sesuai alur "Tandai Lunas" front desk), bukan dari feed pembayaran Cloudbeds -- Cloudbeds tidak menyediakan endpoint pembayaran terpisah untuk API key ini.',
+      payment_received_note: cloudbedsVerifiedCount>0
+        ? `Untuk ${cloudbedsVerifiedCount} dari ${active.length} booking, dihitung dari saldo asli Cloudbeds (getReservations.balance). Sisanya (booking direct/walk-in atau belum tersinkron) memakai status booking (checkin/checkout = lunas, sesuai alur "Tandai Lunas" front desk) sebagai perkiraan.`
+        : 'Dihitung dari status booking (checkin/checkout = sudah bayar penuh, sesuai alur "Tandai Lunas" front desk) -- belum ada booking dengan saldo asli Cloudbeds tersinkron pada periode ini. Jalankan "Tarik Reservasi" di Admin > Cloudbeds untuk mengisinya.',
       outstanding,
       ota_receivable: otaReceivable,
       ota_receivable_note: 'Total revenue booking OTA (non-direct) yang statusnya belum RECEIVED di alur settlement manual Finance.',
@@ -2564,11 +2584,12 @@ Deno.serve(async (req)=>{
           : 'NOT VERIFIED -- belum ada settlement yang ditandai diterima (dengan referensi bank) untuk periode ini.',
       },
       bookings_counted: active.length,
+      cloudbeds_balance_verified_count: cloudbedsVerifiedCount,
       cancelled_excluded: cancelled,
       alerts,
       last_cloudbeds_activity: lastEvent?.created_at ?? null,
       data_caveats: [
-        'Balance mismatch check (Cloudbeds balance vs calculated) NOT_AVAILABLE -- sinkronisasi ini hanya menarik grandTotal/subTotal (getReservationsWithRateDetails), bukan field balance/outstanding otoritatif yang terpisah dari Cloudbeds.',
+        'Balance mismatch check (Cloudbeds balance vs calculated) NOT_AVAILABLE -- belum ada perbandingan otomatis antara total kami dan balance Cloudbeds; balance Cloudbeds sekarang dipakai langsung sebagai sumber status bayar/outstanding, bukan dibandingkan.',
         'Refund tracking NOT_AVAILABLE -- tidak ada endpoint refund yang tersinkron dari Cloudbeds ke sistem ini.',
         'Sync run history (jumlah reservasi/transaksi/pembayaran per sync) NOT_AVAILABLE sebagai log tersimpan -- lihat halaman Admin > Cloudbeds untuk menjalankan sync dan melihat ringkasannya secara langsung.',
       ],
@@ -2579,7 +2600,7 @@ Deno.serve(async (req)=>{
     if(!isFinance) return forbidden();
     const { from, to } = financeDateRange();
     const { data: rows, error } = await supabase.from('bookings')
-      .select('id,sumber,status,tgl_checkin,tgl_checkout,total_bayar,tarif')
+      .select('id,sumber,status,tgl_checkin,tgl_checkout,total_bayar,tarif,cloudbeds_balance')
       .gte('tgl_checkin', from).lte('tgl_checkin', to).neq('status','batal');
     if(error) return err(error.message);
     const bookings = rows ?? [];
@@ -2598,9 +2619,11 @@ Deno.serve(async (req)=>{
       const key = b.sumber ?? 'other';
       const cur = bySumber.get(key) ?? { sumber:key, normalized_channel: normalizedChannel(key), revenue:0, payment:0, outstanding:0, ota_receivable:0, settled_count:0, unsettled_count:0, booking_count:0 };
       const amount = Number(b.total_bayar ?? b.tarif ?? 0);
+      const bOutstanding = outstandingForBooking(b, amount);
       cur.revenue += amount;
       cur.booking_count++;
-      if(paymentStatusForBooking(b)==='PAID') cur.payment += amount; else cur.outstanding += amount;
+      cur.payment += amount - bOutstanding;
+      cur.outstanding += bOutstanding;
       const s = settlementByBooking.get(b.id);
       const settled = s?.settlement_status==='RECEIVED';
       if(settled) cur.settled_count++; else cur.unsettled_count++;
@@ -2627,7 +2650,7 @@ Deno.serve(async (req)=>{
     const offset = Math.max(0, Number(url.searchParams.get('offset') ?? 0));
 
     let query = supabase.from('bookings')
-      .select('id,unit_nomor,guest_nama,sumber,status,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_reservation_id,created_at', {count:'exact'})
+      .select('id,unit_nomor,guest_nama,sumber,status,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_balance,cloudbeds_reservation_id,created_at', {count:'exact'})
       .gte('tgl_checkin', from).lte('tgl_checkin', to)
       .order('tgl_checkin',{ascending:false});
     if(sumber) query = query.eq('sumber', sumber);
@@ -2653,7 +2676,8 @@ Deno.serve(async (req)=>{
         id: b.id, unit_nomor: b.unit_nomor, guest_nama: b.guest_nama, sumber: b.sumber,
         normalized_channel: normalizedChannel(b.sumber), status: b.status,
         tgl_checkin: b.tgl_checkin, tgl_checkout: b.tgl_checkout, durasi_malam: b.durasi_malam,
-        revenue: amount, payment_status: pay, outstanding: pay==='UNPAID' ? amount : 0,
+        revenue: amount, payment_status: pay, outstanding: outstandingForBooking(b, amount),
+        payment_status_source: b.cloudbeds_balance != null ? 'cloudbeds_balance' : 'booking_status_estimate',
         cloudbeds_reservation_id: b.cloudbeds_reservation_id,
         settlement_status: s?.settlement_status ?? null,
         settlement_confidence: s?.settlement_confidence ?? null,
@@ -2692,7 +2716,14 @@ Deno.serve(async (req)=>{
         unit_nomor: b.unit_nomor, units: b.units ?? null, status: b.status, cloudbeds_reservation_id: b.cloudbeds_reservation_id,
       },
       revenue: { room: amount, extras: null, discount: null, tax: null, fee: null, refund: null, net: amount, note: 'Tidak ada breakdown room/extras/tax/fee terpisah dari Cloudbeds untuk API key ini -- hanya total reservasi.' },
-      payment: { paid: paymentStatusForBooking(b)==='PAID', outstanding: paymentStatusForBooking(b)==='UNPAID' ? amount : 0, method: 'UNKNOWN', payment_date: b.checkin_at ?? null },
+      payment: {
+        paid: paymentStatusForBooking(b)==='PAID',
+        outstanding: outstandingForBooking(b, amount),
+        method: 'UNKNOWN',
+        payment_date: b.checkin_at ?? null,
+        source: b.cloudbeds_balance != null ? 'cloudbeds_balance' : 'booking_status_estimate',
+        cloudbeds_balance: b.cloudbeds_balance ?? null,
+      },
       settlement: {
         collection_method: cfg?.collection_method ?? 'UNKNOWN',
         expected_settlement_date: settlement?.expected_settlement_date ?? null,

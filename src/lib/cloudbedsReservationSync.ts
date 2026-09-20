@@ -56,6 +56,15 @@ interface CloudbedsReservation {
   endDate: string;
   rooms?: CloudbedsRoomAssignment[];
   guestList?: Record<string, CloudbedsGuestDetail>;
+  /**
+   * What the guest still OWES, per the pms-v1.2 spec -- the one field
+   * GetReservationsResponse actually carries (see the comment above
+   * getCloudbedsReservationTotals in cloudbedsApi.ts for why it's wrong
+   * for revenue). It's exactly right for payment/outstanding status,
+   * which is the Finance dashboard's use for it. Arrives as a string
+   * like every numeric field in this API.
+   */
+  balance?: string | number | null;
 }
 
 async function fetchAllActiveReservations(apiKey: string): Promise<CloudbedsReservation[]> {
@@ -207,6 +216,8 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
     // the nightly rate stays derivable.
     const totals = totalsById.get(resv.reservationID) ?? null;
     const stayTotal = totals ? totals.grandTotal : 0;
+    const balanceRaw = resv.balance;
+    const cloudbedsBalance = balanceRaw != null && balanceRaw !== '' && Number.isFinite(Number(balanceRaw)) ? Number(balanceRaw) : null;
 
     const guestDetail = room.guestID ? resv.guestList?.[room.guestID] : undefined;
     const guestNama =
@@ -268,6 +279,7 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
           durasi_malam: nights > 0 ? nights : null,
           tarif: stayTotal,
           total_bayar: stayTotal,
+          cloudbeds_balance: cloudbedsBalance,
           status: statusToVilla(resv.status),
           cloudbeds_reservation_id: resv.reservationID,
         },
