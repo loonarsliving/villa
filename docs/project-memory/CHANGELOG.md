@@ -4,6 +4,14 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-09-20 (branch `claude/receptionist-checkout-qris-payment-gvczm7`) — audit ulang check-in
+- **Tanda tangan tamu bisa terhapus diam-diam** — `fitCanvas` dipasang sebagai listener `resize`, dan `canvas.width = ...` mengosongkan kanvas. Di HP, `resize` terpicu saat keyboard muncul / bilah URL menyusut / layar diputar, semuanya bisa terjadi setelah tamu menandatangani; `hasSignature` tetap true sehingga gambar KOSONG tersimpan sebagai bukti persetujuan. Bug ini diperkenalkan oleh perbaikan kanvas 19 Sep. **Dibuktikan di Chromium (Playwright)**: kode lama piksel tinta 1658 → 0, kode baru 1057 → 1057.
+- **Latar tanda tangan transparan** (bukan putih) — `bg-white` hanya kelas CSS, `toDataURL` cuma mengambil isi kanvas. Putihnya sekarang ditulis ke dalam kanvas.
+- **Foto KTP tidak lagi terunggah ulang** saat check-in gagal lalu diulang dengan foto yang sama (data pribadi tamu tidak menumpuk di storage).
+- **Digabung dengan `main`** (#91, perbaikan kalender geser sehari); konflik diselesaikan dengan mempertahankan helper bersama `addDaysISO` + `dayIndex` versi UTC.
+- **Terbuka, perlu keputusan owner**: `ktp_photo_path` dan `signature_data_url` sekali tulis — tidak ada endpoint/halaman mana pun yang membacanya kembali, jadi bukti yang dikumpulkan tidak bisa dipakai saat sengketa.
+- Diperiksa dan BUKAN bug: `sendWa()` tidak pernah melempar; booking belum bayar tidak bisa di-check-in; check-in ganda terkunci di RPC.
+
 ### 2026-09-19 (lanjutan 2) — WIB sampai ke database & villa-api (owner: "Ya perbaiki")
 - **Database, SUDAH di produksi** (migrasi `villa_checkin_checkout_wib_dates`): `villa_commit_checkin` menulis `periode_bulan` dari `to_char(now() at time zone 'Asia/Jakarta','YYYY-MM')`, `villa_commit_checkout` menulis `housekeeping.tgl` dari `(now() at time zone 'Asia/Jakarta')::date`. `checkin_at`/`checkout_at` tetap `now()` (timestamptz, memang benar). Diperiksa: tidak ada data lama yang salah periode.
 - **villa-api (di branch, aktif setelah merge)**: helper `todayWIB`/`monthWIB`/`prevMonthWIB` + 19 turunan "hari ini"/"bulan ini" dipindahkan ke WIB — default periode `/report`, `/admin/overview`, `/admin/dividends`, `/opex`, plus `/summary`, `/housekeeping`, `/dashboard/hari-ini`, masa berlaku voucher & promo, dan nomor invoice (aman: nomor disimpan sekali, tidak pernah dinomori ulang). Kolom timestamptz tidak disentuh.

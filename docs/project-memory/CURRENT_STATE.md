@@ -2,6 +2,81 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-20 — audit ulang alur check-in
+
+Owner minta dipastikan tidak ada bug lagi di proses check-in. Ditelusuri
+ulang: `/front-desk` → CheckinCard → `POST /checkin` → `villa_commit_checkin`,
+plus jalur walk-in lewat Payment Gateway.
+
+### Bug baru yang ditemukan — dan ini bug yang SAYA perkenalkan sendiri
+
+`fitCanvas` dipasang sebagai listener `resize`, dan di dalamnya
+`canvas.width = ...` — menyetel ukuran buffer kanvas MENGOSONGKAN kanvas.
+Di HP, `resize` terpicu saat keyboard virtual muncul/hilang, saat bilah URL
+menyusut ketika modal di-scroll, dan saat layar diputar — semuanya bisa
+terjadi SETELAH tamu menandatangani. Goresannya terhapus sementara
+`hasSignature` tetap `true`, jadi penjagaannya lolos dan yang tersimpan
+sebagai bukti persetujuan tata tertib adalah **gambar kosong** — padahal
+tanda tangan itu dasar penagihan denda merokok Rp500.000 dan ganti rugi.
+
+**Dibuktikan di Chromium sungguhan (Playwright), bukan dinalar:**
+menandatangani lalu mengecilkan viewport → kode lama piksel tinta
+1658 → **0**; kode baru 1057 → **1057**.
+
+Pelajarannya: memperbaiki kanvas agar responsif (perbaikan koordinat pena
+19 Sep) sekaligus membuka lubang baru di fitur yang sama. Perbaikan pada
+kanvas HARUS diuji di browser, karena tidak ada satu pun tes Node yang bisa
+menangkapnya.
+
+Dua hal ikut ketahuan dari pengujian yang sama:
+- **Latar tanda tangan transparan** (56.000 piksel transparan). `bg-white`
+  cuma kelas CSS; `toDataURL` hanya mengambil isi kanvas. Tinta hitam di
+  atas latar transparan tidak akan terbaca di atas latar gelap. Sekarang
+  putihnya ditulis ke dalam kanvas.
+- **Foto KTP terunggah ulang** setiap kali check-in gagal lalu diulang —
+  salinan KTP menganggur menumpuk di storage. Sekarang dipakai ulang.
+
+### Temuan yang BELUM ditangani: KTP & tanda tangan tidak bisa dilihat kembali
+
+Foto KTP diunggah ke bucket privat `guest-documents`, path-nya disimpan di
+`bookings.ktp_photo_path`, dan tanda tangan di `bookings.signature_data_url`.
+**Tidak ada satu pun endpoint maupun halaman yang membacanya kembali** —
+diperiksa di seluruh `src/` dan villa-api. Jadi seluruh proses ambil KTP +
+tanda tangan saat ini bersifat sekali tulis: datanya dikumpulkan, tapi tidak
+pernah bisa dipakai saat sengketa (denda merokok, kerusakan, keterlambatan
+check-out) — yang justru satu-satunya alasan mengumpulkannya. Sementara itu
+villa tetap menanggung risiko menyimpan data pribadi tamu.
+
+Perlu keputusan owner: bikin penampil khusus staf (signed URL berumur
+pendek, digerbang role), dan sekalian tentukan berapa lama dokumen ini
+disimpan.
+
+### Fakta penting: alur ini BELUM PERNAH dipakai sungguhan
+
+`bookings` hanya punya **satu** check-in yang pernah terjadi (28 Agu), dan
+baris itu `ktp_photo_path` dan `signature_data_url`-nya NULL — dibuat
+sebelum CheckinCard ada. Artinya seluruh rangkaian KTP + tanda tangan belum
+pernah dijalankan di produksi sekali pun. Bug-bug di atas (kanvas melenceng,
+foto terlalu besar, KTP tamu salah, tanda tangan terhapus) semuanya akan
+muncul pada check-in sungguhan yang PERTAMA.
+
+### Yang diperiksa dan ternyata BUKAN bug
+
+- `sendWa()` tidak pernah melempar error — semua kegagalan ditangkap dan
+  dicatat ke `wa_messages_log`, lalu mengembalikan `false`. Jadi WA yang
+  gagal terkirim TIDAK membuat check-in yang sudah tercatat dilaporkan
+  gagal ke resepsionis.
+- Booking website yang belum dibayar berstatus `menunggu_pembayaran`,
+  tidak muncul di `/bookings?status=terjadwal`, dan `villa_commit_checkin`
+  juga menolaknya. Tidak bisa check-in tanpa bayar.
+- Check-in ganda terkunci benar di database (`select ... for update` lalu
+  cek status di dalam RPC).
+
+### Perbaikan kalender dari `main` (#91) sudah digabung ke branch ini
+
+Konfliknya diselesaikan dengan mempertahankan `addDaysISO` (helper bersama
+yang ada tesnya) sambil mengambil perbaikan `dayIndex` versi UTC dari main.
+
 ## 2026-09-19 (lanjutan 2) — WIB ditutup sampai ke database dan villa-api
 
 Owner menyetujui perbaikan yang sebelumnya ditahan ("Ya perbaiki"). Sekarang
