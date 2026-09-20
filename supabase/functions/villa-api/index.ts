@@ -151,6 +151,9 @@ const EXPIRED_HOLD_MARK = '[Kedaluwarsa otomatis]';
  */
 const WIB_TZ = 'Asia/Jakarta';
 function todayWIB(d = new Date()){ return d.toLocaleDateString('en-CA', {timeZone: WIB_TZ}); }
+function hourWIB(d = new Date()){ return Number(new Intl.DateTimeFormat('en-GB', {timeZone: WIB_TZ, hour:'2-digit', hourCycle:'h23'}).format(d)); }
+/** Night self check-in window: 22:00-06:59 WIB, mirroring the FO/security shift boundary. */
+function isNightSelfCheckinWindow(d = new Date()){ const h = hourWIB(d); return h >= 22 || h < 7; }
 function monthWIB(d = new Date()){ return todayWIB(d).slice(0,7); }
 function prevMonthWIB(d = new Date()){
   const [y, mo] = monthWIB(d).split('-').map(Number);
@@ -1371,6 +1374,145 @@ Deno.serve(async (req)=>{
       hold_minutes: PENDING_PAYMENT_HOLD_MINUTES,
       invoice_no: booking.invoice_no ?? null,
     });
+  }
+
+  /**
+   * Night self check-in (loonars.id/checkin), owner request 2026-09-20.
+   *
+   * Semua tiga endpoint di bawah PUBLIK (tanpa sesi staf) karena tamu
+   * mengaksesnya sendiri lewat HP-nya setelah FO pulang (22:00-07:00 WIB).
+   * Nomor WA tamu adalah kuncinya, sama seperti /public/bookings/status --
+   * tanpa itu siapa pun yang menebak/melihat sebuah invoice bisa
+   * check-in-kan booking orang lain.
+   *
+   * Sengaja TIDAK membuat status/kolom baru: eligibility dihitung dari data
+   * yang sudah ada (status booking, tanggal, jam server), dan komit
+   * check-in-nya lewat RPC villa_commit_checkin YANG SAMA dipakai FO --
+   * jadi PIN pintu yang dikirim tetap PIN unik-per-booking yang sudah
+   * berjalan di produksi (dikirim via WA saat FO check-in-kan tamu siang
+   * hari), bukan kode statis baru.
+   */
+  async function checkinEligibility(booking_id, hp){
+    if(!/^[0-9a-f-]{36}$/i.test(booking_id ?? '')) return {eligible:false, reason:'INVALID_BOOKING_ID', status:400};
+    const hpTrim = (hp ?? '').trim();
+    if(!hpTrim) return {eligible:false, reason:'PHONE_REQUIRED', status:400};
+
+    const {data:booking} = await supabase.from('bookings')
+      .select('id,guest_id,guest_nama,unit_nomor,tipe,status,tgl_checkin,tgl_checkout,invoice_no')
+      .eq('id', booking_id).maybeSingle();
+    if(!booking) return {eligible:false, reason:'BOOKING_NOT_FOUND', status:404};
+
+    let guestHp = null;
+    if(booking.guest_id){
+      const {data:g} = await supabase.from('guests').select('hp').eq('id', booking.guest_id).maybeSingle();
+      guestHp = g?.hp ?? null;
+    }
+    if(!guestHp || guestHp.trim() !== hpTrim) return {eligible:false, reason:'PHONE_MISMATCH', status:403};
+
+    if(booking.status === 'batal') return {eligible:false, reason:'BOOKING_CANCELLED', status:409};
+    if(booking.status === 'checkin') return {eligible:false, reason:'ALREADY_CHECKED_IN', status:409, booking};
+    if(booking.status !== 'terjadwal') return {eligible:false, reason:'PAYMENT_NOT_CONFIRMED', status:409};
+
+    const today = todayWIB();
+    if(today < booking.tgl_checkin) return {eligible:false, reason:'BEFORE_CHECKIN_DATE', status:409};
+    if(booking.tgl_checkout && today >= booking.tgl_checkout) return {eligible:false, reason:'AFTER_CHECKOUT_DATE', status:409};
+
+    if(!isNightSelfCheckinWindow()) return {eligible:false, reason:'OUTSIDE_NIGHT_WINDOW', status:409};
+
+    return {eligible:true, reason:null, status:200, booking};
+  }
+
+  // Tamu mencari reservasinya sendiri lewat nomor invoice + WA -- langkah 1
+  // dari flow night self check-in, sebelum diminta foto KTP.
+  if(path==='/public/checkin/lookup' && m==='GET'){
+    const invoice_no = (url.searchParams.get('invoice_no') ?? '').trim();
+    const hp = (url.searchParams.get('hp') ?? '').trim();
+    if(!invoice_no) return err('Nomor invoice wajib diisi');
+    if(!hp) return err('Nomor WhatsApp wajib diisi');
+
+    const {data:booking} = await supabase.from('bookings')
+      .select('id,guest_id,guest_nama,unit_nomor,tipe,status,tgl_checkin,tgl_checkout,invoice_no')
+      .eq('invoice_no', invoice_no).maybeSingle();
+    if(!booking) return err('Booking tidak ditemukan -- periksa kembali nomor invoice Anda', 404);
+
+    const result = await checkinEligibility(booking.id, hp);
+    if(!result.eligible){
+      return json({eligible:false, reason:result.reason}, result.status === 400 ? 400 : 200);
+    }
+    return json({
+      eligible:true,
+      booking_id: booking.id,
+      guest_nama: booking.guest_nama,
+      unit_nomor: booking.unit_nomor,
+      tipe: booking.tipe,
+      tgl_checkin: booking.tgl_checkin,
+      tgl_checkout: booking.tgl_checkout,
+    });
+  }
+
+  // Tamu mengunggah foto KTP/paspornya sendiri -- padanan publik dari
+  // /api/checkin/upload-ktp (yang mensyaratkan token staf). Path-nya baru
+  // dipakai kalau /public/checkin di bawah berhasil; foto yatim di storage
+  // untuk percobaan yang tidak jadi diselesaikan adalah trade-off yang sama
+  // seperti alur staf.
+  if(path==='/public/checkin/upload-ktp' && m==='POST'){
+    const b = await req.json().catch(() => null);
+    const dataUrl = b?.dataUrl;
+    if(!dataUrl || !dataUrl.startsWith('data:image/')) return err('Foto KTP wajib diisi');
+    const match = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/);
+    if(!match) return err('Format foto tidak dikenali');
+    const [, ext, base64] = match;
+    let bytes;
+    try { bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0)); }
+    catch { return err('Foto tidak bisa dibaca'); }
+    if(bytes.length > 8*1024*1024) return err('Foto terlalu besar (maks 8MB)');
+
+    const path = `ktp/${crypto.randomUUID()}.${ext}`;
+    const {error} = await supabase.storage.from('guest-documents').upload(path, bytes, {
+      contentType: `image/${ext}`, upsert: false,
+    });
+    if(error) return err(error.message, 500);
+    return json({path});
+  }
+
+  // Langkah terakhir: tamu sudah upload KTP + tanda tangan tata tertib di
+  // HP-nya sendiri. Memakai RPC villa_commit_checkin yang SAMA dengan FO,
+  // supaya penguncian baris (select for update), nomor invoice, dan
+  // pencatatan bagi hasil semuanya lewat satu jalur -- tidak ada jalur
+  // kedua yang bisa berbeda perilaku dari yang sudah diuji di produksi.
+  if(path==='/public/checkin' && m==='POST'){
+    const b = await req.json().catch(() => null);
+    if(!b) return err('Data tidak valid');
+    const result = await checkinEligibility(b.booking_id, b.hp);
+    if(!result.eligible){
+      return json({success:false, reason:result.reason}, result.status);
+    }
+    if(!b.ktp_photo_path) return err('Foto KTP wajib diisi');
+    if(!b.signature_data_url) return err('Persetujuan tata tertib (tanda tangan) wajib diisi');
+
+    const {data, error} = await supabase.rpc('villa_commit_checkin', {
+      p_booking_id: b.booking_id,
+      p_checkin_by: 'self-checkin (tamu, malam hari)',
+      p_ktp_photo_path: b.ktp_photo_path,
+      p_signature_data_url: b.signature_data_url,
+    });
+    if(error){
+      const msg = error.message ?? '';
+      if(msg.includes('already_checked_in')) return json({success:false, reason:'ALREADY_CHECKED_IN'}, 409);
+      if(msg.includes('booking_not_found')) return json({success:false, reason:'BOOKING_NOT_FOUND'}, 404);
+      if(msg.includes('invalid_booking_status')) return json({success:false, reason:'PAYMENT_NOT_CONFIRMED'}, 409);
+      if(msg.includes('booking_missing_total_bayar')) return json({success:false, reason:'PAYMENT_NOT_CONFIRMED'}, 409);
+      return err(msg, 500);
+    }
+
+    await notif(data.unit_id,'all','checkin',`Self check-in malam — Unit ${data.unit_nomor}`,`${data.guest_nama} check-in sendiri lewat loonars.id/checkin`,b.booking_id);
+
+    let guestPhone = b.hp;
+    await sendWa(guestPhone,
+      `Halo ${data.guest_nama}, selamat datang di Loonars Private Living Unit ${data.unit_nomor}!\nKode PIN key box Anda: *${data.pin_kode}*\nJangan bagikan kode ini kepada siapa pun. Security malam kami siap membantu di lokasi bila diperlukan.`,
+      {booking_id:b.booking_id, unit_id:data.unit_id, template_type:'pin_checkin_self'});
+
+    return json({success:true, pin_kode:data.pin_kode, unit_nomor:data.unit_nomor, guest_nama:data.guest_nama});
   }
 
   // Owner mengonfirmasi dana QRIS sudah masuk, dengan membalas WA
