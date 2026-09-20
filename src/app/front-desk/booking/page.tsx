@@ -12,10 +12,27 @@ import type { Booking, Unit } from "@/lib/types";
 
 const RANGE_OPTIONS = [7, 14, 21] as const;
 
+/**
+ * Tanggal diurai sebagai tengah malam WAKTU LOKAL, lalu diserialkan ulang
+ * lewat toISOString() (UTC). Di WIB (UTC+7), tengah malam 20 Sep adalah
+ * 17:00 UTC tanggal 19 Sep -- jadi addDays("2026-09-20", 0) mengembalikan
+ * "2026-09-19". Kolom pertama kalender (dan semua kolom setelahnya) ikut
+ * mundur satu hari dari tanggal `start` yang sebenarnya, sementara batang
+ * booking diposisikan relatif terhadap tanggal aslinya -- hasilnya sebuah
+ * booking tampak menempel di kolom yang berlabel satu hari lebih awal dari
+ * tanggal check-in-nya yang sesungguhnya.
+ *
+ * Dibuktikan nyata (2026-09-20): booking Cloudbeds "Ni made rai rusmala
+ * Dewi" punya tgl_checkin = 2026-09-20 di database (cocok dengan reservasi
+ * Cloudbeds-nya), tapi tampil di kolom "19 Sep".
+ *
+ * Diperbaiki dengan aritmetika UTC murni (`T00:00:00Z`, setUTCDate), yang
+ * tidak bisa bergeser oleh timezone perangkat resepsionis mana pun.
+ */
 function addDays(iso: string, n: number): string {
-  const d = new Date(`${iso}T00:00:00`);
-  d.setDate(d.getDate() + n);
-  return d.toISOString().split("T")[0];
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
 }
 
 function dateRange(start: string, days: number): string[] {
@@ -107,8 +124,12 @@ export default function BookingCalendarPage() {
 
   const bloks = ["A", "B", "C"] as const;
 
+  // Sama-sama UTC seperti addDays di atas -- sebelumnya konsisten secara
+  // internal (kedua sisi memakai gaya parsing lokal yang sama), tapi
+  // disamakan supaya tidak jadi sumber selisih lain kalau addDays berubah
+  // lagi di masa depan.
   function dayIndex(dateIso: string): number {
-    const diff = Math.round((new Date(`${dateIso}T00:00:00`).getTime() - new Date(`${start}T00:00:00`).getTime()) / 86400000);
+    const diff = Math.round((new Date(`${dateIso}T00:00:00Z`).getTime() - new Date(`${start}T00:00:00Z`).getTime()) / 86400000);
     return Math.max(0, Math.min(days.length, diff));
   }
 
