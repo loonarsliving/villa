@@ -316,7 +316,7 @@ export interface CloudbedsLogRow {
 
 // ── Finance dashboard ───────────────────────────────────────────────────
 
-export type NormalizedChannel = "DIRECT" | "BOOKING_COM" | "AGODA" | "AIRBNB" | "OTHER_OTA" | "UNKNOWN";
+export type NormalizedChannel = "DIRECT" | "BOOKING_COM" | "AGODA" | "AIRBNB" | "TRAVELOKA" | "OTHER_OTA" | "UNKNOWN";
 export type CollectionMethod = "DIRECT_PAYMENT" | "OTA_COLLECT" | "VCC" | "PAY_AT_PROPERTY" | "PAYMENT_GATEWAY" | "UNKNOWN";
 export type SettlementStatus = "PENDING" | "READY_TO_COLLECT" | "PROCESSING" | "RECEIVED";
 export type SettlementConfidence = "CONFIGURED" | "UNKNOWN";

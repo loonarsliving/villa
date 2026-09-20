@@ -785,6 +785,7 @@ async function computeOtaBreakdown(periode){
         if (name.includes('airbnb')) commissionPctBySumber.set('airbnb', Number(s.commission ?? 0));
         else if (name.includes('booking.com')) commissionPctBySumber.set('booking.com', Number(s.commission ?? 0));
         else if (name.includes('agoda')) commissionPctBySumber.set('agoda', Number(s.commission ?? 0));
+        else if (name.includes('traveloka')) commissionPctBySumber.set('traveloka', Number(s.commission ?? 0));
         else if (name.includes('tiket')) commissionPctBySumber.set('tiket', Number(s.commission ?? 0));
       }
     } catch { /* Cloudbeds unreachable -- fall through with 0% for OTA sumbers below, never invent a number */ }
@@ -841,11 +842,17 @@ async function computeOtaBreakdown(periode){
 
 function normalizedChannel(sumber){
   const s = String(sumber||'').toLowerCase();
-  if(s==='walk-in' || s==='website' || s==='whatsapp') return 'DIRECT';
+  // 'google' = Google Hotel Search, a metasearch referral confirmed live in
+  // Cloudbeds' Distribution > Channels (owner screenshot, 20 Sep 2026) --
+  // Google never collects guest money, the guest pays the property directly
+  // via whichever booking engine the click-through lands on, so this is
+  // DIRECT for settlement purposes even though it's a distinct traffic source.
+  if(s==='walk-in' || s==='website' || s==='whatsapp' || s==='google') return 'DIRECT';
   if(s==='booking.com') return 'BOOKING_COM';
   if(s==='agoda') return 'AGODA';
   if(s==='airbnb') return 'AIRBNB';
-  if(s==='tiket') return 'OTHER_OTA'; // Tiket.com -- no dedicated bucket in this schema's sumber values; shown as-is, not guessed into TRAVELOKA.
+  if(s==='traveloka') return 'TRAVELOKA';
+  if(s==='tiket') return 'OTHER_OTA'; // Tiket.com -- distinct company from Traveloka, not a live Cloudbeds channel for this property.
   return 'UNKNOWN'; // includes raw 'cloudbeds' (source not yet resolved to a named OTA) and anything unmapped.
 }
 
