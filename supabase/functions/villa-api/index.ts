@@ -154,6 +154,20 @@ function todayWIB(d = new Date()){ return d.toLocaleDateString('en-CA', {timeZon
 function hourWIB(d = new Date()){ return Number(new Intl.DateTimeFormat('en-GB', {timeZone: WIB_TZ, hour:'2-digit', hourCycle:'h23'}).format(d)); }
 /** Night self check-in window: 22:00-06:59 WIB, mirroring the FO/security shift boundary. */
 function isNightSelfCheckinWindow(d = new Date()){ const h = hourWIB(d); return h >= 22 || h < 7; }
+
+/**
+ * Kode key box malam -- TETAP, owner-confirmed 2026-09-20: villa tidak
+ * memakai smart lock, jadi tidak ada cara memprogram kode berbeda per tamu
+ * ke perangkat fisiknya. Satu key box, satu kombinasi, diganti manual oleh
+ * owner/security kalau suatu saat perlu -- bukan oleh kode ini.
+ *
+ * SENGAJA terpisah dari `pin_kode` yang dihasilkan `villa_commit_checkin`:
+ * pin_kode itu dikirim ke SEMUA tamu check-in (FO siang & malam) tapi
+ * tidak membuka apa pun di lapangan karena alasan yang sama (tidak ada
+ * smart lock) -- itu perilaku lama yang sudah berjalan, di luar cakupan
+ * perubahan ini, TIDAK disentuh di sini.
+ */
+const NIGHT_KEYBOX_PIN = '231';
 function monthWIB(d = new Date()){ return todayWIB(d).slice(0,7); }
 function prevMonthWIB(d = new Date()){
   const [y, mo] = monthWIB(d).split('-').map(Number);
@@ -1509,10 +1523,10 @@ Deno.serve(async (req)=>{
 
     let guestPhone = b.hp;
     await sendWa(guestPhone,
-      `Halo ${data.guest_nama}, selamat datang di Loonars Private Living Unit ${data.unit_nomor}!\nKode PIN key box Anda: *${data.pin_kode}*\nJangan bagikan kode ini kepada siapa pun. Security malam kami siap membantu di lokasi bila diperlukan.`,
+      `Halo ${data.guest_nama}, selamat datang di Loonars Private Living Unit ${data.unit_nomor}!\nKode key box Anda: *${NIGHT_KEYBOX_PIN}*\nJangan bagikan kode ini kepada siapa pun. Security malam kami siap membantu di lokasi bila diperlukan.`,
       {booking_id:b.booking_id, unit_id:data.unit_id, template_type:'pin_checkin_self'});
 
-    return json({success:true, pin_kode:data.pin_kode, unit_nomor:data.unit_nomor, guest_nama:data.guest_nama});
+    return json({success:true, pin_kode:NIGHT_KEYBOX_PIN, unit_nomor:data.unit_nomor, guest_nama:data.guest_nama});
   }
 
   // Owner mengonfirmasi dana QRIS sudah masuk, dengan membalas WA
