@@ -2413,15 +2413,25 @@ Deno.serve(async (req)=>{
   }
 
   /**
-   * Setiap 15 menit selama jendela self check-in (23:00-07:00 WIB, lihat
-   * vercel.json), mengirim link /checkin pribadi via WA ke tamu yang
-   * malam ini menginap tapi belum check-in -- terutama tamu OTA, yang
+   * SEKALI SEHARI jam 23:00 WIB (lihat vercel.json) -- disederhanakan dari
+   * rencana awal tiap 15 menit (owner request 2026-09-20: cron tidak perlu
+   * sesering itu) -- mengirim link /checkin pribadi via WA ke tamu yang
+   * malam ini menginap tapi belum check-in. Terutama untuk tamu OTA, yang
    * tidak pernah menyentuh halaman booking loonars.id sehingga tidak
    * pernah melihat tombol "Self Check-in Sekarang" di sana.
    *
-   * Dedupe lewat wa_messages_log (bukan tabel baru): satu booking_id
-   * dengan template_type ini sudah pernah terkirim -> dilewati, supaya
-   * tamu tidak dibanjiri WA yang sama setiap 15 menit semalaman.
+   * Konsekuensi sengaja diterima dari "sekali sehari": booking baru yang
+   * masuk SETELAH jam 23:00 (mis. tamu OTA pesan tengah malam) tidak
+   * langsung dapat link -- tamu seperti itu tetap bisa buka /checkin dan
+   * cari reservasinya sendiri secara manual (form invoice+HP yang sudah
+   * ada), atau menunggu run besok malam kalau menginapnya lebih dari satu
+   * malam.
+   *
+   * Dedupe lewat wa_messages_log (bukan tabel baru): booking_id + template
+   * ini yang sudah pernah SUKSES terkirim -> dilewati. Kalau gagal
+   * (mis. bridge WA down), booking yang masih dalam masa menginap akan
+   * dicoba lagi di run besok malam -- bukan retry dalam semalam, karena
+   * cron ini sekarang cuma jalan sekali.
    */
   if(path==='/cron/self-checkin-links' && m==='POST'){
     const cron = await getSetting('cron');
