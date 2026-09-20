@@ -2,6 +2,38 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-20 — branch check-in/QRIS/WIB di-merge; villa-api GAGAL ter-deploy
+
+Owner menyetujui merge seluruhnya ("Smua perbaikan langsung merge untuk apa
+km simpan2"). PR #92 di-merge ke `main`.
+
+**Frontend: BERHASIL.** Vercel `dpl_CsJEhgQxcdQ5uugCDZ7qXGZVJN9u`, state
+READY, commit `c030a4a`. Semua perbaikan check-in, QRIS statis, dan tampilan
+WIB sudah live.
+
+**villa-api: GAGAL.** Workflow `deploy-villa-api.yml` berhenti di
+`401 Unauthorized` — `SUPABASE_ACCESS_TOKEN` (GitHub repo secret) sudah tidak
+berlaku. Live masih **v67** (14 Sep). Lihat DEPLOYMENT.md untuk cara
+memperbaikinya; token itu hanya bisa diganti owner.
+
+**Tidak ada yang rusak karenanya, dan ini diperiksa bukan diasumsikan:**
+seluruh endpoint villa-api yang dipanggil frontend baru (`/bookings`,
+`/checkin`, `/checkout`, `/summary`, `/units`, `/availability`,
+`/housekeeping`, `/notifications`, `/walkin-payments`, `/walkin-qris`) ada di
+v67. Frontend baru juga berhenti mengirim `tarif`/`total_bayar` pada
+`POST /bookings` — v67 memang sudah mengabaikannya dan menghitung sendiri.
+
+**Yang belum aktif sampai villa-api ter-deploy:** 19 turunan "hari
+ini"/"bulan ini" di villa-api masih memakai UTC, jadi default periode
+`/report`, `/admin/overview`, `/opex`, serta `/summary` dan `/housekeeping`
+masih menjawab tanggal/bulan kemarin selama 00:00–07:00 WIB. Frontend sudah
+mengirim tanggal WIB secara eksplisit di hampir semua pemanggilan, jadi
+dampaknya sempit — tapi belum tertutup.
+
+Fungsi database (`villa_commit_checkin`, `villa_commit_checkout`) TIDAK
+terpengaruh: keduanya sudah WIB sejak 19 Sep, diterapkan langsung lewat
+migrasi, bukan lewat workflow ini.
+
 ## 2026-09-20 — audit ulang alur check-in
 
 Owner minta dipastikan tidak ada bug lagi di proses check-in. Ditelusuri
