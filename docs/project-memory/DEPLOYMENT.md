@@ -64,6 +64,40 @@ The repo is ready to receive it with no further code changes. Steps for whoever 
 5. Verify as an admin: open `/admin/cloudbeds`, confirm the green "Terhubung ke Cloudbeds API — N room tersedia" banner replaces the amber "belum tersedia" one, and that "+ Petakan Room" shows a live dropdown instead of manual fields.
 6. `/api/admin/cloudbeds/rooms` requires a valid admin session token (hardened 2026-08-27) — if you get 401 while testing, confirm you're logged in as `admin` role, not just hitting the URL directly.
 
+### SUPABASE_ACCESS_TOKEN BISA KEDALUWARSA — DEPLOY villa-api GAGAL DIAM-DIAM (2026-09-20)
+
+Deploy `villa-api` lewat `.github/workflows/deploy-villa-api.yml` **gagal**
+pada merge #92 dengan:
+
+```
+unexpected list functions status 401: {"message":"Unauthorized"}
+```
+
+Bukan masalah kode. `SUPABASE_ACCESS_TOKEN` (GitHub **repo secret**, bukan
+env var Vercel yang bernama sama) sudah tidak berlaku. Deploy terakhir yang
+berhasil 2026-09-14 (run #30, villa-api v67).
+
+**Kenapa ini berbahaya:** merge ke `main` memicu DUA deploy yang berdiri
+sendiri — Vercel (frontend) dan workflow ini (villa-api). Vercel berhasil,
+workflow gagal, dan **tidak ada apa pun yang memberi tahu**: tidak ada
+notifikasi, dan aplikasi tetap berjalan karena frontend kompatibel dengan
+villa-api versi lama. Akibatnya repo `main` bisa terlihat "sudah ter-deploy"
+padahal separuhnya tidak. Setelah setiap merge yang menyentuh
+`supabase/functions/villa-api/**`, **wajib** dicek:
+- Actions → "Deploy villa-api Edge Function" hijau, DAN
+- versi fungsi naik (`mcp__Supabase__list_edge_functions`, atau dashboard
+  Supabase → Edge Functions → villa-api).
+
+**Cara memperbaiki tokennya** (hanya owner yang bisa — token ini rahasia dan
+tidak boleh dikirimkan lewat chat, PR, atau berkas mana pun):
+1. Supabase → klik avatar → **Account Settings** → **Access Tokens** →
+   *Generate new token*. Salin sekali (tidak ditampilkan lagi).
+2. GitHub → repo `loonarsliving/villa` → **Settings** → *Secrets and
+   variables* → **Actions** → `SUPABASE_ACCESS_TOKEN` → *Update secret*,
+   tempel nilainya.
+3. Actions → "Deploy villa-api Edge Function" → **Run workflow** pada `main`
+   (workflow ini punya `workflow_dispatch`, jadi tidak perlu commit kosong).
+
 ### PEMBAYARAN QRIS — STATIS, TANPA PAYMENT GATEWAY (keputusan owner 2026-09-19)
 
 Owner menegaskan villa **tidak memakai iPaymu** (atau PSP mana pun): pembayaran
