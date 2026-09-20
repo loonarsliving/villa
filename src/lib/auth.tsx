@@ -61,5 +61,6 @@ export function useAuth() {
 export function roleHome(role: Role): string {
   if (role === "receptionist") return "/front-desk";
   if (role === "admin") return "/admin";
+  if (role === "finance") return "/finance";
   return "/investor";
 }
