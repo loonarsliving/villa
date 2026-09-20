@@ -438,11 +438,15 @@ export interface FinanceBookingDetail {
   audit_log: FinanceAuditLogRow[];
 }
 
+export type SettlementBasis = "CHECKIN" | "CHECKOUT";
+
 export interface FinanceOtaSettlementConfig {
   id: string;
   sumber: string;
   collection_method: CollectionMethod;
   settlement_delay_days: number | null;
+  /** Tanggal mana yang jadi acuan settlement_delay_days: CHECKIN (mis. Airbnb, dana dirilis ~24 jam setelah tamu checkin) atau CHECKOUT (mis. Booking.com/Agoda). */
+  settlement_basis: SettlementBasis;
   destination_account_label: string | null;
   currency: string;
   effective_date: string | null;

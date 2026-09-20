@@ -887,8 +887,16 @@ async function getSettlementConfigMap(){
  * entered a settlement_delay_days rule for this sumber in
  * finance_ota_settlement_config -- never hardcodes "Booking.com = 7
  * hari" or any other OTA-specific assumption.
+ *
+ * settlement_basis (owner-configured per channel, default CHECKOUT):
+ * most OTAs (Booking.com, Agoda) settle counting from checkout, but
+ * Airbnb's own payout policy releases funds ~24h after the guest CHECKS
+ * IN -- for a multi-night stay, counting from checkout instead would
+ * understate how long the money has actually been outstanding. Never
+ * assumed per-OTA; an admin picks CHECKIN or CHECKOUT explicitly when
+ * configuring that channel.
  */
-function calculateExpectedSettlement({ sumber, tgl_checkout, configMap }){
+function calculateExpectedSettlement({ sumber, tgl_checkin, tgl_checkout, configMap }){
   const cfg = configMap.get(sumber);
   const collection_method = cfg?.collection_method ?? 'UNKNOWN';
   if(!cfg || cfg.settlement_delay_days==null || cfg.settlement_delay_days===''){
@@ -899,21 +907,24 @@ function calculateExpectedSettlement({ sumber, tgl_checkout, configMap }){
       collection_method,
     };
   }
-  if(!tgl_checkout){
+  const basis = cfg.settlement_basis === 'CHECKIN' ? 'CHECKIN' : 'CHECKOUT';
+  const anchorDate = basis === 'CHECKIN' ? tgl_checkin : tgl_checkout;
+  const anchorLabel = basis === 'CHECKIN' ? 'checkin' : 'checkout';
+  if(!anchorDate){
     return {
       expected_settlement_date: null,
       confidence: 'UNKNOWN',
-      reason: 'Booking belum punya tanggal checkout',
+      reason: `Booking belum punya tanggal ${anchorLabel}`,
       collection_method,
     };
   }
-  const d = new Date(`${tgl_checkout}T00:00:00Z`);
+  const d = new Date(`${anchorDate}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + Number(cfg.settlement_delay_days));
   const expected_settlement_date = d.toISOString().slice(0,10);
   return {
     expected_settlement_date,
     confidence: 'CONFIGURED',
-    reason: `${cfg.settlement_delay_days} hari setelah checkout, sesuai konfigurasi OTA settlement`,
+    reason: `${cfg.settlement_delay_days} hari setelah ${anchorLabel}, sesuai konfigurasi OTA settlement`,
     collection_method,
   };
 }
@@ -923,7 +934,7 @@ async function ensureFinanceSettlements(bookings, configMap){
   const candidates = bookings.filter(b => b.status !== 'batal');
   if(!candidates.length) return;
   const rows = candidates.map(b => {
-    const calc = calculateExpectedSettlement({ sumber: b.sumber, tgl_checkout: b.tgl_checkout, configMap });
+    const calc = calculateExpectedSettlement({ sumber: b.sumber, tgl_checkin: b.tgl_checkin, tgl_checkout: b.tgl_checkout, configMap });
     return {
       booking_id: b.id,
       sumber: b.sumber,
@@ -2760,6 +2771,7 @@ Deno.serve(async (req)=>{
       sumber,
       collection_method: body.collection_method ?? 'UNKNOWN',
       settlement_delay_days: body.settlement_delay_days === '' || body.settlement_delay_days == null ? null : Number(body.settlement_delay_days),
+      settlement_basis: body.settlement_basis === 'CHECKIN' ? 'CHECKIN' : 'CHECKOUT',
       destination_account_label: body.destination_account_label ?? null,
       currency: body.currency ?? 'IDR',
       effective_date: body.effective_date || null,

@@ -7,9 +7,13 @@ import { api } from "@/lib/api";
 import { fmtDateTime } from "@/lib/format";
 import { Card, CardHeader, Loading, Empty } from "@/components/Card";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
-import type { FinanceOtaSettlementConfig, CollectionMethod } from "@/lib/types";
+import type { FinanceOtaSettlementConfig, CollectionMethod, SettlementBasis } from "@/lib/types";
 
 const COLLECTION_METHODS: CollectionMethod[] = ["DIRECT_PAYMENT", "OTA_COLLECT", "VCC", "PAY_AT_PROPERTY", "PAYMENT_GATEWAY", "UNKNOWN"];
+const SETTLEMENT_BASES: { value: SettlementBasis; label: string }[] = [
+  { value: "CHECKOUT", label: "Checkout (mis. Booking.com, Agoda)" },
+  { value: "CHECKIN", label: "Checkin (mis. Airbnb — dana dirilis ~24 jam setelah tamu checkin)" },
+];
 
 /**
  * OTA settlement configuration -- per the mandate, write access is
@@ -66,7 +70,7 @@ export default function SettlementConfigPage() {
             action={
               isAdmin && (
                 <button
-                  onClick={() => setEditing({ sumber: "", collection_method: "UNKNOWN", currency: "IDR" })}
+                  onClick={() => setEditing({ sumber: "", collection_method: "UNKNOWN", currency: "IDR", settlement_basis: "CHECKOUT" })}
                   className="text-[10px] font-semibold text-ink/50 border border-ink/15 rounded px-2.5 py-1.5"
                 >
                   + Tambah / Ubah
@@ -83,6 +87,7 @@ export default function SettlementConfigPage() {
                     <th className="px-4 py-2">Sumber</th>
                     <th className="px-3 py-2">Collection Method</th>
                     <th className="px-3 py-2">Delay Settlement</th>
+                    <th className="px-3 py-2">Basis</th>
                     <th className="px-3 py-2">Rekening Tujuan</th>
                     <th className="px-3 py-2">Berlaku Sejak</th>
                     <th className="px-3 py-2">Diubah</th>
@@ -95,6 +100,7 @@ export default function SettlementConfigPage() {
                       <td className="px-4 py-2.5 font-medium text-ink/80">{r.sumber}</td>
                       <td className="px-3 py-2.5">{r.collection_method}</td>
                       <td className="px-3 py-2.5">{r.settlement_delay_days != null ? `${r.settlement_delay_days} hari` : "Belum dikonfigurasi"}</td>
+                      <td className="px-3 py-2.5">{r.settlement_delay_days != null ? (r.settlement_basis === "CHECKIN" ? "sejak checkin" : "sejak checkout") : "—"}</td>
                       <td className="px-3 py-2.5">{r.destination_account_label ?? "—"}</td>
                       <td className="px-3 py-2.5">{r.effective_date ?? "—"}</td>
                       <td className="px-3 py-2.5 text-ink/40">{fmtDateTime(r.updated_at)}</td>
@@ -149,13 +155,26 @@ export default function SettlementConfigPage() {
               ))}
             </select>
           </Field>
-          <Field label="Delay Settlement (hari setelah checkout — kosongkan jika belum dikonfirmasi OTA/kontrak)">
+          <Field label="Delay Settlement (jumlah hari — kosongkan jika belum dikonfirmasi OTA/kontrak)">
             <input
               className={inputCls}
               type="number"
               value={editing.settlement_delay_days ?? ""}
               onChange={(e) => setEditing({ ...editing, settlement_delay_days: e.target.value === "" ? null : Number(e.target.value) })}
             />
+          </Field>
+          <Field label="Delay dihitung sejak">
+            <select
+              className={inputCls}
+              value={editing.settlement_basis ?? "CHECKOUT"}
+              onChange={(e) => setEditing({ ...editing, settlement_basis: e.target.value as SettlementBasis })}
+            >
+              {SETTLEMENT_BASES.map((b) => (
+                <option key={b.value} value={b.value}>
+                  {b.label}
+                </option>
+              ))}
+            </select>
           </Field>
           <Field label="Label Rekening Tujuan (mis. Mandiri ****1234 — jangan nomor lengkap)">
             <input className={inputCls} value={editing.destination_account_label ?? ""} onChange={(e) => setEditing({ ...editing, destination_account_label: e.target.value })} />
