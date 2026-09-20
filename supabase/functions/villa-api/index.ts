@@ -152,8 +152,8 @@ const EXPIRED_HOLD_MARK = '[Kedaluwarsa otomatis]';
 const WIB_TZ = 'Asia/Jakarta';
 function todayWIB(d = new Date()){ return d.toLocaleDateString('en-CA', {timeZone: WIB_TZ}); }
 function hourWIB(d = new Date()){ return Number(new Intl.DateTimeFormat('en-GB', {timeZone: WIB_TZ, hour:'2-digit', hourCycle:'h23'}).format(d)); }
-/** Night self check-in window: 22:00-06:59 WIB, mirroring the FO/security shift boundary. */
-function isNightSelfCheckinWindow(d = new Date()){ const h = hourWIB(d); return h >= 22 || h < 7; }
+/** Night self check-in window: 23:00-06:59 WIB (owner-set 2026-09-20, above 22:00 FO/security shift boundary). */
+function isNightSelfCheckinWindow(d = new Date()){ const h = hourWIB(d); return h >= 23 || h < 7; }
 
 /**
  * Kode key box malam -- TETAP, owner-confirmed 2026-09-20: villa tidak
@@ -1439,14 +1439,27 @@ Deno.serve(async (req)=>{
   // Tamu mencari reservasinya sendiri lewat nomor invoice + WA -- langkah 1
   // dari flow night self check-in, sebelum diminta foto KTP.
   if(path==='/public/checkin/lookup' && m==='GET'){
+    // booking_id dipakai oleh tombol otomatis di halaman konfirmasi booking
+    // (booking_id+hp sudah ada di penyimpanan browser tamu sejak dia bayar --
+    // tidak perlu ketik ulang apa pun). invoice_no tetap ada untuk tamu yang
+    // membuka /checkin langsung tanpa datang dari halaman itu.
     const invoice_no = (url.searchParams.get('invoice_no') ?? '').trim();
+    const booking_id_param = (url.searchParams.get('booking_id') ?? '').trim();
     const hp = (url.searchParams.get('hp') ?? '').trim();
-    if(!invoice_no) return err('Nomor invoice wajib diisi');
+    if(!invoice_no && !booking_id_param) return err('Nomor invoice wajib diisi');
     if(!hp) return err('Nomor WhatsApp wajib diisi');
 
-    const {data:booking} = await supabase.from('bookings')
-      .select('id,guest_id,guest_nama,unit_nomor,tipe,status,tgl_checkin,tgl_checkout,invoice_no')
-      .eq('invoice_no', invoice_no).maybeSingle();
+    let booking;
+    if(booking_id_param){
+      if(!/^[0-9a-f-]{36}$/i.test(booking_id_param)) return err('booking_id tidak valid');
+      ({data:booking} = await supabase.from('bookings')
+        .select('id,guest_id,guest_nama,unit_nomor,tipe,status,tgl_checkin,tgl_checkout,invoice_no')
+        .eq('id', booking_id_param).maybeSingle());
+    } else {
+      ({data:booking} = await supabase.from('bookings')
+        .select('id,guest_id,guest_nama,unit_nomor,tipe,status,tgl_checkin,tgl_checkout,invoice_no')
+        .eq('invoice_no', invoice_no).maybeSingle());
+    }
     if(!booking) return err('Booking tidak ditemukan -- periksa kembali nomor invoice Anda', 404);
 
     const result = await checkinEligibility(booking.id, hp);
