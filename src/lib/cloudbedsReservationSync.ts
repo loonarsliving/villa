@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getCloudbedsReservationTotals } from "@/lib/cloudbedsApi";
+import { mapSourceNameToSumber } from "@/lib/cloudbedsSourceMapping";
 
 /**
  * Pulls active & upcoming reservations pulls active & upcoming reservations
@@ -56,6 +57,15 @@ interface CloudbedsReservation {
   endDate: string;
   rooms?: CloudbedsRoomAssignment[];
   guestList?: Record<string, CloudbedsGuestDetail>;
+  /**
+   * Free-text OTA/channel name -- proven present on getReservations rows
+   * (already read by src/app/api/admin/cloudbeds/pace/route.ts). Until
+   * 2026-09-20 this sync never read it and wrote sumber:'cloudbeds' for
+   * every reservation regardless of actual source, which is why Finance's
+   * channel breakdown showed everything as UNKNOWN/generic "cloudbeds"
+   * instead of the real OTA.
+   */
+  sourceName?: string | null;
   /**
    * What the guest still OWES, per the pms-v1.2 spec -- the one field
    * GetReservationsResponse actually carries (see the comment above
@@ -273,7 +283,7 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
           guest_id: guestId,
           guest_nama: guestNama,
           tipe: "harian",
-          sumber: "cloudbeds",
+          sumber: mapSourceNameToSumber(resv.sourceName),
           tgl_checkin: checkIn,
           tgl_checkout: checkOut,
           durasi_malam: nights > 0 ? nights : null,
