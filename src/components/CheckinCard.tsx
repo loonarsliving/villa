@@ -69,6 +69,13 @@ export function CheckinCard({
   const toast = useToast();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawingRef = useRef(false);
+  /**
+   * Foto KTP yang sudah terlanjur diunggah, supaya percobaan check-in kedua
+   * (mis. yang pertama gagal karena koneksi) tidak menaruh salinan KTP yang
+   * sama berkali-kali di storage. Ini data pribadi tamu -- salinan menganggur
+   * yang tidak tertaut ke booking mana pun tidak boleh menumpuk.
+   */
+  const ktpUploadRef = useRef<{ dataUrl: string; path: string } | null>(null);
   const [ktpPreview, setKtpPreview] = useState<string | null>(null);
   /** Sudah diperkecil saat dipilih, bukan berkas mentah dari kamera. */
   const [ktpDataUrl, setKtpDataUrl] = useState<string | null>(null);
@@ -80,26 +87,47 @@ export function CheckinCard({
   /**
    * Samakan ukuran buffer kanvas dengan ukuran tampilannya.
    *
-   * Sebelumnya kanvas dipatok width=360/height=140 sementara CSS-nya
+   * Kanvas ini dulu dipatok width=360/height=140 sementara CSS-nya
    * `w-full`, jadi di layar yang lebarnya bukan 360px koordinat pena tidak
    * pernah jatuh di titik yang sama dengan goresan yang tergambar: di HP
    * (~288px) tanda tangan muncul melenceng ke kiri dan gepeng, di layar
    * lebar ujung kanannya terpotong. Tanda tangan ini ikut disimpan sebagai
    * bukti persetujuan tata tertib, jadi harus sesuai dengan yang ditulis
    * tamu.
+   *
+   * `preserve` ADA KARENA menyetel canvas.width/height MENGOSONGKAN kanvas.
+   * Di HP, event `resize` terpicu saat keyboard virtual muncul/hilang, saat
+   * bilah URL menyusut ketika modal di-scroll, dan saat layar diputar --
+   * semuanya bisa terjadi setelah tamu menandatangani. Tanpa penyelamatan
+   * isi, goresannya terhapus diam-diam sementara `hasSignature` tetap true,
+   * sehingga yang tersimpan sebagai bukti persetujuan adalah gambar KOSONG.
    */
-  function fitCanvas() {
+  function sizeCanvas(preserve: boolean) {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 3);
-    canvas.width = Math.round(rect.width * dpr);
-    canvas.height = Math.round(rect.height * dpr);
+    const w = Math.round(rect.width * dpr);
+    const h = Math.round(rect.height * dpr);
+    if (preserve && canvas.width === w && canvas.height === h) return;
+
+    const sebelumnya = preserve && canvas.width && canvas.height ? canvas.toDataURL("image/png") : null;
+    canvas.width = w;
+    canvas.height = h;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, rect.width, rect.height);
+    // Latar putih ditulis ke dalam kanvas, bukan cuma lewat kelas CSS:
+    // toDataURL hanya mengambil isi kanvas, jadi tanpa ini PNG-nya
+    // transparan dan tinta hitamnya tidak terbaca di atas latar gelap.
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, rect.width, rect.height);
+    if (sebelumnya) {
+      const img = new Image();
+      img.onload = () => ctx.drawImage(img, 0, 0, rect.width, rect.height);
+      img.src = sebelumnya;
+    }
   }
 
   useEffect(() => {
@@ -110,12 +138,16 @@ export function CheckinCard({
     setHasSignature(false);
     setAgreed(false);
     setSubmitting(false);
+    ktpUploadRef.current = null;
+    const onResize = () => sizeCanvas(true);
     // Kanvas baru ada di DOM setelah modal dirender.
-    const id = requestAnimationFrame(fitCanvas);
-    window.addEventListener("resize", fitCanvas);
+    const id = requestAnimationFrame(() => sizeCanvas(false));
+    window.addEventListener("resize", onResize);
+    window.addEventListener("orientationchange", onResize);
     return () => {
       cancelAnimationFrame(id);
-      window.removeEventListener("resize", fitCanvas);
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("orientationchange", onResize);
     };
   }, [open]);
 
@@ -182,7 +214,9 @@ export function CheckinCard({
     const ctx = canvas?.getContext("2d");
     if (canvas && ctx) {
       const rect = canvas.getBoundingClientRect();
-      ctx.clearRect(0, 0, rect.width || canvas.width, rect.height || canvas.height);
+      // Diisi putih, bukan clearRect -- lihat alasannya di sizeCanvas.
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, rect.width || canvas.width, rect.height || canvas.height);
     }
     setHasSignature(false);
   }
@@ -207,12 +241,20 @@ export function CheckinCard({
     }
     setSubmitting(true);
     try {
-      const body = await localApi<{ path: string }>("/api/checkin/upload-ktp", {
-        method: "POST",
-        body: JSON.stringify({ dataUrl: ktpDataUrl }),
-      });
+      // Unggah ulang hanya kalau fotonya memang berganti -- kalau percobaan
+      // sebelumnya gagal di langkah /checkin, foto yang sama tidak perlu
+      // (dan tidak boleh) disalin lagi ke storage.
+      let path = ktpUploadRef.current?.dataUrl === ktpDataUrl ? ktpUploadRef.current.path : null;
+      if (!path) {
+        const body = await localApi<{ path: string }>("/api/checkin/upload-ktp", {
+          method: "POST",
+          body: JSON.stringify({ dataUrl: ktpDataUrl }),
+        });
+        path = body.path;
+        ktpUploadRef.current = { dataUrl: ktpDataUrl, path };
+      }
       const signatureDataUrl = canvasRef.current?.toDataURL("image/png") ?? "";
-      await onConfirm({ ktpPhotoPath: body.path, signatureDataUrl });
+      await onConfirm({ ktpPhotoPath: path, signatureDataUrl });
     } catch (e) {
       toast("⚠", "Gagal", e instanceof Error ? e.message : "Terjadi kesalahan.", "ruby");
     } finally {
