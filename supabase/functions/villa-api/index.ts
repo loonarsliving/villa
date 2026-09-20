@@ -2412,6 +2412,55 @@ Deno.serve(async (req)=>{
     return json({success:true, dispatched});
   }
 
+  /**
+   * Setiap 15 menit selama jendela self check-in (23:00-07:00 WIB, lihat
+   * vercel.json), mengirim link /checkin pribadi via WA ke tamu yang
+   * malam ini menginap tapi belum check-in -- terutama tamu OTA, yang
+   * tidak pernah menyentuh halaman booking loonars.id sehingga tidak
+   * pernah melihat tombol "Self Check-in Sekarang" di sana.
+   *
+   * Dedupe lewat wa_messages_log (bukan tabel baru): satu booking_id
+   * dengan template_type ini sudah pernah terkirim -> dilewati, supaya
+   * tamu tidak dibanjiri WA yang sama setiap 15 menit semalaman.
+   */
+  if(path==='/cron/self-checkin-links' && m==='POST'){
+    const cron = await getSetting('cron');
+    const provided = req.headers.get('x-cron-secret') ?? '';
+    if(!cron.secret) return err('Cron belum dikonfigurasi (integration_settings.cron.secret)',503);
+    if(!await secretsMatch(provided, cron.secret)) return err('Unauthorized',401);
+    if(!isNightSelfCheckinWindow()) return json({success:true, sent:0, skipped:'outside_night_window'});
+
+    const today = todayWIB();
+    const {data:bookings} = await supabase.from('bookings')
+      .select('id,guest_id,guest_nama,unit_nomor,tgl_checkin,tgl_checkout,status')
+      .eq('status','terjadwal').lte('tgl_checkin', today);
+
+    let sent=0;
+    for(const bk of bookings ?? []){
+      if(bk.tgl_checkout && today >= bk.tgl_checkout) continue;
+      if(!bk.guest_id) continue;
+
+      // Hanya kiriman yang BENAR-BENAR sukses ('sent') yang menghentikan
+      // pengiriman ulang -- kalau tidak, satu kegagalan jembatan WA
+      // (bridge down, dsb.) akan membuat tamu itu tidak pernah dicoba lagi
+      // sepanjang malam.
+      const {data:already} = await supabase.from('wa_messages_log')
+        .select('id').eq('booking_id', bk.id).eq('template_type','self_checkin_link').eq('status','sent').maybeSingle();
+      if(already) continue;
+
+      const {data:g} = await supabase.from('guests').select('hp').eq('id', bk.guest_id).maybeSingle();
+      if(!g?.hp) continue;
+
+      const link = `https://loonars.id/checkin?booking_id=${bk.id}&hp=${encodeURIComponent(g.hp)}`;
+      const ok = await sendWa(g.hp,
+        `Halo ${bk.guest_nama}, FO sudah tidak bertugas malam ini -- Anda bisa check-in sendiri kapan saja lewat link berikut:\n${link}\nSiapkan foto KTP/identitas Anda. Security malam kami siap membantu di lokasi bila diperlukan.`,
+        {booking_id:bk.id, template_type:'self_checkin_link'});
+      if(ok) sent++;
+    }
+
+    return json({success:true, sent});
+  }
+
   // Reminder WA to every active investor to fill/confirm their dividend
   // bank account, added 2026-09-10 (owner request). One-time send (11 Sep
   // 2026, 12:05 WIB per vercel.json) -- not a recurring monthly cron, so

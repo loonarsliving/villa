@@ -28,6 +28,10 @@
     {
       "path": "/api/cron/sync-cloudbeds-rates",
       "schedule": "25 17 * * *"
+    },
+    {
+      "path": "/api/cron/self-checkin-links",
+      "schedule": "*/15 16-23 * * *"
     }
   ]
 }
