@@ -17,7 +17,9 @@ const SETTLEMENT_BASES: { value: SettlementBasis; label: string }[] = [
 const SETTLEMENT_SCHEDULES: { value: SettlementSchedule; label: string }[] = [
   { value: "FIXED_DELAY", label: "Delay tetap (N hari setelah basis)" },
   { value: "MONTHLY_1ST", label: "Bulanan, tanggal 1 (mis. Booking.com)" },
+  { value: "WEEKLY_ON_DAY", label: "Mingguan, hari tertentu (mis. Traveloka)" },
 ];
+const WEEKDAY_LABELS = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
 
 /**
  * OTA settlement configuration -- per the mandate, write access is
@@ -106,12 +108,16 @@ export default function SettlementConfigPage() {
                       <td className="px-3 py-2.5">
                         {r.settlement_schedule === "MONTHLY_1ST"
                           ? "Bulanan, tgl 1"
-                          : r.settlement_delay_days != null
-                            ? `${r.settlement_delay_days} hari`
-                            : "Belum dikonfigurasi"}
+                          : r.settlement_schedule === "WEEKLY_ON_DAY"
+                            ? r.settlement_weekday != null
+                              ? `Mingguan, tiap ${WEEKDAY_LABELS[r.settlement_weekday]}`
+                              : "Mingguan (hari belum diisi)"
+                            : r.settlement_delay_days != null
+                              ? `${r.settlement_delay_days} hari`
+                              : "Belum dikonfigurasi"}
                       </td>
                       <td className="px-3 py-2.5">
-                        {r.settlement_schedule === "MONTHLY_1ST" || r.settlement_delay_days != null
+                        {r.settlement_schedule !== "FIXED_DELAY" || r.settlement_delay_days != null
                           ? r.settlement_basis === "CHECKIN"
                             ? "sejak checkin"
                             : "sejak checkout"
@@ -192,6 +198,22 @@ export default function SettlementConfigPage() {
                 value={editing.settlement_delay_days ?? ""}
                 onChange={(e) => setEditing({ ...editing, settlement_delay_days: e.target.value === "" ? null : Number(e.target.value) })}
               />
+            </Field>
+          )}
+          {editing.settlement_schedule === "WEEKLY_ON_DAY" && (
+            <Field label="Hari Pembayaran">
+              <select
+                className={inputCls}
+                value={editing.settlement_weekday ?? ""}
+                onChange={(e) => setEditing({ ...editing, settlement_weekday: e.target.value === "" ? null : Number(e.target.value) })}
+              >
+                <option value="">Pilih hari</option>
+                {WEEKDAY_LABELS.map((label, idx) => (
+                  <option key={idx} value={idx}>
+                    {label}
+                  </option>
+                ))}
+              </select>
             </Field>
           )}
           <Field label="Basis tanggal">

@@ -954,6 +954,34 @@ function calculateExpectedSettlement({ sumber, tgl_checkin, tgl_checkout, config
     };
   }
 
+  if(cfg.settlement_schedule === 'WEEKLY_ON_DAY'){
+    if(cfg.settlement_weekday==null){
+      return {
+        expected_settlement_date: null,
+        confidence: 'UNKNOWN',
+        reason: `Jadwal mingguan dipilih untuk '${sumber}' tapi hari pembayarannya belum diisi`,
+        collection_method,
+      };
+    }
+    const WEEKDAY_NAMES = ['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'];
+    const d = new Date(`${anchorDate}T00:00:00Z`);
+    const currentWeekday = d.getUTCDay();
+    const targetWeekday = Number(cfg.settlement_weekday);
+    // Next occurrence STRICTLY after anchorDate, same "before payment date"
+    // semantics as MONTHLY_1ST: a reservation checking out ON the payment
+    // day itself rolls to the following week's run, not the same day's.
+    let diff = (targetWeekday - currentWeekday + 7) % 7;
+    if(diff === 0) diff = 7;
+    d.setUTCDate(d.getUTCDate() + diff);
+    const expected_settlement_date = d.toISOString().slice(0,10);
+    return {
+      expected_settlement_date,
+      confidence: 'CONFIGURED',
+      reason: `Dibayar hari ${WEEKDAY_NAMES[targetWeekday]} berikutnya setelah ${anchorLabel} (jadwal pembayaran mingguan), sesuai konfigurasi OTA settlement`,
+      collection_method,
+    };
+  }
+
   if(cfg.settlement_delay_days==null || cfg.settlement_delay_days===''){
     return {
       expected_settlement_date: null,
@@ -2816,7 +2844,8 @@ Deno.serve(async (req)=>{
       collection_method: body.collection_method ?? 'UNKNOWN',
       settlement_delay_days: body.settlement_delay_days === '' || body.settlement_delay_days == null ? null : Number(body.settlement_delay_days),
       settlement_basis: body.settlement_basis === 'CHECKIN' ? 'CHECKIN' : 'CHECKOUT',
-      settlement_schedule: body.settlement_schedule === 'MONTHLY_1ST' ? 'MONTHLY_1ST' : 'FIXED_DELAY',
+      settlement_schedule: ['MONTHLY_1ST','WEEKLY_ON_DAY'].includes(body.settlement_schedule) ? body.settlement_schedule : 'FIXED_DELAY',
+      settlement_weekday: body.settlement_weekday === '' || body.settlement_weekday == null ? null : Number(body.settlement_weekday),
       destination_account_label: body.destination_account_label ?? null,
       currency: body.currency ?? 'IDR',
       effective_date: body.effective_date || null,
