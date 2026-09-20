@@ -18,12 +18,23 @@
  * therefore misclassified as a flat "cloudbeds" bucket in Finance/OTA
  * reporting (normalizedChannel('cloudbeds') = 'UNKNOWN') even though
  * Cloudbeds was sending the real source name the whole time.
+ *
+ * 'traveloka' and 'google' added 2026-09-20 after the owner shared
+ * Cloudbeds' live Distribution > Channels screen showing both as
+ * actually-enabled channels (bookings_sumber_check previously didn't
+ * even allow those values). Google Hotel Search is a metasearch
+ * referral, not a money-collecting OTA -- a guest who clicks through
+ * from Google still pays the property directly (or via whichever
+ * booking engine handles the click-through), so it's classified as
+ * DIRECT in normalizedChannel(), not as its own OTA settlement bucket.
  */
 export function mapSourceNameToSumber(sourceName: string | null | undefined): string {
   const s = (sourceName ?? "").toLowerCase();
   if (s.includes("airbnb")) return "airbnb";
   if (s.includes("booking.com") || s.includes("booking dot com")) return "booking.com";
   if (s.includes("agoda")) return "agoda";
+  if (s.includes("traveloka")) return "traveloka";
+  if (s.includes("google")) return "google";
   if (s.includes("tiket")) return "tiket";
   if (s.includes("whatsapp")) return "whatsapp";
   return "cloudbeds";
