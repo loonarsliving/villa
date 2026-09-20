@@ -891,9 +891,9 @@ async function getSettlementConfigMap(){
  * calculateExpectedSettlement() per the spec: input source/collection
  * method/booking, output {expected_settlement_date, settlement_status,
  * confidence, reason}. Only CONFIGURED when an owner/admin has actually
- * entered a settlement_delay_days rule for this sumber in
- * finance_ota_settlement_config -- never hardcodes "Booking.com = 7
- * hari" or any other OTA-specific assumption.
+ * entered a rule for this sumber in finance_ota_settlement_config --
+ * never hardcodes "Booking.com = 7 hari" or any other OTA-specific
+ * assumption.
  *
  * settlement_basis (owner-configured per channel, default CHECKOUT):
  * most OTAs (Booking.com, Agoda) settle counting from checkout, but
@@ -902,11 +902,21 @@ async function getSettlementConfigMap(){
  * understate how long the money has actually been outstanding. Never
  * assumed per-OTA; an admin picks CHECKIN or CHECKOUT explicitly when
  * configuring that channel.
+ *
+ * settlement_schedule (owner-configured per channel, default
+ * FIXED_DELAY): Booking.com's real "Payments by Booking.com" schedule
+ * (per owner's Extranet screenshot, 20 Sep 2026) is not a fixed N-days
+ * delay -- it's a calendar cutoff, paid on the 1st of the month,
+ * covering every reservation whose settlement_basis date falls before
+ * that payment date. Approximating that as an average day-count would
+ * be wrong for most bookings (a checkout on the 2nd and one on the 29th
+ * both get paid the same 1st), so MONTHLY_1ST is a distinct, exact rule
+ * rather than a guessed number forced into settlement_delay_days.
  */
 function calculateExpectedSettlement({ sumber, tgl_checkin, tgl_checkout, configMap }){
   const cfg = configMap.get(sumber);
   const collection_method = cfg?.collection_method ?? 'UNKNOWN';
-  if(!cfg || cfg.settlement_delay_days==null || cfg.settlement_delay_days===''){
+  if(!cfg){
     return {
       expected_settlement_date: null,
       confidence: 'UNKNOWN',
@@ -922,6 +932,33 @@ function calculateExpectedSettlement({ sumber, tgl_checkin, tgl_checkout, config
       expected_settlement_date: null,
       confidence: 'UNKNOWN',
       reason: `Booking belum punya tanggal ${anchorLabel}`,
+      collection_method,
+    };
+  }
+
+  if(cfg.settlement_schedule === 'MONTHLY_1ST'){
+    // Date.UTC(y, m, 1) directly, NOT setUTCMonth()+setUTCDate() on an
+    // existing date -- setUTCMonth() preserves the day-of-month while
+    // changing the month, so calling it on e.g. "2026-01-31" overflows
+    // into March (Feb only has 28/29 days) before setUTCDate(1) ever
+    // runs, silently landing a month late. Constructing the date fresh
+    // with day=1 from the start has no day component to overflow.
+    const [y, mo] = anchorDate.split('-').map(Number); // mo is 1-based; Date.UTC's month arg is 0-based, so mo alone already means "next month, 0-based".
+    const d = new Date(Date.UTC(y, mo, 1));
+    const expected_settlement_date = d.toISOString().slice(0,10);
+    return {
+      expected_settlement_date,
+      confidence: 'CONFIGURED',
+      reason: `Dibayar tanggal 1 bulan berikutnya setelah ${anchorLabel} (jadwal pembayaran bulanan), sesuai konfigurasi OTA settlement`,
+      collection_method,
+    };
+  }
+
+  if(cfg.settlement_delay_days==null || cfg.settlement_delay_days===''){
+    return {
+      expected_settlement_date: null,
+      confidence: 'UNKNOWN',
+      reason: `Belum ada aturan settlement yang dikonfigurasi untuk sumber '${sumber}'`,
       collection_method,
     };
   }
@@ -2779,6 +2816,7 @@ Deno.serve(async (req)=>{
       collection_method: body.collection_method ?? 'UNKNOWN',
       settlement_delay_days: body.settlement_delay_days === '' || body.settlement_delay_days == null ? null : Number(body.settlement_delay_days),
       settlement_basis: body.settlement_basis === 'CHECKIN' ? 'CHECKIN' : 'CHECKOUT',
+      settlement_schedule: body.settlement_schedule === 'MONTHLY_1ST' ? 'MONTHLY_1ST' : 'FIXED_DELAY',
       destination_account_label: body.destination_account_label ?? null,
       currency: body.currency ?? 'IDR',
       effective_date: body.effective_date || null,

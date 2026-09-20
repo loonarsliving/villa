@@ -439,6 +439,7 @@ export interface FinanceBookingDetail {
 }
 
 export type SettlementBasis = "CHECKIN" | "CHECKOUT";
+export type SettlementSchedule = "FIXED_DELAY" | "MONTHLY_1ST";
 
 export interface FinanceOtaSettlementConfig {
   id: string;
@@ -447,6 +448,8 @@ export interface FinanceOtaSettlementConfig {
   settlement_delay_days: number | null;
   /** Tanggal mana yang jadi acuan settlement_delay_days: CHECKIN (mis. Airbnb, dana dirilis ~24 jam setelah tamu checkin) atau CHECKOUT (mis. Booking.com/Agoda). */
   settlement_basis: SettlementBasis;
+  /** FIXED_DELAY = settlement_delay_days hari setelah settlement_basis. MONTHLY_1ST = dibayar tanggal 1 bulan berikutnya (mis. Booking.com), settlement_delay_days diabaikan. */
+  settlement_schedule: SettlementSchedule;
   destination_account_label: string | null;
   currency: string;
   effective_date: string | null;
