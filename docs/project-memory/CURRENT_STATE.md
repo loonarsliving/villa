@@ -2,6 +2,75 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-20 — Finance dashboard (`/finance`) built, on branch, NOT merged/deployed yet
+
+Owner requested a dedicated Finance dashboard answering 5 questions
+(revenue, payment received, outstanding, settlement, cash actually in the
+bank). Built on branch `claude/loonars-finance-dashboard-wq1oha`, **not
+merged to `main`** — owner explicitly approved the schema/architecture
+decisions below via AskUserQuestion, but merge itself is a separate gate
+this session did not take (schema changes require owner sign-off on the
+PR, per MERGE AUTHORITY in this file's parent CLAUDE.md).
+
+**Audit finding that shaped the design:** Cloudbeds' API, as actually
+used by this integration (`getReservationsWithRateDetails`), only ever
+supplies a reservation grand total — there is no separate
+payment/refund/settlement/payout endpoint available to this key. No
+`payments`, `refunds`, `settlements`, or `bank_transactions` table
+existed anywhere in the schema before this work; `bookings` had only one
+Cloudbeds ID column (`cloudbeds_reservation_id`).
+
+**Schema added** (owner-approved 2026-09-20, migration
+`finance_dashboard_schema`): `finance_ota_settlement_config` (per-channel
+collection method / settlement delay / destination account, admin-only
+write), `finance_settlements` (one row per booking: expected settlement
+date + confidence, settlement status, amount received, bank reference,
+reconciliation status/variance), `finance_audit_log` (every manual
+Finance change). `villa_users_role_check` extended with a new `'finance'`
+role (owner-approved instead of reusing `admin`).
+
+**villa-api additions** (in the repo's snapshot,
+`supabase/functions/villa-api/index.ts` — **not yet deployed**, see
+below): `calculateExpectedSettlement()` only ever returns
+`confidence:'CONFIGURED'` when an admin has actually entered a
+`settlement_delay_days` rule for that channel in
+`finance_ota_settlement_config` — never a hardcoded "Booking.com = 7
+hari" guess. Routes: `/finance/summary`, `/finance/channel-breakdown`,
+`/finance/bookings`(+`/finance/booking` detail), `/finance/ota-settlement-config`
+(GET for finance+admin, POST/DELETE admin-only), `/finance/settlements/process`,
+`/finance/settlements/receive`, `/finance/audit-log`, `/finance/whoami`.
+
+**Known, stated (not hidden) data limitations** — every one of these is
+surfaced in the dashboard itself, never silently assumed:
+- Gross revenue = Net revenue (no itemized room/extras/tax/fee or
+  discount/refund feed from Cloudbeds for this key).
+- "Payment received" vs "outstanding" is inferred from booking workflow
+  status (`checkin`/`checkout` = paid, per the existing "Tandai
+  Lunas"-before-check-in rule), **not** a Cloudbeds payment feed — stated
+  explicitly in the API response, not presented as authoritative.
+- "Cash Received" only ever shows a real figure once Finance staff
+  manually mark a settlement RECEIVED with a bank reference; otherwise it
+  reads **NOT VERIFIED**, exactly per the mandate ("Jangan menyamakan
+  Cloudbeds Payment = Bank Cash").
+- Cloudbeds-balance-vs-calculated-balance mismatch detection and refund
+  tracking are marked **NOT_AVAILABLE** in every summary response — this
+  integration does not sync a separate balance/refund field to compare
+  against.
+
+**NOT done yet, needs the PR merged + explicit deploy first:**
+1. PR not opened/merged (branch pushed only, per this session's
+   instructions not to merge/PR without being asked).
+2. Even once merged, villa-api will **not** auto-update: per the
+   2026-09-20 entry above, `deploy-villa-api.yml` is currently failing
+   (`SUPABASE_ACCESS_TOKEN` expired) — the Finance routes exist in the
+   repo's snapshot but are **not live** on the Supabase Edge Function
+   until that token is fixed and the workflow re-run.
+3. No `finance`-role user exists yet — an admin must create one via
+   Admin → Pengguna (role dropdown now includes "Finance").
+4. `finance_ota_settlement_config` is empty — every channel will show
+   settlement confidence `UNKNOWN` until an admin fills in real delay
+   days per OTA contract via `/finance/settlement-config`.
+
 ## 2026-09-20 — branch check-in/QRIS/WIB di-merge; villa-api GAGAL ter-deploy
 
 Owner menyetujui merge seluruhnya ("Smua perbaikan langsung merge untuk apa

@@ -1,4 +1,4 @@
-export type Role = "owner" | "receptionist" | "admin";
+export type Role = "owner" | "receptionist" | "admin" | "finance";
 
 export interface SessionUser {
   id: string;
@@ -311,6 +311,146 @@ export interface CloudbedsLogRow {
   reservation_id: string | null;
   event_type: string;
   matched: boolean;
+  created_at: string;
+}
+
+// ── Finance dashboard ───────────────────────────────────────────────────
+
+export type NormalizedChannel = "DIRECT" | "BOOKING_COM" | "AGODA" | "AIRBNB" | "OTHER_OTA" | "UNKNOWN";
+export type CollectionMethod = "DIRECT_PAYMENT" | "OTA_COLLECT" | "VCC" | "PAY_AT_PROPERTY" | "PAYMENT_GATEWAY" | "UNKNOWN";
+export type SettlementStatus = "PENDING" | "READY_TO_COLLECT" | "PROCESSING" | "RECEIVED";
+export type SettlementConfidence = "CONFIGURED" | "UNKNOWN";
+export type ReconciliationStatus = "MATCHED" | "VARIANCE";
+export type PaymentStatus = "PAID" | "UNPAID" | "CANCELLED";
+
+export interface FinanceAlert {
+  type: string;
+  level: "info" | "warning" | "danger";
+  message: string;
+}
+
+export interface FinanceSummary {
+  period: { from: string; to: string };
+  gross_revenue: number;
+  net_revenue: number;
+  net_revenue_note: string;
+  payment_received: number;
+  payment_received_note: string;
+  outstanding: number;
+  ota_receivable: number;
+  ota_receivable_note: string;
+  cash_received: { amount: number; verified: boolean; count: number; note: string };
+  bookings_counted: number;
+  cancelled_excluded: number;
+  alerts: FinanceAlert[];
+  last_cloudbeds_activity: string | null;
+  data_caveats: string[];
+}
+
+export interface FinanceChannelRow {
+  sumber: string;
+  normalized_channel: NormalizedChannel;
+  revenue: number;
+  payment: number;
+  outstanding: number;
+  ota_receivable: number;
+  settled_count: number;
+  unsettled_count: number;
+  booking_count: number;
+  collection_method: CollectionMethod;
+  destination_account: string | null;
+}
+
+export interface FinanceChannelBreakdown {
+  period: { from: string; to: string };
+  channels: FinanceChannelRow[];
+  totals: { revenue: number; payment: number; outstanding: number; ota_receivable: number };
+  settlement_configs_count: number;
+}
+
+export interface FinanceBookingRow {
+  id: string;
+  unit_nomor: string;
+  guest_nama: string;
+  sumber: string;
+  normalized_channel: NormalizedChannel;
+  status: string;
+  tgl_checkin: string;
+  tgl_checkout: string | null;
+  durasi_malam: number | null;
+  revenue: number;
+  payment_status: PaymentStatus;
+  outstanding: number;
+  cloudbeds_reservation_id: string | null;
+  settlement_status: SettlementStatus | null;
+  settlement_confidence: SettlementConfidence | null;
+  expected_settlement_date: string | null;
+}
+
+export interface FinanceBookingList {
+  items: FinanceBookingRow[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface FinanceBookingDetail {
+  reservation: {
+    id: string;
+    guest_nama: string;
+    guests: { nama: string; hp: string | null; email: string | null } | null;
+    sumber: string;
+    normalized_channel: NormalizedChannel;
+    tgl_checkin: string;
+    tgl_checkout: string | null;
+    unit_nomor: string;
+    units: { nomor: string; blok: string } | null;
+    status: string;
+    cloudbeds_reservation_id: string | null;
+  };
+  revenue: { room: number; extras: null; discount: null; tax: null; fee: null; refund: null; net: number; note: string };
+  payment: { paid: boolean; outstanding: number; method: string; payment_date: string | null };
+  settlement: {
+    collection_method: CollectionMethod;
+    expected_settlement_date: string | null;
+    settlement_confidence: SettlementConfidence | null;
+    settlement_status: SettlementStatus | null;
+    settlement_reference: string | null;
+    destination_account: string | null;
+  };
+  bank: {
+    amount_received: number | null;
+    received_date: string | null;
+    bank_reference: string | null;
+    reconciliation_status: ReconciliationStatus | null;
+    variance_amount: number | null;
+  };
+  audit_log: FinanceAuditLogRow[];
+}
+
+export interface FinanceOtaSettlementConfig {
+  id: string;
+  sumber: string;
+  collection_method: CollectionMethod;
+  settlement_delay_days: number | null;
+  destination_account_label: string | null;
+  currency: string;
+  effective_date: string | null;
+  notes: string | null;
+  configured_by: string | null;
+  updated_at: string;
+}
+
+export interface FinanceAuditLogRow {
+  id: string;
+  entity_type: string;
+  entity_id: string;
+  user_id: string | null;
+  user_nama: string | null;
+  action: string;
+  old_value: Record<string, unknown> | null;
+  new_value: Record<string, unknown> | null;
+  reason: string | null;
   created_at: string;
 }
 

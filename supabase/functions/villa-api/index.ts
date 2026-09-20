@@ -807,6 +807,134 @@ async function computeOtaBreakdown(periode){
   };
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// FINANCE DASHBOARD (Loonars Finance)
+//
+// Cloudbeds' API (verified against what this integration actually pulls,
+// see getCloudbedsReservationTotals) exposes only a reservation-level
+// grandTotal/subTotal via getReservationsWithRateDetails -- there is no
+// separate payment, refund, or settlement/payout endpoint available to
+// this key. So:
+//   - "Revenue" = bookings.total_bayar (what Cloudbeds/direct booking
+//     says the stay costs). There is no itemized room/extras/tax/fee
+//     breakdown or discount/refund feed, so gross === net here; this is
+//     stated explicitly in every response rather than inventing a split.
+//   - "Payment received" vs "outstanding" is inferred from the booking
+//     workflow, not a Cloudbeds payment feed: front-desk check-in
+//     requires "Tandai Lunas" first (see CURRENT_STATE.md 2026-09-19 --
+//     a booking cannot reach status='checkin' unpaid), so
+//     status IN (checkin, checkout) = PAID, status IN (terjadwal,
+//     menunggu_pembayaran) = UNPAID. This is a real, traceable rule
+//     about how this system works, not a guess -- but it is explicitly
+//     NOT the same thing as a Cloudbeds/bank payment confirmation, and
+//     every response says so.
+//   - Settlement/reconciliation is a MANUAL finance workflow
+//     (finance_settlements table) since Cloudbeds provides no OTA
+//     settlement/payout data. calculateExpectedSettlement() only ever
+//     returns confidence:'CONFIGURED' when finance_ota_settlement_config
+//     has a real, owner-entered rule for that channel -- otherwise
+//     'UNKNOWN', never a guessed date.
+//   - "Cash received" only reflects amounts finance staff explicitly
+//     mark as received (with a bank reference) through the Settlement
+//     workflow below -- never equated with Cloudbeds payment status.
+// ═══════════════════════════════════════════════════════════════════════
+
+function normalizedChannel(sumber){
+  const s = String(sumber||'').toLowerCase();
+  if(s==='walk-in' || s==='website' || s==='whatsapp') return 'DIRECT';
+  if(s==='booking.com') return 'BOOKING_COM';
+  if(s==='agoda') return 'AGODA';
+  if(s==='airbnb') return 'AIRBNB';
+  if(s==='tiket') return 'OTHER_OTA'; // Tiket.com -- no dedicated bucket in this schema's sumber values; shown as-is, not guessed into TRAVELOKA.
+  return 'UNKNOWN'; // includes raw 'cloudbeds' (source not yet resolved to a named OTA) and anything unmapped.
+}
+
+/** PAID/UNPAID/CANCELLED -- see the module comment above for why this is workflow-status-based, not a Cloudbeds payment feed. */
+function paymentStatusForBooking(b){
+  if(b.status==='batal') return 'CANCELLED';
+  if(b.status==='checkin' || b.status==='checkout') return 'PAID';
+  return 'UNPAID';
+}
+
+async function getSettlementConfigMap(){
+  const {data} = await supabase.from('finance_ota_settlement_config').select('*');
+  const map = new Map();
+  for(const row of (data||[])) map.set(row.sumber, row);
+  return map;
+}
+
+/**
+ * calculateExpectedSettlement() per the spec: input source/collection
+ * method/booking, output {expected_settlement_date, settlement_status,
+ * confidence, reason}. Only CONFIGURED when an owner/admin has actually
+ * entered a settlement_delay_days rule for this sumber in
+ * finance_ota_settlement_config -- never hardcodes "Booking.com = 7
+ * hari" or any other OTA-specific assumption.
+ */
+function calculateExpectedSettlement({ sumber, tgl_checkout, configMap }){
+  const cfg = configMap.get(sumber);
+  const collection_method = cfg?.collection_method ?? 'UNKNOWN';
+  if(!cfg || cfg.settlement_delay_days==null || cfg.settlement_delay_days===''){
+    return {
+      expected_settlement_date: null,
+      confidence: 'UNKNOWN',
+      reason: `Belum ada aturan settlement yang dikonfigurasi untuk sumber '${sumber}'`,
+      collection_method,
+    };
+  }
+  if(!tgl_checkout){
+    return {
+      expected_settlement_date: null,
+      confidence: 'UNKNOWN',
+      reason: 'Booking belum punya tanggal checkout',
+      collection_method,
+    };
+  }
+  const d = new Date(`${tgl_checkout}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + Number(cfg.settlement_delay_days));
+  const expected_settlement_date = d.toISOString().slice(0,10);
+  return {
+    expected_settlement_date,
+    confidence: 'CONFIGURED',
+    reason: `${cfg.settlement_delay_days} hari setelah checkout, sesuai konfigurasi OTA settlement`,
+    collection_method,
+  };
+}
+
+/** Lazily creates a finance_settlements row for any booking that doesn't have one yet. Idempotent (unique booking_id, upsert ignoreDuplicates). */
+async function ensureFinanceSettlements(bookings, configMap){
+  const candidates = bookings.filter(b => b.status !== 'batal');
+  if(!candidates.length) return;
+  const rows = candidates.map(b => {
+    const calc = calculateExpectedSettlement({ sumber: b.sumber, tgl_checkout: b.tgl_checkout, configMap });
+    return {
+      booking_id: b.id,
+      sumber: b.sumber,
+      amount: Number(b.total_bayar ?? b.tarif ?? 0),
+      expected_settlement_date: calc.expected_settlement_date,
+      settlement_confidence: calc.confidence,
+      settlement_status: 'PENDING',
+    };
+  });
+  await supabase.from('finance_settlements').upsert(rows, { onConflict: 'booking_id', ignoreDuplicates: true });
+
+  // Bookings whose expected date has arrived move PENDING -> READY_TO_COLLECT.
+  // Never touches PROCESSING/RECEIVED rows -- those are finance's own actions.
+  const today = todayWIB();
+  await supabase.from('finance_settlements')
+    .update({ settlement_status: 'READY_TO_COLLECT', updated_at: new Date().toISOString() })
+    .eq('settlement_status', 'PENDING')
+    .lte('expected_settlement_date', today)
+    .not('expected_settlement_date', 'is', null);
+}
+
+async function writeFinanceAudit({ entity_type, entity_id, session, action, old_value, new_value, reason }){
+  await supabase.from('finance_audit_log').insert({
+    entity_type, entity_id, user_id: session.uid, user_nama: session.email ?? null,
+    action, old_value: old_value ?? null, new_value: new_value ?? null, reason: reason ?? null,
+  });
+}
+
 /**
  * Unit yang boleh dilihat sebuah akun investor.
  *
@@ -2348,6 +2476,331 @@ Deno.serve(async (req)=>{
   const isAdmin = session.role==='admin';
   const isStaff = session.role==='receptionist' || isAdmin;
   const isOwner = session.role==='owner';
+  const isFinance = session.role==='finance' || isAdmin;
+
+  // ── FINANCE DASHBOARD ───────────────────────────────────────────────────
+  // See the module comment above calculateExpectedSettlement() for the data
+  // model this is built on (Cloudbeds reservation totals + a manual
+  // settlement/reconciliation workflow -- no fabricated payment/settlement
+  // data). Role: 'finance' or 'admin' can view/reconcile/process/mark
+  // received; only 'admin' can write OTA settlement configuration, per the
+  // mandate ("OTA settlement configuration hanya OWNER/ADMIN").
+
+  if(path==='/finance/whoami' && m==='GET'){
+    if(!isFinance) return forbidden();
+    return json({ ok:true, role: session.role });
+  }
+
+  function financeDateRange(){
+    const to = url.searchParams.get('to') || todayWIB();
+    const from = url.searchParams.get('from') || `${monthWIB()}-01`;
+    return { from, to };
+  }
+
+  if(path==='/finance/summary' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const { from, to } = financeDateRange();
+    const { data: rows, error } = await supabase.from('bookings')
+      .select('id,sumber,status,tgl_checkin,tgl_checkout,total_bayar,tarif')
+      .gte('tgl_checkin', from).lte('tgl_checkin', to);
+    if(error) return err(error.message);
+    const bookings = rows ?? [];
+    const configMap = await getSettlementConfigMap();
+    await ensureFinanceSettlements(bookings, configMap);
+
+    const active = bookings.filter(b=>b.status!=='batal');
+    const cancelled = bookings.length - active.length;
+    const amountOf = b => Number(b.total_bayar ?? b.tarif ?? 0);
+    const gross_revenue = active.reduce((s,b)=>s+amountOf(b),0);
+    const payment_received = active.filter(b=>paymentStatusForBooking(b)==='PAID').reduce((s,b)=>s+amountOf(b),0);
+    const outstanding = active.filter(b=>paymentStatusForBooking(b)==='UNPAID').reduce((s,b)=>s+amountOf(b),0);
+
+    const activeIds = active.map(b=>b.id);
+    let otaReceivable = 0, alertsUnknown = 0, alertsOverdue = 0, alertsDueToday = 0;
+    let cashReceivedAmount = 0, cashReceivedCount = 0;
+    if(activeIds.length){
+      const { data: settlements } = await supabase.from('finance_settlements')
+        .select('booking_id,sumber,amount,settlement_status,settlement_confidence,expected_settlement_date,amount_received,received_date')
+        .in('booking_id', activeIds);
+      const today = todayWIB();
+      for(const s of (settlements ?? [])){
+        const isOta = normalizedChannel(s.sumber) !== 'DIRECT';
+        if(isOta && s.settlement_status !== 'RECEIVED') otaReceivable += Number(s.amount ?? 0);
+        if(s.settlement_status !== 'RECEIVED' && s.settlement_confidence==='UNKNOWN') alertsUnknown++;
+        if(s.settlement_status !== 'RECEIVED' && s.expected_settlement_date){
+          if(s.expected_settlement_date < today) alertsOverdue++;
+          else if(s.expected_settlement_date === today) alertsDueToday++;
+        }
+        if(s.settlement_status==='RECEIVED' && s.received_date && s.received_date>=from && s.received_date<=to){
+          cashReceivedAmount += Number(s.amount_received ?? 0);
+          cashReceivedCount++;
+        }
+      }
+    }
+
+    const { data: lastEvent } = await supabase.from('cloudbeds_events_log').select('created_at').order('created_at',{ascending:false}).limit(1).maybeSingle();
+
+    const alerts = [];
+    if(outstanding>0) alerts.push({ type:'outstanding', level:'warning', message:`Rp ${Math.round(outstanding).toLocaleString('id-ID')} masih outstanding (belum lunas).` });
+    if(alertsDueToday>0) alerts.push({ type:'settlement_due', level:'info', message:`${alertsDueToday} settlement diperkirakan cair hari ini.` });
+    if(alertsOverdue>0) alerts.push({ type:'overdue', level:'danger', message:`${alertsOverdue} settlement sudah lewat tanggal perkiraan cair dan belum diterima.` });
+    if(alertsUnknown>0) alerts.push({ type:'unknown_settlement_rule', level:'warning', message:`${alertsUnknown} transaksi punya aturan settlement yang belum dikonfigurasi (UNKNOWN).` });
+
+    return json({
+      period: { from, to },
+      gross_revenue, net_revenue: gross_revenue,
+      net_revenue_note: 'Sama dengan Gross Revenue -- integrasi Cloudbeds ini hanya membawa total reservasi (grandTotal), tidak ada feed diskon/refund terpisah untuk dikurangkan.',
+      payment_received,
+      payment_received_note: 'Dihitung dari status booking (checkin/checkout = sudah bayar penuh, sesuai alur "Tandai Lunas" front desk), bukan dari feed pembayaran Cloudbeds -- Cloudbeds tidak menyediakan endpoint pembayaran terpisah untuk API key ini.',
+      outstanding,
+      ota_receivable: otaReceivable,
+      ota_receivable_note: 'Total revenue booking OTA (non-direct) yang statusnya belum RECEIVED di alur settlement manual Finance.',
+      cash_received: {
+        amount: cashReceivedAmount,
+        verified: cashReceivedCount>0,
+        count: cashReceivedCount,
+        note: cashReceivedCount>0
+          ? 'Berdasarkan input manual Finance (Tandai Diterima + referensi bank) pada periode ini.'
+          : 'NOT VERIFIED -- belum ada settlement yang ditandai diterima (dengan referensi bank) untuk periode ini.',
+      },
+      bookings_counted: active.length,
+      cancelled_excluded: cancelled,
+      alerts,
+      last_cloudbeds_activity: lastEvent?.created_at ?? null,
+      data_caveats: [
+        'Balance mismatch check (Cloudbeds balance vs calculated) NOT_AVAILABLE -- sinkronisasi ini hanya menarik grandTotal/subTotal (getReservationsWithRateDetails), bukan field balance/outstanding otoritatif yang terpisah dari Cloudbeds.',
+        'Refund tracking NOT_AVAILABLE -- tidak ada endpoint refund yang tersinkron dari Cloudbeds ke sistem ini.',
+        'Sync run history (jumlah reservasi/transaksi/pembayaran per sync) NOT_AVAILABLE sebagai log tersimpan -- lihat halaman Admin > Cloudbeds untuk menjalankan sync dan melihat ringkasannya secara langsung.',
+      ],
+    });
+  }
+
+  if(path==='/finance/channel-breakdown' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const { from, to } = financeDateRange();
+    const { data: rows, error } = await supabase.from('bookings')
+      .select('id,sumber,status,tgl_checkin,tgl_checkout,total_bayar,tarif')
+      .gte('tgl_checkin', from).lte('tgl_checkin', to).neq('status','batal');
+    if(error) return err(error.message);
+    const bookings = rows ?? [];
+    const configMap = await getSettlementConfigMap();
+    await ensureFinanceSettlements(bookings, configMap);
+
+    const ids = bookings.map(b=>b.id);
+    const settlementByBooking = new Map();
+    if(ids.length){
+      const { data: settlements } = await supabase.from('finance_settlements').select('*').in('booking_id', ids);
+      for(const s of (settlements ?? [])) settlementByBooking.set(s.booking_id, s);
+    }
+
+    const bySumber = new Map();
+    for(const b of bookings){
+      const key = b.sumber ?? 'other';
+      const cur = bySumber.get(key) ?? { sumber:key, normalized_channel: normalizedChannel(key), revenue:0, payment:0, outstanding:0, ota_receivable:0, settled_count:0, unsettled_count:0, booking_count:0 };
+      const amount = Number(b.total_bayar ?? b.tarif ?? 0);
+      cur.revenue += amount;
+      cur.booking_count++;
+      if(paymentStatusForBooking(b)==='PAID') cur.payment += amount; else cur.outstanding += amount;
+      const s = settlementByBooking.get(b.id);
+      const settled = s?.settlement_status==='RECEIVED';
+      if(settled) cur.settled_count++; else cur.unsettled_count++;
+      if(cur.normalized_channel!=='DIRECT' && !settled) cur.ota_receivable += amount;
+      bySumber.set(key, cur);
+    }
+    const cfgArr = [...configMap.values()];
+    const channels = [...bySumber.values()].map(c=>{
+      const cfg = configMap.get(c.sumber);
+      return { ...c, collection_method: cfg?.collection_method ?? 'UNKNOWN', destination_account: cfg?.destination_account_label ?? null };
+    }).sort((a,b)=>b.revenue-a.revenue);
+    const totals = channels.reduce((acc,c)=>({ revenue:acc.revenue+c.revenue, payment:acc.payment+c.payment, outstanding:acc.outstanding+c.outstanding, ota_receivable:acc.ota_receivable+c.ota_receivable }), { revenue:0, payment:0, outstanding:0, ota_receivable:0 });
+    return json({ period:{from,to}, channels, totals, settlement_configs_count: cfgArr.length });
+  }
+
+  if(path==='/finance/bookings' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const { from, to } = financeDateRange();
+    const sumber = url.searchParams.get('sumber');
+    const payment_status = url.searchParams.get('payment_status');
+    const settlement_status = url.searchParams.get('settlement_status');
+    const q = String(url.searchParams.get('q') ?? '').trim();
+    const limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit') ?? 50)));
+    const offset = Math.max(0, Number(url.searchParams.get('offset') ?? 0));
+
+    let query = supabase.from('bookings')
+      .select('id,unit_nomor,guest_nama,sumber,status,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_reservation_id,created_at', {count:'exact'})
+      .gte('tgl_checkin', from).lte('tgl_checkin', to)
+      .order('tgl_checkin',{ascending:false});
+    if(sumber) query = query.eq('sumber', sumber);
+    if(q) query = query.ilike('guest_nama', `%${q}%`);
+    const { data: rows, error, count } = await query.range(offset, offset+limit-1);
+    if(error) return err(error.message);
+    let bookings = rows ?? [];
+
+    const configMap = await getSettlementConfigMap();
+    await ensureFinanceSettlements(bookings.filter(b=>b.status!=='batal'), configMap);
+    const ids = bookings.map(b=>b.id);
+    const settlementByBooking = new Map();
+    if(ids.length){
+      const { data: settlements } = await supabase.from('finance_settlements').select('*').in('booking_id', ids);
+      for(const s of (settlements ?? [])) settlementByBooking.set(s.booking_id, s);
+    }
+
+    let items = bookings.map(b=>{
+      const amount = Number(b.total_bayar ?? b.tarif ?? 0);
+      const pay = paymentStatusForBooking(b);
+      const s = settlementByBooking.get(b.id) ?? null;
+      return {
+        id: b.id, unit_nomor: b.unit_nomor, guest_nama: b.guest_nama, sumber: b.sumber,
+        normalized_channel: normalizedChannel(b.sumber), status: b.status,
+        tgl_checkin: b.tgl_checkin, tgl_checkout: b.tgl_checkout, durasi_malam: b.durasi_malam,
+        revenue: amount, payment_status: pay, outstanding: pay==='UNPAID' ? amount : 0,
+        cloudbeds_reservation_id: b.cloudbeds_reservation_id,
+        settlement_status: s?.settlement_status ?? null,
+        settlement_confidence: s?.settlement_confidence ?? null,
+        expected_settlement_date: s?.expected_settlement_date ?? null,
+      };
+    });
+    if(payment_status) items = items.filter(i=>i.payment_status===payment_status);
+    if(settlement_status) items = items.filter(i=>i.settlement_status===settlement_status);
+
+    return json({ items, total: count ?? items.length, limit, offset });
+  }
+
+  if(path==='/finance/booking' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const id = url.searchParams.get('id');
+    if(!id) return err('id wajib diisi');
+    const { data: b, error } = await supabase.from('bookings')
+      .select('*, guests(nama,hp,email), units(nomor,blok)')
+      .eq('id', id).maybeSingle();
+    if(error) return err(error.message);
+    if(!b) return err('Booking tidak ditemukan',404);
+
+    const configMap = await getSettlementConfigMap();
+    await ensureFinanceSettlements([b], configMap);
+    const { data: settlement } = await supabase.from('finance_settlements').select('*').eq('booking_id', id).maybeSingle();
+    const cfg = configMap.get(b.sumber) ?? null;
+    const { data: auditLog } = settlement
+      ? await supabase.from('finance_audit_log').select('*').eq('entity_type','finance_settlement').eq('entity_id', settlement.id).order('created_at',{ascending:false}).limit(20)
+      : { data: [] };
+
+    const amount = Number(b.total_bayar ?? b.tarif ?? 0);
+    return json({
+      reservation: {
+        id: b.id, guest_nama: b.guest_nama, guests: b.guests ?? null, sumber: b.sumber,
+        normalized_channel: normalizedChannel(b.sumber), tgl_checkin: b.tgl_checkin, tgl_checkout: b.tgl_checkout,
+        unit_nomor: b.unit_nomor, units: b.units ?? null, status: b.status, cloudbeds_reservation_id: b.cloudbeds_reservation_id,
+      },
+      revenue: { room: amount, extras: null, discount: null, tax: null, fee: null, refund: null, net: amount, note: 'Tidak ada breakdown room/extras/tax/fee terpisah dari Cloudbeds untuk API key ini -- hanya total reservasi.' },
+      payment: { paid: paymentStatusForBooking(b)==='PAID', outstanding: paymentStatusForBooking(b)==='UNPAID' ? amount : 0, method: 'UNKNOWN', payment_date: b.checkin_at ?? null },
+      settlement: {
+        collection_method: cfg?.collection_method ?? 'UNKNOWN',
+        expected_settlement_date: settlement?.expected_settlement_date ?? null,
+        settlement_confidence: settlement?.settlement_confidence ?? 'UNKNOWN',
+        settlement_status: settlement?.settlement_status ?? null,
+        settlement_reference: settlement?.settlement_reference ?? null,
+        destination_account: cfg?.destination_account_label ?? null,
+      },
+      bank: {
+        amount_received: settlement?.amount_received ?? null,
+        received_date: settlement?.received_date ?? null,
+        bank_reference: settlement?.bank_reference ?? null,
+        reconciliation_status: settlement?.reconciliation_status ?? null,
+        variance_amount: settlement?.variance_amount ?? null,
+      },
+      audit_log: auditLog ?? [],
+    });
+  }
+
+  if(path==='/finance/ota-settlement-config' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const { data, error } = await supabase.from('finance_ota_settlement_config').select('*').order('sumber');
+    if(error) return err(error.message);
+    return json(data ?? []);
+  }
+
+  if(path==='/finance/ota-settlement-config' && m==='POST'){
+    if(!isAdmin) return forbidden();
+    const body = await req.json();
+    const sumber = String(body.sumber ?? '').trim();
+    if(!sumber) return err('sumber wajib diisi');
+    const { data: existing } = await supabase.from('finance_ota_settlement_config').select('*').eq('sumber', sumber).maybeSingle();
+    const patch = {
+      sumber,
+      collection_method: body.collection_method ?? 'UNKNOWN',
+      settlement_delay_days: body.settlement_delay_days === '' || body.settlement_delay_days == null ? null : Number(body.settlement_delay_days),
+      destination_account_label: body.destination_account_label ?? null,
+      currency: body.currency ?? 'IDR',
+      effective_date: body.effective_date || null,
+      notes: body.notes ?? null,
+      configured_by: session.uid,
+      updated_at: new Date().toISOString(),
+    };
+    const { data: saved, error } = await supabase.from('finance_ota_settlement_config').upsert(patch, { onConflict:'sumber' }).select('*').single();
+    if(error) return err(error.message);
+    await writeFinanceAudit({ entity_type:'finance_ota_settlement_config', entity_id: saved.id, session, action: existing?'update_settlement_config':'create_settlement_config', old_value: existing ?? null, new_value: saved, reason: body.reason ?? null });
+    return json(saved);
+  }
+
+  if(path==='/finance/ota-settlement-config' && m==='DELETE'){
+    if(!isAdmin) return forbidden();
+    const sumber = url.searchParams.get('sumber');
+    if(!sumber) return err('sumber wajib diisi');
+    const { data: existing } = await supabase.from('finance_ota_settlement_config').select('*').eq('sumber', sumber).maybeSingle();
+    if(!existing) return err('Konfigurasi tidak ditemukan',404);
+    const { error } = await supabase.from('finance_ota_settlement_config').delete().eq('sumber', sumber);
+    if(error) return err(error.message);
+    await writeFinanceAudit({ entity_type:'finance_ota_settlement_config', entity_id: existing.id, session, action:'delete_settlement_config', old_value: existing, new_value: null });
+    return json({ success:true });
+  }
+
+  if(path==='/finance/settlements/process' && m==='POST'){
+    if(!isFinance) return forbidden();
+    const body = await req.json();
+    const booking_id = body.booking_id;
+    if(!booking_id) return err('booking_id wajib diisi');
+    const { data: s } = await supabase.from('finance_settlements').select('*').eq('booking_id', booking_id).maybeSingle();
+    if(!s) return err('Settlement belum ada untuk booking ini -- buka detail booking dulu supaya settlement dibuat.',404);
+    if(s.settlement_status==='RECEIVED') return err('Settlement ini sudah RECEIVED.',400);
+    const patch = { settlement_status:'PROCESSING', settlement_reference: body.settlement_reference ?? null, processed_by: session.uid, processed_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+    const { data: saved, error } = await supabase.from('finance_settlements').update(patch).eq('id', s.id).select('*').single();
+    if(error) return err(error.message);
+    await writeFinanceAudit({ entity_type:'finance_settlement', entity_id: s.id, session, action:'process_settlement', old_value: s, new_value: saved, reason: body.reason ?? null });
+    return json(saved);
+  }
+
+  if(path==='/finance/settlements/receive' && m==='POST'){
+    if(!isFinance) return forbidden();
+    const body = await req.json();
+    const booking_id = body.booking_id;
+    if(!booking_id) return err('booking_id wajib diisi');
+    if(body.amount_received == null || body.received_date == null) return err('amount_received dan received_date wajib diisi');
+    const { data: s } = await supabase.from('finance_settlements').select('*').eq('booking_id', booking_id).maybeSingle();
+    if(!s) return err('Settlement belum ada untuk booking ini.',404);
+    const amount_received = Number(body.amount_received);
+    const variance_amount = amount_received - Number(s.amount);
+    const reconciliation_status = variance_amount === 0 ? 'MATCHED' : 'VARIANCE';
+    const patch = {
+      settlement_status:'RECEIVED', amount_received, received_date: body.received_date,
+      bank_reference: body.bank_reference ?? null, notes: body.notes ?? s.notes ?? null,
+      reconciliation_status, variance_amount, updated_at: new Date().toISOString(),
+    };
+    const { data: saved, error } = await supabase.from('finance_settlements').update(patch).eq('id', s.id).select('*').single();
+    if(error) return err(error.message);
+    await writeFinanceAudit({ entity_type:'finance_settlement', entity_id: s.id, session, action:'mark_received', old_value: s, new_value: saved, reason: body.reason ?? null });
+    return json(saved);
+  }
+
+  if(path==='/finance/audit-log' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit') ?? 50)));
+    let query = supabase.from('finance_audit_log').select('*').order('created_at',{ascending:false}).limit(limit);
+    const entity_type = url.searchParams.get('entity_type');
+    if(entity_type) query = query.eq('entity_type', entity_type);
+    const { data, error } = await query;
+    if(error) return err(error.message);
+    return json(data ?? []);
+  }
 
   // ── Database tamu ──────────────────────────────────────────────────────
   // Tujuan owner 2026-09-12: "kt punya database tamu" dari OTA maupun web.
