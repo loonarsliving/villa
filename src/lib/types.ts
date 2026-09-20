@@ -341,6 +341,7 @@ export interface FinanceSummary {
   ota_receivable_note: string;
   cash_received: { amount: number; verified: boolean; count: number; note: string };
   bookings_counted: number;
+  cloudbeds_balance_verified_count: number;
   cancelled_excluded: number;
   alerts: FinanceAlert[];
   last_cloudbeds_activity: string | null;
@@ -381,6 +382,8 @@ export interface FinanceBookingRow {
   revenue: number;
   payment_status: PaymentStatus;
   outstanding: number;
+  /** "cloudbeds_balance" = angka asli dari Cloudbeds; "booking_status_estimate" = perkiraan dari status booking. */
+  payment_status_source: "cloudbeds_balance" | "booking_status_estimate";
   cloudbeds_reservation_id: string | null;
   settlement_status: SettlementStatus | null;
   settlement_confidence: SettlementConfidence | null;
@@ -409,7 +412,14 @@ export interface FinanceBookingDetail {
     cloudbeds_reservation_id: string | null;
   };
   revenue: { room: number; extras: null; discount: null; tax: null; fee: null; refund: null; net: number; note: string };
-  payment: { paid: boolean; outstanding: number; method: string; payment_date: string | null };
+  payment: {
+    paid: boolean;
+    outstanding: number;
+    method: string;
+    payment_date: string | null;
+    source: "cloudbeds_balance" | "booking_status_estimate";
+    cloudbeds_balance: number | null;
+  };
   settlement: {
     collection_method: CollectionMethod;
     expected_settlement_date: string | null;
