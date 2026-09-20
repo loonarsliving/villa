@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { AdminShell } from "../_shell";
 import { api, ApiError } from "@/lib/api";
 import { useToast } from "@/lib/toast";
-import { fmtDate } from "@/lib/format";
+import { fmtDate, fmtDateTime } from "@/lib/format";
 import { Card, CardHeader, CardBody, Loading, Badge } from "@/components/Card";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
 import type { AmenityItem, AmenityKitItem, AmenityUsageLog } from "@/lib/types";
@@ -209,7 +209,7 @@ export default function AdminAmenitiesPage() {
               <div className="flex-1 min-w-0">
                 <div className="text-xs text-ink/80">{l.amenity_nama || "—"}</div>
                 <div className="text-[10px] text-ink/30 mt-0.5">
-                  Unit {l.unit_nomor || "—"} · {fmtDate(l.created_at, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                  Unit {l.unit_nomor || "—"} · {fmtDateTime(l.created_at)}
                   {l.created_by ? ` · ${l.created_by}` : ""}
                 </div>
               </div>

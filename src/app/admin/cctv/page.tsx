@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { AdminShell } from "../_shell";
 import { api, ApiError, localApi } from "@/lib/api";
 import { useToast } from "@/lib/toast";
+import { fmtDateTime } from "@/lib/format";
 import { Card, CardHeader, Loading, Badge } from "@/components/Card";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
 import type { CctvCamera, CctvCheckpointLog, CctvDisciplinaryReport } from "@/lib/types";
@@ -22,7 +23,7 @@ const emptyForm = {
 const ZONA_LABEL: Record<string, string> = { satpam: "Satpam", resepsionis: "Resepsionis" };
 
 function formatDateTime(iso: string) {
-  return new Date(iso).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" });
+  return fmtDateTime(iso, { dateStyle: "medium", timeStyle: "short" });
 }
 
 export default function AdminCctvPage() {

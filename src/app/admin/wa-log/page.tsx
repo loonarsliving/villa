@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { AdminShell } from "../_shell";
 import { api } from "@/lib/api";
-import { fmtDate } from "@/lib/format";
+import { fmtDate, fmtDateTime } from "@/lib/format";
 import { Card, CardHeader, Loading, Badge } from "@/components/Card";
 import type { WaLogRow } from "@/lib/types";
 
@@ -41,7 +41,7 @@ export default function AdminWaLogPage() {
               <div className="flex-1 min-w-0">
                 <div className="text-xs text-ink/80 truncate">{r.message || "—"}</div>
                 <div className="text-[10px] text-ink/30 mt-0.5">
-                  {r.phone || "tanpa nomor"} · {r.template_type || "—"} · {fmtDate(r.created_at, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                  {r.phone || "tanpa nomor"} · {r.template_type || "—"} · {fmtDateTime(r.created_at)}
                 </div>
               </div>
               <Badge tone={statusTone[r.status || ""] || "pending"}>{r.status}</Badge>

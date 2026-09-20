@@ -7,33 +7,32 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
 import { fmtDate, todayISO } from "@/lib/format";
+import { addDaysISO } from "@/lib/stayDates";
 import { Card, CardHeader, Loading } from "@/components/Card";
 import type { Booking, Unit } from "@/lib/types";
 
 const RANGE_OPTIONS = [7, 14, 21] as const;
 
 /**
- * Tanggal diurai sebagai tengah malam WAKTU LOKAL, lalu diserialkan ulang
- * lewat toISOString() (UTC). Di WIB (UTC+7), tengah malam 20 Sep adalah
- * 17:00 UTC tanggal 19 Sep -- jadi addDays("2026-09-20", 0) mengembalikan
- * "2026-09-19". Kolom pertama kalender (dan semua kolom setelahnya) ikut
- * mundur satu hari dari tanggal `start` yang sebenarnya, sementara batang
- * booking diposisikan relatif terhadap tanggal aslinya -- hasilnya sebuah
- * booking tampak menempel di kolom yang berlabel satu hari lebih awal dari
- * tanggal check-in-nya yang sesungguhnya.
+ * Tanggal dulu diurai sebagai tengah malam WAKTU LOKAL, lalu diserialkan
+ * ulang lewat toISOString() (UTC). Di WIB (UTC+7), tengah malam 20 Sep
+ * adalah 17:00 UTC tanggal 19 Sep -- jadi addDays("2026-09-20", 0)
+ * mengembalikan "2026-09-19". Kolom pertama kalender (dan semua kolom
+ * setelahnya) ikut mundur satu hari dari tanggal `start` yang sebenarnya,
+ * sementara batang booking diposisikan relatif terhadap tanggal aslinya --
+ * hasilnya sebuah booking tampak menempel di kolom yang berlabel satu hari
+ * lebih awal dari tanggal check-in-nya yang sesungguhnya.
  *
  * Dibuktikan nyata (2026-09-20): booking Cloudbeds "Ni made rai rusmala
  * Dewi" punya tgl_checkin = 2026-09-20 di database (cocok dengan reservasi
- * Cloudbeds-nya), tapi tampil di kolom "19 Sep".
+ * Cloudbeds-nya), tapi tampil di kolom "19 Sep". Diperbaiki di main lewat
+ * PR #91.
  *
- * Diperbaiki dengan aritmetika UTC murni (`T00:00:00Z`, setUTCDate), yang
- * tidak bisa bergeser oleh timezone perangkat resepsionis mana pun.
+ * addDaysISO bekerja sepenuhnya di UTC sehingga tanggal polos tidak pernah
+ * bergeser; dipakai di sini alih-alih menyalin ulang aritmetikanya, supaya
+ * hanya ada satu implementasi yang diuji (src/lib/stayDates.test.ts).
  */
-function addDays(iso: string, n: number): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-}
+const addDays = addDaysISO;
 
 function dateRange(start: string, days: number): string[] {
   return Array.from({ length: days }, (_, i) => addDays(start, i));

@@ -2,6 +2,359 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-20 — audit ulang alur check-in
+
+Owner minta dipastikan tidak ada bug lagi di proses check-in. Ditelusuri
+ulang: `/front-desk` → CheckinCard → `POST /checkin` → `villa_commit_checkin`,
+plus jalur walk-in lewat Payment Gateway.
+
+### Bug baru yang ditemukan — dan ini bug yang SAYA perkenalkan sendiri
+
+`fitCanvas` dipasang sebagai listener `resize`, dan di dalamnya
+`canvas.width = ...` — menyetel ukuran buffer kanvas MENGOSONGKAN kanvas.
+Di HP, `resize` terpicu saat keyboard virtual muncul/hilang, saat bilah URL
+menyusut ketika modal di-scroll, dan saat layar diputar — semuanya bisa
+terjadi SETELAH tamu menandatangani. Goresannya terhapus sementara
+`hasSignature` tetap `true`, jadi penjagaannya lolos dan yang tersimpan
+sebagai bukti persetujuan tata tertib adalah **gambar kosong** — padahal
+tanda tangan itu dasar penagihan denda merokok Rp500.000 dan ganti rugi.
+
+**Dibuktikan di Chromium sungguhan (Playwright), bukan dinalar:**
+menandatangani lalu mengecilkan viewport → kode lama piksel tinta
+1658 → **0**; kode baru 1057 → **1057**.
+
+Pelajarannya: memperbaiki kanvas agar responsif (perbaikan koordinat pena
+19 Sep) sekaligus membuka lubang baru di fitur yang sama. Perbaikan pada
+kanvas HARUS diuji di browser, karena tidak ada satu pun tes Node yang bisa
+menangkapnya.
+
+Dua hal ikut ketahuan dari pengujian yang sama:
+- **Latar tanda tangan transparan** (56.000 piksel transparan). `bg-white`
+  cuma kelas CSS; `toDataURL` hanya mengambil isi kanvas. Tinta hitam di
+  atas latar transparan tidak akan terbaca di atas latar gelap. Sekarang
+  putihnya ditulis ke dalam kanvas.
+- **Foto KTP terunggah ulang** setiap kali check-in gagal lalu diulang —
+  salinan KTP menganggur menumpuk di storage. Sekarang dipakai ulang.
+
+### Temuan yang BELUM ditangani: KTP & tanda tangan tidak bisa dilihat kembali
+
+Foto KTP diunggah ke bucket privat `guest-documents`, path-nya disimpan di
+`bookings.ktp_photo_path`, dan tanda tangan di `bookings.signature_data_url`.
+**Tidak ada satu pun endpoint maupun halaman yang membacanya kembali** —
+diperiksa di seluruh `src/` dan villa-api. Jadi seluruh proses ambil KTP +
+tanda tangan saat ini bersifat sekali tulis: datanya dikumpulkan, tapi tidak
+pernah bisa dipakai saat sengketa (denda merokok, kerusakan, keterlambatan
+check-out) — yang justru satu-satunya alasan mengumpulkannya. Sementara itu
+villa tetap menanggung risiko menyimpan data pribadi tamu.
+
+Perlu keputusan owner: bikin penampil khusus staf (signed URL berumur
+pendek, digerbang role), dan sekalian tentukan berapa lama dokumen ini
+disimpan.
+
+### Fakta penting: alur ini BELUM PERNAH dipakai sungguhan
+
+`bookings` hanya punya **satu** check-in yang pernah terjadi (28 Agu), dan
+baris itu `ktp_photo_path` dan `signature_data_url`-nya NULL — dibuat
+sebelum CheckinCard ada. Artinya seluruh rangkaian KTP + tanda tangan belum
+pernah dijalankan di produksi sekali pun. Bug-bug di atas (kanvas melenceng,
+foto terlalu besar, KTP tamu salah, tanda tangan terhapus) semuanya akan
+muncul pada check-in sungguhan yang PERTAMA.
+
+### Yang diperiksa dan ternyata BUKAN bug
+
+- `sendWa()` tidak pernah melempar error — semua kegagalan ditangkap dan
+  dicatat ke `wa_messages_log`, lalu mengembalikan `false`. Jadi WA yang
+  gagal terkirim TIDAK membuat check-in yang sudah tercatat dilaporkan
+  gagal ke resepsionis.
+- Booking website yang belum dibayar berstatus `menunggu_pembayaran`,
+  tidak muncul di `/bookings?status=terjadwal`, dan `villa_commit_checkin`
+  juga menolaknya. Tidak bisa check-in tanpa bayar.
+- Check-in ganda terkunci benar di database (`select ... for update` lalu
+  cek status di dalam RPC).
+
+### Perbaikan kalender dari `main` (#91) sudah digabung ke branch ini
+
+Konfliknya diselesaikan dengan mempertahankan `addDaysISO` (helper bersama
+yang ada tesnya) sambil mengambil perbaikan `dayIndex` versi UTC dari main.
+
+## 2026-09-19 (lanjutan 2) — WIB ditutup sampai ke database dan villa-api
+
+Owner menyetujui perbaikan yang sebelumnya ditahan ("Ya perbaiki"). Sekarang
+seluruh rantainya memakai kalender WIB, bukan hanya tampilan frontend.
+
+### Database — SUDAH diterapkan ke produksi
+
+Migrasi `villa_checkin_checkout_wib_dates` (lewat Supabase MCP; repo ini
+memang tidak punya `supabase/migrations`, lihat DEVELOPMENT_WORKFLOW.md).
+Dua ekspresi yang diubah, tidak lebih:
+
+- `villa_commit_checkin`: `to_char(now(), 'YYYY-MM')` →
+  `to_char(now() at time zone 'Asia/Jakarta', 'YYYY-MM')` untuk
+  `transactions.periode_bulan`.
+- `villa_commit_checkout`: `current_date` →
+  `(now() at time zone 'Asia/Jakarta')::date` untuk `housekeeping.tgl`.
+
+`checkin_at`/`checkout_at` sengaja TETAP `now()` — keduanya `timestamptz`,
+menyimpan titik waktu absolut memang benar, dan frontend sudah
+menampilkannya dalam WIB.
+
+**Tidak ada data lama yang rusak, dan ini diperiksa, bukan diasumsikan:**
+tidak ada satu pun baris `transactions` yang `periode_bulan`-nya berbeda dari
+bulan WIB `created_at`-nya, dan satu-satunya baris `housekeeping` hasil
+checkout sungguhan (A5, 28 Agu 13:45 WIB) tanggalnya sudah benar. Dua baris
+housekeeping lain yang tanggalnya berbeda adalah data uji bertanggal Desember,
+bukan korban bug ini.
+
+**Cakupannya diperiksa dulu:** project Supabase ini dipakai bersama
+Mkhsistem (ada ratusan fungsi `crm_*`, `hr_*`, `cm_*`, `construction_*`,
+`kpi_*`, `loonars_*`). Dari seluruh fungsi `villa_*`, hanya dua di atas yang
+menyentuh tanggal. Tidak ada fungsi milik sistem lain yang disentuh.
+
+### villa-api — ada di branch, BARU AKTIF SETELAH MERGE ke `main`
+
+Ditambahkan `todayWIB()` / `monthWIB()` / `prevMonthWIB()` di atas file, lalu
+19 turunan "hari ini"/"bulan ini" dipindahkan ke sana. Edge Function ini
+berjalan di UTC, jadi sebelumnya `new Date().toISOString()` menjawab
+tanggal/bulan KEMARIN selama 00:00–07:00 WIB. Yang terkena:
+
+- default periode `/report`, `/report/ota-breakdown`, `/admin/overview`,
+  `/admin/dividends`, `/opex` (GET dan POST) — laporan bagi hasil investor;
+- `/summary` dan `/housekeeping` — tugas "hari ini" resepsionis;
+- `/dashboard/hari-ini`, `/cron/laporan-harian`;
+- masa berlaku voucher menginap investor dan tanggal berlakunya promo;
+- nomor invoice (`INV-LV-<ymd>-…`). Aman diubah karena nomornya dihitung
+  sekali lalu DISIMPAN di `bookings.invoice_no` — invoice yang sudah terbit
+  tidak pernah dinomori ulang, hanya yang baru.
+
+`/cron/sync-mkh-income` (periode "bulan lalu") juga dipindahkan, tapi
+**bukan karena sedang rusak**: cron-nya `15 1 1 * *` UTC = 08:15 WIB, di luar
+jendela 00:00–07:00, jadi selama ini hasilnya kebetulan benar. Sekarang tidak
+lagi bergantung pada kebetulan itu.
+
+Kolom `timestamptz` (`paid_at`, `sent_at`, `bukti_pembayaran_at`, dst.) tetap
+`new Date().toISOString()` — sengaja.
+
+**Penting:** `supabase/functions/villa-api/index.ts` di repo sekarang BERBEDA
+dari v67 yang live. Deploy terjadi lewat `.github/workflows/deploy-villa-api.yml`
+saat branch ini di-merge ke `main`, bukan sekarang.
+
+### Label "WITA" di komentar diperbaiki jadi WIB
+
+Mesin harga AI dan snapshot inventori **ternyata sudah benar** — keduanya
+memakai `Asia/Jakarta` (`todayJakarta()`, `todayInJakarta()`), dan
+`toISOString().slice(0,10)` di sana hanyalah aritmetika UTC murni atas string
+tanggal (`${dateStr}T00:00:00Z`), yang memang tidak boleh bergeser. Yang salah
+cuma **labelnya**: beberapa komentar menyebut "WITA" (UTC+8) padahal
+Asia/Jakarta adalah WIB (UTC+7). Diperbaiki di `cctv-checkpoint` (11:00 WIB),
+`dividend-list` (08:00 WIB), `sync-mkh-income` (08:15 WIB),
+`investor-bank-reminder` (12:05 WIB), `daily-inventory-snapshot`, dan
+villa-api.
+
+Ini bukan kerapian belaka: salah label yang persis sama pernah membuat jam
+pada dokumen tata tertib yang DITANDATANGANI TAMU meleset satu jam
+(lihat catatan 2026-09-11 dan komentar di `CheckinCard.tsx`) — dan jam itulah
+dasar denda keterlambatan check-out.
+
+Sisa penyebutan "WITA" ada di `docs/revenue-engine/PHASE4-DESIGN.md` dan
+`PHASE6-DESIGN.md`; keduanya catatan desain bertanggal, sengaja tidak
+diubah. Yang benar: cron `55 15 * * *` = 22:55 WIB, dan cron mesin harga di
+`vercel.json` sekarang `10 17 * * *` = 00:10 WIB (dokumen itu masih menulis
+`10 16 * * *`).
+
+## 2026-09-19 (lanjutan) — iPaymu dihapus, semua jam & tanggal jadi WIB
+
+Dua keputusan owner setelah audit di bawah: *"Saya tidak pakai ipaymu saya
+pakai qris statis, dan tolong rubah jdi wib untuk jam dan waktu"*.
+
+### iPaymu dihapus seluruhnya
+
+Dihapus: `src/lib/ipaymuApi.ts`, `/api/payment-gateway/qris`,
+`/api/payment-gateway/qris/status`, `/api/webhooks/ipaymu`, dan dependensi
+`qrcode`. Kredensialnya memang tidak pernah ada di Vercel dan
+`walkin_payments` kosong, jadi tidak ada satu pun transaksi sungguhan yang
+pernah melewatinya. Kodenya tetap ada di riwayat git.
+
+Halaman Payment Gateway sekarang **murni QRIS statis**: tidak ada percobaan
+membuat QR dinamis, tidak ada tombol "Cek Status", tidak ada lencana status
+iPaymu. Yang ditambahkan sebagai gantinya, karena sifat QRIS statis memang
+menuntutnya:
+- QRIS villa ditampilkan lebih besar (w-64) dengan nominal besar di bawahnya;
+- langkah bayar ditulis eksplisit — tamu **mengetik sendiri** nominalnya,
+  karena kode statis tidak membawa nominal;
+- ditegaskan tidak ada konfirmasi otomatis: **klik "Tandai Lunas" oleh kasir
+  itulah catatan pembayarannya**, dan untuk villa klik itu sekaligus
+  menjalankan check-in (kirim PIN WA, catat pemasukan bagi hasil, ubah status
+  unit);
+- peringatan merah di kartu Kasir kalau gambar QRIS belum diunggah — tanpa
+  itu seluruh alur kasir mati, dan dulu hal ini hanya terlihat setelah modal
+  dibuka.
+
+### Semua jam & tanggal jadi WIB
+
+`src/lib/format.ts` sekarang memaksa `timeZone: "Asia/Jakarta"` di semua
+formatter dan memberi label "WIB" pada setiap jam (`fmtDateTime`, `fmtTime`).
+Sebelumnya modul ini tidak menyebut zona waktu sama sekali, jadi hasilnya
+mengikuti pengaturan perangkat — HP yang zonanya salah atau laptop yang
+sedang di luar negeri menampilkan jam berbeda untuk kejadian yang sama,
+padahal jam di layar ini dipakai menghitung denda check-out (batas 12:00
+WIB).
+
+Tiga bug tanggal yang ikut ketahuan dan diperbaiki — semuanya akibat mencampur
+waktu lokal dengan UTC:
+
+1. **`todayISO()`/`currentPeriod()` memakai tanggal UTC.** Antara 00:00–07:00
+   WIB keduanya menjawab tanggal/bulan **kemarin**. Resepsionis shift malam
+   mendapat tanggal kemarin sebagai nilai bawaan form check-in.
+2. **Kalender booking front-desk bergeser satu hari.** `addDays()` mengurai
+   tanggal sebagai tengah malam **lokal** lalu menyerialkan ulang lewat
+   `toISOString()` (**UTC**). Di WIB, tengah malam 20 Sep = 17:00 UTC 19 Sep,
+   sehingga `addDays("2026-09-20", 1)` mengembalikan `"2026-09-20"` lagi —
+   seluruh kolom kalender, penanda "Hari Ini", dan rentang yang diminta ke
+   villa-api bergeser. Sekarang memakai `addDaysISO` yang murni UTC.
+3. **Daftar bulan di laporan investor menunjuk bulan yang salah.**
+   `new Date(tahun, bulan - i, 1).toISOString().slice(0,7)` di WIB
+   menghasilkan bulan **sebelumnya**, sementara labelnya memakai waktu lokal.
+   Jadi label tertulis "September 2026" tapi periode yang diminta ke API
+   `2026-08` — investor membaca laporan bulan yang bukan dipilihnya.
+   Diganti `recentPeriods()` yang murni aritmetika tahun/bulan.
+   **Perhatian: angka di halaman Laporan Bulanan investor akan bergeser ke
+   bulan yang benar setelah ini.** Tidak ada formula yang diubah — hanya
+   bulan yang diminta.
+
+Ditambah 8 tes baru untuk WIB (total 70 tes hijau).
+
+### Masih memakai UTC dan BELUM diubah — perlu persetujuan owner
+
+Ini di sisi database, bukan frontend, dan menyentuh uang/skema:
+- **`villa_commit_checkin` menulis `periode_bulan = to_char(now(),'YYYY-MM')`
+  dengan timezone database UTC** (dikonfirmasi: `current_setting('TimeZone')`
+  = UTC). Check-in antara 00:00–07:00 WIB pada tanggal 1 akan tercatat di
+  **bulan sebelumnya**, sehingga pemasukannya masuk ke laporan bagi hasil
+  bulan yang salah.
+- **`villa_commit_checkout` memakai `current_date`** untuk `housekeeping.tgl`
+  dengan masalah yang sama. Checkout yang diproses 00:00–07:00 WIB membuat
+  tugas housekeeping bertanggal kemarin, sehingga tidak muncul di halaman
+  Housekeeping yang menanyakan tanggal hari ini. Setelah `todayISO()` jadi
+  WIB, tugas seperti itu tidak akan muncul sama sekali (sebelumnya sempat
+  muncul selama 6 jam pertama). Jendelanya sempit — butuh checkout diproses
+  dini hari — tapi nyata.
+
+Perbaikannya sederhana (`(now() at time zone 'Asia/Jakarta')`), tapi keduanya
+mengubah fungsi database yang menyentuh pencatatan pemasukan investor.
+
+## 2026-09-19 — audit halaman resepsionis (check-in + pembayaran QRIS)
+
+Owner minta halaman resepsionis untuk check-in dan pembayaran QRIS diperiksa
+sampai tidak ada bug lagi. Yang diperiksa: `/front-desk`,
+`/front-desk/payment-gateway`, `CheckinCard`, `/api/checkin/upload-ktp`,
+`/api/payment-gateway/qris(+/status)`, `/api/webhooks/ipaymu`, dan
+`src/lib/ipaymuApi.ts` — semuanya dicocokkan ke villa-api v67 yang **live**
+(diverifikasi lewat Supabase MCP; snapshot di repo identik dengan yang live)
+serta ke skema `bookings` dan RPC `villa_commit_checkin/checkout`.
+
+### Temuan terberat: booking 0 malam menembus SEMUA pengaman double-booking
+
+Form kasir villa walk-in memberi nilai bawaan **check-out = check-in**. Itu
+menghasilkan `daterange(tgl_checkin, tgl_checkout, '[)')` yang **kosong**, dan
+rentang kosong tidak pernah bertabrakan dengan apa pun. Akibatnya booking
+seperti itu lolos dari ketiga lapis pengaman sekaligus:
+
+1. exclusion constraint `bookings_no_overlap_active` di database,
+2. pengecekan bentrok villa-api (`datesOverlap`) di `POST /bookings`,
+3. `GET /availability` yang dipakai dropdown unit di layar kasir.
+
+Artinya resepsionis yang tidak mengubah tanggal bawaan bisa membuat booking
+untuk unit yang **sedang terisi**, tanpa satu pun peringatan, dan unit itu
+tetap ditagih satu malam (`Math.max(1, ...)` di villa-api). Belum pernah
+terjadi di produksi — dicek, tidak ada satu pun baris `bookings` dengan
+`tgl_checkout <= tgl_checkin` — tapi keadaan bawaan form memang persis itu.
+
+Diperbaiki di sisi form: bawaan check-out sekarang satu malam (satu bulan
+untuk sewa bulanan), rentang divalidasi sebelum booking dibuat, dan tombolnya
+terkunci selama rentangnya tidak sah. Logika tanggalnya dipisah ke
+`src/lib/stayDates.ts` dengan 9 tes.
+
+**Belum ditutup di lapis bawah, dan ini sengaja:** villa-api dan constraint
+database masih menerima rentang kosong dari jalur lain (mis. pemanggil API
+langsung). Menutupnya menyentuh skema/constraint, yang butuh persetujuan
+owner lebih dulu.
+
+### iPaymu memang BELUM dikonfigurasi di produksi
+
+`IPAYMU_VA` dan `IPAYMU_API_KEY` **tidak ada** di environment variables
+Vercel (diperiksa langsung, hanya nama yang dilihat). Jadi setiap pembuatan
+QRIS dinamis menjawab 503, dan modal pembayaran diam-diam jatuh ke **QRIS
+statis** villa — yang tidak membawa nominal. Kasir tidak punya cara tahu
+bedanya: layarnya terlihat normal.
+
+Ini bukan sekadar teori: inilah cara halaman itu berjalan sekarang. Tamu
+harus mengetik sendiri nominalnya, dan salah ketik baru ketahuan belakangan.
+Modal sekarang menyatakannya terang-terangan (nominal yang harus diketik ikut
+ditampilkan), dan "Cek Status" menjelaskan kenapa status otomatis belum bisa
+dipakai alih-alih memunculkan galat mentah.
+
+`walkin_payments` masih **kosong sama sekali** — Payment Gateway belum pernah
+dipakai untuk transaksi sungguhan.
+
+### Bug lain yang ditemukan dan diperbaiki
+
+- **KTP + tanda tangan bisa menempel ke tamu yang salah.** `capturedKtpSig`
+  disimpan tanpa penanda milik siapa. Membuat booking tamu A lalu membuka
+  booking tamu B yang masih pending dan menekan "Tandai Lunas & Check-In"
+  menyimpan KTP dan tanda tangan **tamu A** ke booking **tamu B** — dokumen
+  persetujuan tata tertib jadi milik orang yang salah. Sekarang terikat ke
+  `booking_id`; kalau tidak cocok, kartu check-in diminta ulang.
+- **Kanvas tanda tangan melenceng.** `width=360/height=140` dipatok sementara
+  CSS-nya `w-full`, jadi koordinat pena tidak pernah jatuh di titik yang
+  digambar: di HP tanda tangan muncul bergeser dan gepeng, di layar lebar
+  ujung kanannya terpotong. Kanvas kini mengikuti ukuran tampilan + DPR.
+- **Foto KTP dari kamera HP bisa menembus batas body Vercel (~4,5MB).** Foto
+  3–6MB dikirim sebagai data URL base64 (membengkak ~1,37x) ke
+  `/api/checkin/upload-ktp`, dan check-in gagal dengan galat yang tidak
+  menjelaskan apa pun. Foto sekarang diperkecil di browser (maks 1600px,
+  JPEG) sebelum diunggah.
+- **Catatan kondisi saat check-out dibuang.** Kolom "Catatan" diisi
+  resepsionis lalu tidak pernah dikirim ke mana pun; villa-api hanya menerima
+  `kondisi` (disimpan ke `bookings.catatan`). Sekarang digabung ke sana.
+- **`load()` Front Desk tanpa penanganan galat** — satu permintaan gagal
+  membuat halaman berhenti di "Memuat…" selamanya tanpa pesan apa pun.
+  `doCheckout()` juga tanpa `try/catch`: checkout yang gagal tidak
+  memunculkan apa pun di layar.
+- **Dobel-klik.** Tidak ada satu pun tombol aksi yang terkunci saat aksinya
+  berjalan. Sekarang `Btn` punya `disabled`, dipakai di check-in, check-out,
+  tandai lunas, dan pembuatan transaksi.
+- **Tanggal bawaan memakai UTC.** `todayISO()` mengambil tanggal UTC, jadi
+  resepsionis yang bekerja sebelum pukul 07:00 WIB mendapat tanggal
+  **kemarin**. Alur check-in kini memakai `todayLocalISO()`.
+- **Daftar booking terjadwal diurutkan tanggal pembuatan.** villa-api
+  mengembalikan `created_at` menurun dan memotong 50 baris, jadi booking OTA
+  lama untuk kedatangan hari ini berada paling bawah. Diurutkan ulang di
+  klien berdasarkan tanggal kedatangan + penanda "Hari ini"/"Terlambat" +
+  kotak pencarian. Saat ini baru 11 booking `terjadwal`, jadi batas 50 belum
+  menggigit — tapi akan menggigit.
+- **QRIS dibuat ulang setiap modal dibuka**, padahal tiap `POST
+  /payment/direct` membuat transaksi baru di iPaymu dengan `referenceId` yang
+  sama. Sekarang di-cache selama halaman terbuka.
+- **Webhook iPaymu bisa 500 karena id sampah.** `referenceId` sembarang dari
+  internet membuat Postgres menolak query (kolom uuid) → 500 → iPaymu
+  mengulang. Sekarang divalidasi sebagai uuid dan diabaikan diam-diam.
+
+### Yang TIDAK diubah dan perlu keputusan owner
+
+- **Sewa bulanan lebih dari satu bulan hanya ditagih satu bulan.** villa-api
+  memakai `tarif_bulanan` apa adanya tanpa mengalikan jumlah bulan (berbeda
+  dari harian yang dikali malam). Ini perubahan harga, jadi tidak disentuh.
+- **Nominal QRIS dikirim dari klien.** `/api/payment-gateway/qris` memakai
+  `amount` dari body, bukan membacanya ulang dari booking/transaksi di
+  server. Untuk sekarang sumbernya selalu data server, jadi tidak ada
+  ketidakcocokan — tapi lapisannya belum ada.
+- **`timestamp()` di `ipaymuApi.ts` memakai UTC**, sedangkan pustaka resmi
+  iPaymu memakai waktu server (praktiknya WIB). Kalau iPaymu memvalidasi
+  jendela waktu, selisih 7 jam akan menolak semua permintaan. Belum bisa
+  dipastikan tanpa kredensial sandbox — jangan dianggap benar sampai diuji.
+- **Bentuk respons `/payment/direct` masih belum pernah diuji ke iPaymu
+  sungguhan** (catatan lama di DEPLOYMENT.md masih berlaku).
+
 ## 2026-09-16 — Standard: weekday diturunkan ke Rp550.000, weekend TETAP Rp750.000 (owner-approved)
 
 Owner minta harga weekday Standard diturunkan ke Rp550.000, tapi harga

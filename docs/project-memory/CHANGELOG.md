@@ -4,6 +4,42 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-09-20 (branch `claude/receptionist-checkout-qris-payment-gvczm7`) — audit ulang check-in
+- **Tanda tangan tamu bisa terhapus diam-diam** — `fitCanvas` dipasang sebagai listener `resize`, dan `canvas.width = ...` mengosongkan kanvas. Di HP, `resize` terpicu saat keyboard muncul / bilah URL menyusut / layar diputar, semuanya bisa terjadi setelah tamu menandatangani; `hasSignature` tetap true sehingga gambar KOSONG tersimpan sebagai bukti persetujuan. Bug ini diperkenalkan oleh perbaikan kanvas 19 Sep. **Dibuktikan di Chromium (Playwright)**: kode lama piksel tinta 1658 → 0, kode baru 1057 → 1057.
+- **Latar tanda tangan transparan** (bukan putih) — `bg-white` hanya kelas CSS, `toDataURL` cuma mengambil isi kanvas. Putihnya sekarang ditulis ke dalam kanvas.
+- **Foto KTP tidak lagi terunggah ulang** saat check-in gagal lalu diulang dengan foto yang sama (data pribadi tamu tidak menumpuk di storage).
+- **Digabung dengan `main`** (#91, perbaikan kalender geser sehari); konflik diselesaikan dengan mempertahankan helper bersama `addDaysISO` + `dayIndex` versi UTC.
+- **Terbuka, perlu keputusan owner**: `ktp_photo_path` dan `signature_data_url` sekali tulis — tidak ada endpoint/halaman mana pun yang membacanya kembali, jadi bukti yang dikumpulkan tidak bisa dipakai saat sengketa.
+- Diperiksa dan BUKAN bug: `sendWa()` tidak pernah melempar; booking belum bayar tidak bisa di-check-in; check-in ganda terkunci di RPC.
+
+### 2026-09-19 (lanjutan 2) — WIB sampai ke database & villa-api (owner: "Ya perbaiki")
+- **Database, SUDAH di produksi** (migrasi `villa_checkin_checkout_wib_dates`): `villa_commit_checkin` menulis `periode_bulan` dari `to_char(now() at time zone 'Asia/Jakarta','YYYY-MM')`, `villa_commit_checkout` menulis `housekeeping.tgl` dari `(now() at time zone 'Asia/Jakarta')::date`. `checkin_at`/`checkout_at` tetap `now()` (timestamptz, memang benar). Diperiksa: tidak ada data lama yang salah periode.
+- **villa-api (di branch, aktif setelah merge)**: helper `todayWIB`/`monthWIB`/`prevMonthWIB` + 19 turunan "hari ini"/"bulan ini" dipindahkan ke WIB — default periode `/report`, `/admin/overview`, `/admin/dividends`, `/opex`, plus `/summary`, `/housekeeping`, `/dashboard/hari-ini`, masa berlaku voucher & promo, dan nomor invoice (aman: nomor disimpan sekali, tidak pernah dinomori ulang). Kolom timestamptz tidak disentuh.
+- **Mesin harga AI & snapshot inventori ternyata sudah benar** memakai `Asia/Jakarta`; yang salah hanya label komentar "WITA" (UTC+8) untuk zona yang sebenarnya WIB (UTC+7). Diperbaiki di lima route cron + villa-api — salah label yang sama pernah membuat jam pada dokumen yang ditandatangani tamu meleset satu jam.
+- **Hanya fungsi `villa_*` yang disentuh** — project Supabase ini dipakai bersama Mkhsistem.
+
+### 2026-09-19 (branch `claude/receptionist-checkout-qris-payment-gvczm7`, lanjutan) — iPaymu dihapus + semua waktu jadi WIB
+- **Integrasi iPaymu dihapus** atas keputusan owner (*"Saya tidak pakai ipaymu saya pakai qris statis"*): `src/lib/ipaymuApi.ts`, `/api/payment-gateway/qris`, `/api/payment-gateway/qris/status`, `/api/webhooks/ipaymu`, dependensi `qrcode`. Tidak pernah punya kredensial di Vercel dan `walkin_payments` kosong — tidak ada transaksi sungguhan yang hilang. Kode tetap ada di riwayat git.
+- **Payment Gateway jadi murni QRIS statis**: QR villa ditampilkan lebih besar, nominal besar di bawahnya, langkah bayar ditulis eksplisit (tamu mengetik sendiri nominal), dan ditegaskan tidak ada konfirmasi otomatis — klik "Tandai Lunas" kasir itulah catatan pembayarannya. Peringatan merah kalau gambar QRIS belum diunggah.
+- **`src/lib/format.ts` memaksa `Asia/Jakarta`** di semua formatter; `fmtDateTime`/`fmtTime` baru selalu memberi label "WIB". `todayISO`/`currentPeriod` yang dulu memakai tanggal UTC (menjawab kemarin selama 00:00–07:00 WIB) kini memakai kalender WIB.
+- **Kalender booking front-desk bergeser satu hari** karena `addDays()` mengurai tanggal sebagai tengah malam lokal lalu menyerialkannya sebagai UTC — `addDays("2026-09-20", 1)` mengembalikan tanggal yang sama di WIB. Diganti `addDaysISO`.
+- **Daftar bulan laporan investor menunjuk bulan yang salah** (label "September 2026", periode dikirim `2026-08`). Diganti `recentPeriods()`. Angka di halaman Laporan Bulanan akan bergeser ke bulan yang benar — tidak ada formula yang diubah.
+- **Belum diubah, perlu persetujuan owner**: `villa_commit_checkin` (`periode_bulan`) dan `villa_commit_checkout` (`housekeeping.tgl`) masih memakai `now()`/`current_date` pada database ber-timezone UTC.
+- 8 tes baru (total 70 hijau), `tsc` bersih, build berhasil.
+
+### 2026-09-19 (branch `claude/receptionist-checkout-qris-payment-gvczm7`, not yet on `main`)
+- **Booking 0 malam tidak bisa dibuat lagi dari layar kasir.** Bawaan check-out = check-in menghasilkan daterange kosong, yang lolos dari exclusion constraint `bookings_no_overlap_active`, dari `datesOverlap` villa-api, DAN dari `/availability` — tiga lapis pengaman double-booking sekaligus. Bawaan jadi satu malam + validasi rentang; logikanya di `src/lib/stayDates.ts` dengan 9 tes (total 62 tes hijau).
+- **KTP + tanda tangan tidak bisa lagi menempel ke tamu yang salah.** `capturedKtpSig` kini terikat ke `booking_id`.
+- **Kanvas tanda tangan mengikuti ukuran tampilan + DPR** (sebelumnya dipatok 360×140 dengan CSS `w-full`, sehingga goresan melenceng di HP dan terpotong di layar lebar).
+- **Foto KTP diperkecil di browser** (maks 1600px, JPEG) sebelum diunggah — foto kamera HP bisa menembus batas body ~4,5MB Route Handler Vercel.
+- **Modal pembayaran menyatakan kalau yang tampil QRIS statis** (nominal tidak otomatis, ikut menampilkan nominal yang harus diketik tamu). Sebelumnya kegagalan QRIS dinamis disembunyikan. Catatan: `IPAYMU_VA`/`IPAYMU_API_KEY` memang belum ada di Vercel, jadi inilah keadaan yang sedang berjalan.
+- **Catatan kondisi check-out ikut tersimpan** (digabung ke `kondisi` → `bookings.catatan`); sebelumnya dibuang.
+- **Penanganan galat + kunci dobel-klik** di Front Desk dan Payment Gateway; `Btn` diberi prop `disabled`.
+- **Tanggal bawaan check-in pakai waktu lokal**, bukan UTC (`todayLocalISO`).
+- **Daftar booking terjadwal diurutkan tanggal kedatangan** + penanda "Hari ini"/"Terlambat" + pencarian.
+- **QRIS di-cache per transaksi** supaya membuka-tutup modal tidak menumpuk transaksi kembar di iPaymu; webhook iPaymu memvalidasi uuid sebelum query.
+- **Tidak ada perubahan skema, tidak ada perubahan villa-api, tidak ada perubahan harga.** Perbedaan angka yang terlihat di form hanyalah perkiraan total (malam × tarif) yang sebelumnya menampilkan tarif satu malam — nominal final tetap dihitung villa-api.
+
 ### 2026-09-13 — WhatsApp villa pindah ke perangkat sendiri (tanpa perubahan kode villa-api)
 - **`integration_settings.vercel_bridge.base_url` diubah dari `https://mkh.haluoleo.id` ke `https://living.haluoleo.id`.** Seluruh WA villa kini lewat perangkat WhaCenter milik villa, bukan menumpang Mkhsistem. `sendWa()` membaca nilai ini setiap panggilan (tidak di-cache) sehingga berlaku seketika tanpa deploy, dan bisa dikembalikan dengan mengubah satu nilai yang sama.
 - **Tidak ada baris villa-api yang diubah** — kontrak `/api/wa/send` villa (body `{phone, message}`, header `x-internal-secret`, balasan `{success}`) memang dibuat identik dengan milik Mkhsistem justru untuk ini.

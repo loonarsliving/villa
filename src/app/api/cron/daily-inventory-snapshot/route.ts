@@ -18,9 +18,11 @@ export const maxDuration = 30;
  * manually re-triggered run on the same day overwrites that day's rows
  * rather than duplicating them.
  *
- * Uses Asia/Jakarta as the property's business date, per the program's
- * §24 timezone rule -- "today" here is WITA's today, not the server's
- * UTC today, which matters most right around midnight.
+ * Uses Asia/Jakarta as the property's business date -- "today" here is
+ * WIB's today, not the server's UTC today, which matters most right around
+ * midnight. (Asia/Jakarta IS WIB/UTC+7; komentar lama di repo ini sempat
+ * menyebutnya WITA, dan salah label yang sama pernah membuat jam pada
+ * dokumen yang ditandatangani tamu meleset satu jam -- lihat CheckinCard.)
  */
 
 function todayInJakarta(): string {

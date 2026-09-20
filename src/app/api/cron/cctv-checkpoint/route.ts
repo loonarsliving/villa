@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * Vercel Cron target (see vercel.json, once daily at 04:00 UTC / 12:00 WITA
+ * Vercel Cron target (see vercel.json, once daily at 04:00 UTC / 11:00 WIB
  * -- the original every-2h schedule exceeded the Hobby plan's daily-cron
  * limit and blocked deployment). Vercel automatically sends
  * `Authorization: Bearer $CRON_SECRET` on cron-triggered invocations when a

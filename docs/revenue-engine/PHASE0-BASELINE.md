@@ -128,7 +128,7 @@ diff, not by comparing before/after totals on near-empty data.
 | `CLOUDBEDS_WEBHOOK_SECRET` | Next.js/Vercel | Inbound Cloudbeds webhook auth. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Next.js/Vercel | Cloudbeds webhook route's direct Postgres writes. |
 | `CLOUDBEDS_API_KEY`, `CLOUDBEDS_PROPERTY_ID` | Next.js/Vercel | Outbound Cloudbeds `getRooms` only (read-only today). |
-| `IPAYMU_VA`, `IPAYMU_API_KEY`, `IPAYMU_ENV` | Next.js/Vercel | QRIS payment gateway (currently inert, unverified live response shape). |
+| ~~`IPAYMU_VA`, `IPAYMU_API_KEY`, `IPAYMU_ENV`~~ | — | Dihapus 2026-09-19: villa memakai QRIS statis, tanpa payment gateway. |
 | `EZVIZ_APP_KEY`, `EZVIZ_APP_SECRET` | Next.js/Vercel | CCTV live-view token issuance. |
 | `CRON_SECRET` | Next.js/Vercel | Gates the CCTV/dividend Vercel Crons. |
 

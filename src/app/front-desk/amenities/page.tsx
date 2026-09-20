@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { FrontDeskShell } from "../_shell";
 import { api } from "@/lib/api";
-import { fmtDate } from "@/lib/format";
+import { fmtDate, fmtDateTime } from "@/lib/format";
 import { Card, CardHeader, Loading, Badge } from "@/components/Card";
 import type { AmenityItem, AmenityUsageLog } from "@/lib/types";
 
@@ -63,7 +63,7 @@ export default function FrontDeskAmenitiesPage() {
               <div className="flex-1 min-w-0">
                 <div className="text-xs text-ink/80">{l.amenity_nama || "—"}</div>
                 <div className="text-[10px] text-ink/30 mt-0.5">
-                  Unit {l.unit_nomor || "—"} · {fmtDate(l.created_at, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                  Unit {l.unit_nomor || "—"} · {fmtDateTime(l.created_at)}
                 </div>
               </div>
               <div className="text-xs text-ruby-400 shrink-0">-{l.qty}</div>

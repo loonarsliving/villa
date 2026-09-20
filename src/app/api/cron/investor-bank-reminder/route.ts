@@ -9,7 +9,7 @@ const API_BASE = "https://svcmybsziaelwwdrnzcv.supabase.co/functions/v1/villa-ap
 
 /**
  * Vercel Cron target (see vercel.json). Owner explicitly asked for a
- * ONE-TIME send (11 Sep 2026, 13:05 WITA), not a recurring monthly
+ * ONE-TIME send (11 Sep 2026, 12:05 WIB), not a recurring monthly
  * reminder -- the schedule is a single specific date/time, not a
  * wildcard pattern, so it only fires once in practice. Remove the cron
  * entry from vercel.json after it fires so it doesn't also fire again on
