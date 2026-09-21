@@ -1539,9 +1539,14 @@ Deno.serve(async (req)=>{
     // bookings_no_overlap_active exclusion constraint (which only covers
     // 'terjadwal'/'checkin'), so the unit is NOT locked and does not appear
     // in the staff calendar yet. It only becomes a real, unit-locking
-    // 'terjadwal' booking once the guest uploads proof of transfer via
-    // /public/bookings/confirm-payment (owner's explicit instruction,
-    // 2026-09-11 -- booking used to lock the unit immediately on submit).
+    // 'terjadwal' booking once payment is confirmed -- either automatically
+    // from the BTN QRIS email (scanPaymentInbox, triggered by the guest's
+    // own booking page and by the /cron/check-payment-email safety net) or
+    // manually by the owner replying "LUNAS <kode>" on WhatsApp
+    // (/bridge/confirm-payment). Guests no longer upload proof of transfer
+    // (owner's explicit instruction, 2026-09-21 -- that upload step, and
+    // /public/bookings/confirm-payment which handled it, were removed once
+    // the email-based auto-confirmation shipped).
     // Menginap gratis langsung 'terjadwal' -- tidak ada yang perlu dibayar,
     // jadi tidak ada alasan menahannya di 'menunggu_pembayaran' lalu
     // membiarkannya dibatalkan mesin sejam kemudian. Kata owner: "dia hanya
@@ -1645,86 +1650,6 @@ Deno.serve(async (req)=>{
       promo: promoTerpakai ? {kode: promoTerpakai.promo.kode, nama: promoTerpakai.promo.nama, harga_normal: promoTerpakai.hasil.harga_normal, hemat: promoTerpakai.hasil.hemat} : null,
       menginap_gratis: voucherTerpakai ? {kode: voucherTerpakai.voucher.kode, malam_gratis: 1, hemat: nilaiMalamGratis} : null,
     }, 201);
-  }
-
-  // Konfirmasi pembayaran (upload bukti transfer) dari tamu di public booking
-  // site. QRIS pembayaran tetap statis (tidak ada verifikasi otomatis via
-  // payment gateway) -- tamu dianggap sudah bayar begitu mereka mengupload
-  // bukti transfer di sini, lalu tombol "Cetak Invoice" di frontend terbuka.
-  // Cocokkan booking_id + hp supaya orang lain tidak bisa mengisi bukti untuk
-  // booking milik tamu lain.
-  //
-  // Ini juga titik di mana booking benar-benar "mengunci" unit: status
-  // berubah dari 'menunggu_pembayaran' -> 'terjadwal' di sini, BUKAN saat
-  // booking pertama kali dibuat (owner's explicit instruction, 2026-09-11).
-  // Karena exclusion constraint bookings_no_overlap_active hanya berlaku
-  // untuk status 'terjadwal'/'checkin', UPDATE status ini otomatis gagal
-  // (23P01) kalau ternyata unit sudah keburu dikunci booking lain untuk
-  // tanggal yang sama -- jadi tidak perlu app-level conflict re-check
-  // terpisah yang rawan race condition, Postgres yang menjaminnya.
-  if(path==='/public/bookings/confirm-payment' && m==='POST'){
-    const b = await req.json().catch(()=>null);
-    if(!b) return err('Body tidak valid');
-    const booking_id = String(b.booking_id??'').trim();
-    const hp = String(b.hp??'').trim();
-    const dataUrl = String(b.dataUrl??'');
-    if(!/^[0-9a-f-]{36}$/i.test(booking_id)) return err('booking_id tidak valid');
-    if(!hp) return err('Nomor WhatsApp wajib diisi');
-    const match = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/);
-    if(!match) return err('Bukti transfer harus berupa gambar (JPG/PNG)');
-    const [, ext, base64] = match;
-    let bytes;
-    try{ bytes = Uint8Array.from(atob(base64), c=>c.charCodeAt(0)); } catch { return err('Bukti transfer tidak valid'); }
-    if(bytes.length > 8*1024*1024) return err('Bukti transfer terlalu besar (maks 8MB)');
-
-    const {data:booking} = await supabase.from('bookings').select('id,guest_id,sumber,invoice_no,created_at,status,unit_id,unit_nomor,guest_nama,cloudbeds_reservation_id,tgl_checkin,tgl_checkout,adults,children').eq('id',booking_id).maybeSingle();
-    if(!booking) return err('Booking tidak ditemukan', 404);
-    if(booking.sumber !== 'website') return err('Booking ini tidak bisa dikonfirmasi lewat jalur ini', 403);
-    let guestHp = null;
-    if(booking.guest_id){
-      const {data:g} = await supabase.from('guests').select('hp').eq('id',booking.guest_id).maybeSingle();
-      guestHp = g?.hp ?? null;
-    }
-    if(!guestHp || guestHp.trim() !== hp) return err('Nomor WhatsApp tidak cocok dengan booking ini', 403);
-
-    const path = `bukti-bayar/${booking_id}-${Date.now()}.${ext}`;
-    const {error:upErr} = await supabase.storage.from('guest-documents').upload(path, bytes, {contentType:`image/${ext}`, upsert:false});
-    if(upErr) return err(upErr.message, 500);
-
-    let invoice_no = booking.invoice_no;
-    if(!invoice_no){
-      const ymd = todayWIB(new Date(booking.created_at)).replace(/-/g,'');
-      invoice_no = `INV-LV-${ymd}-${booking_id.slice(0,8).toUpperCase()}`;
-    }
-
-    const shouldLockUnit = booking.status === 'menunggu_pembayaran';
-    const basePatch = { bukti_pembayaran_path: path, bukti_pembayaran_at: new Date().toISOString(), invoice_no };
-    let unitLocked = booking.status === 'terjadwal';
-
-    if(shouldLockUnit){
-      const {error:lockErr} = await supabase.from('bookings').update({...basePatch, status:'terjadwal'}).eq('id', booking_id);
-      if(lockErr && lockErr.code !== '23P01') return err(lockErr.message, 500);
-      unitLocked = !lockErr;
-    }
-    if(!unitLocked){
-      // Unit sudah dikunci booking lain untuk tanggal yang sama duluan --
-      // tetap simpan bukti pembayarannya (tamu sudah bayar) dan tetap
-      // terbitkan invoice, tapi status booking dibiarkan 'menunggu_pembayaran'
-      // (tidak masuk kalender) sampai staff menjadwalkan ulang secara manual.
-      const {error:saveErr} = await supabase.from('bookings').update(basePatch).eq('id', booking_id);
-      if(saveErr) return err(saveErr.message, 500);
-      await notif(null, 'all', 'transfer', `KONFLIK UNIT -- Booking Website perlu dijadwalkan ulang`,
-        `Booking ${booking_id.slice(0,8)} (Unit ${booking.unit_nomor}, ${booking.tgl_checkin} s/d ${booking.tgl_checkout}) sudah bayar tapi unit sudah terisi booking lain -- mohon segera hubungi tamu untuk reschedule/unit pengganti.`, booking_id);
-      return json({success:true, invoice_no});
-    }
-
-    await notif(null, 'all', 'transfer', `Pembayaran dikonfirmasi -- Unit ${booking.unit_nomor} terkunci`,
-      `Booking ${booking_id.slice(0,8)} (${booking.tgl_checkin} s/d ${booking.tgl_checkout}) sudah upload bukti transfer, unit sudah masuk kalender.`, booking_id);
-
-    // Same reason as the WhatsApp confirmation path above.
-    await pushBookingToCloudbeds({...booking, id: booking_id, status:'terjadwal'});
-
-    return json({success:true, invoice_no});
   }
 
   // Tamu menanyakan apakah pembayarannya sudah dikonfirmasi owner. Dipanggil
