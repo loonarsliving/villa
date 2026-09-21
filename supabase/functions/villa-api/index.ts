@@ -3891,6 +3891,40 @@ Deno.serve(async (req)=>{
     })));
   }
 
+  // Perkiraan harga untuk layar kasir/walk-in SEBELUM booking dibuat --
+  // memanggil computeStayTarif yang SAMA dengan yang dipakai POST /bookings
+  // (staf) dan /public/bookings (loonars.id), supaya angka yang dilihat
+  // kasir tidak pernah bisa berbeda dari yang benar-benar ditagih maupun
+  // dari yang tamu lihat di loonars.id. Sebelum route ini ada, kasir
+  // menghitung sendiri di browser pakai tarif_harian flat -- tidak pernah
+  // melihat override villa_rates (harga dinamis mesin AI), sehingga
+  // perkiraan di layar kasir bisa beda dari harga yang dipakai loonars.id
+  // dan bahkan dari nominal yang akhirnya tercatat di booking yang sama.
+  if(path==='/tarif-preview' && m==='GET'){
+    if(!isStaff) return forbidden();
+    const unit_id = url.searchParams.get('unit_id');
+    const tgl_checkin = url.searchParams.get('tgl_checkin');
+    const tgl_checkout = url.searchParams.get('tgl_checkout');
+    const tipe = url.searchParams.get('tipe');
+    if(!unit_id || !tgl_checkin) return err('unit_id dan tgl_checkin wajib diisi');
+    if(!isValidDateStr(tgl_checkin)) return err('tgl_checkin tidak valid');
+    if(tgl_checkout != null && !isValidDateStr(tgl_checkout)) return err('tgl_checkout tidak valid');
+    if(!['harian','bulanan'].includes(tipe)) return err('tipe tidak valid (harus harian atau bulanan)');
+
+    const {data:unit, error:unitErr} = await supabase.from('units')
+      .select('tarif_harian,tarif_bulanan,room_type_id').eq('id', unit_id).single();
+    if(unitErr || !unit) return err('Unit tidak ditemukan', 404);
+
+    if(tipe === 'bulanan'){
+      return json({tarif: Number(unit.tarif_bulanan ?? 0), nights: null});
+    }
+    const nights = tgl_checkout
+      ? Math.max(1, Math.round((new Date(tgl_checkout).getTime() - new Date(tgl_checkin).getTime()) / 86400000))
+      : 1;
+    const tarif = await computeStayTarif(unit, tgl_checkin, nights);
+    return json({tarif, nights});
+  }
+
   if(path==='/bookings' && m==='POST'){
     if(!isStaff) return forbidden();
     const b=await req.json();
@@ -3919,34 +3953,11 @@ Deno.serve(async (req)=>{
       const nights = b.tgl_checkout
         ? Math.max(1, Math.round((new Date(b.tgl_checkout).getTime() - new Date(b.tgl_checkin).getTime()) / 86400000))
         : 1;
-      const flatTarif = Number(unit.tarif_harian ?? 0);
-
-      let plannedByDate = new Map();
-      if(unit.room_type_id){
-        const nightDates = [];
-        for(let i=0;i<nights;i++){
-          const d = new Date(`${b.tgl_checkin}T00:00:00Z`);
-          d.setUTCDate(d.getUTCDate()+i);
-          nightDates.push(d.toISOString().slice(0,10));
-        }
-        const {data:plannedRates} = await supabase.from('villa_rates')
-          .select('date,rate')
-          .eq('room_type_id', unit.room_type_id)
-          .in('date', nightDates);
-        for(const r of (plannedRates??[])) plannedByDate.set(r.date, Number(r.rate));
-      }
-
-      if(plannedByDate.size > 0){
-        computedTarif = 0;
-        for(let i=0;i<nights;i++){
-          const d = new Date(`${b.tgl_checkin}T00:00:00Z`);
-          d.setUTCDate(d.getUTCDate()+i);
-          const dateStr = d.toISOString().slice(0,10);
-          computedTarif += plannedByDate.has(dateStr) ? plannedByDate.get(dateStr) : flatTarif;
-        }
-      } else {
-        computedTarif = flatTarif * nights;
-      }
+      // Sama persis dengan /public/bookings dan /tarif-preview -- satu
+      // fungsi harga, supaya kasir, loonars.id, dan nominal yang tercatat
+      // di sini tidak pernah bisa berbeda pendapat (lihat komentar di
+      // computeStayTarif).
+      computedTarif = await computeStayTarif(unit, b.tgl_checkin, nights);
     }
     if(computedTarif <= 0) return err('Tarif unit belum diatur — hubungi admin', 409);
 

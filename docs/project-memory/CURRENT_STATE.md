@@ -2,6 +2,58 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-21 — kasir (Payment Gateway) dan loonars.id disatukan sumber harganya
+
+Owner bertanya kenapa harga di sistem kasir berbeda dengan loonars.id.
+Root cause (dibaca langsung dari kode, bukan tebakan): **loonars.id**
+(`/public/bookings`, `/public/availability`) sudah lama memakai
+`computeStayTarif()` di `villa-api`, yang mengambil harga dinamis per
+tanggal dari `villa_rates` (hasil mesin harga AI) kalau ada, baru jatuh
+ke `units.tarif_harian` flat kalau tidak. **Layar kasir** (`/front-desk/
+payment-gateway`) sebaliknya menghitung sendiri di browser pakai
+`tarif_harian` flat × jumlah malam — tidak pernah menanyakan
+`villa_rates` — jadi setiap kali mesin harga AI sedang menetapkan harga
+berbeda dari flat rate untuk tanggal itu (weekend surcharge, high/low
+season), angka di layar kasir bisa beda dari loonars.id, dan bahkan dari
+nominal yang akhirnya tercatat (karena `POST /bookings` staf memang
+sudah menghitung ulang di server dengan logika yang sama seperti
+loonars.id -- yang beda cuma tampilan di layar kasir SEBELUM booking
+dibuat).
+
+**Diperbaiki (branch `claude/kasir-loonars-price-diff-tn923p`,
+owner-approved di chat 2026-09-21 -- ini soal harga tamu, jadi tidak
+di-merge sendiri tanpa itu):**
+- Route baru staf-only `GET /tarif-preview` di villa-api, memanggil
+  `computeStayTarif()` yang SAMA dipakai `/public/bookings` -- kasir
+  sekarang menanyakan harga real-time ke server, bukan menghitung
+  sendiri.
+- `POST /bookings` (jalur kasir) yang tadinya menyalin ulang logika
+  `villa_rates`-lookup-nya sendiri (kode duplikat, berisiko menyimpang
+  dari `computeStayTarif` suatu saat) sekarang memanggil fungsi yang
+  sama juga -- tiga jalur (`/tarif-preview`, `POST /bookings`,
+  `/public/bookings`) sekarang satu fungsi harga, bukan tiga salinan.
+- `payment-gateway/page.tsx` memanggil `/tarif-preview` setiap kali
+  unit/tanggal/tipe berubah dan menampilkan angka itu ("Harga sistem
+  saat ini — sama dengan loonars.id"), dengan fallback ke perkiraan
+  flat (dilabeli jelas sebagai perkiraan) kalau panggilan itu gagal.
+
+**Belum aktif sampai di-deploy:** perubahan `villa-api` di repo ini
+hanya snapshot -- baru live setelah branch ini di-merge ke `main` DAN
+`deploy-villa-api.yml` berhasil. Per catatan 2026-09-20 di atas,
+`SUPABASE_ACCESS_TOKEN` (GitHub secret) sedang kedaluwarsa sehingga
+workflow itu gagal 401 -- **wajib dicek ulang setelah merge** (Actions
+hijau + versi fungsi naik di `mcp__Supabase__list_edge_functions`)
+sebelum menganggap perbaikan ini benar-benar berlaku di produksi. Kalau
+token belum diperbaiki, `/tarif-preview` akan 404 di produksi dan kasir
+otomatis kembali ke perkiraan flat lama (aman, tidak crash, tapi
+perbaikannya belum jalan).
+
+**Diverifikasi sebelum push:** `npx tsc --noEmit` bersih, `npm test`
+70/70 hijau, `npm run build` sukses. `npm run lint` tidak bisa
+dijalankan non-interaktif di sesi ini (`next lint` meminta pemilihan
+konfigurasi ESLint interaktif -- repo ini memang belum punya
+`.eslintrc`/`eslint.config.*`, bukan regresi dari perubahan ini).
+
 ## 2026-09-20 — Finance dashboard (`/finance`) built, on branch, NOT merged/deployed yet
 
 Owner requested a dedicated Finance dashboard answering 5 questions
