@@ -289,7 +289,11 @@ async function scanPaymentInbox(cfg, {onlyBookingId} = {}){
       lock.release();
     }
   } catch(e){
-    gagal = String(e?.message ?? e);
+    // e.reason (kalau ada) adalah BYE reason dari server IMAP -- misalnya
+    // "Too many connections" -- yang jauh lebih berguna untuk diagnosis
+    // daripada pesan generik "Unexpected close" saja.
+    const detail = [e?.code, e?.reason].filter(Boolean).join(': ');
+    gagal = detail ? `${String(e?.message ?? e)} (${detail})` : String(e?.message ?? e);
   } finally {
     // client.close() (bukan logout()) supaya socket-nya langsung
     // dihancurkan alih-alih menunggu handshake LOGOUT -- itulah yang
