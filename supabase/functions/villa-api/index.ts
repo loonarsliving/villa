@@ -4,6 +4,29 @@ import { timingSafeEqual } from 'node:crypto';
 
 const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
+// npm:imapflow (dipakai oleh scanPaymentInbox, lihat komentar di sana) punya
+// race condition di librarynya sendiri: greeting handler-nya (beginSession)
+// memanggil startSession()/authenticate() lewat then().catch() yang "keluar
+// dari thread parsing saat ini" tanpa di-await, dan di Supabase Edge Runtime
+// continuation itu kadang baru resume SETELAH client sudah ditutup (state
+// LOGOUT) -- baik oleh kode kita sendiri maupun oleh isolate yang dibekukan
+// lalu dipakai ulang untuk request lain. Hasilnya "Already logged out"
+// muncul sebagai unhandled rejection di luar try/catch manapun di kode kita,
+// dan Deno menjatuhkan RESPONS REQUEST LAIN yang kebetulan sedang berjalan
+// di isolate yang sama dengan 503 -- padahal request itu sendiri tidak
+// salah apa-apa. client.close() + client.on('error') (lihat scanPaymentInbox)
+// mengurangi kemungkinannya tapi terbukti dari log production TIDAK
+// menghilangkannya sepenuhnya. Ini jaring pengaman terakhir: menelan HANYA
+// unhandled rejection dengan pesan persis ini, supaya request lain yang
+// tidak berhubungan tidak ikut ditumbangkan olehnya. Error asli lain di
+// aplikasi ini TETAP muncul sebagai unhandled rejection seperti biasa.
+globalThis.addEventListener('unhandledrejection', (event)=>{
+  const msg = String(event.reason?.message ?? event.reason ?? '');
+  if(msg.includes('Already logged out')){
+    event.preventDefault();
+  }
+});
+
 const SESSION_SECRET = Deno.env.get('VILLA_SESSION_SECRET') ?? '';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 
