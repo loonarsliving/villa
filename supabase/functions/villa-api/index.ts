@@ -110,6 +110,31 @@ function paymentCode(bookingId){
 }
 
 /**
+ * Kode unik pembayaran: angka 3 digit (100-999) yang ditambahkan ke total
+ * tagihan booking website, supaya nominalnya tidak pernah sama persis
+ * dengan booking lain yang juga sedang menunggu pembayaran. QRIS BTN yang
+ * dipakai statis -- tidak ada ID transaksi per pemesanan di notifikasi
+ * emailnya -- jadi nominal itu SATU-SATUNYA hal yang bisa dipakai
+ * /cron/check-payment-email untuk mencocokkan email masuk ke booking yang
+ * benar. Diperiksa dulu ke seluruh booking 'menunggu_pembayaran' yang
+ * masih hidup supaya tidak bentrok; kalau 20x coba masih bentrok (praktis
+ * mustahil untuk villa sekecil ini), tetap dipakai apa adanya daripada
+ * menggagalkan booking -- kalau sampai bentrok, cron akan menemukan lebih
+ * dari satu kandidat dan membiarkan owner mengonfirmasi manual lewat
+ * WhatsApp seperti biasa, bukan mengonfirmasi booking yang salah.
+ */
+async function generateKodeUnikPembayaran(){
+  const {data:pending} = await supabase.from('bookings')
+    .select('total_bayar').eq('sumber','website').eq('status','menunggu_pembayaran');
+  const dipakai = new Set((pending??[]).map(b=>Number(b.total_bayar)%1000));
+  for(let coba=0; coba<20; coba++){
+    const kandidat = 100 + Math.floor(Math.random()*900);
+    if(!dipakai.has(kandidat)) return kandidat;
+  }
+  return 100 + Math.floor(Math.random()*900);
+}
+
+/**
  * Berapa lama sebuah booking website yang belum dibayar boleh ditahan
  * (instruksi owner 2026-09-12: "harusnya stlah 1 jam pesanan langsung
  * dibatalkan").
@@ -1366,6 +1391,21 @@ Deno.serve(async (req)=>{
 
     const {data:g} = await supabase.from('guests').insert({nama, hp, email}).select('id').single();
 
+    // Kode unik pembayaran (owner 2026-09-20): ditambahkan ke total_bayar
+    // supaya setiap booking website yang menunggu pembayaran punya nominal
+    // PERSIS berbeda dari yang lain. QRIS BTN yang dipakai bersifat statis
+    // (satu kode QR yang sama untuk semua transaksi, tidak ada ID transaksi
+    // per pemesanan di notifikasi emailnya) -- kalau dua tamu kebetulan
+    // pesan tipe unit yang sama di waktu berdekatan, nominalnya akan sama
+    // persis dan cron pembaca email (lihat /cron/check-payment-email) tidak
+    // bisa tahu email mana untuk siapa. Kode unik ini yang membuat
+    // pencocokan otomatis itu selalu tepat satu booking, bukan tebakan.
+    // `tarif` TETAP harga asli (tidak dibubuhi) -- yang dibubuhi cuma
+    // `total_bayar`, karena itu yang ditagih ke tamu dan yang dicocokkan
+    // ke email, sedangkan `tarif` dipakai laporan/rekap harga.
+    const kodeUnik = seluruhnyaGratis || computedTarif <= 0 ? 0 : await generateKodeUnikPembayaran();
+    const totalDitagih = computedTarif > 0 ? computedTarif + kodeUnik : computedTarif;
+
     // Status starts as 'menunggu_pembayaran' -- deliberately OUTSIDE the
     // bookings_no_overlap_active exclusion constraint (which only covers
     // 'terjadwal'/'checkin'), so the unit is NOT locked and does not appear
@@ -1389,7 +1429,7 @@ Deno.serve(async (req)=>{
         unit_id: freeUnit.id, unit_nomor: freeUnit.nomor, guest_id: g?.id ?? null, guest_nama: nama,
         tipe: 'harian', sumber: voucherTerpakai ? 'investor' : 'website', tgl_checkin, tgl_checkout,
         durasi_malam: nights, checkin_time: '14:00:00', adults, children,
-        tarif: computedTarif, total_bayar: computedTarif, status: 'menunggu_pembayaran',
+        tarif: computedTarif, total_bayar: totalDitagih, status: 'menunggu_pembayaran',
         // Menginap lebih dari semalam bukan menginap gratis: hanya SATU
         // malamnya yang ditanggung voucher, sisanya dibayar seperti tamu
         // lain. Karena itu is_free_stay tetap false -- malam-malam yang
@@ -1454,22 +1494,25 @@ Deno.serve(async (req)=>{
 
     const kode = paymentCode(booking.id);
     await notif(freeUnit.id, 'all', 'booking', `Booking baru dari Website (menunggu pembayaran) -- Unit ${freeUnit.nomor}`,
-      `${nama} (${hp}) - ${tgl_checkin} s/d ${tgl_checkout} - Rp ${Math.round(computedTarif).toLocaleString('id-ID')} -- unit belum terkunci, menunggu konfirmasi pembayaran (kode ${kode})`, booking.id);
+      `${nama} (${hp}) - ${tgl_checkin} s/d ${tgl_checkout} - Rp ${Math.round(totalDitagih).toLocaleString('id-ID')} -- unit belum terkunci, menunggu konfirmasi pembayaran (kode ${kode})`, booking.id);
 
     // WA ke owner supaya dia bisa mengunci unit hanya dengan membalas kode
     // ini begitu notifikasi QRIS masuk di HP-nya. Nomornya dari
     // integration_settings.villa_notify.owner_hp -- kalau belum diisi,
     // sendWa() mencatat 'skipped_no_phone' dan booking tetap berjalan
     // normal, jadi fitur ini tidak pernah bisa menggagalkan pemesanan.
+    // Nominal yang disebutkan ke owner sudah termasuk kode unik 3 digit di
+    // belakangnya (lihat generateKodeUnikPembayaran) -- itu jugalah yang
+    // ditampilkan ke tamu, supaya keduanya melihat angka yang sama persis.
     const notifySetting = await getSetting('villa_notify');
     await sendWa(notifySetting?.owner_hp ?? null,
-      `Booking baru dari website\n\n${nama} (${hp})\nUnit ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\nTotal: Rp ${Math.round(computedTarif).toLocaleString('id-ID')}${promoTerpakai ? `\nPromo ${promoTerpakai.promo.kode} (normal Rp ${Math.round(promoTerpakai.hasil.harga_normal).toLocaleString('id-ID')})` : ''}${voucherTerpakai ? `\nKode investor ${voucherTerpakai.voucher.kode} (${voucherTerpakai.pemilik.nama}) -- malam pertama gratis Rp ${Math.round(nilaiMalamGratis).toLocaleString('id-ID')}` : ''}\n\nKalau dana sudah masuk, balas:\nLUNAS ${kode}`,
+      `Booking baru dari website\n\n${nama} (${hp})\nUnit ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\nTotal (dengan kode unik): Rp ${Math.round(totalDitagih).toLocaleString('id-ID')}${promoTerpakai ? `\nPromo ${promoTerpakai.promo.kode} (normal Rp ${Math.round(promoTerpakai.hasil.harga_normal).toLocaleString('id-ID')})` : ''}${voucherTerpakai ? `\nKode investor ${voucherTerpakai.voucher.kode} (${voucherTerpakai.pemilik.nama}) -- malam pertama gratis Rp ${Math.round(nilaiMalamGratis).toLocaleString('id-ID')}` : ''}\n\nKalau dana sudah masuk, sistem akan mengonfirmasi otomatis lewat email. Kalau belum juga terkonfirmasi, balas:\nLUNAS ${kode}`,
       {booking_id: booking.id, unit_id: freeUnit.id, template_type:'website_booking_awaiting_payment'});
 
     return json({
       booking_id: booking.id, unit_nomor: freeUnit.nomor,
       tgl_checkin, tgl_checkout, durasi_malam: nights,
-      tarif: computedTarif, total_bayar: computedTarif, status: booking.status,
+      tarif: computedTarif, total_bayar: totalDitagih, kode_unik: kodeUnik, status: booking.status,
       promo: promoTerpakai ? {kode: promoTerpakai.promo.kode, nama: promoTerpakai.promo.nama, harga_normal: promoTerpakai.hasil.harga_normal, hemat: promoTerpakai.hasil.hemat} : null,
       menginap_gratis: voucherTerpakai ? {kode: voucherTerpakai.voucher.kode, malam_gratis: 1, hemat: nilaiMalamGratis} : null,
     }, 201);
@@ -2569,6 +2612,133 @@ Deno.serve(async (req)=>{
     } catch(e){
       return err(`Gagal menghubungi MKH Property: ${String(e)}`,502);
     }
+  }
+
+  // ── Baca notifikasi pembayaran QRIS BTN dari email (kode unik) ─────────
+  // QRIS BTN yang dipakai statis: tidak ada payment gateway, tidak ada
+  // webhook, dan tidak ada ID transaksi per pemesanan -- satu-satunya
+  // sinyal "sudah dibayar" yang tersedia adalah email notifikasi BTN yang
+  // masuk ke inbox pemilik. Cron ini membaca inbox itu lewat IMAP setiap
+  // beberapa menit, mencocokkan NOMINAL PERSIS (termasuk kode unik 3 digit
+  // dari generateKodeUnikPembayaran) ke booking yang sedang
+  // 'menunggu_pembayaran', dan kalau cocok TEPAT SATU booking, menguncinya
+  // -- meniru persis yang dilakukan owner secara manual lewat WhatsApp
+  // "LUNAS <kode>" (lihat /bridge/confirm-payment). Ditambahkan 2026-09-20
+  // atas instruksi owner: "tetap qris statis dr btn, pakai kode unik".
+  //
+  // Sengaja TIDAK mengonfirmasi kalau nominalnya cocok ke LEBIH dari satu
+  // booking sekaligus (kode unik kebetulan bentrok -- kejadian yang sangat
+  // jarang untuk villa sekecil ini) -- dibiarkan untuk konfirmasi manual
+  // owner, karena mengunci unit yang salah jauh lebih mahal daripada
+  // membiarkan satu booking menunggu sedikit lebih lama.
+  //
+  // Kredensial IMAP-nya di integration_settings.payment_email (host, port,
+  // user, password, secure, subject_contains) -- pola yang sama dengan
+  // secret lain di sistem ini (cron.secret, vercel_bridge.secret). Import
+  // library IMAP-nya sengaja dynamic (bukan di atas file) supaya cold
+  // start rute lain tidak ikut menanggung biaya memuatnya.
+  if(path==='/cron/check-payment-email' && m==='POST'){
+    const cron = await getSetting('cron');
+    const provided = req.headers.get('x-cron-secret') ?? '';
+    if(!cron.secret) return err('Cron belum dikonfigurasi (integration_settings.cron.secret)',503);
+    if(!await secretsMatch(provided, cron.secret)) return err('Unauthorized',401);
+
+    const cfg = await getSetting('payment_email');
+    if(!cfg.host || !cfg.user || !cfg.password){
+      return err('Email pembayaran belum dikonfigurasi (integration_settings.payment_email: host, user, password)',503);
+    }
+
+    let ImapFlow, simpleParser;
+    try {
+      ({ ImapFlow } = await import('npm:imapflow@^1.0.0'));
+      ({ simpleParser } = await import('npm:mailparser@^3.6.0'));
+    } catch(e){
+      return err(`Gagal memuat library IMAP: ${String(e?.message ?? e)}`, 500);
+    }
+
+    const client = new ImapFlow({
+      host: cfg.host, port: Number(cfg.port ?? 993), secure: cfg.secure !== false,
+      auth: { user: cfg.user, pass: cfg.password }, logger: false,
+    });
+
+    let diperiksa = 0;
+    const dikonfirmasi = [];
+    const ambigu = [];
+    let gagal = null;
+    try {
+      await client.connect();
+      const lock = await client.getMailboxLock('INBOX');
+      try {
+        const subjectFilter = cfg.subject_contains ?? 'Payment Merchant Success';
+        const uids = await client.search({seen:false, subject:subjectFilter}, {uid:true});
+        for(const uid of (uids ?? [])){
+          diperiksa++;
+          const msg = await client.fetchOne(uid, {source:true}, {uid:true});
+          if(!msg?.source) continue;
+          let bodyText = '';
+          try {
+            const parsed = await simpleParser(msg.source);
+            bodyText = parsed.text ?? parsed.html ?? '';
+          } catch { continue; }
+
+          const cocok = bodyText.match(/Total\s*:?\s*Rp\.?\s*([\d.,]+)/i);
+          // Ditandai sudah dibaca terlepas cocok atau tidak, supaya email
+          // yang subjeknya cocok tapi bukan format yang dikenali tidak
+          // terus-menerus diperiksa ulang setiap cron jalan.
+          await client.messageFlagsAdd(uid, ['\\Seen'], {uid:true});
+          if(!cocok) continue;
+          const nominal = Number(cocok[1].replace(/[.,]/g,''));
+          if(!Number.isFinite(nominal) || nominal<=0) continue;
+
+          // Kolom sama persis dengan SELECT_COLS di /bridge/confirm-payment
+          // -- cloudbeds_reservation_id WAJIB ikut supaya pushBookingToCloudbeds
+          // di bawah tahu booking ini sudah pernah didorong (kalau ada) dan
+          // tidak membuat reservasi Cloudbeds kedua untuk booking yang sama.
+          const {data:pendingSama} = await supabase.from('bookings')
+            .select('id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,total_bayar,created_at,invoice_no,cloudbeds_reservation_id,adults,children')
+            .eq('sumber','website').eq('status','menunggu_pembayaran').eq('total_bayar', nominal);
+          if(!pendingSama?.length) continue;
+
+          if(pendingSama.length > 1){
+            ambigu.push({nominal, jumlah_booking: pendingSama.length});
+            await notif(null, 'all', 'transfer', 'Email pembayaran ambigu -- perlu konfirmasi manual',
+              `Email BTN QRIS Rp ${Math.round(nominal).toLocaleString('id-ID')} cocok dengan ${pendingSama.length} booking yang menunggu pembayaran sekaligus -- sistem tidak mengonfirmasi otomatis supaya tidak salah kunci unit. Mohon cek dan balas LUNAS <kode> secara manual untuk booking yang benar.`, null);
+            continue;
+          }
+
+          const booking = pendingSama[0];
+          const invoice_no = booking.invoice_no ?? invoiceNoFor(booking);
+          const {error:lockErr} = await supabase.from('bookings')
+            .update({status:'terjadwal', bukti_pembayaran_at:new Date().toISOString(), invoice_no})
+            .eq('id', booking.id).eq('status','menunggu_pembayaran');
+
+          if(lockErr){
+            if(lockErr.code !== '23P01') continue;
+            // Unit keburu dikunci booking lain untuk tanggal yang sama.
+            // Tamu sudah membayar, jadi pembayarannya tetap dicatat dan
+            // invoice tetap terbit -- yang tidak dilakukan hanyalah
+            // memaksa unitnya masuk kalender.
+            await supabase.from('bookings').update({bukti_pembayaran_at:new Date().toISOString(), invoice_no}).eq('id', booking.id);
+            await notif(null, 'all', 'transfer', 'KONFLIK UNIT -- Booking Website perlu dijadwalkan ulang',
+              `Booking ${String(booking.id).slice(0,8)} (Unit ${booking.unit_nomor}, ${booking.tgl_checkin} s/d ${booking.tgl_checkout}) terkonfirmasi lunas otomatis via email tapi unit sudah terisi booking lain -- mohon segera hubungi tamu untuk reschedule/unit pengganti.`, booking.id);
+            continue;
+          }
+
+          await notif(null, 'all', 'transfer', `Pembayaran dikonfirmasi otomatis -- Unit ${booking.unit_nomor} terkunci`,
+            `Booking ${String(booking.id).slice(0,8)} (${booking.tgl_checkin} s/d ${booking.tgl_checkout}) dikonfirmasi lunas otomatis dari email BTN QRIS (Rp ${Math.round(nominal).toLocaleString('id-ID')}), unit sudah masuk kalender.`, booking.id);
+          await pushBookingToCloudbeds({...booking, status:'terjadwal'});
+          dikonfirmasi.push({booking_id:booking.id, unit_nomor:booking.unit_nomor, nominal});
+        }
+      } finally {
+        lock.release();
+      }
+      await client.logout().catch(()=>{});
+    } catch(e){
+      gagal = String(e?.message ?? e);
+    }
+
+    if(gagal) return err(`Gagal membaca email: ${gagal}`, 502);
+    return json({success:true, diperiksa, dikonfirmasi, ambigu});
   }
 
   const session = await requireAuth(req);
