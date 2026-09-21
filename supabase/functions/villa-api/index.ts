@@ -135,6 +135,135 @@ async function generateKodeUnikPembayaran(){
 }
 
 /**
+ * Mencocokkan satu nominal (dibaca dari email notifikasi BTN QRIS) ke
+ * booking website yang sedang menunggu pembayaran, dan mengunci booking itu
+ * kalau cocok. Dipakai oleh scanPaymentInbox untuk dua mode:
+ * - onlyBookingId kosong (cron latar belakang): mencocokkan ke SEMUA
+ *   booking pending -- kalau nominalnya cocok ke lebih dari satu sekaligus,
+ *   tidak ada yang dikonfirmasi (lihat komentar ambigu di bawah).
+ * - onlyBookingId diisi (dipicu tamu dari halaman booking): dibatasi ke
+ *   booking itu saja, jadi tidak pernah ambigu.
+ */
+async function tryConfirmBookingByNominal(nominal, onlyBookingId){
+  let q = supabase.from('bookings')
+    // Kolom sama persis dengan SELECT_COLS di /bridge/confirm-payment --
+    // cloudbeds_reservation_id WAJIB ikut supaya pushBookingToCloudbeds di
+    // bawah tahu booking ini sudah pernah didorong (kalau ada) dan tidak
+    // membuat reservasi Cloudbeds kedua untuk booking yang sama.
+    .select('id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,total_bayar,created_at,invoice_no,cloudbeds_reservation_id,adults,children')
+    .eq('sumber','website').eq('status','menunggu_pembayaran').eq('total_bayar', nominal);
+  if(onlyBookingId) q = q.eq('id', onlyBookingId);
+  const {data:pendingSama} = await q;
+  if(!pendingSama?.length) return {matched:false};
+
+  if(!onlyBookingId && pendingSama.length > 1){
+    await notif(null, 'all', 'transfer', 'Email pembayaran ambigu -- perlu konfirmasi manual',
+      `Email BTN QRIS Rp ${Math.round(nominal).toLocaleString('id-ID')} cocok dengan ${pendingSama.length} booking yang menunggu pembayaran sekaligus -- sistem tidak mengonfirmasi otomatis supaya tidak salah kunci unit. Mohon cek dan balas LUNAS <kode> secara manual untuk booking yang benar.`, null);
+    return {ambigu:true, nominal, jumlah_booking: pendingSama.length};
+  }
+
+  const booking = pendingSama[0];
+  const invoice_no = booking.invoice_no ?? invoiceNoFor(booking);
+  const {error:lockErr} = await supabase.from('bookings')
+    .update({status:'terjadwal', bukti_pembayaran_at:new Date().toISOString(), invoice_no})
+    .eq('id', booking.id).eq('status','menunggu_pembayaran');
+
+  if(lockErr){
+    if(lockErr.code !== '23P01') return {matched:false};
+    // Unit keburu dikunci booking lain untuk tanggal yang sama. Tamu sudah
+    // membayar, jadi pembayarannya tetap dicatat dan invoice tetap terbit
+    // -- yang tidak dilakukan hanyalah memaksa unitnya masuk kalender.
+    await supabase.from('bookings').update({bukti_pembayaran_at:new Date().toISOString(), invoice_no}).eq('id', booking.id);
+    await notif(null, 'all', 'transfer', 'KONFLIK UNIT -- Booking Website perlu dijadwalkan ulang',
+      `Booking ${String(booking.id).slice(0,8)} (Unit ${booking.unit_nomor}, ${booking.tgl_checkin} s/d ${booking.tgl_checkout}) terkonfirmasi lunas otomatis via email tapi unit sudah terisi booking lain -- mohon segera hubungi tamu untuk reschedule/unit pengganti.`, booking.id);
+    return {matched:false};
+  }
+
+  await notif(null, 'all', 'transfer', `Pembayaran dikonfirmasi otomatis -- Unit ${booking.unit_nomor} terkunci`,
+    `Booking ${String(booking.id).slice(0,8)} (${booking.tgl_checkin} s/d ${booking.tgl_checkout}) dikonfirmasi lunas otomatis dari email BTN QRIS (Rp ${Math.round(nominal).toLocaleString('id-ID')}), unit sudah masuk kalender.`, booking.id);
+  await pushBookingToCloudbeds({...booking, status:'terjadwal'});
+  return {matched:true, booking_id:booking.id, unit_nomor:booking.unit_nomor, nominal};
+}
+
+/**
+ * Login IMAP sekali dan memeriksa email BTN QRIS yang belum dibaca.
+ * onlyBookingId (opsional) membatasi pencocokan ke satu booking saja --
+ * dipakai oleh pemicu dari halaman tamu (POST /public/bookings/check-payment)
+ * supaya satu tamu tidak bisa memicu konfirmasi booking orang lain, dan
+ * supaya email yang TIDAK cocok ke booking itu sengaja TIDAK ditandai
+ * dibaca (dibiarkan untuk cron latar belakang atau tamu lain yang nominalnya
+ * kebetulan sama).
+ */
+async function scanPaymentInbox(cfg, {onlyBookingId} = {}){
+  let ImapFlow, simpleParser;
+  try {
+    ({ ImapFlow } = await import('npm:imapflow@^1.0.0'));
+    ({ simpleParser } = await import('npm:mailparser@^3.6.0'));
+  } catch(e){
+    return {diperiksa:0, dikonfirmasi:[], ambigu:[], gagal:`Gagal memuat library IMAP: ${String(e?.message ?? e)}`};
+  }
+
+  const client = new ImapFlow({
+    host: cfg.host, port: Number(cfg.port ?? 993), secure: cfg.secure !== false,
+    auth: { user: cfg.user, pass: cfg.password }, logger: false,
+  });
+
+  let diperiksa = 0;
+  const dikonfirmasi = [];
+  const ambigu = [];
+  let gagal = null;
+  try {
+    await client.connect();
+    const lock = await client.getMailboxLock('INBOX');
+    try {
+      const subjectFilter = cfg.subject_contains ?? 'Payment Merchant Success';
+      const uids = await client.search({seen:false, subject:subjectFilter}, {uid:true});
+      for(const uid of (uids ?? [])){
+        diperiksa++;
+        const msg = await client.fetchOne(uid, {source:true}, {uid:true});
+        if(!msg?.source) continue;
+        let bodyText = '';
+        try {
+          const parsed = await simpleParser(msg.source);
+          bodyText = parsed.text ?? parsed.html ?? '';
+        } catch { continue; }
+
+        const cocok = bodyText.match(/Total\s*:?\s*Rp\.?\s*([\d.,]+)/i);
+        if(!cocok){
+          // Format tidak dikenali -- tandai dibaca supaya tidak diulang
+          // terus, baik oleh cron penuh maupun pengecekan per-booking.
+          await client.messageFlagsAdd(uid, ['\\Seen'], {uid:true});
+          continue;
+        }
+        const nominal = Number(cocok[1].replace(/[.,]/g,''));
+        if(!Number.isFinite(nominal) || nominal<=0){
+          await client.messageFlagsAdd(uid, ['\\Seen'], {uid:true});
+          continue;
+        }
+
+        const hasil = await tryConfirmBookingByNominal(nominal, onlyBookingId);
+        if(onlyBookingId){
+          // Hanya tandai dibaca kalau memang cocok ke booking ini -- kalau
+          // tidak, jangan disentuh (lihat komentar di atas fungsi ini).
+          if(hasil.matched) await client.messageFlagsAdd(uid, ['\\Seen'], {uid:true});
+        } else {
+          await client.messageFlagsAdd(uid, ['\\Seen'], {uid:true});
+        }
+        if(hasil.ambigu) ambigu.push(hasil);
+        else if(hasil.matched) dikonfirmasi.push(hasil);
+      }
+    } finally {
+      lock.release();
+    }
+    await client.logout().catch(()=>{});
+  } catch(e){
+    gagal = String(e?.message ?? e);
+  }
+
+  return {diperiksa, dikonfirmasi, ambigu, gagal};
+}
+
+/**
  * Berapa lama sebuah booking website yang belum dibayar boleh ditahan
  * (instruksi owner 2026-09-12: "harusnya stlah 1 jam pesanan langsung
  * dibatalkan").
@@ -2648,97 +2777,57 @@ Deno.serve(async (req)=>{
       return err('Email pembayaran belum dikonfigurasi (integration_settings.payment_email: host, user, password)',503);
     }
 
-    let ImapFlow, simpleParser;
-    try {
-      ({ ImapFlow } = await import('npm:imapflow@^1.0.0'));
-      ({ simpleParser } = await import('npm:mailparser@^3.6.0'));
-    } catch(e){
-      return err(`Gagal memuat library IMAP: ${String(e?.message ?? e)}`, 500);
+    const hasil = await scanPaymentInbox(cfg);
+    if(hasil.gagal) return err(`Gagal membaca email: ${hasil.gagal}`, 502);
+    return json({success:true, diperiksa:hasil.diperiksa, dikonfirmasi:hasil.dikonfirmasi, ambigu:hasil.ambigu});
+  }
+
+  // Dipanggil dari halaman booking begitu QRIS ditampilkan (dan diulang
+  // berkala oleh polling status di sana) supaya tamu tidak perlu menunggu
+  // sampai 5 menit giliran cron berikutnya -- lihat CATATAN di atas fungsi
+  // scanPaymentInbox soal kenapa email tetap jadi satu-satunya sinyal.
+  // Ditambahkan 2026-09-21 karena cron latar belakang tiap 5 menit dianggap
+  // terlalu jarang untuk pengalaman tamu (owner minta pemicu dari sisi
+  // tamu, bukan cuma jadwal tetap).
+  if(path==='/public/bookings/check-payment' && m==='POST'){
+    const b = await req.json().catch(()=>null);
+    if(!b) return err('Body tidak valid');
+    const booking_id = String(b.booking_id??'').trim();
+    const hp = String(b.hp??'').trim();
+    if(!/^[0-9a-f-]{36}$/i.test(booking_id)) return err('booking_id tidak valid');
+    if(!hp) return err('Nomor WhatsApp wajib diisi');
+
+    const {data:booking} = await supabase.from('bookings')
+      .select('id,guest_id,sumber,status').eq('id',booking_id).maybeSingle();
+    if(!booking) return err('Booking tidak ditemukan', 404);
+    if(booking.sumber !== 'website') return err('Booking ini tidak bisa dicek lewat jalur ini', 403);
+
+    let guestHp = null;
+    if(booking.guest_id){
+      const {data:g} = await supabase.from('guests').select('hp').eq('id',booking.guest_id).maybeSingle();
+      guestHp = g?.hp ?? null;
+    }
+    if(!guestHp || guestHp.trim() !== hp) return err('Nomor WhatsApp tidak cocok dengan booking ini', 403);
+
+    // Sudah lunas/batal duluan (misalnya oleh cron latar belakang atau balasan
+    // WA manual owner) -- tidak perlu login IMAP sama sekali.
+    if(booking.status !== 'menunggu_pembayaran'){
+      return json({success:true, checked:false, confirmed: booking.status === 'terjadwal'});
     }
 
-    const client = new ImapFlow({
-      host: cfg.host, port: Number(cfg.port ?? 993), secure: cfg.secure !== false,
-      auth: { user: cfg.user, pass: cfg.password }, logger: false,
-    });
-
-    let diperiksa = 0;
-    const dikonfirmasi = [];
-    const ambigu = [];
-    let gagal = null;
-    try {
-      await client.connect();
-      const lock = await client.getMailboxLock('INBOX');
-      try {
-        const subjectFilter = cfg.subject_contains ?? 'Payment Merchant Success';
-        const uids = await client.search({seen:false, subject:subjectFilter}, {uid:true});
-        for(const uid of (uids ?? [])){
-          diperiksa++;
-          const msg = await client.fetchOne(uid, {source:true}, {uid:true});
-          if(!msg?.source) continue;
-          let bodyText = '';
-          try {
-            const parsed = await simpleParser(msg.source);
-            bodyText = parsed.text ?? parsed.html ?? '';
-          } catch { continue; }
-
-          const cocok = bodyText.match(/Total\s*:?\s*Rp\.?\s*([\d.,]+)/i);
-          // Ditandai sudah dibaca terlepas cocok atau tidak, supaya email
-          // yang subjeknya cocok tapi bukan format yang dikenali tidak
-          // terus-menerus diperiksa ulang setiap cron jalan.
-          await client.messageFlagsAdd(uid, ['\\Seen'], {uid:true});
-          if(!cocok) continue;
-          const nominal = Number(cocok[1].replace(/[.,]/g,''));
-          if(!Number.isFinite(nominal) || nominal<=0) continue;
-
-          // Kolom sama persis dengan SELECT_COLS di /bridge/confirm-payment
-          // -- cloudbeds_reservation_id WAJIB ikut supaya pushBookingToCloudbeds
-          // di bawah tahu booking ini sudah pernah didorong (kalau ada) dan
-          // tidak membuat reservasi Cloudbeds kedua untuk booking yang sama.
-          const {data:pendingSama} = await supabase.from('bookings')
-            .select('id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,total_bayar,created_at,invoice_no,cloudbeds_reservation_id,adults,children')
-            .eq('sumber','website').eq('status','menunggu_pembayaran').eq('total_bayar', nominal);
-          if(!pendingSama?.length) continue;
-
-          if(pendingSama.length > 1){
-            ambigu.push({nominal, jumlah_booking: pendingSama.length});
-            await notif(null, 'all', 'transfer', 'Email pembayaran ambigu -- perlu konfirmasi manual',
-              `Email BTN QRIS Rp ${Math.round(nominal).toLocaleString('id-ID')} cocok dengan ${pendingSama.length} booking yang menunggu pembayaran sekaligus -- sistem tidak mengonfirmasi otomatis supaya tidak salah kunci unit. Mohon cek dan balas LUNAS <kode> secara manual untuk booking yang benar.`, null);
-            continue;
-          }
-
-          const booking = pendingSama[0];
-          const invoice_no = booking.invoice_no ?? invoiceNoFor(booking);
-          const {error:lockErr} = await supabase.from('bookings')
-            .update({status:'terjadwal', bukti_pembayaran_at:new Date().toISOString(), invoice_no})
-            .eq('id', booking.id).eq('status','menunggu_pembayaran');
-
-          if(lockErr){
-            if(lockErr.code !== '23P01') continue;
-            // Unit keburu dikunci booking lain untuk tanggal yang sama.
-            // Tamu sudah membayar, jadi pembayarannya tetap dicatat dan
-            // invoice tetap terbit -- yang tidak dilakukan hanyalah
-            // memaksa unitnya masuk kalender.
-            await supabase.from('bookings').update({bukti_pembayaran_at:new Date().toISOString(), invoice_no}).eq('id', booking.id);
-            await notif(null, 'all', 'transfer', 'KONFLIK UNIT -- Booking Website perlu dijadwalkan ulang',
-              `Booking ${String(booking.id).slice(0,8)} (Unit ${booking.unit_nomor}, ${booking.tgl_checkin} s/d ${booking.tgl_checkout}) terkonfirmasi lunas otomatis via email tapi unit sudah terisi booking lain -- mohon segera hubungi tamu untuk reschedule/unit pengganti.`, booking.id);
-            continue;
-          }
-
-          await notif(null, 'all', 'transfer', `Pembayaran dikonfirmasi otomatis -- Unit ${booking.unit_nomor} terkunci`,
-            `Booking ${String(booking.id).slice(0,8)} (${booking.tgl_checkin} s/d ${booking.tgl_checkout}) dikonfirmasi lunas otomatis dari email BTN QRIS (Rp ${Math.round(nominal).toLocaleString('id-ID')}), unit sudah masuk kalender.`, booking.id);
-          await pushBookingToCloudbeds({...booking, status:'terjadwal'});
-          dikonfirmasi.push({booking_id:booking.id, unit_nomor:booking.unit_nomor, nominal});
-        }
-      } finally {
-        lock.release();
-      }
-      await client.logout().catch(()=>{});
-    } catch(e){
-      gagal = String(e?.message ?? e);
+    const cfg = await getSetting('payment_email');
+    if(!cfg.host || !cfg.user || !cfg.password){
+      // Belum dikonfigurasi -- diam-diam saja untuk tamu, ini bukan masalah
+      // di sisi mereka. Cron latar belakang (kalau menyala) atau owner akan
+      // tetap mengonfirmasi manual lewat WA.
+      return json({success:true, checked:false, confirmed:false});
     }
 
-    if(gagal) return err(`Gagal membaca email: ${gagal}`, 502);
-    return json({success:true, diperiksa, dikonfirmasi, ambigu});
+    const hasil = await scanPaymentInbox(cfg, {onlyBookingId: booking_id});
+    if(hasil.gagal){
+      return json({success:true, checked:false, confirmed:false});
+    }
+    return json({success:true, checked:true, confirmed: hasil.dikonfirmasi.length>0});
   }
 
   const session = await requireAuth(req);
