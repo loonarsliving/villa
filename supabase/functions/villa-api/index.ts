@@ -207,6 +207,16 @@ async function scanPaymentInbox(cfg, {onlyBookingId} = {}){
     host: cfg.host, port: Number(cfg.port ?? 993), secure: cfg.secure !== false,
     auth: { user: cfg.user, pass: cfg.password }, logger: false,
   });
+  // Supabase Edge Runtime bisa membekukan lalu memakai ulang isolate yang
+  // sama untuk request lain (terlihat dari "booted"/"shutdown" yang
+  // berselang-seling di log). Kalau ImapFlow masih punya timer latar
+  // belakang (keepalive/IDLE) yang menyala saat isolate itu dibekukan,
+  // timer itu bisa menembak ULANG setelah dibangunkan untuk request LAIN
+  // yang tidak ada hubungannya -- muncul sebagai "event loop error: Error:
+  // Already logged out" yang bikin request itu gagal dengan 503, padahal
+  // request itu sendiri tidak melakukan apa-apa yang salah. Listener ini
+  // menelan error semacam itu supaya tidak merembet ke request lain.
+  client.on('error', ()=>{});
 
   let diperiksa = 0;
   const dikonfirmasi = [];
@@ -255,9 +265,14 @@ async function scanPaymentInbox(cfg, {onlyBookingId} = {}){
     } finally {
       lock.release();
     }
-    await client.logout().catch(()=>{});
   } catch(e){
     gagal = String(e?.message ?? e);
+  } finally {
+    // client.close() (bukan logout()) supaya socket-nya langsung
+    // dihancurkan alih-alih menunggu handshake LOGOUT -- itulah yang
+    // meninggalkan timer latar belakang menyala setelah fungsi ini selesai
+    // (lihat komentar di atas client.on('error', ...)).
+    try { client.close(); } catch {}
   }
 
   return {diperiksa, dikonfirmasi, ambigu, gagal};
