@@ -1466,10 +1466,18 @@ async function computeSurvivalKpis(property_code, from, to){
   const mkh_funding_gap = Math.max(0, -mkh_operating_result);
 
   const additional_revenue_needed = computeAdditionalRevenueNeeded(config, netRevenueRange.net_revenue, monthly_guarantee, opex_mtd);
-  const band = roomsPerNightBand(rooms_per_night_30d ?? rooms_per_night_period);
   const status = survivalStatus(guarantee_gap, mkh_funding_gap);
 
   // ── Simple, staff-readable version: everything in room-nights (kamar-malam), no Rupiah, no jargon ──
+  //
+  // The "current" figure used for the AMAN/KURANG check is the MONTH-TO-DATE
+  // average (room-nights sold from the 1st of the current month through
+  // today, divided by day-of-month) -- NOT a trailing 30-day rolling
+  // average. Per owner correction (23 Sep 2026): checking on the 6th should
+  // compare against the average for days 1-6 of THIS month only, so a slow
+  // start is visible immediately and the shortfall can be closed from the
+  // days still remaining in the same month -- a 30-day window that spills
+  // into last month hides that signal.
   const { requiredRoomNightsPerMonth } = computeRequiredRoomNightsForSafety(config);
   const requiredRoomsPerNight = requiredRoomNightsPerMonth != null ? requiredRoomNightsPerMonth / 30 : null;
 
@@ -1479,6 +1487,9 @@ async function computeSurvivalKpis(property_code, from, to){
   const daysInCurrentMonth = new Date(Date.UTC(my, mo2, 0)).getUTCDate();
   const dayOfMonth = Number(today.slice(8,10));
   const occThisMonthSoFar = await computeOccupiedRoomNights(monthStart, today);
+  const mtdAvgRoomsPerNight = dayOfMonth > 0 ? occThisMonthSoFar.occupiedRoomNights / dayOfMonth : null;
+  const band = roomsPerNightBand(mtdAvgRoomsPerNight);
+
   const requiredRoomNightsThisMonth = requiredRoomNightsPerMonth != null ? requiredRoomNightsPerMonth * (daysInCurrentMonth/30) : null;
   const roomNightsStillNeededThisMonth = requiredRoomNightsThisMonth != null ? Math.max(0, requiredRoomNightsThisMonth - occThisMonthSoFar.occupiedRoomNights) : null;
   const daysRemainingInMonth = Math.max(0, daysInCurrentMonth - dayOfMonth);
@@ -1531,6 +1542,7 @@ async function computeSurvivalKpis(property_code, from, to){
     simple: {
       required_rooms_per_night: requiredRoomsPerNight,
       required_room_nights_per_month: requiredRoomNightsPerMonth,
+      mtd_avg_rooms_per_night: mtdAvgRoomsPerNight,
       target_table: simple_target_table,
       this_month: {
         month: monthStr,
