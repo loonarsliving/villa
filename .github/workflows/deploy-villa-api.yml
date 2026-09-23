@@ -15,6 +15,13 @@ on:
 
 jobs:
   deploy:
+    # `workflow_dispatch` bisa dijalankan dari branch mana pun, dan itu akan
+    # mendorong villa-api versi branch itu ke PRODUKSI -- diam-diam, karena
+    # tidak ada preview/staging untuk Edge Function. Pernah terjadi: run #34
+    # (20 Sep 2026) dijalankan dari `claude/loonars-finance-dashboard-wq1oha`.
+    # `main` adalah satu-satunya sumber kebenaran, jadi jalur lain ditutup di
+    # sini alih-alih mengandalkan kehati-hatian orang yang menekan tombolnya.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,3 +37,14 @@ jobs:
           supabase functions deploy villa-api \
             --project-ref svcmybsziaelwwdrnzcv \
             --no-verify-jwt
+
+      # Kegagalan deploy ini SENYAP: aplikasi tetap berjalan karena frontend
+      # kompatibel dengan villa-api versi lama, jadi `main` bisa terlihat
+      # sudah ter-deploy padahal separuhnya tidak (kejadian 20 Sep 2026,
+      # token kedaluwarsa, lihat DEPLOYMENT.md). Versi fungsinya dicetak di
+      # sini supaya log run ini sendiri membuktikan deploy-nya benar terjadi.
+      - name: Tampilkan versi villa-api setelah deploy
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          supabase functions list --project-ref svcmybsziaelwwdrnzcv || true

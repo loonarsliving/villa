@@ -2,6 +2,35 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-23 — deploy villa-api pulih; celah dispatch-dari-branch ditutup
+
+Owner menerbitkan `SUPABASE_ACCESS_TOKEN` baru dan memperbarui repo secret-nya.
+Deploy dijalankan ulang dari `main`: **hijau**, autentikasi lolos.
+
+**Diverifikasi sampai ke isinya, bukan cuma warna hijau:**
+- villa-api live = **v87**, dan isinya **identik byte-per-byte** dengan
+  `supabase/functions/villa-api/index.ts` di `main`. Tidak ada penyimpangan.
+- Perbaikan WIB dari #92 **ada di produksi**: `todayWIB`, `monthWIB`,
+  `prevMonthWIB` hadir, dan **nol** sisa turunan tanggal UTC
+  (`new Date().toISOString().slice(0,7|10)`).
+
+**Versinya tidak naik, dan itu WAJAR.** CLI Supabase menjawab
+`No change found in Function: villa-api` lalu keluar sukses, karena isinya
+sudah sama dengan yang live (ter-deploy lebih dulu oleh sesi lain hari ini).
+Jadi "versi tidak naik" bukan tanda gagal — yang menentukan adalah isi yang
+live sama dengan `main`. Catatan lama di DEPLOYMENT.md yang menyuruh
+"pastikan versinya naik" sudah dikoreksi.
+
+**Catatan 20 Sep yang bilang villa-api macet di v67 kini USANG** — sudah
+lewat v87. Jangan dipakai lagi sebagai keadaan sekarang.
+
+**Celah baru yang ditemukan dan ditutup:** `workflow_dispatch` bisa dijalankan
+dari branch mana pun, dan itu mendorong villa-api versi branch itu langsung ke
+PRODUKSI — tidak ada preview/staging untuk Edge Function. Sudah pernah terjadi
+(run #34, 20 Sep, dari `claude/loonars-finance-dashboard-wq1oha`). Ditutup
+dengan `if: github.ref == 'refs/heads/main'` pada job-nya, plus langkah yang
+mencetak daftar fungsi setelah deploy supaya log run-nya sendiri jadi bukti.
+
 ## 2026-09-23 — Cloudbeds MENGHAPUS check-in resepsionis (bug uang, ditemukan dari data nyata)
 
 Ditemukan saat owner minta dipastikan tidak ada kendala di proses check-in.
