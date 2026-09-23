@@ -298,6 +298,104 @@ function daysBetween(fromDate: string, toDate: string): number {
  */
 const COLD_START_MIN_BOOKINGS = 20;
 
+/**
+ * Owner instruction (2026-09-23): harga dibulatkan ke ribuan terdekat.
+ * Minat pasar dan diskon persen menghasilkan angka seperti Rp749.306 --
+ * benar secara aritmetika, tapi terlihat seperti galat di OTA dan tidak
+ * pernah dipakai hotel mana pun. Dibulatkan di langkah paling akhir,
+ * setelah semua aturan, lalu dijepit ulang ke min/max supaya pembulatan
+ * tidak pernah menembus batas pemilik.
+ */
+const PRICE_ROUNDING_STEP = 1000;
+
+/**
+ * Owner instruction (2026-09-23): "jangan lupakan libur tahun baru".
+ *
+ * Sampai hari ini Natal-Tahun Baru hanya dikenal lewat baris
+ * villa_high_season_periods yang ditulis riset AI -- dan riset itu mati
+ * sepuluh hari (13-23 Sep) tanpa ada yang tahu. Puncak paling pasti dalam
+ * setahun tidak boleh bergantung pada panggilan AI yang bisa gagal diam-
+ * diam, jadi tanggalnya dipatok di kode: tanggalnya tidak pernah berubah.
+ *
+ * Malam 31 Desember diperlakukan terpisah, seperti hotel besar
+ * memperlakukannya: itu satu malam dengan permintaan tertinggi setahun,
+ * bukan sekadar bagian dari periode liburan. (Hotel juga memasang minimum
+ * menginap di malam ini; villa belum mengirim restriksi ke Cloudbeds, jadi
+ * belum dilakukan di sini.)
+ *
+ * Ditandai created_by tersendiri sehingga appliesWithoutPickup()
+ * menerapkannya penuh tanpa menunggu pickup dan tanpa dibatasi harga
+ * kompetitor -- sama seperti ai_recurring_peak. Kalau baris AI untuk
+ * periode yang sama juga ada, pickPeriodForDate memilih yang terkuat;
+ * keduanya tidak pernah ditumpuk. Tetap dibatasi rem harian dan max_rate.
+ */
+export const FIXED_CALENDAR_CREATED_BY = "fixed_calendar_peak";
+const CHRISTMAS_NEW_YEAR_ADJUSTMENT_PCT = 0.2;
+const NEW_YEARS_EVE_ADJUSTMENT_PCT = 0.4;
+
+/** Puncak kalender tetap yang menutupi satu malam menginap, atau null. */
+export function fixedCalendarPeriodFor(date: string): SeasonPeriod | null {
+  const monthDay = date.slice(5, 10);
+  if (monthDay === "12-31") return { suggested_adjustment_pct: NEW_YEARS_EVE_ADJUSTMENT_PCT, created_by: FIXED_CALENDAR_CREATED_BY };
+  // Malam 24-30 Des dan malam 1 Jan (tanggal merah, tamu masih berlibur).
+  if (monthDay >= "12-24" || monthDay === "01-01") return { suggested_adjustment_pct: CHRISTMAS_NEW_YEAR_ADJUSTMENT_PCT, created_by: FIXED_CALENDAR_CREATED_BY };
+  return null;
+}
+
+/**
+ * Tangga okupansi (owner 2026-09-23: "pelajari bagaimana villa/hotel
+ * besar"). PriceLabs dan Beyond menaikkan harga BERTAHAP seiring unit
+ * terisi, bukan sekali lompat di satu ambang. Sebelumnya kenaikan hanya
+ * terjadi di >= high_occupancy_threshold_pct: Sawah View punya 3 unit, jadi
+ * 2 dari 3 terjual (66,7%) diperlakukan sama persis dengan 0 terjual --
+ * unit terakhir dijual di harga biasa. Sekarang di atas angka ini kenaikan
+ * mulai merambat naik dan mencapai penuh tepat di ambang tinggi.
+ */
+const OCCUPANCY_LADDER_START_PCT = 50;
+
+/**
+ * Jendela diskon lead time dipelajari dari booking villa sendiri, bukan
+ * ditebak. Revenue system besar menurunkan "kapan tamu biasanya memesan"
+ * dari data booking window pasarnya sendiri; angka 14/45 hari di
+ * DISCOUNT_LEAD_TIME_* adalah tebakan awal yang kebetulan cocok dengan data
+ * per 2026-09-23 (median 14 hari). Di bawah COLD_START_MIN_BOOKINGS angka
+ * bawaan tetap dipakai, dan hasil belajar selalu dijepit supaya satu-dua
+ * booking jauh-hari (Lebaran dipesan 171 hari sebelumnya) tidak membuat
+ * diskon menyala setengah tahun lebih awal.
+ */
+const LEARNED_FULL_WINDOW_BOUNDS = [7, 30] as const;
+const LEARNED_HALF_WINDOW_BOUNDS = [21, 90] as const;
+
+export interface DiscountWindow {
+  fullDays: number;
+  halfDays: number;
+  learned: boolean;
+  sample: number;
+}
+
+function quantile(sorted: number[], q: number): number {
+  const pos = (sorted.length - 1) * q;
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+}
+
+/** Median (diskon penuh) dan P75 (diskon separuh) jarak pesan-ke-menginap, dalam hari WIB. */
+export function learnDiscountWindow(rows: { created_at: string | null; tgl_checkin: string | null }[]): DiscountWindow {
+  const leads = rows
+    .filter((r) => r.created_at && r.tgl_checkin)
+    .map((r) => daysBetween(new Date(Date.parse(r.created_at as string) + 7 * 3600000).toISOString().slice(0, 10), r.tgl_checkin as string))
+    .filter((n) => Number.isFinite(n) && n >= 0)
+    .sort((a, b) => a - b);
+  if (leads.length < COLD_START_MIN_BOOKINGS) {
+    return { fullDays: DISCOUNT_LEAD_TIME_FULL_DAYS, halfDays: DISCOUNT_LEAD_TIME_HALF_DAYS, learned: false, sample: leads.length };
+  }
+  const clamp = (n: number, [lo, hi]: readonly [number, number]) => Math.max(lo, Math.min(hi, Math.round(n)));
+  const fullDays = clamp(quantile(leads, 0.5), LEARNED_FULL_WINDOW_BOUNDS);
+  const halfDays = Math.max(fullDays + 1, clamp(quantile(leads, 0.75), LEARNED_HALF_WINDOW_BOUNDS));
+  return { fullDays, halfDays, learned: true, sample: leads.length };
+}
+
 export interface RoomTypeForPricing {
   id: string;
   code: string;
@@ -694,6 +792,8 @@ export interface DateDecisionInput {
   settings: PricingSettings;
   minRate: number | null;
   maxRate: number | null;
+  /** Jendela diskon lead time; bawaan 14/45 hari. Lihat learnDiscountWindow. */
+  discountWindow?: Pick<DiscountWindow, "fullDays" | "halfDays">;
 }
 
 /**
@@ -779,12 +879,19 @@ export function decideRateForDate(input: DateDecisionInput): DatePriceDecision {
     // Filling up is the strongest signal there is, at any lead time.
     occupancySignalPct = settings.high_occupancy_adjustment_pct;
     reasonCodes.push("high_occupancy");
+  } else if (occupancyPct > OCCUPANCY_LADDER_START_PCT && settings.high_occupancy_threshold_pct > OCCUPANCY_LADDER_START_PCT) {
+    // Tangga okupansi: naik bertahap menuju kenaikan penuh.
+    const share = (occupancyPct - OCCUPANCY_LADDER_START_PCT) / (settings.high_occupancy_threshold_pct - OCCUPANCY_LADDER_START_PCT);
+    occupancySignalPct = settings.high_occupancy_adjustment_pct * share;
+    reasonCodes.push("occupancy_building");
   } else if (occupancyPct <= settings.low_occupancy_threshold_pct) {
     if (coldStart) {
       reasonCodes.push("cold_start_hold");
     } else {
       // An empty date far out is not a distress signal -- see SIGNAL 3.
-      const leadShare = daysToArrival <= DISCOUNT_LEAD_TIME_FULL_DAYS ? 1 : daysToArrival <= DISCOUNT_LEAD_TIME_HALF_DAYS ? 0.5 : 0;
+      const fullDays = input.discountWindow?.fullDays ?? DISCOUNT_LEAD_TIME_FULL_DAYS;
+      const halfDays = input.discountWindow?.halfDays ?? DISCOUNT_LEAD_TIME_HALF_DAYS;
+      const leadShare = daysToArrival <= fullDays ? 1 : daysToArrival <= halfDays ? 0.5 : 0;
       if (leadShare === 0) {
         reasonCodes.push("low_occupancy_too_early_to_discount");
       } else {
@@ -859,7 +966,15 @@ export function decideRateForDate(input: DateDecisionInput): DatePriceDecision {
       // subject to the pickup test -- guests book these months out, so
       // waiting for pickup means selling the peak at base rate.
       earnedShare = 1;
-      reasonCodes.push(period.created_by === MARKET_DEMAND_RECURRING_CREATED_BY ? "recurring_peak" : "owner_high_season");
+      reasonCodes.push(
+        period.created_by === FIXED_CALENDAR_CREATED_BY
+          ? targetDate.slice(5, 10) === "12-31"
+            ? "new_years_eve_peak"
+            : "christmas_new_year_peak"
+          : period.created_by === MARKET_DEMAND_RECURRING_CREATED_BY
+            ? "recurring_peak"
+            : "owner_high_season",
+      );
     } else if (coldStart) {
       reasonCodes.push("event_uplift_held_cold_start");
     } else if (occupancyPct >= EVENT_DEMAND_FULL_PCT) {
@@ -952,6 +1067,11 @@ export function decideRateForDate(input: DateDecisionInput): DatePriceDecision {
     guardrailStatus = "clamped_max";
   }
 
+  // --- 10. Round to the nearest Rp1.000, never past the owner's limits ---
+  decidedRate = Math.round(decidedRate / PRICE_ROUNDING_STEP) * PRICE_ROUNDING_STEP;
+  if (minRate !== null && decidedRate < minRate) decidedRate = minRate;
+  if (maxRate !== null && decidedRate > maxRate) decidedRate = maxRate;
+
   return {
     date: targetDate,
     anchor_rate: anchorRate,
@@ -978,6 +1098,7 @@ function narrateDecision(codes: string[], guardrail: DatePriceDecision["guardrai
   parts.push(has("weekend") ? "Harga dasar akhir pekan" : "Harga dasar");
 
   if (has("high_occupancy")) parts.push(`dinaikkan karena tanggal ini sudah terisi ${occupancyPct}%`);
+  else if (has("occupancy_building")) parts.push(`dinaikkan bertahap karena tanggal ini sudah terisi ${occupancyPct}%`);
   else if (has("cold_start_hold")) parts.push("diskon okupansi ditahan dulu karena riwayat pemesanan belum cukup");
   else if (has("low_occupancy_too_early_to_discount")) parts.push(`belum diturunkan walau masih kosong — masih ${daysToArrival} hari lagi, terlalu dini`);
   else if (has("low_occupancy_partial_lead_time")) parts.push(`didiskon separuh karena masih kosong dan tinggal ${daysToArrival} hari lagi`);
@@ -985,6 +1106,8 @@ function narrateDecision(codes: string[], guardrail: DatePriceDecision["guardrai
 
   if (has("low_season_discount")) parts.push("diturunkan lagi karena masuk periode sepi");
   else if (has("low_season_discount_not_needed")) parts.push("masuk periode sepi tapi tanggal ini sudah laku, jadi tidak didiskon");
+  else if (has("new_years_eve_peak")) parts.push("dinaikkan penuh karena malam tahun baru, malam paling ramai dalam setahun");
+  else if (has("christmas_new_year_peak")) parts.push("dinaikkan penuh karena libur Natal dan Tahun Baru");
   else if (has("recurring_peak")) parts.push("dinaikkan penuh karena puncak musiman tahunan yang sudah pasti");
   else if (has("owner_high_season")) parts.push("dinaikkan penuh karena periode high season yang diatur pemilik");
   else if (has("event_demand_confirmed")) parts.push("dinaikkan penuh karena ada event dan permintaannya sudah terbukti");
@@ -1099,6 +1222,7 @@ export async function decideRatesForRoomType(
   const paceWeekday = buildPaceBaseline(bookingRows, unitIds, today, false);
 
   const coldStart = (allBookings ?? []).length < COLD_START_MIN_BOOKINGS;
+  const discountWindow = learnDiscountWindow((allBookings ?? []) as { created_at: string | null; tgl_checkin: string | null }[]);
   const minRate = roomType.min_rate !== null ? Number(roomType.min_rate) : null;
   const maxRate = roomType.max_rate !== null ? Number(roomType.max_rate) : null;
 
@@ -1111,7 +1235,9 @@ export async function decideRatesForRoomType(
         (!b.tgl_checkout || b.tgl_checkout > targetDate),
     );
     const occupancyPct = unitIds.size > 0 ? Math.round((activeForDate.length / unitIds.size) * 1000) / 10 : 0;
-    const covering = (seasonPeriods ?? []).filter((p) => p.start_date <= targetDate && p.end_date >= targetDate);
+    const covering: SeasonPeriod[] = (seasonPeriods ?? []).filter((p) => p.start_date <= targetDate && p.end_date >= targetDate);
+    const fixedPeak = fixedCalendarPeriodFor(targetDate);
+    if (fixedPeak) covering.push(fixedPeak);
 
     const daysToArrival = daysBetween(today, targetDate);
     const paceBaseline = isWeekendJakarta(targetDate) ? paceWeekend : paceWeekday;
@@ -1128,7 +1254,7 @@ export async function decideRatesForRoomType(
       occupancyPct,
       daysToArrival,
       coldStart,
-      period: pickPeriodForDate(covering as SeasonPeriod[]),
+      period: pickPeriodForDate(covering),
       competitorMedian,
       liveRate: liveRateByDate.get(targetDate) ?? null,
       marketTrend,
@@ -1138,6 +1264,7 @@ export async function decideRatesForRoomType(
       settings,
       minRate,
       maxRate,
+      discountWindow,
     });
   });
 }

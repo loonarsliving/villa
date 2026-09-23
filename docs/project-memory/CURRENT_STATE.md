@@ -2,6 +2,48 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-23 (lanjutan) — pembulatan, Tahun Baru dari kalender tetap, dua sinyal baru dari data sendiri
+
+Branch `claude/ai-dynamic-pricing-check-gs6okn`. Menyangkut harga tamu, jadi
+merge menunggu persetujuan owner. Tidak ada perubahan skema maupun setelan.
+Semua di `src/lib/aiPricingEngine.ts` (+11 tes, total 101 hijau).
+
+1. **Pembulatan ke Rp1.000** sebagai langkah terakhir (langkah 10), lalu
+   dijepit ulang ke `min_rate`/`max_rate`.
+2. **Natal–Tahun Baru dipatok di kode** (`fixedCalendarPeriodFor`,
+   `created_by='fixed_calendar_peak'`), tidak bergantung riset AI yang
+   bisa mati diam-diam: malam 24–30 Des dan 1 Jan +20%, **malam 31 Des
+   +40%**. Berlaku tanpa menunggu pickup dan tanpa batas harga kompetitor,
+   tapi tetap kena rem harian 15% dan `max_rate`. Kalau baris AI untuk
+   periode yang sama ada, yang terkuat dipakai (tidak ditumpuk).
+3. **Tangga okupansi** (gaya PriceLabs/Beyond): di antara 50% dan ambang
+   tinggi (80%) kenaikan merambat naik, bukan lompat sekali. Contoh: Sawah
+   View 2 dari 3 unit terjual (66,7%) sekarang naik ±5,6%; dulu tidak naik.
+4. **Jendela diskon lead time dipelajari dari booking sendiri**
+   (`learnDiscountWindow`): median jarak pesan-ke-menginap = diskon penuh,
+   P75 = diskon separuh, dijepit [7,30] dan [21,90]. Di bawah 20 booking
+   pakai bawaan 14/45. Data 2026-09-23 (23 booking): median 14, P75 ±42.
+
+Riset pendukung (industri): PriceLabs (occupancy-based adjustments,
+last-minute/far-out, orphan day), Beyond (seasonality, day-of-week dari data
+lokal, gap filling), Duetto/IDeaS (pace, forecast, length-of-stay), praktik
+hotel untuk malam tahun baru (minimum menginap 3 malam).
+
+Simulasi (data produksi + hasil riset AI 23 Sep, mesin lama vs baru): semua
+harga bulat; malam 31 Des naik (Standard 660rb → 759rb, Sawah View 900rb →
+1,035jt di malam pertama karena rem 15%, menuju ±770rb / ±1,05jt); 5–7 Nov
+tidak lagi didiskon separuh (jendela 45 → 42 hari). Selebihnya hanya
+pembulatan.
+
+**Belum dikerjakan (butuh izin terpisah):**
+- Minimum menginap untuk malam tahun baru. Villa belum mengirim restriksi
+  ke Cloudbeds.
+- Mencatat pencarian ketersediaan di website loonars sebagai sinyal
+  permintaan (seperti data "lookers" di Duetto). Butuh tabel baru, jadi
+  perlu izin skema.
+- Harga kompetitor per tanggal untuk tanggal puncak. Riset AI sekarang
+  hanya mengembalikan harga malam biasa.
+
 ## 2026-09-23 — audit AI dynamic pricing: mesin harga jalan, tapi RISET AI MATI sejak 13 Sep
 
 Diperiksa lewat Supabase MCP + Vercel MCP (read-only), bukan dari catatan lama.
