@@ -2,6 +2,101 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-23 — Cloudbeds MENGHAPUS check-in resepsionis (bug uang, ditemukan dari data nyata)
+
+Ditemukan saat owner minta dipastikan tidak ada kendala di proses check-in.
+Bukan dari membaca kode — dari melihat satu baris `bookings` sungguhan.
+
+**Booking Unit A1, "Ni made rai rusmala Dewi" (`dcb3197c`):** `checkin_at` =
+20 Sep 14:02 WIB, `checkin_by` = `reception`, `pin_kode` terisi, foto KTP
+terisi, tanda tangan terisi, dan satu baris `transactions` pemasukan
+Rp1.188.297 sudah tercatat. Tapi `status` = **`terjadwal`**, dan `sumber`
+berubah dari `cloudbeds` jadi `agoda`. Artinya check-in itu benar-benar
+terjadi, lalu **dibatalkan diam-diam oleh Cloudbeds**.
+
+### Penyebabnya: dua tempat menimpa status tanpa syarat
+
+1. **`/api/webhooks/cloudbeds`** meng-`upsert` dengan `status: "terjadwal"`
+   **dipatok keras**. Setiap kejadian Cloudbeds — pembayaran, catatan,
+   perubahan apa pun — menimpa check-in yang sudah dilakukan. `sumber` yang
+   jadi `agoda` membuktikan webhook inilah pelakunya (hanya webhook yang
+   memetakan nama sumber OTA).
+2. **`cloudbedsReservationSync.ts`** (cron 10 menit) memakai
+   `statusToVilla()`, yang mengembalikan `"checkin"` HANYA kalau Cloudbeds
+   sendiri bilang `checked_in` — dan itu tidak akan pernah terjadi, karena
+   resepsionis menandai check-in di sini, bukan di Cloudbeds.
+
+### Akibatnya, dan ini yang membuatnya serius
+
+1. Meja depan menampilkan tamu yang sedang menginap sebagai "Menunggu
+   Check-In", padahal `units.status` tetap `occupied` — datanya bertentangan
+   sendiri.
+2. **Tamu itu tidak bisa di-check-out**, karena `villa_commit_checkout`
+   mensyaratkan status `checkin`. Memblokir operasional tepat pada hari tamu
+   itu keluar (23 Sep).
+3. **Check-in ulang akan mencatat pemasukan DUA KALI.**
+   `villa_commit_checkin` menerima booking ber-status `terjadwal`, jadi
+   resepsionis yang melihat layar bertuliskan "belum check-in" akan
+   melakukan hal yang wajar — dan pemasukan ganda itu ikut masuk ke bagi
+   hasil investor 70/30.
+
+Diperiksa: baru **satu** baris transaksi untuk booking ini, jadi
+penggandaannya belum terjadi. Itu keberuntungan, bukan pengaman.
+
+### Diperbaiki
+
+Aturannya dipisahkan tegas di `src/lib/bookingStatusSync.ts` (+8 tes):
+**Cloudbeds berwenang atas RESERVASINYA** (ada/tidaknya, tanggal, tarif,
+pembatalan); **meja depan berwenang atas KEADAAN TAMU DI PROPERTI**
+(check-in, check-out). `statusSetelahSync()` tidak pernah menarik mundur
+`checkin`/`checkout`, tapi Cloudbeds masih boleh MENAIKKAN `terjadwal` jadi
+`checkin`. Dipakai di webhook dan di sync.
+
+**Data produksi dipulihkan**: booking itu dikembalikan ke `status='checkin'`
+(hanya status; tidak ada transaksi ditambah atau diubah) supaya tamunya bisa
+di-check-out.
+
+### Bug kedua yang ikut ketahuan: sync MELEWATI semua booking OTA
+
+Penanda "booking ini milik kita, jangan ditimpa" memakai
+`sumber !== 'cloudbeds'`. Itu sudah tidak berlaku sejak webhook memetakan
+nama sumber OTA ke nilai aslinya: booking Agoda yang sah ber-`sumber='agoda'`,
+lolos tes itu, lalu **ikut dilewati sync sepenuhnya** — sehingga pembatalan
+dan perubahan tanggal dari Cloudbeds tidak pernah sampai ke booking OTA mana
+pun. Penandanya sekarang tepat: `sumber='website'` ATAU catatan "[Website]"
+(`dibuatDiSini()`).
+
+## 2026-09-23 — KTP & tanda tangan akhirnya bisa dilihat kembali
+
+Owner: *"Harus bisa di lohat kembali"*. Ditambahkan
+`GET /api/checkin/dokumen?booking_id=...` (gerbang staf; foto KTP lewat URL
+bertanda tangan berumur 5 menit dari bucket privat) dan komponen
+`DokumenCheckin`. Masuknya lewat **klik batang booking di Kalender Booking**,
+yang sebelumnya cuma memunculkan toast sekilas.
+
+Ditaruh di Next.js, bukan villa-api, karena bucket-nya privat (butuh service
+role, pola yang sama dengan `/api/checkin/upload-ktp` yang menulisnya) dan
+villa-api sedang tidak bisa ter-deploy.
+
+Tanda tangan ditampilkan di atas latar putih yang dipaksa: yang dibuat
+sebelum 20 Sep tersimpan berlatar transparan.
+
+### Ikut diperbaiki: gangguan jaringan bisa mengeluarkan resepsionis di tengah check-in
+
+`tokenPasses()` memanggil `fetch` tanpa `try/catch`. Kalau villa-api
+tersendat, setiap rute berpagar staf melempar **500** — termasuk unggah KTP,
+tepat saat tamu berdiri di meja depan. Dan kalau gangguan itu dipetakan jadi
+401, `api.ts` memanggil `endSession()` yang **mengeluarkan pengguna dari
+aplikasi**.
+
+Sekarang tiga keadaan, bukan dua (`periksaTokenStaf`): `lolos`, `ditolak`
+(→401), `gagal-periksa` (→**503**, "coba lagi", bukan "sesi Anda habis").
+Dipakai di dua rute jalur check-in. Rute admin lain masih memakai bentuk lama
+yang sengaja melempar, bukan mengembalikan false. +7 tes.
+
+`load()` di Kalender Booking juga tidak punya penanganan galat — kalendernya
+tampil KOSONG saat gagal memuat, terbaca seperti "tidak ada booking".
+
 ## 2026-09-20 — branch check-in/QRIS/WIB di-merge; villa-api GAGAL ter-deploy
 
 Owner menyetujui merge seluruhnya ("Smua perbaikan langsung merge untuk apa

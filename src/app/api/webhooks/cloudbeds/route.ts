@@ -3,6 +3,7 @@ import { getCloudbedsReservationTotals } from "@/lib/cloudbedsApi";
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { statusSetelahSync } from "@/lib/bookingStatusSync";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -270,6 +271,19 @@ export async function POST(request: Request) {
 
         const sumber = mapSourceNameToSumber(reservation.sourceName ?? reservation.source_name);
 
+        // Status TIDAK boleh dipatok "terjadwal" lagi. Baris ini pernah
+        // menghapus check-in sungguhan: tamu Unit A1 (20 Sep 2026) sudah
+        // di-check-in resepsionis lengkap dengan KTP, tanda tangan, PIN
+        // pintu, dan pemasukan tercatat -- lalu satu kejadian Cloudbeds
+        // mengembalikannya ke "Menunggu Check-In", sehingga tamunya tidak
+        // bisa di-check-out dan check-in ulang akan mencatat pemasukan dua
+        // kali. Lihat src/lib/bookingStatusSync.ts.
+        const { data: bookingSaatIni } = await supabase
+          .from("bookings")
+          .select("status")
+          .eq("cloudbeds_reservation_id", reservationId)
+          .maybeSingle();
+
         const { error: bookingUpsertError } = await supabase.from("bookings").upsert(
           {
             unit_id: unitId,
@@ -283,7 +297,7 @@ export async function POST(request: Request) {
             durasi_malam: nights > 0 ? nights : null,
             tarif: grandTotal,
             total_bayar: grandTotal,
-            status: "terjadwal",
+            status: statusSetelahSync(bookingSaatIni?.status, "terjadwal"),
             cloudbeds_reservation_id: reservationId,
           },
           { onConflict: "cloudbeds_reservation_id" },
