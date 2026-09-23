@@ -36,15 +36,13 @@ berjalan hanya dengan okupansi + weekend + lead time + periode lama.
 Log Vercel tidak bisa dipakai (retensi ~1 jam), dan ringkasan cron tidak
 disimpan ke database, makanya tidak ketahuan.
 
-**Status perbaikan (2026-09-23): kode SIAP di branch
-`claude/ai-dynamic-pricing-check-gs6okn`, BELUM di-merge — menunggu
-persetujuan owner** (menyangkut harga tamu). `src/lib/aiBridge.ts` kini
+**Status perbaikan: DI-MERGE ke `main` 2026-09-23 atas persetujuan owner.** `src/lib/aiBridge.ts` kini
 membaca `integration_settings.ai_bridge` (`base_url`, `secret` opsional →
 jatuh ke `vercel_bridge.secret`), TANPA fallback ke
-`vercel_bridge.base_url`. Baris `ai_bridge` belum dibuat; isinya cukup
-`{"base_url":"https://mkh.haluoleo.id"}`. Urutan aman: buat baris dulu,
-lalu merge (sebelum baris ada, riset gagal dengan pesan jelas, sama
-seperti sekarang — tidak ada harga berubah).
+`vercel_bridge.base_url`. Baris `integration_settings.ai_bridge` =
+`{"base_url":"https://mkh.haluoleo.id"}` dibuat 2026-09-23 (sebelum
+merge). Riset pertama akan jalan di cron 00:10 WIB berikutnya; harga
+tanggal Lebaran/libur sekolah naik bertahap (maks 15%/malam).
 
 Terverifikasi hari ini lewat `pg_net` dari database (secret tidak pernah
 keluar dari DB): ketiga rute Mkhsistem (`market-demand`,
@@ -63,7 +61,10 @@ run sungguhan bisa sedikit beda.
 **Temuan tambahan:** baris lama `ai_recurring_peak` "Libur Idul Fitri"
 20–30 Mar 2027 (+20%) kemungkinan salah tanggal — riset baru menempatkan
 Lebaran 10–18 Mar 2027, dan baris lama tidak akan tertimpa (label beda).
-Belum diubah; butuh keputusan owner.
+**Dinonaktifkan** (`active=false`) 2026-09-23 atas persetujuan owner.
+Catatan: kalau riset AI suatu saat mengembalikan label + tanggal mulai
+yang persis sama, `refreshMarketDemandIfStale` akan meng-update baris itu
+dengan `active: true` lagi — cek ulang kalau 20–30 Mar 2027 kembali mahal.
 
 **Koreksi catatan lama:** `villa_rates.updated_at` selalu sama dengan
 `created_at` (tidak berubah saat harga berubah), jadi "2 baris berubah
