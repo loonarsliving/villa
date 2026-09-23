@@ -6,11 +6,52 @@ import { supabaseAdmin } from "./supabaseAdmin";
  * Villa has no Gemini integration or GEMINI_API_KEY of its own. Instead, the
  * AI CCTV checkpoint module calls into Mkhsistem's existing AI Service via a
  * dedicated bridge endpoint (loonarsliving/Mkhsistem's
- * app/api/villa/ai/cctv-vision), reusing the SAME shared secret already
- * configured for the WhatsApp bridge (integration_settings.vercel_bridge --
- * villa-api's sendWa() reads it the same way) rather than a second,
- * separately-managed AI credential.
+ * app/api/villa/ai/cctv-vision), reusing the SAME shared secret as the
+ * WhatsApp bridge rather than a second, separately-managed AI credential.
+ * The address is separate, though -- see resolveAiBridgeConfig below.
  */
+
+export interface AiBridgeConfig {
+  baseUrl: string;
+  secret: string;
+}
+
+/**
+ * Where the /api/villa/ai/* bridges live (Mkhsistem) is read from its OWN
+ * row, integration_settings.ai_bridge ({ base_url, secret? }), not from
+ * vercel_bridge.
+ *
+ * Until 2026-09-23 these calls borrowed vercel_bridge.base_url, which is
+ * the WhatsApp bridge's address. On 2026-09-13 that value was moved to
+ * villa itself (villa got its own WhatsApp device), and villa has no
+ * /api/villa/ai/* routes -- so competitor research, market-demand/event
+ * research and the pricing insight all failed silently for ten days
+ * while the pricing engine kept running without them. Two different
+ * destinations must not share one address.
+ *
+ * The secret is the same VILLA_BRIDGE_SECRET on both sides, so
+ * ai_bridge.secret is optional and falls back to vercel_bridge.secret.
+ * base_url deliberately has NO fallback: falling back to vercel_bridge's
+ * address is exactly the bug above.
+ */
+export function resolveAiBridgeConfig(aiBridge: unknown, waBridge: unknown): AiBridgeConfig {
+  const ai = (aiBridge ?? {}) as { base_url?: unknown; secret?: unknown };
+  const wa = (waBridge ?? {}) as { secret?: unknown };
+  const baseUrl = typeof ai.base_url === "string" ? ai.base_url.trim().replace(/\/+$/, "") : "";
+  if (!baseUrl) throw new Error("integration_settings.ai_bridge.base_url is not configured");
+  const ownSecret = typeof ai.secret === "string" ? ai.secret.trim() : "";
+  const sharedSecret = typeof wa.secret === "string" ? wa.secret.trim() : "";
+  const secret = ownSecret || sharedSecret;
+  if (!secret) throw new Error("no AI bridge secret: set integration_settings.ai_bridge.secret (or vercel_bridge.secret)");
+  return { baseUrl, secret };
+}
+
+async function loadAiBridgeConfig(): Promise<AiBridgeConfig> {
+  const { data, error } = await supabaseAdmin().from("integration_settings").select("key, value").in("key", ["ai_bridge", "vercel_bridge"]);
+  if (error) throw new Error(`Failed to load AI bridge settings: ${error.message}`);
+  const byKey = new Map((data ?? []).map((r: { key: string; value: unknown }) => [r.key, r.value]));
+  return resolveAiBridgeConfig(byKey.get("ai_bridge"), byKey.get("vercel_bridge"));
+}
 
 export interface CctvDetectionResult {
   person_present: boolean;
@@ -27,15 +68,9 @@ export interface CctvDetectionResult {
  * more.
  */
 export async function detectPersonInZone(imageBase64: string, mimeType: string, zona: string): Promise<CctvDetectionResult> {
-  const { data: setting, error } = await supabaseAdmin().from("integration_settings").select("value").eq("key", "vercel_bridge").maybeSingle();
-  if (error) throw new Error(`Failed to load vercel_bridge setting: ${error.message}`);
-  const baseUrl = setting?.value?.base_url as string | undefined;
-  const secret = setting?.value?.secret as string | undefined;
-  if (!baseUrl || !secret) {
-    throw new Error("integration_settings.vercel_bridge (base_url/secret) is not configured");
-  }
+  const { baseUrl, secret } = await loadAiBridgeConfig();
 
-  const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/api/villa/ai/cctv-vision`, {
+  const res = await fetch(`${baseUrl}/api/villa/ai/cctv-vision`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-internal-secret": secret },
     body: JSON.stringify({ image: imageBase64, mimeType, zona }),
@@ -74,15 +109,9 @@ export interface PricingInsightInput {
  * before they approve/reject.
  */
 export async function explainPricingRecommendation(input: PricingInsightInput): Promise<string> {
-  const { data: setting, error } = await supabaseAdmin().from("integration_settings").select("value").eq("key", "vercel_bridge").maybeSingle();
-  if (error) throw new Error(`Failed to load vercel_bridge setting: ${error.message}`);
-  const baseUrl = setting?.value?.base_url as string | undefined;
-  const secret = setting?.value?.secret as string | undefined;
-  if (!baseUrl || !secret) {
-    throw new Error("integration_settings.vercel_bridge (base_url/secret) is not configured");
-  }
+  const { baseUrl, secret } = await loadAiBridgeConfig();
 
-  const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/api/villa/ai/pricing-insight`, {
+  const res = await fetch(`${baseUrl}/api/villa/ai/pricing-insight`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-internal-secret": secret },
     body: JSON.stringify(input),
@@ -119,15 +148,9 @@ export interface CompetitorRateResult {
  * here writes to villa_rates or changes a live price by itself.
  */
 export async function researchCompetitorRates(input: CompetitorRateInput): Promise<CompetitorRateResult[]> {
-  const { data: setting, error } = await supabaseAdmin().from("integration_settings").select("value").eq("key", "vercel_bridge").maybeSingle();
-  if (error) throw new Error(`Failed to load vercel_bridge setting: ${error.message}`);
-  const baseUrl = setting?.value?.base_url as string | undefined;
-  const secret = setting?.value?.secret as string | undefined;
-  if (!baseUrl || !secret) {
-    throw new Error("integration_settings.vercel_bridge (base_url/secret) is not configured");
-  }
+  const { baseUrl, secret } = await loadAiBridgeConfig();
 
-  const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/api/villa/ai/competitor-pricing`, {
+  const res = await fetch(`${baseUrl}/api/villa/ai/competitor-pricing`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-internal-secret": secret },
     body: JSON.stringify(input),
@@ -206,15 +229,9 @@ export interface MarketDemandResult {
  * other high-season period.
  */
 export async function researchMarketDemand(locationLabel: string): Promise<MarketDemandResult> {
-  const { data: setting, error } = await supabaseAdmin().from("integration_settings").select("value").eq("key", "vercel_bridge").maybeSingle();
-  if (error) throw new Error(`Failed to load vercel_bridge setting: ${error.message}`);
-  const baseUrl = setting?.value?.base_url as string | undefined;
-  const secret = setting?.value?.secret as string | undefined;
-  if (!baseUrl || !secret) {
-    throw new Error("integration_settings.vercel_bridge (base_url/secret) is not configured");
-  }
+  const { baseUrl, secret } = await loadAiBridgeConfig();
 
-  const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/api/villa/ai/market-demand`, {
+  const res = await fetch(`${baseUrl}/api/villa/ai/market-demand`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-internal-secret": secret },
     body: JSON.stringify({ location_label: locationLabel }),

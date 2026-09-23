@@ -36,13 +36,34 @@ berjalan hanya dengan okupansi + weekend + lead time + periode lama.
 Log Vercel tidak bisa dipakai (retensi ~1 jam), dan ringkasan cron tidak
 disimpan ke database, makanya tidak ketahuan.
 
-**Status perbaikan: BELUM**, menunggu persetujuan owner (menyangkut harga
-tamu; menyalakan kembali riset akan menggeser harga live). Arah yang
-diusulkan: beri jembatan AI URL-nya sendiri (mis. key terpisah yang
-menunjuk ke `https://mkh.haluoleo.id`), jangan kembalikan
-`vercel_bridge.base_url` karena itu akan memindahkan WA kembali ke
-Mkhsistem. Secret-nya harus tetap cocok dengan `VILLA_BRIDGE_SECRET` di
-Mkhsistem — belum diverifikasi.
+**Status perbaikan (2026-09-23): kode SIAP di branch
+`claude/ai-dynamic-pricing-check-gs6okn`, BELUM di-merge — menunggu
+persetujuan owner** (menyangkut harga tamu). `src/lib/aiBridge.ts` kini
+membaca `integration_settings.ai_bridge` (`base_url`, `secret` opsional →
+jatuh ke `vercel_bridge.secret`), TANPA fallback ke
+`vercel_bridge.base_url`. Baris `ai_bridge` belum dibuat; isinya cukup
+`{"base_url":"https://mkh.haluoleo.id"}`. Urutan aman: buat baris dulu,
+lalu merge (sebelum baris ada, riset gagal dengan pesan jelas, sama
+seperti sekarang — tidak ada harga berubah).
+
+Terverifikasi hari ini lewat `pg_net` dari database (secret tidak pernah
+keluar dari DB): ketiga rute Mkhsistem (`market-demand`,
+`competitor-pricing` ×2) menjawab `200 success:true` dengan secret
+`vercel_bridge` yang ada — kuncinya masih cocok.
+
+Simulasi (data produksi + hasil riset nyata tadi, `decideRatesForRoomType`
+dengan klien tiruan; baseline cocok dengan harga live kecuali 1–3 tanggal):
+~500 tanggal berubah, sebagian besar ±0,1–0,4% (indeks minat pasar, hasilnya
+angka tidak bulat seperti 749.306). Yang besar: Lebaran 10–18 Mar 2027
+naik (+15% malam pertama, menuju +20%); libur sekolah Jun–Jul 2027 naik
+menuju +20%; Ramadan 8 Feb–9 Mar 2027 dan Januari 2027 turun (Sawah View ke
+lantai 700rb, weekend Standard ~600rb). Riset AI tidak deterministik; hasil
+run sungguhan bisa sedikit beda.
+
+**Temuan tambahan:** baris lama `ai_recurring_peak` "Libur Idul Fitri"
+20–30 Mar 2027 (+20%) kemungkinan salah tanggal — riset baru menempatkan
+Lebaran 10–18 Mar 2027, dan baris lama tidak akan tertimpa (label beda).
+Belum diubah; butuh keputusan owner.
 
 **Koreksi catatan lama:** `villa_rates.updated_at` selalu sama dengan
 `created_at` (tidak berubah saat harga berubah), jadi "2 baris berubah
