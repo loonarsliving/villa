@@ -1378,6 +1378,40 @@ function computeAdditionalRevenueNeeded(config, actualNetRevenue, monthly_guaran
   return Math.max(0, required - actualNetRevenue);
 }
 
+/**
+ * Minimum room-nights per (30-day reference) month needed so BOTH the
+ * guarantee and OPEX are covered by the contractual split, expressed
+ * directly in room-nights (kamar-malam) instead of Rupiah -- per owner
+ * feedback (23 Sep 2026): the Rupiah-and-jargon KPI cards are too
+ * confusing to hand to staff; a plain "sudah aman di X malam, kurang Y
+ * malam" table is what's actually usable day to day.
+ *
+ * Solved analytically (not iteratively) at target_net_adr:
+ *   revenueForGuarantee = guarantee / investor_pct
+ *   revenueForOpex solves: revenue*mkh_pct - payroll - electricity*(revenue/adr) = 0
+ *     => revenue = payroll / (mkh_pct - electricity/adr)
+ *   requiredRevenue = MAX(revenueForGuarantee, revenueForOpex)
+ *   requiredRoomNights = requiredRevenue / target_net_adr
+ * Cross-checked against computeScenario() at the resulting room-night
+ * level before shipping -- guarantee_gap and mkh_funding_gap both land
+ * on exactly 0 there, confirming the two formulas agree.
+ */
+function computeRequiredRoomNightsForSafety(config){
+  const investorPct = Number(config.investor_share_pct);
+  const mkhPct = Number(config.mkh_share_pct);
+  const targetAdr = Number(config.target_net_adr);
+  const guarantee = Number(config.total_rooms) * Number(config.guarantee_per_room);
+  const payroll = Number(config.payroll_employee_count) * Number(config.payroll_per_employee);
+  const electricity = Number(config.room_electricity_per_night);
+
+  const revenueForGuarantee = investorPct > 0 ? guarantee / investorPct : Infinity;
+  const denom = mkhPct - (targetAdr > 0 ? electricity / targetAdr : 0);
+  const revenueForOpex = denom > 0 ? payroll / denom : Infinity;
+  const requiredRevenue = Math.max(revenueForGuarantee, revenueForOpex);
+  const requiredRoomNightsPerMonth = targetAdr > 0 && Number.isFinite(requiredRevenue) ? requiredRevenue / targetAdr : null;
+  return { requiredRevenue, requiredRoomNightsPerMonth };
+}
+
 /** Fixed bands per owner's brief (23 Sep 2026) -- not stored in config since the brief gave exact numbers, not "configurable". One place, not scattered across the UI. */
 function roomsPerNightBand(roomsPerNight){
   if(roomsPerNight == null) return { band:'UNKNOWN', label:'Belum ada data', accent:'neutral' };
@@ -1435,6 +1469,35 @@ async function computeSurvivalKpis(property_code, from, to){
   const band = roomsPerNightBand(rooms_per_night_30d ?? rooms_per_night_period);
   const status = survivalStatus(guarantee_gap, mkh_funding_gap);
 
+  // ── Simple, staff-readable version: everything in room-nights (kamar-malam), no Rupiah, no jargon ──
+  const { requiredRoomNightsPerMonth } = computeRequiredRoomNightsForSafety(config);
+  const requiredRoomsPerNight = requiredRoomNightsPerMonth != null ? requiredRoomNightsPerMonth / 30 : null;
+
+  const monthStr = monthWIB();
+  const monthStart = `${monthStr}-01`;
+  const [my, mo2] = monthStr.split('-').map(Number);
+  const daysInCurrentMonth = new Date(Date.UTC(my, mo2, 0)).getUTCDate();
+  const dayOfMonth = Number(today.slice(8,10));
+  const occThisMonthSoFar = await computeOccupiedRoomNights(monthStart, today);
+  const requiredRoomNightsThisMonth = requiredRoomNightsPerMonth != null ? requiredRoomNightsPerMonth * (daysInCurrentMonth/30) : null;
+  const roomNightsStillNeededThisMonth = requiredRoomNightsThisMonth != null ? Math.max(0, requiredRoomNightsThisMonth - occThisMonthSoFar.occupiedRoomNights) : null;
+  const daysRemainingInMonth = Math.max(0, daysInCurrentMonth - dayOfMonth);
+  const avgRoomsPerNightNeededForRestOfMonth = roomNightsStillNeededThisMonth != null
+    ? (daysRemainingInMonth > 0 ? roomNightsStillNeededThisMonth / daysRemainingInMonth : (roomNightsStillNeededThisMonth > 0 ? null : 0))
+    : null;
+
+  const simple_target_table = [];
+  for(let level = 1; level <= total_rooms; level++){
+    const roomNightsAtLevel = level * 30;
+    const shortfall = requiredRoomNightsPerMonth != null ? Math.max(0, requiredRoomNightsPerMonth - roomNightsAtLevel) : null;
+    simple_target_table.push({
+      rooms_per_night: level,
+      occupancy_pct: total_rooms > 0 ? (level/total_rooms)*100 : null,
+      aman: shortfall != null ? shortfall <= 0 : null,
+      kurang_malam_per_bulan: shortfall != null ? Math.ceil(shortfall) : null,
+    });
+  }
+
   return {
     property_code, property_name: config.property_name, period: { from, to, days },
     today: {
@@ -1465,6 +1528,21 @@ async function computeSurvivalKpis(property_code, from, to){
     mkh_operating_result, mkh_funding_gap,
     additional_revenue_needed,
     survival_status: status,
+    simple: {
+      required_rooms_per_night: requiredRoomsPerNight,
+      required_room_nights_per_month: requiredRoomNightsPerMonth,
+      target_table: simple_target_table,
+      this_month: {
+        month: monthStr,
+        days_in_month: daysInCurrentMonth,
+        day_of_month: dayOfMonth,
+        days_remaining: daysRemainingInMonth,
+        room_nights_so_far: occThisMonthSoFar.occupiedRoomNights,
+        room_nights_required: requiredRoomNightsThisMonth,
+        room_nights_still_needed: roomNightsStillNeededThisMonth,
+        avg_rooms_per_night_needed_for_rest_of_month: avgRoomsPerNightNeededForRestOfMonth,
+      },
+    },
     config,
   };
 }

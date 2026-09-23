@@ -9,26 +9,26 @@ import { StatCard } from "@/components/StatCard";
 import type { FinanceSurvivalKpis, SurvivalStatus } from "@/lib/types";
 
 /**
- * "Financial control center" top section for /finance -- answers, within
- * a few seconds of opening the page, whether Loonars 1 can currently
- * cover its investor guarantee and OPEX from actual bookings.
+ * "Financial control center" top section for /finance.
  *
- * IMPORTANT: this reads a SEPARATE calculation engine from
- * computeReport() (the frozen, authoritative dividend formula investors
- * are actually paid from -- see villa-api's module comment above
- * computeSurvivalKpis()). This page never appears on /investor; the
- * owner explicitly confirmed (23 Sep 2026) this analysis is Finance-only.
+ * Owner feedback (23 Sep 2026): the first version (all Rupiah, "MKH
+ * Operating Result", "Guarantee Gap") was too confusing to hand to
+ * staff. Redesigned so the FIRST thing anyone sees is a plain table --
+ * kamar/malam vs AMAN or "kurang N malam" -- something a front-desk
+ * employee can read without any financial background. The Rupiah-level
+ * detail (still useful for Finance/Admin) moved into a collapsed
+ * "Detail Finance" section below it, not deleted.
+ *
+ * IMPORTANT: reads a SEPARATE calculation engine from computeReport()
+ * (the frozen, authoritative dividend formula investors are actually
+ * paid from). This page never appears on /investor -- owner confirmed
+ * (23 Sep 2026) this analysis is Finance-only.
  */
 
 const STATUS_LABEL: Record<SurvivalStatus, string> = {
   SAFE: "AMAN",
   WATCH: "PERLU DIPANTAU",
   AT_RISK: "BERISIKO",
-};
-const STATUS_DESC: Record<SurvivalStatus, string> = {
-  SAFE: "Revenue net saat ini cukup menutupi jaminan investor DAN OPEX dari pembagian kontraktual 70/30.",
-  WATCH: "Masih ada gap ke jaminan investor, tapi MKH masih bisa menutupinya dari porsi 30%-nya sendiri tanpa perlu dana tambahan dari luar.",
-  AT_RISK: "Gap ke jaminan investor dan/atau OPEX terlalu besar untuk ditutup dari porsi MKH sendiri -- butuh dana tambahan.",
 };
 
 function fmtPct(v: number | null | undefined, digits = 1): string {
@@ -42,6 +42,7 @@ export function SurvivalControlCenter({ from, to }: { from: string; to: string }
   const [data, setData] = useState<FinanceSurvivalKpis | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showDetail, setShowDetail] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -58,13 +59,13 @@ export function SurvivalControlCenter({ from, to }: { from: string; to: string }
   if (error) return <div className="text-ruby-500 text-xs px-1 py-3 mb-4">Gagal memuat Survival Control Center: {error}</div>;
   if (!data) return null;
 
-  const guaranteeCoveragePct = data.investor_guarantee > 0 ? (data.investor_entitlement_mtd / data.investor_guarantee) * 100 : null;
   const roomsPerNightNow = data.rolling_30d.rooms_per_night ?? data.rooms_per_night_period;
-  const gapTo5 = roomsPerNightNow != null ? 5 - roomsPerNightNow : null;
+  const guaranteeCoveragePct = data.investor_guarantee > 0 ? (data.investor_entitlement_mtd / data.investor_guarantee) * 100 : null;
   const gapToGuarantee = data.investor_guarantee - data.investor_entitlement_mtd;
 
   const statusTone: "ok" | "pending" | "danger" = data.survival_status === "SAFE" ? "ok" : data.survival_status === "WATCH" ? "pending" : "danger";
-  const statusAccent = data.survival_status === "SAFE" ? "sage" : data.survival_status === "WATCH" ? "gold" : "ruby";
+  const s = data.simple;
+  const currentRow = s.target_table.find((r) => roomsPerNightNow != null && Math.round(roomsPerNightNow) === r.rooms_per_night);
 
   return (
     <div className="mb-6">
@@ -82,109 +83,168 @@ export function SurvivalControlCenter({ from, to }: { from: string; to: string }
         </Link>
       </div>
 
-      {/* LOONARS 1 SURVIVAL STATUS -- the big card */}
+      {/* ONE-SENTENCE STATUS -- readable by anyone, no financial background needed */}
       <Card className="mb-4">
-        <div className="p-5 flex flex-col sm:flex-row sm:items-center gap-4">
-          <div className={`w-16 h-16 rounded-full flex items-center justify-center shrink-0 text-2xl font-serif ${
-            statusAccent === "sage" ? "bg-sage-500/15 text-sage-600" : statusAccent === "gold" ? "bg-gold-500/15 text-gold-600" : "bg-ruby-500/15 text-ruby-600"
-          }`}>
-            {data.survival_status === "SAFE" ? "✓" : data.survival_status === "WATCH" ? "!" : "✕"}
+        <div className="p-5">
+          <div className="flex items-center gap-2 mb-2">
+            <Badge tone={statusTone}>{STATUS_LABEL[data.survival_status]}</Badge>
+            <span className="text-[10px] text-ink/40 uppercase tracking-wide">Status Loonars 1</span>
           </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-[10px] font-semibold text-ink/40 tracking-wide uppercase mb-1">Loonars 1 Survival Status</div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="font-serif text-xl text-ink">{STATUS_LABEL[data.survival_status]}</span>
-              <Badge tone={statusTone}>{data.survival_status}</Badge>
-            </div>
-            <div className="text-[11px] text-ink/60">{STATUS_DESC[data.survival_status]}</div>
+          <div className="text-[13px] text-ink/80 leading-relaxed">
+            Rata-rata <strong>{fmtRoomsPerNight(roomsPerNightNow)}</strong> (30 hari terakhir). Supaya AMAN, butuh minimal{" "}
+            <strong>{s.required_rooms_per_night != null ? `${s.required_rooms_per_night.toFixed(1)} kamar/malam` : "—"}</strong> rata-rata sebulan.
+            {currentRow?.aman === false && currentRow.kurang_malam_per_bulan != null && (
+              <>
+                {" "}
+                Sekarang <strong className="text-ruby-500">kurang {currentRow.kurang_malam_per_bulan} malam terisi</strong> per bulan dari target itu.
+              </>
+            )}
+            {currentRow?.aman === true && <> Target sudah tercapai. ✅</>}
           </div>
         </div>
       </Card>
 
-      {/* Top KPI row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
-        <StatCard label="30-Day Rolling Occupancy" value={fmtPct(data.rolling_30d.occupancy_pct)} accent="azure" sub={`${data.rolling_30d.days_with_data} hari data`} />
-        <StatCard label="Rata-rata Kamar/Malam" value={fmtRoomsPerNight(roomsPerNightNow)} accent={data.rooms_per_night_band.accent} sub={data.rooms_per_night_band.label} />
-        <StatCard label="Net ADR" value={data.net_adr != null ? fmtCurrency(data.net_adr) : "—"} accent="azure" sub={data.net_adr == null ? "Belum ada kamar terisi" : undefined} />
-        <StatCard label="Net Revenue (periode)" value={fmtCurrency(data.net_revenue_mtd)} accent="azure" />
-        <StatCard label="Jaminan Investor" value={fmtCurrency(data.investor_guarantee)} accent="neutral" sub="per bulan" />
-        <StatCard
-          label="Cakupan Jaminan"
-          value={fmtPct(guaranteeCoveragePct, 0)}
-          accent={guaranteeCoveragePct != null && guaranteeCoveragePct >= 100 ? "sage" : "gold"}
-          sub={`Entitlement ${fmtCurrency(data.investor_entitlement_mtd)}`}
-        />
-        <StatCard label="OPEX (periode)" value={fmtCurrency(data.opex_mtd)} accent="neutral" sub="asumsi payroll + listrik" />
-        <StatCard
-          label="MKH Operating Result"
-          value={fmtCurrency(data.mkh_operating_result)}
-          accent={data.mkh_operating_result >= 0 ? "sage" : "ruby"}
-          sub={data.mkh_funding_gap > 0 ? `Butuh dana tambahan ${fmtCurrency(data.mkh_funding_gap)}` : undefined}
-        />
-      </div>
+      {/* SIMPLE TARGET TABLE -- the main thing, kamar/malam vs AMAN atau kurang berapa malam */}
+      <Card className="mb-4">
+        <CardHeader title="Target Kamar per Malam" subtitle="Aman kalau segini kamar terisi tiap malam rata-rata sebulan" />
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="text-left text-ink/40 border-b border-ink/10">
+                <th className="px-4 py-2">Kamar Terisi / Malam</th>
+                <th className="px-3 py-2">Occupancy</th>
+                <th className="px-3 py-2">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {s.target_table.map((row) => {
+                const isCurrent = roomsPerNightNow != null && Math.round(roomsPerNightNow) === row.rooms_per_night;
+                return (
+                  <tr key={row.rooms_per_night} className={`border-b border-ink/5 ${isCurrent ? "bg-gold-500/[0.08]" : ""}`}>
+                    <td className="px-4 py-2.5 font-medium text-ink/80">
+                      {row.rooms_per_night} kamar {isCurrent && <span className="text-[9.5px] text-gold-600 font-semibold ml-1">← SEKARANG</span>}
+                    </td>
+                    <td className="px-3 py-2.5">{fmtPct(row.occupancy_pct, 0)}</td>
+                    <td className="px-3 py-2.5">
+                      {row.aman ? (
+                        <Badge tone="ok">AMAN</Badge>
+                      ) : row.kurang_malam_per_bulan != null ? (
+                        <span className="text-ruby-500 font-medium">Kurang {row.kurang_malam_per_bulan} malam/bulan</span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Card>
 
-      {/* Gap callouts */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
-        <Card>
-          <CardHeader title="Seberapa jauh dari 5 kamar/malam?" subtitle="Target survival" />
-          <div className="p-4 sm:p-5 grid grid-cols-3 gap-2 text-center">
-            <div>
-              <div className="text-[9.5px] text-ink/30 uppercase tracking-wide">Sekarang</div>
-              <div className="font-serif text-lg text-ink">{roomsPerNightNow != null ? roomsPerNightNow.toFixed(1) : "—"}</div>
-            </div>
-            <div>
-              <div className="text-[9.5px] text-ink/30 uppercase tracking-wide">Target</div>
-              <div className="font-serif text-lg text-ink">5.0</div>
-            </div>
-            <div>
-              <div className="text-[9.5px] text-ink/30 uppercase tracking-wide">Gap</div>
-              <div className={`font-serif text-lg ${gapTo5 != null && gapTo5 <= 0 ? "text-sage-600" : "text-ruby-500"}`}>
-                {gapTo5 == null ? "—" : gapTo5 <= 0 ? "Tercapai" : `+${gapTo5.toFixed(1)}`}
-              </div>
-            </div>
-          </div>
-        </Card>
-        <Card>
-          <CardHeader title="Seberapa jauh dari cakupan jaminan?" subtitle="Periode berjalan" />
-          <div className="p-4 sm:p-5 grid grid-cols-3 gap-2 text-center">
-            <div>
-              <div className="text-[9.5px] text-ink/30 uppercase tracking-wide">Entitlement</div>
-              <div className="font-serif text-base text-ink">{fmtCurrency(data.investor_entitlement_mtd)}</div>
-            </div>
-            <div>
-              <div className="text-[9.5px] text-ink/30 uppercase tracking-wide">Jaminan</div>
-              <div className="font-serif text-base text-ink">{fmtCurrency(data.investor_guarantee)}</div>
-            </div>
-            <div>
-              <div className="text-[9.5px] text-ink/30 uppercase tracking-wide">Gap</div>
-              <div className={`font-serif text-base ${gapToGuarantee <= 0 ? "text-sage-600" : "text-ruby-500"}`}>
-                {gapToGuarantee <= 0 ? "Tercapai" : fmtCurrency(gapToGuarantee)}
-              </div>
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      {data.additional_revenue_needed > 0 && (
-        <Card className="mb-4 border-gold-500/30">
-          <div className="p-4 text-[11px] text-ink/60">
-            💡 Butuh tambahan revenue net sekitar <strong className="text-ink/80">{fmtCurrencyFull(data.additional_revenue_needed)}</strong> pada
-            periode ini supaya jaminan investor dan OPEX bisa tertutup penuh dari pembagian kontraktual 70/30.
-          </div>
-        </Card>
-      )}
-
-      <Card>
-        <CardHeader title="Catatan perhitungan" />
-        <div className="p-4 sm:p-5 text-[10.5px] text-ink/50 space-y-1">
-          <div>• {data.net_adr_note}</div>
-          <div>• {data.opex_note}</div>
+      {/* THIS MONTH -- how many nights still need to be sold, plain language */}
+      <Card className="mb-4">
+        <CardHeader title="Bulan Ini" subtitle={`${s.this_month.month} — sisa ${s.this_month.days_remaining} hari`} />
+        <div className="p-4 sm:p-5 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
           <div>
-            • Formula entitlement/jaminan di sini TERPISAH dari perhitungan bagi hasil investor aktual (lihat halaman Investor) --
-            khusus untuk analisis Finance, tidak dipakai membayar dividen.
+            <div className="text-[9.5px] text-ink/30 uppercase tracking-wide">Sudah Terjual</div>
+            <div className="font-serif text-lg text-ink">{s.this_month.room_nights_so_far} malam</div>
+          </div>
+          <div>
+            <div className="text-[9.5px] text-ink/30 uppercase tracking-wide">Target Sebulan</div>
+            <div className="font-serif text-lg text-ink">{s.this_month.room_nights_required != null ? `${Math.ceil(s.this_month.room_nights_required)} malam` : "—"}</div>
+          </div>
+          <div>
+            <div className="text-[9.5px] text-ink/30 uppercase tracking-wide">Masih Kurang</div>
+            <div className={`font-serif text-lg ${s.this_month.room_nights_still_needed === 0 ? "text-sage-600" : "text-ruby-500"}`}>
+              {s.this_month.room_nights_still_needed != null ? `${Math.ceil(s.this_month.room_nights_still_needed)} malam` : "—"}
+            </div>
+          </div>
+          <div>
+            <div className="text-[9.5px] text-ink/30 uppercase tracking-wide">Perlu / Malam (Sisa Hari)</div>
+            <div className="font-serif text-lg text-ink">
+              {s.this_month.avg_rooms_per_night_needed_for_rest_of_month != null
+                ? `${s.this_month.avg_rooms_per_night_needed_for_rest_of_month.toFixed(1)} kamar`
+                : "—"}
+            </div>
           </div>
         </div>
+        <div className="px-4 sm:px-5 pb-4 text-[10.5px] text-ink/40">
+          Kalau dari {s.this_month.room_nights_still_needed != null ? Math.ceil(s.this_month.room_nights_still_needed) : "—"} malam yang masih kurang itu terjual dari sisa hari bulan ini, target
+          tercapai.
+        </div>
       </Card>
+
+      {/* Toggle: detailed Rupiah/finance view for Finance/Admin */}
+      <button onClick={() => setShowDetail((v) => !v)} className="text-[10.5px] font-semibold text-ink/50 border border-ink/15 rounded px-3 py-1.5 mb-4">
+        {showDetail ? "▴ Sembunyikan" : "▾ Lihat"} Detail Finance (Rupiah)
+      </button>
+
+      {showDetail && (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+            <StatCard label="30-Day Rolling Occupancy" value={fmtPct(data.rolling_30d.occupancy_pct)} accent="azure" sub={`${data.rolling_30d.days_with_data} hari data`} />
+            <StatCard label="Rata-rata Kamar/Malam" value={fmtRoomsPerNight(roomsPerNightNow)} accent={data.rooms_per_night_band.accent} sub={data.rooms_per_night_band.label} />
+            <StatCard label="Net ADR" value={data.net_adr != null ? fmtCurrency(data.net_adr) : "—"} accent="azure" sub={data.net_adr == null ? "Belum ada kamar terisi" : undefined} />
+            <StatCard label="Net Revenue (periode)" value={fmtCurrency(data.net_revenue_mtd)} accent="azure" />
+            <StatCard label="Jaminan Investor" value={fmtCurrency(data.investor_guarantee)} accent="neutral" sub="per bulan" />
+            <StatCard
+              label="Cakupan Jaminan"
+              value={fmtPct(guaranteeCoveragePct, 0)}
+              accent={guaranteeCoveragePct != null && guaranteeCoveragePct >= 100 ? "sage" : "gold"}
+              sub={`Entitlement ${fmtCurrency(data.investor_entitlement_mtd)}`}
+            />
+            <StatCard label="OPEX (periode)" value={fmtCurrency(data.opex_mtd)} accent="neutral" sub="asumsi payroll + listrik" />
+            <StatCard
+              label="MKH Operating Result"
+              value={fmtCurrency(data.mkh_operating_result)}
+              accent={data.mkh_operating_result >= 0 ? "sage" : "ruby"}
+              sub={data.mkh_funding_gap > 0 ? `Butuh dana tambahan ${fmtCurrency(data.mkh_funding_gap)}` : undefined}
+            />
+          </div>
+
+          <Card className="mb-4">
+            <CardHeader title="Seberapa jauh dari cakupan jaminan?" subtitle="Periode berjalan" />
+            <div className="p-4 sm:p-5 grid grid-cols-3 gap-2 text-center">
+              <div>
+                <div className="text-[9.5px] text-ink/30 uppercase tracking-wide">Entitlement</div>
+                <div className="font-serif text-base text-ink">{fmtCurrency(data.investor_entitlement_mtd)}</div>
+              </div>
+              <div>
+                <div className="text-[9.5px] text-ink/30 uppercase tracking-wide">Jaminan</div>
+                <div className="font-serif text-base text-ink">{fmtCurrency(data.investor_guarantee)}</div>
+              </div>
+              <div>
+                <div className="text-[9.5px] text-ink/30 uppercase tracking-wide">Gap</div>
+                <div className={`font-serif text-base ${gapToGuarantee <= 0 ? "text-sage-600" : "text-ruby-500"}`}>
+                  {gapToGuarantee <= 0 ? "Tercapai" : fmtCurrency(gapToGuarantee)}
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          {data.additional_revenue_needed > 0 && (
+            <Card className="mb-4 border-gold-500/30">
+              <div className="p-4 text-[11px] text-ink/60">
+                💡 Butuh tambahan revenue net sekitar <strong className="text-ink/80">{fmtCurrencyFull(data.additional_revenue_needed)}</strong> pada
+                periode ini supaya jaminan investor dan OPEX bisa tertutup penuh dari pembagian kontraktual 70/30.
+              </div>
+            </Card>
+          )}
+
+          <Card>
+            <CardHeader title="Catatan perhitungan" />
+            <div className="p-4 sm:p-5 text-[10.5px] text-ink/50 space-y-1">
+              <div>• {data.net_adr_note}</div>
+              <div>• {data.opex_note}</div>
+              <div>
+                • Formula entitlement/jaminan di sini TERPISAH dari perhitungan bagi hasil investor aktual (lihat halaman Investor) --
+                khusus untuk analisis Finance, tidak dipakai membayar dividen.
+              </div>
+            </div>
+          </Card>
+        </>
+      )}
     </div>
   );
 }

@@ -553,7 +553,31 @@ export interface FinanceSurvivalKpis {
   mkh_funding_gap: number;
   additional_revenue_needed: number;
   survival_status: SurvivalStatus;
+  simple: FinanceSimpleTargets;
   config: FinancePropertyConfig;
+}
+
+export interface FinanceSimpleTargetRow {
+  rooms_per_night: number;
+  occupancy_pct: number | null;
+  aman: boolean | null;
+  kurang_malam_per_bulan: number | null;
+}
+
+export interface FinanceSimpleTargets {
+  required_rooms_per_night: number | null;
+  required_room_nights_per_month: number | null;
+  target_table: FinanceSimpleTargetRow[];
+  this_month: {
+    month: string;
+    days_in_month: number;
+    day_of_month: number;
+    days_remaining: number;
+    room_nights_so_far: number;
+    room_nights_required: number | null;
+    room_nights_still_needed: number | null;
+    avg_rooms_per_night_needed_for_rest_of_month: number | null;
+  };
 }
 
 export interface FinanceScenarioResult {
