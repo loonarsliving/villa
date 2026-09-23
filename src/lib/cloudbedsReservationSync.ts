@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { statusSetelahSync, dibuatDiSini } from "./bookingStatusSync";
 import { getCloudbedsReservationTotals } from "@/lib/cloudbedsApi";
 import { mapSourceNameToSumber } from "@/lib/cloudbedsSourceMapping";
 
@@ -172,17 +173,29 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
   // every website booking with "[Website] Booking mandiri dari
   // loonars.id". So a booking is ours if EITHER marker still says so, and
   // losing one no longer costs the protection.
+  //
+  // KOREKSI 2026-09-23: penanda "sumber != 'cloudbeds'" di atas sudah tidak
+  // berlaku sejak webhook memetakan nama sumber OTA ke nilai aslinya --
+  // booking Agoda yang sah ber-`sumber='agoda'`, lolos tes itu, lalu ikut
+  // DILEWATI sync ini. Akibatnya pembatalan dan perubahan tanggal dari
+  // Cloudbeds tidak pernah sampai ke booking OTA mana pun. Penandanya
+  // sekarang tepat: `sumber='website'` ATAU catatan "[Website]" (lihat
+  // dibuatDiSini di src/lib/bookingStatusSync.ts).
   const reservationIds = reservations.map((r) => r.reservationID);
   const ownReservationIds = new Set<string>();
+  // Status yang SUDAH ada di sini, supaya check-in/check-out dari meja depan
+  // tidak ditarik mundur oleh salinan Cloudbeds.
+  const statusSaatIni = new Map<string, string>();
   if (reservationIds.length > 0) {
     const { data: existing } = await supabase
       .from("bookings")
-      .select("cloudbeds_reservation_id, sumber, catatan")
+      .select("cloudbeds_reservation_id, sumber, catatan, status")
       .in("cloudbeds_reservation_id", reservationIds);
     for (const b of existing ?? []) {
       if (!b.cloudbeds_reservation_id) continue;
-      const madeHere = b.sumber !== "cloudbeds" || String(b.catatan ?? "").includes("[Website]");
-      if (madeHere) ownReservationIds.add(String(b.cloudbeds_reservation_id));
+      const id = String(b.cloudbeds_reservation_id);
+      if (b.status) statusSaatIni.set(id, String(b.status));
+      if (dibuatDiSini(b.sumber, b.catatan)) ownReservationIds.add(id);
     }
   }
 
@@ -290,7 +303,7 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
           tarif: stayTotal,
           total_bayar: stayTotal,
           cloudbeds_balance: cloudbedsBalance,
-          status: statusToVilla(resv.status),
+          status: statusSetelahSync(statusSaatIni.get(resv.reservationID), statusToVilla(resv.status)),
           cloudbeds_reservation_id: resv.reservationID,
         },
         { onConflict: "cloudbeds_reservation_id" },

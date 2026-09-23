@@ -4,6 +4,15 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-09-23 — Cloudbeds menghapus check-in resepsionis; KTP & tanda tangan bisa dilihat kembali
+- **Bug uang, ditemukan dari data nyata**: webhook Cloudbeds meng-upsert `status: "terjadwal"` yang dipatok keras, dan sync memakai `statusToVilla()` yang hanya mengembalikan `checkin` kalau Cloudbeds sendiri bilang begitu — padahal resepsionis menandai check-in di sini, bukan di Cloudbeds. Check-in sungguhan tamu Unit A1 (20 Sep, lengkap dengan KTP, tanda tangan, PIN, dan pemasukan Rp1.188.297) terhapus jadi "Menunggu Check-In". Akibatnya tamu tidak bisa di-check-out, dan check-in ulang akan mencatat pemasukan DUA KALI ke bagi hasil investor.
+- **Diperbaiki** lewat `src/lib/bookingStatusSync.ts` (+8 tes): Cloudbeds berwenang atas reservasinya, meja depan berwenang atas keadaan tamu di properti. `checkin`/`checkout` tidak pernah ditarik mundur; `terjadwal` → `checkin` masih boleh. Data produksi dipulihkan (status saja, tidak ada transaksi disentuh).
+- **Bug kedua**: penanda "milik kita" (`sumber !== 'cloudbeds'`) membuat sync **melewati semua booking OTA** sejak webhook memetakan sumber jadi `agoda`/`booking.com`/dst — pembatalan Cloudbeds tidak pernah sampai ke booking OTA. Diganti `dibuatDiSini()`.
+- **KTP & tanda tangan akhirnya bisa dilihat kembali**: `GET /api/checkin/dokumen` (gerbang staf, URL bertanda tangan 5 menit) + komponen `DokumenCheckin`, dibuka lewat klik batang booking di Kalender Booking.
+- **Gangguan jaringan tidak lagi mengeluarkan resepsionis di tengah check-in**: `periksaTokenStaf` membedakan `ditolak` (401) dari `gagal-periksa` (503); sebelumnya `fetch` tanpa try/catch berubah jadi 500, dan 401 memicu `endSession()`. +7 tes.
+- `load()` Kalender Booking diberi penanganan galat (sebelumnya kalender tampil kosong tanpa tanda apa pun saat gagal memuat).
+- 85 tes hijau, tsc bersih, build berhasil.
+
 ### 2026-09-20 (branch `claude/receptionist-checkout-qris-payment-gvczm7`) — audit ulang check-in
 - **Tanda tangan tamu bisa terhapus diam-diam** — `fitCanvas` dipasang sebagai listener `resize`, dan `canvas.width = ...` mengosongkan kanvas. Di HP, `resize` terpicu saat keyboard muncul / bilah URL menyusut / layar diputar, semuanya bisa terjadi setelah tamu menandatangani; `hasSignature` tetap true sehingga gambar KOSONG tersimpan sebagai bukti persetujuan. Bug ini diperkenalkan oleh perbaikan kanvas 19 Sep. **Dibuktikan di Chromium (Playwright)**: kode lama piksel tinta 1658 → 0, kode baru 1057 → 1057.
 - **Latar tanda tangan transparan** (bukan putih) — `bg-white` hanya kelas CSS, `toDataURL` cuma mengambil isi kanvas. Putihnya sekarang ditulis ke dalam kanvas.

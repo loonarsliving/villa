@@ -9,6 +9,7 @@ import { useToast } from "@/lib/toast";
 import { fmtDate, todayISO } from "@/lib/format";
 import { addDaysISO } from "@/lib/stayDates";
 import { Card, CardHeader, Loading } from "@/components/Card";
+import { DokumenCheckin } from "@/components/DokumenCheckin";
 import type { Booking, Unit } from "@/lib/types";
 
 const RANGE_OPTIONS = [7, 14, 21] as const;
@@ -87,6 +88,8 @@ export default function BookingCalendarPage() {
   const [loading, setLoading] = useState(true);
   const [rangeDays, setRangeDays] = useState<number>(14);
   const [start, setStart] = useState(todayISO());
+  // Booking yang sedang dibuka detailnya (termasuk foto KTP & tanda tangan).
+  const [dokumenBookingId, setDokumenBookingId] = useState<string | null>(null);
 
   const days = useMemo(() => dateRange(start, rangeDays), [start, rangeDays]);
   const end = days[days.length - 1];
@@ -101,6 +104,12 @@ export default function BookingCalendarPage() {
         setUnits(u || []);
         const now = Date.now();
         setBookings((b || []).filter((x) => isVisibleOnCalendar(x, now)));
+      })
+      .catch((e) => {
+        // Tanpa ini, permintaan yang gagal hanya menghasilkan unhandled
+        // rejection: kalendernya tampil KOSONG tanpa satu pun tanda bahwa
+        // datanya gagal dimuat -- terbaca seperti "tidak ada booking".
+        toast("⚠", "Gagal memuat kalender", e instanceof Error ? e.message : "Periksa koneksi, lalu muat ulang.", "ruby");
       })
       .finally(() => setLoading(false));
   }
@@ -226,16 +235,12 @@ export default function BookingCalendarPage() {
                               return (
                                 <button
                                   key={b.id}
-                                  onClick={() =>
-                                    toast(
-                                      b.sumber === "cloudbeds" ? "☁" : "◎",
-                                      b.guest_nama,
-                                      `Unit ${b.unit_nomor} · ${fmtDate(b.tgl_checkin)} – ${b.tgl_checkout ? fmtDate(b.tgl_checkout) : "belum ada tanggal keluar"} · ${
-                                        b.sumber === "cloudbeds" ? "Cloudbeds" : b.sumber
-                                      } · ${b.status}`,
-                                      b.sumber === "cloudbeds" ? "gold" : "sage",
-                                    )
-                                  }
+                                  // Dulu cuma memunculkan toast sekilas. Sekarang
+                                  // membuka detail booking berikut dokumen
+                                  // check-in-nya (foto KTP + tanda tangan), yang
+                                  // sebelumnya tidak bisa dilihat kembali dari
+                                  // mana pun di aplikasi ini.
+                                  onClick={() => setDokumenBookingId(b.id)}
                                   style={{ position: "absolute", left: `${leftPct}%`, width: `calc(${widthPct}% - 4px)`, marginLeft: 2, top: 0, bottom: 0 }}
                                   className={`rounded px-2 text-left text-[9.5px] truncate border ${toneClass[b.status] || toneClass.terjadwal}`}
                                   title={`${b.guest_nama} — Unit ${b.unit_nomor}`}
@@ -256,6 +261,8 @@ export default function BookingCalendarPage() {
           </div>
         )}
       </Card>
+
+      <DokumenCheckin bookingId={dokumenBookingId} onClose={() => setDokumenBookingId(null)} />
     </Shell>
   );
 }

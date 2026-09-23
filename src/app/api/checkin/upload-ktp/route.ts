@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
-import { isStaffToken } from "@/lib/villaApiAuth";
+import { periksaTokenStaf } from "@/lib/villaApiAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,7 +16,17 @@ const BUCKET = "guest-documents";
  */
 export async function POST(request: Request) {
   const token = request.headers.get("x-villa-token") ?? "";
-  if (!token || !(await isStaffToken(token))) {
+  const sesi = token ? await periksaTokenStaf(token) : "ditolak";
+  if (sesi === "gagal-periksa") {
+    // 503, BUKAN 401: klien mengeluarkan pengguna dari aplikasi setiap kali
+    // menerima 401, dan gangguan sesaat tidak boleh melempar resepsionis ke
+    // halaman login di tengah check-in.
+    return NextResponse.json(
+      { error: "Sesi tidak bisa diperiksa sekarang — jaringan atau villa-api sedang terganggu. Coba lagi sebentar lagi, jangan keluar dari aplikasi." },
+      { status: 503 },
+    );
+  }
+  if (sesi !== "lolos") {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
