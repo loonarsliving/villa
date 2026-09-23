@@ -2,6 +2,24 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-24 00:45 WIB — run pertama setelah #111 + #112: TERVERIFIKASI sesuai simulasi
+
+Dicek lewat Supabase MCP, jejak run 2026-09-23 17:21 UTC:
+- Riset AI hidup lagi: 4 baris `villa_competitor_rates` baru (hanya Sawah
+  View; jatah 1 riset per run, Standard menyusul malam berikutnya), 7
+  periode AI baru (termasuk `ai_low_season` Pasca Tahun Baru & Ramadan 8 Feb–8
+  Mar 2027, "Libur Idul Fitri" 9–17 Mar 2027, Waisak), `market_demand` =
+  `naik`, indeks minat pasar 12 bulan tersimpan.
+- 458 perubahan harga di `villa_rate_history`, **semua kelipatan Rp1.000**
+  (bukti kode #112 sudah live), 0 di bawah `min_rate`, 0 di atas `max_rate`.
+- 31 Des: Standard 660rb → 759rb, Sawah View 900rb → 1.035rb (persis
+  simulasi). Lebaran 9–17 Mar 2027: +15% (dibatasi rem). Ramadan & Januari
+  turun. Periode Idul Fitri lama 20–30 Mar tetap nonaktif, harga di sana
+  kembali normal.
+- Turun terbesar −20,4% (weekend Ramadan Standard 750rb → 597rb) melewati rem
+  15% karena itu koreksi ke arah `base_rate` — perilaku yang memang dirancang
+  (lihat langkah 8 di `decideRateForDate`), bukan bug.
+
 ## 2026-09-23 (lanjutan) — pembulatan, Tahun Baru dari kalender tetap, dua sinyal baru dari data sendiri
 
 Branch `claude/ai-dynamic-pricing-check-gs6okn`. Menyangkut harga tamu, jadi
