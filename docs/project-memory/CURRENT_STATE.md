@@ -40,6 +40,18 @@ menemukan harga malam tahun baru (daftar kosong). Untuk Standard hanya 1 villa
 produksi: 0 perbedaan harga dari 730 tanggal.** Kedua sinyal baru bekerja
 setelah datanya terkumpul.
 
+**Status live (2026-09-24 01:20 WIB):** villa #114, loonars #9, dan
+Mkhsistem #66 sudah di produksi. villa-api **v88** terverifikasi: panggilan
+nyata `GET /public/availability` menjawab 200 dan tercatat di
+`villa_availability_searches`. Baris ujinya sudah dihapus.
+
+**Deploy villa-api kini `--use-api`** (villa #115). Run #50 gagal dua kali
+di langkah deploy, sebelum kode diunggah, karena ghcr.io membatasi unduhan
+image edge-runtime (`toomanyrequests`). Bundling sekarang dilakukan di
+server Supabase, jadi runner tidak butuh Docker. Catatan: workflow hanya
+jalan otomatis kalau `supabase/functions/villa-api/**` berubah; perubahan
+file workflow saja butuh `workflow_dispatch` dari `main`.
+
 ## 2026-09-24 00:45 WIB — run pertama setelah #111 + #112: TERVERIFIKASI sesuai simulasi
 
 Dicek lewat Supabase MCP, jejak run 2026-09-23 17:21 UTC:
