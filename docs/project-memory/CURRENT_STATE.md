@@ -2,6 +2,53 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-23 — audit AI dynamic pricing: mesin harga jalan, tapi RISET AI MATI sejak 13 Sep
+
+Diperiksa lewat Supabase MCP + Vercel MCP (read-only), bukan dari catatan lama.
+
+**Yang normal:**
+- Cron `/api/cron/ai-dynamic-pricing` jalan tiap malam dan push ke Cloudbeds
+  berhasil: `villa_rate_history` (`cloudbeds_sync`) mencatat perubahan tiap
+  malam s/d 2026-09-22 17:21 UTC; jendela 365 hari bergulir (tanggal
+  terjauh 2027-09-21). `ai_autopush_enabled = true`.
+- Semua harga di dalam `min_rate`/`max_rate` (Standard 550rb–1jt,
+  Sawah View 700rb–1,1jt). Weekend Standard 750rb / Sawah View 850rb.
+- Malam 2026-09-22 ada **58 perubahan harga, hampir semuanya TURUN**
+  (weekend −10% untuk ≤14 hari, −5% untuk ≤45 hari; weekday Sawah View ke
+  lantai 700rb). Ini pola diskon lead time; kemungkinan besar menyala karena
+  jumlah booking melewati `COLD_START_MIN_BOOKINGS = 20` (15 → 21 booking
+  berbayar antara dua malam itu). Satu kenaikan: Sawah View 23 Sep 750rb →
+  809.281 (event "Wisuda UGM" 22–23 Sep).
+- 85 tes (`npm test`) hijau, `tsc --noEmit` bersih.
+
+**Yang RUSAK — riset AI tidak jalan sejak 2026-09-13:**
+`src/lib/aiBridge.ts` (riset kompetitor, minat pasar/event, pricing
+insight, CCTV vision) membaca `integration_settings.vercel_bridge.base_url`
+— setting yang SAMA dengan WA. Pada 2026-09-13 nilai itu dipindah ke
+`https://living.haluoleo.id` (villa sendiri) untuk WA. Villa tidak punya
+rute `/api/villa/ai/*` (rute itu ada di Mkhsistem, `mkh.haluoleo.id`),
+jadi semua panggilan riset AI sejak itu gagal diam-diam.
+Buktinya di data: `villa_competitor_rates` terakhir 2026-09-11,
+`villa_high_season_periods` buatan AI terakhir 2026-09-12,
+`integration_settings.revenue_engine.market_demand` tidak pernah
+tersimpan, tidak ada satu pun baris `ai_low_season`. Mesin harga tetap
+berjalan hanya dengan okupansi + weekend + lead time + periode lama.
+Log Vercel tidak bisa dipakai (retensi ~1 jam), dan ringkasan cron tidak
+disimpan ke database, makanya tidak ketahuan.
+
+**Status perbaikan: BELUM**, menunggu persetujuan owner (menyangkut harga
+tamu; menyalakan kembali riset akan menggeser harga live). Arah yang
+diusulkan: beri jembatan AI URL-nya sendiri (mis. key terpisah yang
+menunjuk ke `https://mkh.haluoleo.id`), jangan kembalikan
+`vercel_bridge.base_url` karena itu akan memindahkan WA kembali ke
+Mkhsistem. Secret-nya harus tetap cocok dengan `VILLA_BRIDGE_SECRET` di
+Mkhsistem — belum diverifikasi.
+
+**Koreksi catatan lama:** `villa_rates.updated_at` selalu sama dengan
+`created_at` (tidak berubah saat harga berubah), jadi "2 baris berubah
+per malam" di bagian 2026-09-12 sebenarnya hanya baris tanggal baru.
+Untuk melacak perubahan harga, pakai `villa_rate_history`.
+
 ## 2026-09-23 — deploy villa-api pulih; celah dispatch-dari-branch ditutup
 
 Owner menerbitkan `SUPABASE_ACCESS_TOKEN` baru dan memperbarui repo secret-nya.
