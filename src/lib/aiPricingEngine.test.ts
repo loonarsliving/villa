@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { buildSearchDemand, decideRateForDate, fixedCalendarPeriodFor, learnDiscountWindow, searchDemandRelativeFor, type DateDecisionInput, type PricingSettings } from "./aiPricingEngine";
+import { acceptedPeakMedian, buildSearchDemand, decideRateForDate, fixedCalendarPeriodFor, learnDiscountWindow, searchDemandRelativeFor, type DateDecisionInput, type PricingSettings } from "./aiPricingEngine";
 
 /**
  * Tests for the pricing REASONING, not for Supabase plumbing.
@@ -463,5 +463,20 @@ describe("harga tetangga untuk malam puncak", () => {
     expect(decide({ peakCompetitorMedian: 2000000 }).decided_rate).toBe(650000);
     const event = { suggested_adjustment_pct: 0.2, created_by: "ai_jogja_events_research" };
     expect(decide({ period: event, peakCompetitorMedian: 2000000 }).reason_codes).not.toContain("peak_competitor_headroom");
+  });
+});
+
+describe("hasil riset puncak harus benar-benar harga puncak", () => {
+  it("rejects a 'peak' sample that is really ordinary-night prices", () => {
+    // Uji nyata 24 Sep: 950rb/2,4jt/750rb untuk malam tahun baru, padahal
+    // median malam biasa villa yang sama sudah 1,2jt.
+    expect(acceptedPeakMedian([950000, 2400000, 750000], 1200000)).toBeNull();
+  });
+  it("accepts it when the peak median is clearly above ordinary nights", () => {
+    expect(acceptedPeakMedian([1500000, 1800000, 1400000], 1200000)).toBe(1500000);
+  });
+  it("needs three villas and an ordinary-night comparison", () => {
+    expect(acceptedPeakMedian([1500000, 1800000], 1000000)).toBeNull();
+    expect(acceptedPeakMedian([1500000, 1800000, 1400000], null)).toBeNull();
   });
 });

@@ -2,6 +2,44 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-24 — dua sumber data baru untuk harga: pencarian website + harga tetangga malam puncak
+
+Owner menyetujui keduanya, dan menolak minimum menginap. Repo yang ikut berubah:
+villa (mesin harga, villa-api, migrasi), loonars (form booking), Mkhsistem
+PR #66 (riset kompetitor menerima `stay_date`/`occasion`; sudah di produksi).
+
+**SINYAL 5 — pencarian tanggal di website.** villa-api `GET
+/public/availability` mencatat setiap pengecekan ke
+`villa_availability_searches` (checkin, checkout, filter tipe, tipe yang
+habis, `session_id` acak dari localStorage loonars). Tidak ada IP, nama, atau
+nomor. Kegagalan mencatat tidak menggagalkan pengecekan tamu. Aturan di
+mesin harga:
+- hanya menaikkan, tidak pernah menurunkan;
+- mulai menyala setelah 30 pencari berbeda dalam 30 hari;
+- baseline = rata-rata pencari per malam untuk 180 hari ke depan;
+- butuh ≥2× baseline, maksimal +6% sebelum penggabungan berbobot (bobot
+  0,15), jadi efektifnya sekitar +1%.
+
+**Harga tetangga untuk malam puncak.** `refreshPeakCompetitorDataIfStale`
+dipanggil di AKHIR run, hanya kalau run ini belum memakai riset AI lain dan
+belum lewat 25 detik:
+- meriset satu pasangan (tipe unit, malam puncak): 31 Des, atau malam pertama
+  periode puncak pasti dalam 200 hari;
+- setiap pasangan disegarkan tiap 14 hari; kalau AI tidak menemukan harga,
+  dicatat baris penanda ber-harga 0;
+- dipakai hanya pada puncak pasti, dengan minimal 3 villa, dan median harus
+  **≥10% di atas median malam biasa villa tetangga**. Syarat terakhir ini
+  ada karena uji pertama mengembalikan harga malam biasa.
+- Kalau lolos: harga di atas median diturunkan ke median, tapi tidak di
+  bawah rate plan pemilik; harga di bawah median boleh naik maksimal +10%.
+  Tetap kena rem harian dan `max_rate`.
+
+Uji nyata ke Mkhsistem produksi (31 Des): untuk Sawah View AI tidak
+menemukan harga malam tahun baru (daftar kosong). Untuk Standard hanya 1 villa
+(2 hotel), jadi belum dipakai. **Simulasi mesin `main` vs branch dengan data
+produksi: 0 perbedaan harga dari 730 tanggal.** Kedua sinyal baru bekerja
+setelah datanya terkumpul.
+
 ## 2026-09-24 00:45 WIB — run pertama setelah #111 + #112: TERVERIFIKASI sesuai simulasi
 
 Dicek lewat Supabase MCP, jejak run 2026-09-23 17:21 UTC:

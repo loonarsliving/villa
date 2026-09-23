@@ -361,6 +361,24 @@ export function searchDemandRelativeFor(demand: SearchDemand, date: string): num
  * tidak pernah boleh menggerakkan harga sendirian tanpa sampel yang cukup.
  */
 const PEAK_COMPETITOR_MAX_UPLIFT_PCT = 0.1;
+/**
+ * Uji pertama 2026-09-24: diminta harga malam tahun baru, riset AI bisa saja
+ * mengembalikan harga malam BIASA (catatan sumbernya "per September 2026").
+ * Harga puncak yang sungguhan hampir selalu lebih mahal dari harga malam
+ * biasa tempat yang sama, jadi hasil riset puncak hanya dipercaya kalau
+ * mediannya setidaknya sebesar ini di atas median malam biasa villa tetangga.
+ * Tanpa median malam biasa (sampel kurang), tidak ada pembanding -- datanya
+ * tidak dipakai sama sekali.
+ */
+const PEAK_MIN_PREMIUM_OVER_ORDINARY = 0.1;
+
+/** Median harga puncak yang lolos uji "memang harga puncak", atau null. Fungsi murni. */
+export function acceptedPeakMedian(peakPrices: number[], ordinaryMedian: number | null): number | null {
+  const prices = peakPrices.filter((n) => Number.isFinite(n) && n > 0);
+  if (prices.length < COMPETITOR_MIN_SAMPLES || ordinaryMedian === null) return null;
+  const m = median(prices);
+  return m >= ordinaryMedian * (1 + PEAK_MIN_PREMIUM_OVER_ORDINARY) ? m : null;
+}
 const PEAK_COMPETITOR_MAX_AGE_DAYS = 30;
 const PEAK_COMPETITOR_STALE_DAYS = 14;
 const PEAK_RESEARCH_HORIZON_DAYS = 200;
@@ -1445,7 +1463,6 @@ export async function decideRatesForRoomType(
     if (!peakPricesByDate.has(r.stay_date)) peakPricesByDate.set(r.stay_date, []);
     peakPricesByDate.get(r.stay_date)!.push(n);
   }
-  const peakMedianByDate = new Map([...peakPricesByDate].filter(([, v]) => v.length >= COMPETITOR_MIN_SAMPLES).map(([d, v]) => [d, median(v)]));
 
   const searchSince = new Date(Date.now() - SEARCH_LOOKBACK_DAYS * 86400000).toISOString();
   const { data: searchRows } = await supabase
@@ -1456,6 +1473,11 @@ export async function decideRatesForRoomType(
   const searchDemand = buildSearchDemand((searchRows ?? []) as AvailabilitySearchRow[], today, roomType.code);
   const competitorPrices = (competitorRates ?? []).map((r) => Number(r.price)).filter((n) => Number.isFinite(n) && n > 0);
   const competitorMedian = competitorPrices.length >= COMPETITOR_MIN_SAMPLES ? median(competitorPrices) : null;
+  const peakMedianByDate = new Map<string, number>();
+  for (const [d, prices] of peakPricesByDate) {
+    const m = acceptedPeakMedian(prices, competitorMedian);
+    if (m !== null) peakMedianByDate.set(d, m);
+  }
 
   // The price each date is actually selling at right now. Every guardrail
   // that talks about "how far price may move" is measured against THIS,
