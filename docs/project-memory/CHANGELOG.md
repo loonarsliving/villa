@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-09-24 — Sinyal pencarian website dan harga tetangga malam puncak
+- Migrasi `20260924000001`: tabel `villa_availability_searches`, kolom `villa_competitor_rates.stay_date`. villa-api mencatat pencarian ketersediaan; loonars mengirim `sid` acak. Mesin harga: SINYAL 5 (naik saja, butuh 30 pencari/30 hari) dan cap/ruang naik dari harga tetangga malam puncak (≥3 villa, ≥10% di atas malam biasa, maks +10%). Mkhsistem PR #66. 115 tes. Simulasi: 0 perubahan harga saat merge. Detail di CURRENT_STATE.md.
+
 ### 2026-09-23 — Harga bulat, Tahun Baru dari kalender tetap, tangga okupansi, jendela diskon dari data sendiri
 - `aiPricingEngine.ts`: pembulatan ke Rp1.000 (langkah terakhir, dijepit ulang ke min/max); periode tetap Natal–Tahun Baru (24 Des–1 Jan +20%, 31 Des +40%, `fixed_calendar_peak`); tangga okupansi 50%→ambang tinggi; `learnDiscountWindow` (median/P75 lead time booking sendiri, dijepit). +11 tes (101 total). Owner-approved sebelum merge. Detail dan simulasi di CURRENT_STATE.md.
 

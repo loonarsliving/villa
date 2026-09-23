@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { decideRateForDate, fixedCalendarPeriodFor, learnDiscountWindow, type DateDecisionInput, type PricingSettings } from "./aiPricingEngine";
+import { acceptedPeakMedian, buildSearchDemand, decideRateForDate, fixedCalendarPeriodFor, learnDiscountWindow, searchDemandRelativeFor, type DateDecisionInput, type PricingSettings } from "./aiPricingEngine";
 
 /**
  * Tests for the pricing REASONING, not for Supabase plumbing.
@@ -382,5 +382,101 @@ describe("jendela diskon dipelajari dari booking sendiri", () => {
     const w = { fullDays: 7, halfDays: 21 };
     expect(decide({ occupancyPct: 0, daysToArrival: 10, discountWindow: w }).reason_codes).toContain("low_occupancy_partial_lead_time");
     expect(decide({ occupancyPct: 0, daysToArrival: 30, discountWindow: w }).reason_codes).toContain("low_occupancy_too_early_to_discount");
+  });
+});
+
+describe("SINYAL 5: pencarian tanggal di website", () => {
+  const today = "2026-10-01";
+  const search = (sid: string, checkin: string, checkout: string, room_type: string | null = null) => ({ session_id: sid, checkin, checkout, room_type });
+
+  it("stays silent until enough different people have searched", () => {
+    const rows = Array.from({ length: 29 }, (_, i) => search(`s${i}`, "2026-10-10", "2026-10-11"));
+    expect(buildSearchDemand(rows, today, "standard").usable).toBe(false);
+  });
+
+  it("counts one person once per night, however many times they click", () => {
+    const rows = [search("a", "2026-10-10", "2026-10-12"), search("a", "2026-10-10", "2026-10-12"), search("b", "2026-10-11", "2026-10-12")];
+    const d = buildSearchDemand(rows, today, "standard");
+    expect(d.byDate.get("2026-10-10")).toBe(1);
+    expect(d.byDate.get("2026-10-11")).toBe(2);
+    expect(d.byDate.has("2026-10-12")).toBe(false); // malam checkout tidak dihitung
+  });
+
+  it("ignores searches filtered to another room type", () => {
+    const d = buildSearchDemand([search("a", "2026-10-10", "2026-10-11", "sawah_view")], today, "standard");
+    expect(d.byDate.size).toBe(0);
+  });
+
+  it("flags a date searched far more than usual", () => {
+    const rows = [
+      ...Array.from({ length: 30 }, (_, i) => search(`nye${i}`, "2026-12-31", "2027-01-01")),
+      ...Array.from({ length: 30 }, (_, i) => search(`x${i}`, `2026-10-${String(2 + (i % 28)).padStart(2, "0")}`, `2026-10-${String(3 + (i % 28)).padStart(2, "0")}`)),
+    ];
+    const d = buildSearchDemand(rows, today, "standard");
+    expect(d.usable).toBe(true);
+    expect(searchDemandRelativeFor(d, "2026-12-31")!).toBeGreaterThan(1);
+  });
+
+  it("raises price a little when a date is searched much more than usual, never lowers it", () => {
+    const up = decide({ searchDemandRelative: 3 });
+    expect(up.decided_rate).toBeGreaterThan(650000);
+    expect(up.reason_codes).toContain("search_demand_high");
+    // Tiga kali lipat baseline tetap dibatasi: 6% x bobot 0,15/0,75 = 1,2%.
+    expect(up.decided_rate).toBe(658000);
+    expect(decide({ searchDemandRelative: -1 }).decided_rate).toBe(650000);
+    expect(decide({ searchDemandRelative: 0.5 }).decided_rate).toBe(650000);
+  });
+
+  it("is held during cold start", () => {
+    expect(decide({ searchDemandRelative: 3, coldStart: true }).reason_codes).toContain("search_demand_held_cold_start");
+  });
+});
+
+describe("harga tetangga untuk malam puncak", () => {
+  const nye = () => fixedCalendarPeriodFor("2026-12-31");
+  const base = { targetDate: "2026-12-31", anchorRate: 750000, maxRate: null } as const;
+
+  it("lets a certain peak move toward much higher neighbour prices, at most +10%", () => {
+    // Tanpa data: 750rb x 1,4 = 1.050.000.
+    const d = decide({ ...base, period: nye(), peakCompetitorMedian: 2000000 });
+    expect(d.decided_rate).toBe(1155000);
+    expect(d.reason_codes).toContain("peak_competitor_headroom");
+  });
+
+  it("never goes above the neighbours' peak price when moving toward it", () => {
+    expect(decide({ ...base, period: nye(), peakCompetitorMedian: 1100000 }).decided_rate).toBe(1100000);
+  });
+
+  it("caps a peak price above the neighbours, but not below the owner's rate plan", () => {
+    const d = decide({ ...base, period: nye(), peakCompetitorMedian: 900000 });
+    expect(d.decided_rate).toBe(900000);
+    expect(d.reason_codes).toContain("peak_competitor_cap");
+    expect(decide({ ...base, period: nye(), peakCompetitorMedian: 500000 }).decided_rate).toBe(750000);
+  });
+
+  it("is still bounded by the daily movement clamp and max_rate", () => {
+    expect(decide({ ...base, period: nye(), peakCompetitorMedian: 2000000, liveRate: 1000000 }).decided_rate).toBe(1150000);
+    expect(decide({ ...base, period: nye(), peakCompetitorMedian: 2000000, maxRate: 1100000 }).decided_rate).toBe(1100000);
+  });
+
+  it("does nothing on an ordinary date or a speculative event", () => {
+    expect(decide({ peakCompetitorMedian: 2000000 }).decided_rate).toBe(650000);
+    const event = { suggested_adjustment_pct: 0.2, created_by: "ai_jogja_events_research" };
+    expect(decide({ period: event, peakCompetitorMedian: 2000000 }).reason_codes).not.toContain("peak_competitor_headroom");
+  });
+});
+
+describe("hasil riset puncak harus benar-benar harga puncak", () => {
+  it("rejects a 'peak' sample that is really ordinary-night prices", () => {
+    // Uji nyata 24 Sep: 950rb/2,4jt/750rb untuk malam tahun baru, padahal
+    // median malam biasa villa yang sama sudah 1,2jt.
+    expect(acceptedPeakMedian([950000, 2400000, 750000], 1200000)).toBeNull();
+  });
+  it("accepts it when the peak median is clearly above ordinary nights", () => {
+    expect(acceptedPeakMedian([1500000, 1800000, 1400000], 1200000)).toBe(1500000);
+  });
+  it("needs three villas and an ordinary-night comparison", () => {
+    expect(acceptedPeakMedian([1500000, 1800000], 1000000)).toBeNull();
+    expect(acceptedPeakMedian([1500000, 1800000, 1400000], null)).toBeNull();
   });
 });

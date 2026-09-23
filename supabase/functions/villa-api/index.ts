@@ -704,6 +704,30 @@ function findConflicts(bookings, checkin, checkout){
   return map;
 }
 
+// Pencarian tanggal di website = sinyal permintaan untuk mesin harga AI
+// (villa src/lib/aiPricingEngine.ts, SINYAL 5), seperti data "lookers" yang
+// dipakai sistem revenue hotel. Tanpa data pribadi -- lihat migrasi
+// 20260924000001. Kegagalan mencatat TIDAK BOLEH menggagalkan pengecekan
+// ketersediaan tamu, jadi galatnya ditelan dan hanya dilog.
+async function catatPencarianKetersediaan({checkin, checkout, room_type, sid, sold_out_types}){
+  try{
+    const nights = Math.round((new Date(checkout).getTime() - new Date(checkin).getTime())/86400000);
+    const today = todayWIB();
+    const daysAhead = Math.round((new Date(checkin).getTime() - new Date(today).getTime())/86400000);
+    // Buang yang jelas bukan pencarian menginap sungguhan.
+    if(nights < 1 || nights > 30 || daysAhead < 0 || daysAhead > 400) return;
+    const session_id = typeof sid === 'string' && /^[A-Za-z0-9-]{8,64}$/.test(sid) ? sid : null;
+    const {error} = await supabase.from('villa_availability_searches').insert({
+      checkin, checkout,
+      room_type: room_type && /^[a-z0-9_]{1,40}$/.test(room_type) ? room_type : null,
+      session_id, sold_out_types, source: 'website',
+    });
+    if(error) console.error('[availability-search-log]', error.message);
+  }catch(e){
+    console.error('[availability-search-log]', e instanceof Error ? e.message : String(e));
+  }
+}
+
 function isValidDateStr(s){
   if(typeof s !== 'string') return false;
   if(!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
@@ -1673,6 +1697,10 @@ Deno.serve(async (req)=>{
         nights, price_total, price_per_night_avg: price_total != null ? Math.round(price_total / nights) : null,
       });
     }
+    await catatPencarianKetersediaan({
+      checkin, checkout, room_type, sid: url.searchParams.get('sid'),
+      sold_out_types: room_types_result.filter(r=>r.available===0).map(r=>r.code),
+    });
     return json({
       checkin, checkout,
       available: room_types_result.some(r=>r.available>0),

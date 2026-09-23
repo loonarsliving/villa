@@ -151,6 +151,7 @@ Only the Cloudbeds webhook route (in this repo) touches Postgres directly (via `
 ## RLS gap on 14 villa tables (found 2026-09-08) — OPEN until migration is applied
 Audit via Supabase advisor + `information_schema.role_table_grants` found 14 villa-owned tables with **RLS disabled while `anon` and `authenticated` still hold full SELECT/INSERT/UPDATE/DELETE/TRUNCATE**. The anon key is public by design (it ships in client bundles), so this means anyone could read *and modify* these tables directly through PostgREST, bypassing `villa-api`'s token/role checks entirely:
 - Revenue engine (10): `villa_room_types`, `villa_channels`, `villa_rate_plans`, `villa_rates`, `villa_rate_history`, `villa_daily_inventory_snapshot`, `villa_pricing_settings`, `villa_pricing_recommendations`, `villa_high_season_periods`, `villa_competitor_rates`.
+- **Ditambahkan 2026-09-24** (migrasi `20260924000001`, owner-approved, diterapkan): tabel `villa_availability_searches` (pencarian ketersediaan dari website; tanpa data pribadi; RLS aktif tanpa policy = service role saja) dan kolom `villa_competitor_rates.stay_date` (null = harga malam biasa, terisi = harga untuk malam puncak tertentu). Setiap pembaca harga malam biasa WAJIB memfilter `stay_date is null`.
 - Amenities (3): `amenities`, `amenity_kit_items`, `amenity_usage_log`.
 - CCTV (1): `cctv_disciplinary_reports`.
 
