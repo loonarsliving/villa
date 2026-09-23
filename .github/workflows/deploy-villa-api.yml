@@ -34,9 +34,14 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
+          # --use-api: bundling di server Supabase, bukan di Docker runner.
+          # Run #50 (23 Sep 2026) gagal dua kali berturut-turut sebelum satu
+          # baris kode pun diunggah, karena ghcr.io menolak unduhan image
+          # edge-runtime ("toomanyrequests"). Tanpa Docker, jalur itu hilang.
           supabase functions deploy villa-api \
             --project-ref svcmybsziaelwwdrnzcv \
-            --no-verify-jwt
+            --no-verify-jwt \
+            --use-api
 
       # Kegagalan deploy ini SENYAP: aplikasi tetap berjalan karena frontend
       # kompatibel dengan villa-api versi lama, jadi `main` bisa terlihat
