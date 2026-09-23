@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-09-23 — Harga bulat, Tahun Baru dari kalender tetap, tangga okupansi, jendela diskon dari data sendiri
+- `aiPricingEngine.ts`: pembulatan ke Rp1.000 (langkah terakhir, dijepit ulang ke min/max); periode tetap Natal–Tahun Baru (24 Des–1 Jan +20%, 31 Des +40%, `fixed_calendar_peak`); tangga okupansi 50%→ambang tinggi; `learnDiscountWindow` (median/P75 lead time booking sendiri, dijepit). +11 tes (101 total). Owner-approved sebelum merge. Detail dan simulasi di CURRENT_STATE.md.
+
 ### 2026-09-23 — Riset AI harga hidup lagi (owner-approved)
 - **Bug:** sejak 2026-09-13 riset kompetitor, riset minat pasar/event, dan pricing insight gagal diam-diam. `src/lib/aiBridge.ts` membaca `integration_settings.vercel_bridge.base_url`, yang hari itu dipindah ke villa sendiri untuk WA; villa tidak punya rute `/api/villa/ai/*`. Mesin harga tetap jalan tanpa data pasar.
 - **Perbaikan:** jembatan AI membaca key terpisah `integration_settings.ai_bridge` (`base_url` wajib, `secret` jatuh ke `vercel_bridge.secret`), tanpa fallback ke alamat WA. Baris dibuat: `base_url = https://mkh.haluoleo.id`. 5 tes baru (`aiBridge.test.ts`).

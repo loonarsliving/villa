@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { decideRateForDate, type DateDecisionInput, type PricingSettings } from "./aiPricingEngine";
+import { decideRateForDate, fixedCalendarPeriodFor, learnDiscountWindow, type DateDecisionInput, type PricingSettings } from "./aiPricingEngine";
 
 /**
  * Tests for the pricing REASONING, not for Supabase plumbing.
@@ -81,7 +81,7 @@ describe("lead time (SIGNAL 3)", () => {
 
   it("discounts an empty date half way in the middle window", () => {
     const d = decide({ occupancyPct: 0, daysToArrival: 30 });
-    expect(d.decided_rate).toBe(617500); // -5% = half of -10%
+    expect(d.decided_rate).toBe(618000); // -5% = half of -10%
     expect(d.reason_codes).toContain("low_occupancy_partial_lead_time");
   });
 
@@ -108,8 +108,8 @@ describe("lead time (SIGNAL 3)", () => {
   it("raises price on high occupancy at ANY lead time", () => {
     const far = decide({ occupancyPct: 90, daysToArrival: 300 });
     const near = decide({ occupancyPct: 90, daysToArrival: 2 });
-    expect(far.decided_rate).toBe(747500);
-    expect(near.decided_rate).toBe(747500);
+    expect(far.decided_rate).toBe(748000);
+    expect(near.decided_rate).toBe(748000);
   });
 });
 
@@ -124,7 +124,8 @@ describe("low season (SIGNAL 1)", () => {
   });
 
   it("withdraws the discount on a quiet-period date that is selling anyway", () => {
-    const d = decide({ period: ramadan, occupancyPct: 60 });
+    // 50%: laku cukup untuk menarik diskon, tapi belum masuk tangga okupansi.
+    const d = decide({ period: ramadan, occupancyPct: 50 });
     expect(d.decided_rate).toBe(650000);
     expect(d.reason_codes).toContain("low_season_discount_not_needed");
   });
@@ -167,11 +168,11 @@ describe("market interest (SIGNAL 2)", () => {
   // (bobot 0,12) menjadi 0,12/0,72 x 3% = +0,5% pada harga akhir. Itu
   // memang disengaja -- ia mengukur seluruh Jogja, bukan villa kita.
   it("nudges price up when search interest is rising", () => {
-    expect(decide({ marketTrend: "naik" }).decided_rate).toBe(653250);
+    expect(decide({ marketTrend: "naik" }).decided_rate).toBe(653000);
   });
 
   it("nudges price down when search interest is falling", () => {
-    expect(decide({ marketTrend: "turun" }).decided_rate).toBe(646750);
+    expect(decide({ marketTrend: "turun" }).decided_rate).toBe(647000);
   });
 
   it("does nothing when the trend is flat or unknown", () => {
@@ -240,7 +241,7 @@ describe("pace (SIGNAL 4)", () => {
 describe("signals only count when they have data", () => {
   it("with occupancy alone, the blend reproduces the old single-signal engine", () => {
     const d = decide({ occupancyPct: 90, paceExpectedSold: null, marketSearchRelative: null, marketTrend: null });
-    expect(d.decided_rate).toBe(747500); // 650.000 x 1,15, persis seperti sebelum lapisan ini ada
+    expect(d.decided_rate).toBe(748000); // 650.000 x 1,15, persis seperti sebelum lapisan ini ada
   });
 });
 
@@ -308,5 +309,78 @@ describe("explanation", () => {
     expect(flat.reason_text).not.toContain("dinaikkan");
     expect(flat.reason_text).not.toContain("diturunkan karena");
     expect(flat.reason_text).not.toContain("didiskon");
+  });
+});
+
+describe("pembulatan ke Rp1.000 (owner 2026-09-23)", () => {
+  it("rounds every price to the nearest thousand", () => {
+    const d = decide({ marketSearchRelative: 0.05 });
+    expect(d.decided_rate % 1000).toBe(0);
+  });
+
+  it("never rounds below min_rate or above max_rate", () => {
+    expect(decide({ occupancyPct: 0, daysToArrival: 5, minRate: 585400 }).decided_rate).toBe(585400);
+    expect(decide({ occupancyPct: 100, maxRate: 700600 }).decided_rate).toBe(700600);
+  });
+});
+
+describe("Natal-Tahun Baru dari kalender tetap (tidak bergantung riset AI)", () => {
+  it("covers the nights of 24-31 Dec and 1 Jan, with New Year's Eve highest", () => {
+    expect(fixedCalendarPeriodFor("2026-12-23")).toBeNull();
+    expect(fixedCalendarPeriodFor("2026-12-24")?.suggested_adjustment_pct).toBe(0.2);
+    expect(fixedCalendarPeriodFor("2026-12-31")?.suggested_adjustment_pct).toBe(0.4);
+    expect(fixedCalendarPeriodFor("2027-01-01")?.suggested_adjustment_pct).toBe(0.2);
+    expect(fixedCalendarPeriodFor("2027-01-02")).toBeNull();
+  });
+
+  it("prices New Year's Eve up in full with no bookings and ignores the ordinary-night competitor cap", () => {
+    // 31 Des 2026 jatuh hari Kamis.
+    const d = decide({ targetDate: "2026-12-31", anchorRate: 750000, period: fixedCalendarPeriodFor("2026-12-31"), competitorMedian: 700000, maxRate: null });
+    expect(d.decided_rate).toBe(1050000);
+    expect(d.reason_codes).toContain("new_years_eve_peak");
+    expect(d.reason_codes).not.toContain("competitor_market_cap");
+  });
+
+  it("is still bounded by the daily movement clamp and max_rate", () => {
+    const period = fixedCalendarPeriodFor("2026-12-31");
+    expect(decide({ targetDate: "2026-12-31", anchorRate: 750000, period, liveRate: 750000, maxRate: null }).decided_rate).toBe(863000);
+    expect(decide({ targetDate: "2026-12-31", anchorRate: 750000, period, maxRate: 1000000 }).decided_rate).toBe(1000000);
+  });
+});
+
+describe("tangga okupansi", () => {
+  it("raises price step by step between 50% and the high threshold", () => {
+    // settings: tinggi 70% = +15%. 60% = separuh jalan = +7,5%.
+    const d = decide({ occupancyPct: 60 });
+    expect(d.decided_rate).toBe(699000);
+    expect(d.reason_codes).toContain("occupancy_building");
+  });
+
+  it("does nothing at or below 50%", () => {
+    expect(decide({ occupancyPct: 50 }).decided_rate).toBe(650000);
+  });
+});
+
+describe("jendela diskon dipelajari dari booking sendiri", () => {
+  const row = (lead: number) => ({ created_at: "2026-09-01T03:00:00Z", tgl_checkin: new Date(Date.parse("2026-09-01T00:00:00Z") + lead * 86400000).toISOString().slice(0, 10) });
+
+  it("keeps the 14/45 defaults until there is enough history", () => {
+    expect(learnDiscountWindow([row(3), row(5)])).toMatchObject({ fullDays: 14, halfDays: 45, learned: false });
+  });
+
+  it("uses the median and 75th percentile of the real booking window", () => {
+    const rows = Array.from({ length: 21 }, (_, i) => row(i * 2)); // 0..40 hari
+    expect(learnDiscountWindow(rows)).toMatchObject({ fullDays: 20, halfDays: 30, learned: true });
+  });
+
+  it("clamps so a few very early bookings cannot start discounts months ahead", () => {
+    const rows = Array.from({ length: 21 }, () => row(170));
+    expect(learnDiscountWindow(rows)).toMatchObject({ fullDays: 30, halfDays: 90 });
+  });
+
+  it("changes when a discount starts", () => {
+    const w = { fullDays: 7, halfDays: 21 };
+    expect(decide({ occupancyPct: 0, daysToArrival: 10, discountWindow: w }).reason_codes).toContain("low_occupancy_partial_lead_time");
+    expect(decide({ occupancyPct: 0, daysToArrival: 30, discountWindow: w }).reason_codes).toContain("low_occupancy_too_early_to_discount");
   });
 });
