@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { FinanceShell } from "./_shell";
+import { SurvivalControlCenter } from "./_SurvivalControlCenter";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { fmtCurrency, fmtCurrencyFull, fmtDate, fmtDateTime, todayISO } from "@/lib/format";
@@ -163,6 +164,8 @@ export default function FinancePage() {
 
   return (
     <FinanceShell pageTitle="Finance" pageSub="Cloudbeds → OTA → Direct Booking → Settlement → Cash">
+      <SurvivalControlCenter from={range.from} to={range.to} />
+
       {/* Filters */}
       <div className="flex flex-wrap gap-2 mb-4">
         {(Object.keys(PRESET_LABELS) as Preset[])
@@ -285,8 +288,11 @@ export default function FinancePage() {
                   <thead>
                     <tr className="text-left text-ink/40 border-b border-ink/10">
                       <th className="px-4 py-2">Channel</th>
-                      <th className="px-3 py-2">Revenue</th>
-                      <th className="px-3 py-2">Payment</th>
+                      <th className="px-3 py-2">Room Nights</th>
+                      <th className="px-3 py-2">Gross Revenue</th>
+                      <th className="px-3 py-2">OTA Deduction</th>
+                      <th className="px-3 py-2">Net Revenue</th>
+                      <th className="px-3 py-2">Avg Net ADR</th>
                       <th className="px-3 py-2">Outstanding</th>
                       <th className="px-3 py-2">Settlement</th>
                       <th className="px-3 py-2">Bank Tujuan</th>
@@ -295,7 +301,7 @@ export default function FinancePage() {
                   <tbody>
                     {channels.channels.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="px-4 py-6 text-center text-ink/30">
+                        <td colSpan={9} className="px-4 py-6 text-center text-ink/30">
                           Tidak ada data pada periode ini.
                         </td>
                       </tr>
@@ -308,8 +314,11 @@ export default function FinancePage() {
                             {c.normalized_channel} · {c.booking_count} booking
                           </div>
                         </td>
+                        <td className="px-3 py-2.5">{c.room_nights}</td>
                         <td className="px-3 py-2.5">{fmtCurrencyFull(c.revenue)}</td>
-                        <td className="px-3 py-2.5">{fmtCurrencyFull(c.payment)}</td>
+                        <td className="px-3 py-2.5 text-ruby-500">{c.ota_deduction > 0 ? `−${fmtCurrencyFull(c.ota_deduction)}` : "—"}</td>
+                        <td className="px-3 py-2.5 font-medium">{fmtCurrencyFull(c.net_revenue)}</td>
+                        <td className="px-3 py-2.5">{c.avg_net_adr != null ? fmtCurrencyFull(c.avg_net_adr) : "—"}</td>
                         <td className="px-3 py-2.5">{fmtCurrencyFull(c.outstanding)}</td>
                         <td className="px-3 py-2.5">
                           {c.settled_count}/{c.settled_count + c.unsettled_count} diterima
@@ -322,8 +331,11 @@ export default function FinancePage() {
                     <tfoot>
                       <tr className="border-t border-ink/10 font-semibold text-ink/70">
                         <td className="px-4 py-2.5">Total</td>
+                        <td className="px-3 py-2.5" />
                         <td className="px-3 py-2.5">{fmtCurrencyFull(channels.totals.revenue)}</td>
-                        <td className="px-3 py-2.5">{fmtCurrencyFull(channels.totals.payment)}</td>
+                        <td className="px-3 py-2.5" />
+                        <td className="px-3 py-2.5">{fmtCurrencyFull(channels.totals.net_revenue)}</td>
+                        <td className="px-3 py-2.5" />
                         <td className="px-3 py-2.5">{fmtCurrencyFull(channels.totals.outstanding)}</td>
                         <td className="px-3 py-2.5" colSpan={2}>
                           OTA Receivable: {fmtCurrencyFull(channels.totals.ota_receivable)}

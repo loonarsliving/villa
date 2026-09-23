@@ -352,12 +352,16 @@ export interface FinanceChannelRow {
   sumber: string;
   normalized_channel: NormalizedChannel;
   revenue: number;
+  net_revenue: number;
+  ota_deduction: number;
+  avg_net_adr: number | null;
   payment: number;
   outstanding: number;
   ota_receivable: number;
   settled_count: number;
   unsettled_count: number;
   booking_count: number;
+  room_nights: number;
   collection_method: CollectionMethod;
   destination_account: string | null;
 }
@@ -365,7 +369,7 @@ export interface FinanceChannelRow {
 export interface FinanceChannelBreakdown {
   period: { from: string; to: string };
   channels: FinanceChannelRow[];
-  totals: { revenue: number; payment: number; outstanding: number; ota_receivable: number };
+  totals: { revenue: number; net_revenue: number; payment: number; outstanding: number; ota_receivable: number };
   settlement_configs_count: number;
 }
 
@@ -486,4 +490,95 @@ export interface WalkinPayment {
   status: WalkinStatus;
   created_at: string;
   paid_at: string | null;
+}
+
+// ── Finance Survival Control Center ─────────────────────────────────────
+
+export interface FinancePropertyConfig {
+  id: string;
+  property_code: string;
+  property_name: string;
+  total_rooms: number;
+  investor_share_pct: number;
+  mkh_share_pct: number;
+  guarantee_per_room: number;
+  target_net_adr: number;
+  conservative_net_adr: number;
+  room_electricity_per_night: number;
+  payroll_employee_count: number;
+  payroll_per_employee: number;
+  currency: string;
+  active: boolean;
+  notes: string | null;
+  updated_by: string | null;
+  updated_at: string;
+  created_at: string;
+}
+
+export type RoomsPerNightBandName = "RED" | "ORANGE" | "GREEN" | "HEALTHY" | "STRONG" | "VERY_STRONG" | "UNKNOWN";
+export interface RoomsPerNightBand {
+  band: RoomsPerNightBandName;
+  label: string;
+  accent: "ruby" | "gold" | "sage" | "neutral";
+}
+
+export type SurvivalStatus = "SAFE" | "WATCH" | "AT_RISK";
+
+export interface FinanceSurvivalKpis {
+  property_code: string;
+  property_name: string;
+  period: { from: string; to: string; days: number };
+  today: { date: string; occupied: number; available: number; occupancy_pct: number | null; has_snapshot: boolean };
+  rolling_30d: { occupancy_pct: number | null; rooms_per_night: number | null; days_with_data: number };
+  rooms_per_night_period: number | null;
+  rooms_per_night_band: RoomsPerNightBand;
+  net_adr: number | null;
+  net_adr_note: string;
+  net_revenue_mtd: number;
+  gross_revenue_mtd: number;
+  ota_commission_mtd: number;
+  commission_source: "cloudbeds_live" | "unavailable_no_api_key";
+  room_nights_mtd: number;
+  booking_count_mtd: number;
+  investor_guarantee: number;
+  investor_entitlement_mtd: number;
+  guarantee_gap: number;
+  mkh_contractual_share_mtd: number;
+  opex_mtd: number;
+  opex_breakdown: { payroll: number; room_electricity: number };
+  opex_source: "ASSUMPTION_FROM_CONFIG";
+  opex_note: string;
+  funds_available_for_opex_if_mkh_zero: number;
+  mkh_operating_result: number;
+  mkh_funding_gap: number;
+  additional_revenue_needed: number;
+  survival_status: SurvivalStatus;
+  config: FinancePropertyConfig;
+}
+
+export interface FinanceScenarioResult {
+  days: number;
+  rooms_per_night: number;
+  net_adr: number;
+  available_room_nights: number;
+  occupied_room_nights: number;
+  occupancy_pct: number;
+  net_revenue: number;
+  investor_entitlement: number;
+  mkh_contractual_share: number;
+  monthly_guarantee: number;
+  guarantee_gap: number;
+  payroll: number;
+  room_electricity: number;
+  opex: number;
+  funds_available_for_opex_if_mkh_zero: number;
+  mkh_operating_result: number;
+  mkh_funding_gap: number;
+}
+
+export interface FinanceScenarioResponse {
+  property_code: string;
+  config: FinancePropertyConfig;
+  custom: FinanceScenarioResult;
+  targets: FinanceScenarioResult[];
 }
