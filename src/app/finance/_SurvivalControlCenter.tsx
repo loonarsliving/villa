@@ -59,7 +59,11 @@ export function SurvivalControlCenter({ from, to }: { from: string; to: string }
   if (error) return <div className="text-ruby-500 text-xs px-1 py-3 mb-4">Gagal memuat Survival Control Center: {error}</div>;
   if (!data) return null;
 
-  const roomsPerNightNow = data.rolling_30d.rooms_per_night ?? data.rooms_per_night_period;
+  // Rata-rata bulan berjalan (dari tanggal 1 sampai hari ini), BUKAN 30 hari
+  // rolling -- per instruksi owner (23 Sep 2026): cek di tanggal 6 harus
+  // dibandingkan ke rata-rata tgl 1-6 bulan ini, bukan jendela 30 hari yang
+  // bisa nyambung ke bulan lalu.
+  const roomsPerNightNow = data.simple.mtd_avg_rooms_per_night;
   const guaranteeCoveragePct = data.investor_guarantee > 0 ? (data.investor_entitlement_mtd / data.investor_guarantee) * 100 : null;
   const gapToGuarantee = data.investor_guarantee - data.investor_entitlement_mtd;
 
@@ -91,7 +95,7 @@ export function SurvivalControlCenter({ from, to }: { from: string; to: string }
             <span className="text-[10px] text-ink/40 uppercase tracking-wide">Status Loonars 1</span>
           </div>
           <div className="text-[13px] text-ink/80 leading-relaxed">
-            Rata-rata <strong>{fmtRoomsPerNight(roomsPerNightNow)}</strong> (30 hari terakhir). Supaya AMAN, butuh minimal{" "}
+            Rata-rata <strong>{fmtRoomsPerNight(roomsPerNightNow)}</strong> (bulan ini sampai hari ini). Supaya AMAN, butuh minimal{" "}
             <strong>{s.required_rooms_per_night != null ? `${s.required_rooms_per_night.toFixed(1)} kamar/malam` : "—"}</strong> rata-rata sebulan.
             {currentRow?.aman === false && currentRow.kurang_malam_per_bulan != null && (
               <>
@@ -184,7 +188,7 @@ export function SurvivalControlCenter({ from, to }: { from: string; to: string }
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
             <StatCard label="30-Day Rolling Occupancy" value={fmtPct(data.rolling_30d.occupancy_pct)} accent="azure" sub={`${data.rolling_30d.days_with_data} hari data`} />
-            <StatCard label="Rata-rata Kamar/Malam" value={fmtRoomsPerNight(roomsPerNightNow)} accent={data.rooms_per_night_band.accent} sub={data.rooms_per_night_band.label} />
+            <StatCard label="Rata-rata Kamar/Malam (Bulan Ini)" value={fmtRoomsPerNight(roomsPerNightNow)} accent={data.rooms_per_night_band.accent} sub={data.rooms_per_night_band.label} />
             <StatCard label="Net ADR" value={data.net_adr != null ? fmtCurrency(data.net_adr) : "—"} accent="azure" sub={data.net_adr == null ? "Belum ada kamar terisi" : undefined} />
             <StatCard label="Net Revenue (periode)" value={fmtCurrency(data.net_revenue_mtd)} accent="azure" />
             <StatCard label="Jaminan Investor" value={fmtCurrency(data.investor_guarantee)} accent="neutral" sub="per bulan" />

@@ -567,6 +567,7 @@ export interface FinanceSimpleTargetRow {
 export interface FinanceSimpleTargets {
   required_rooms_per_night: number | null;
   required_room_nights_per_month: number | null;
+  mtd_avg_rooms_per_night: number | null;
   target_table: FinanceSimpleTargetRow[];
   this_month: {
     month: string;
