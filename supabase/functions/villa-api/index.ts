@@ -954,22 +954,14 @@ async function computeReport(unit_id, periode){
   };
 }
 
-async function computeOtaBreakdown(periode){
-  const [y, mo] = periode.split('-').map(Number);
-  const start = `${periode}-01`;
-  const end = new Date(Date.UTC(y, mo, 1)).toISOString().slice(0, 10);
-
-  const { data: bookings } = await supabase.from('bookings')
-    .select('sumber,total_bayar')
-    .gte('tgl_checkin', start).lt('tgl_checkin', end)
-    .neq('status', 'batal');
-
-  const grossBySumber = new Map();
-  for (const b of (bookings ?? [])) {
-    const key = b.sumber ?? 'other';
-    grossBySumber.set(key, (grossBySumber.get(key) ?? 0) + Number(b.total_bayar ?? 0));
-  }
-
+/**
+ * Live per-channel OTA commission %, from Cloudbeds' own getSources --
+ * shared by computeOtaBreakdown() (investor-facing estimate) and the
+ * Survival Control Center engine below, so the two never quietly
+ * disagree about what an OTA's commission is. Empty map (0% everywhere)
+ * if the API key is missing or the call fails -- never invents a number.
+ */
+async function getOtaCommissionPctMap(){
   const commissionPctBySumber = new Map();
   const apiKey = cloudbedsApiKey();
   if (apiKey) {
@@ -986,6 +978,26 @@ async function computeOtaBreakdown(periode){
       }
     } catch { /* Cloudbeds unreachable -- fall through with 0% for OTA sumbers below, never invent a number */ }
   }
+  return { commissionPctBySumber, commission_source: apiKey ? 'cloudbeds_live' : 'unavailable_no_api_key' };
+}
+
+async function computeOtaBreakdown(periode){
+  const [y, mo] = periode.split('-').map(Number);
+  const start = `${periode}-01`;
+  const end = new Date(Date.UTC(y, mo, 1)).toISOString().slice(0, 10);
+
+  const { data: bookings } = await supabase.from('bookings')
+    .select('sumber,total_bayar')
+    .gte('tgl_checkin', start).lt('tgl_checkin', end)
+    .neq('status', 'batal');
+
+  const grossBySumber = new Map();
+  for (const b of (bookings ?? [])) {
+    const key = b.sumber ?? 'other';
+    grossBySumber.set(key, (grossBySumber.get(key) ?? 0) + Number(b.total_bayar ?? 0));
+  }
+
+  const { commissionPctBySumber, commission_source } = await getOtaCommissionPctMap();
 
   const sources = [];
   let total_gross = 0, total_commission = 0;
@@ -1000,7 +1012,7 @@ async function computeOtaBreakdown(periode){
 
   return {
     periode, sources, total_gross, total_commission, total_net: total_gross - total_commission,
-    commission_source: apiKey ? 'cloudbeds_live' : 'unavailable_no_api_key',
+    commission_source,
   };
 }
 
@@ -1229,6 +1241,232 @@ async function writeFinanceAudit({ entity_type, entity_id, session, action, old_
     entity_type, entity_id, user_id: session.uid, user_nama: session.email ?? null,
     action, old_value: old_value ?? null, new_value: new_value ?? null, reason: reason ?? null,
   });
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// FINANCE SURVIVAL CONTROL CENTER
+//
+// A SEPARATE analysis engine from computeReport() (the frozen,
+// authoritative dividend-payout formula -- see
+// docs/revenue-engine/PHASE0-BASELINE.md §2, which deducts a flat 27.5%
+// marketing + 25% opex before splitting 70/30). This engine splits
+// revenue net of OTA commission directly 70/30, per owner instruction
+// (23 Sep 2026, in response to being asked which formula to use):
+// "Ya pakai, tp bukan di halaman investor, ya ini hanya ada di halaman
+// finance" -- i.e. use this formula, but ONLY on /finance, never
+// surfaced to investors, and never used to actually calculate what an
+// investor is paid. The two engines will show DIFFERENT numbers for the
+// same period by design.
+//
+// All business parameters (rooms, split %, guarantee, ADR targets,
+// payroll, electricity) come from finance_property_config -- nothing
+// here is hardcoded per property, so Loonars 2/3 need only a new config
+// row, never new code.
+// ═══════════════════════════════════════════════════════════════════════
+
+async function getPropertyConfig(property_code){
+  const { data } = await supabase.from('finance_property_config').select('*').eq('property_code', property_code).eq('active', true).maybeSingle();
+  return data ?? null;
+}
+
+function daysInclusive(from, to){
+  return Math.round((new Date(`${to}T00:00:00Z`).getTime() - new Date(`${from}T00:00:00Z`).getTime()) / 86400000) + 1;
+}
+function addDaysStr(dateStr, n){
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0,10);
+}
+
+/**
+ * Net room revenue for bookings whose tgl_checkin falls in [from,to], net
+ * of live Cloudbeds OTA commission (same method computeOtaBreakdown
+ * uses -- getOtaCommissionPctMap() is shared, not duplicated). There is
+ * no tax field anywhere in this schema, so "net of tax" is genuinely
+ * NOT_AVAILABLE -- reported as such (tax_deduction: null), never
+ * silently treated as zero.
+ */
+async function computeNetRevenueForRange(from, to){
+  const { data: bookings } = await supabase.from('bookings')
+    .select('sumber,total_bayar,tarif,durasi_malam,status')
+    .gte('tgl_checkin', from).lte('tgl_checkin', to)
+    .neq('status', 'batal');
+  const rows = bookings ?? [];
+  const { commissionPctBySumber, commission_source } = await getOtaCommissionPctMap();
+  let gross = 0, commission = 0, room_nights = 0;
+  for(const b of rows){
+    const amount = Number(b.total_bayar ?? b.tarif ?? 0);
+    const pct = commissionPctBySumber.get(b.sumber) ?? 0;
+    gross += amount;
+    commission += amount * (pct/100);
+    room_nights += Number(b.durasi_malam ?? 0);
+  }
+  return { gross_revenue: gross, ota_commission: commission, net_revenue: gross - commission, room_nights, booking_count: rows.length, commission_source, tax_deduction: null };
+}
+
+/** Occupied/available room-nights from the daily inventory snapshot -- the SAME table /api/admin/revenue-metrics reads, so occupancy never disagrees between the two dashboards. */
+async function computeOccupiedRoomNights(from, to){
+  const { data } = await supabase.from('villa_daily_inventory_snapshot')
+    .select('snapshot_date,unit_status,on_books')
+    .gte('snapshot_date', from).lte('snapshot_date', to);
+  const rows = data ?? [];
+  const availableRoomNights = rows.filter(r=>r.unit_status!=='maintenance').length;
+  const occupiedRoomNights = rows.filter(r=>r.on_books || r.unit_status==='occupied').length;
+  const daysWithData = new Set(rows.map(r=>r.snapshot_date)).size;
+  return { availableRoomNights, occupiedRoomNights, daysWithData };
+}
+
+/**
+ * Pure scenario calculator. The SAME function backs the What-If
+ * calculator, the 5/6/7/8 rooms/night target table, AND (fed with known
+ * actuals) computeSurvivalKpis() below -- there is exactly one place
+ * this arithmetic exists.
+ *
+ * Guarantee/MKH cascade is THIS ENGINE'S OWN DERIVATION of the owner's
+ * stated worst-case priority (brief, 23 Sep 2026: "1. Operational
+ * continuity 2. Investor guarantee 3. OPEX 4. MKH management profit"),
+ * not a formula the brief gave directly -- flagged for owner
+ * confirmation. Reasoning: net_revenue is fully allocated 70/30 under
+ * the normal split, so if the investor's 70% falls short of the
+ * guarantee, the only pool that can top it up is MKH's 30% share (OPEX
+ * is a separate real cash cost, not part of the split). So MKH's 30%
+ * absorbs the guarantee shortfall AND opex before any profit, and can
+ * go to zero or negative -- negative meaning Loonars must fund the gap
+ * from outside this revenue.
+ */
+function computeScenario(config, { netAdr, roomsPerNight, days = 30 }){
+  const total_rooms = Number(config.total_rooms);
+  const available_room_nights = total_rooms * days;
+  const occupied_room_nights = Math.min(available_room_nights, roomsPerNight * days);
+  const occupancy_pct = available_room_nights > 0 ? (occupied_room_nights / available_room_nights) * 100 : 0;
+
+  const net_revenue = netAdr * occupied_room_nights;
+  const investor_entitlement = net_revenue * Number(config.investor_share_pct);
+  const mkh_contractual_share = net_revenue * Number(config.mkh_share_pct);
+
+  // Guarantee is a MONTHLY figure; prorated here only so a scenario run
+  // for a shorter or longer window than 30 days stays comparable.
+  const monthly_guarantee = total_rooms * Number(config.guarantee_per_room) * (days / 30);
+  const guarantee_gap = Math.max(0, monthly_guarantee - investor_entitlement);
+
+  const payroll = Number(config.payroll_employee_count) * Number(config.payroll_per_employee) * (days / 30);
+  const room_electricity = Number(config.room_electricity_per_night) * occupied_room_nights;
+  const opex = payroll + room_electricity;
+
+  const funds_available_for_opex_if_mkh_zero = Math.max(0, mkh_contractual_share - guarantee_gap);
+  const mkh_operating_result = mkh_contractual_share - guarantee_gap - opex;
+  const mkh_funding_gap = Math.max(0, -mkh_operating_result);
+
+  return {
+    days, rooms_per_night: roomsPerNight, net_adr: netAdr,
+    available_room_nights, occupied_room_nights, occupancy_pct,
+    net_revenue, investor_entitlement, mkh_contractual_share,
+    monthly_guarantee, guarantee_gap,
+    payroll, room_electricity, opex,
+    funds_available_for_opex_if_mkh_zero,
+    mkh_operating_result, mkh_funding_gap,
+  };
+}
+
+/** Additional net revenue needed (over the period) so the contractual split alone covers BOTH the guarantee and OPEX -- the binding constraint is whichever needs more revenue. */
+function computeAdditionalRevenueNeeded(config, actualNetRevenue, monthly_guarantee, opex){
+  const investorPct = Number(config.investor_share_pct);
+  const mkhPct = Number(config.mkh_share_pct);
+  const revenueNeededForGuarantee = investorPct > 0 ? monthly_guarantee / investorPct : 0;
+  const revenueNeededForOpex = mkhPct > 0 ? opex / mkhPct : 0;
+  const required = Math.max(revenueNeededForGuarantee, revenueNeededForOpex);
+  return Math.max(0, required - actualNetRevenue);
+}
+
+/** Fixed bands per owner's brief (23 Sep 2026) -- not stored in config since the brief gave exact numbers, not "configurable". One place, not scattered across the UI. */
+function roomsPerNightBand(roomsPerNight){
+  if(roomsPerNight == null) return { band:'UNKNOWN', label:'Belum ada data', accent:'neutral' };
+  if(roomsPerNight < 3) return { band:'RED', label:'Kritis', accent:'ruby' };
+  if(roomsPerNight < 5) return { band:'ORANGE', label:'Waspada', accent:'gold' };
+  if(roomsPerNight < 6) return { band:'GREEN', label:'Aman', accent:'sage' };
+  if(roomsPerNight < 7) return { band:'HEALTHY', label:'Sehat', accent:'sage' };
+  if(roomsPerNight < 8) return { band:'STRONG', label:'Kuat', accent:'sage' };
+  return { band:'VERY_STRONG', label:'Sangat Kuat', accent:'sage' };
+}
+
+function survivalStatus(guarantee_gap, mkh_funding_gap){
+  if(guarantee_gap === 0 && mkh_funding_gap === 0) return 'SAFE';
+  if(mkh_funding_gap > 0) return 'AT_RISK';
+  return 'WATCH';
+}
+
+async function computeSurvivalKpis(property_code, from, to){
+  const config = await getPropertyConfig(property_code);
+  if(!config) return null;
+
+  const today = todayWIB();
+  const days = daysInclusive(from, to);
+  const total_rooms = Number(config.total_rooms);
+
+  const netRevenueRange = await computeNetRevenueForRange(from, to);
+  const occRange = await computeOccupiedRoomNights(from, to);
+
+  const { data: todayRows } = await supabase.from('villa_daily_inventory_snapshot')
+    .select('unit_status,on_books').eq('snapshot_date', today);
+  const todayOccupied = (todayRows ?? []).filter(r=>r.on_books || r.unit_status==='occupied').length;
+  const todayAvailable = (todayRows ?? []).filter(r=>r.unit_status!=='maintenance').length;
+
+  const occ30 = await computeOccupiedRoomNights(addDaysStr(today,-29), today);
+  const occupancy_30d_pct = occ30.availableRoomNights>0 ? (occ30.occupiedRoomNights/occ30.availableRoomNights)*100 : null;
+  const rooms_per_night_30d = occ30.daysWithData>0 ? occ30.occupiedRoomNights/occ30.daysWithData : null;
+  const rooms_per_night_period = days>0 ? occRange.occupiedRoomNights/days : null;
+
+  const net_adr = occRange.occupiedRoomNights>0 ? netRevenueRange.net_revenue/occRange.occupiedRoomNights : null;
+
+  const monthly_guarantee = total_rooms * Number(config.guarantee_per_room);
+  const investor_entitlement = netRevenueRange.net_revenue * Number(config.investor_share_pct);
+  const mkh_contractual_share = netRevenueRange.net_revenue * Number(config.mkh_share_pct);
+  const guarantee_gap = Math.max(0, monthly_guarantee - investor_entitlement);
+
+  const payroll_mtd = Number(config.payroll_employee_count)*Number(config.payroll_per_employee)*(days/30);
+  const room_electricity_mtd = Number(config.room_electricity_per_night) * occRange.occupiedRoomNights;
+  const opex_mtd = payroll_mtd + room_electricity_mtd;
+
+  const funds_available_for_opex_if_mkh_zero = Math.max(0, mkh_contractual_share - guarantee_gap);
+  const mkh_operating_result = mkh_contractual_share - guarantee_gap - opex_mtd;
+  const mkh_funding_gap = Math.max(0, -mkh_operating_result);
+
+  const additional_revenue_needed = computeAdditionalRevenueNeeded(config, netRevenueRange.net_revenue, monthly_guarantee, opex_mtd);
+  const band = roomsPerNightBand(rooms_per_night_30d ?? rooms_per_night_period);
+  const status = survivalStatus(guarantee_gap, mkh_funding_gap);
+
+  return {
+    property_code, property_name: config.property_name, period: { from, to, days },
+    today: {
+      date: today, occupied: todayOccupied, available: todayAvailable,
+      occupancy_pct: todayAvailable>0 ? (todayOccupied/todayAvailable)*100 : null,
+      has_snapshot: (todayRows ?? []).length > 0,
+    },
+    rolling_30d: { occupancy_pct: occupancy_30d_pct, rooms_per_night: rooms_per_night_30d, days_with_data: occ30.daysWithData },
+    rooms_per_night_period,
+    rooms_per_night_band: band,
+    net_adr,
+    net_adr_note: 'Net dari komisi OTA live Cloudbeds; TIDAK termasuk potongan pajak -- tidak ada field pajak di sistem ini (NOT_AVAILABLE).',
+    net_revenue_mtd: netRevenueRange.net_revenue,
+    gross_revenue_mtd: netRevenueRange.gross_revenue,
+    ota_commission_mtd: netRevenueRange.ota_commission,
+    commission_source: netRevenueRange.commission_source,
+    room_nights_mtd: netRevenueRange.room_nights,
+    booking_count_mtd: netRevenueRange.booking_count,
+    investor_guarantee: monthly_guarantee,
+    investor_entitlement_mtd: investor_entitlement,
+    guarantee_gap,
+    mkh_contractual_share_mtd: mkh_contractual_share,
+    opex_mtd,
+    opex_breakdown: { payroll: payroll_mtd, room_electricity: room_electricity_mtd },
+    opex_source: 'ASSUMPTION_FROM_CONFIG',
+    opex_note: 'Dihitung dari asumsi Konfigurasi Properti (payroll + listrik kamar per malam terisi), bukan dari pencatatan opex aktual -- opex_bulanan (tabel itemized) masih kosong. Ubah asumsi di halaman Konfigurasi Properti kalau ada perubahan jumlah pegawai/tarif listrik.',
+    funds_available_for_opex_if_mkh_zero,
+    mkh_operating_result, mkh_funding_gap,
+    additional_revenue_needed,
+    survival_status: status,
+    config,
+  };
 }
 
 /**
@@ -2909,12 +3147,13 @@ Deno.serve(async (req)=>{
     if(!isFinance) return forbidden();
     const { from, to } = financeDateRange();
     const { data: rows, error } = await supabase.from('bookings')
-      .select('id,sumber,status,tgl_checkin,tgl_checkout,total_bayar,tarif,cloudbeds_balance')
+      .select('id,sumber,status,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_balance')
       .gte('tgl_checkin', from).lte('tgl_checkin', to).neq('status','batal');
     if(error) return err(error.message);
     const bookings = rows ?? [];
     const configMap = await getSettlementConfigMap();
     await ensureFinanceSettlements(bookings, configMap);
+    const { commissionPctBySumber } = await getOtaCommissionPctMap();
 
     const ids = bookings.map(b=>b.id);
     const settlementByBooking = new Map();
@@ -2926,11 +3165,14 @@ Deno.serve(async (req)=>{
     const bySumber = new Map();
     for(const b of bookings){
       const key = b.sumber ?? 'other';
-      const cur = bySumber.get(key) ?? { sumber:key, normalized_channel: normalizedChannel(key), revenue:0, payment:0, outstanding:0, ota_receivable:0, settled_count:0, unsettled_count:0, booking_count:0 };
+      const cur = bySumber.get(key) ?? { sumber:key, normalized_channel: normalizedChannel(key), revenue:0, net_revenue:0, payment:0, outstanding:0, ota_receivable:0, settled_count:0, unsettled_count:0, booking_count:0, room_nights:0 };
       const amount = Number(b.total_bayar ?? b.tarif ?? 0);
+      const commissionPct = commissionPctBySumber.get(b.sumber) ?? 0;
       const bOutstanding = outstandingForBooking(b, amount);
       cur.revenue += amount;
+      cur.net_revenue += amount * (1 - commissionPct/100);
       cur.booking_count++;
+      cur.room_nights += Number(b.durasi_malam ?? 0);
       cur.payment += amount - bOutstanding;
       cur.outstanding += bOutstanding;
       const s = settlementByBooking.get(b.id);
@@ -2942,9 +3184,15 @@ Deno.serve(async (req)=>{
     const cfgArr = [...configMap.values()];
     const channels = [...bySumber.values()].map(c=>{
       const cfg = configMap.get(c.sumber);
-      return { ...c, collection_method: cfg?.collection_method ?? 'UNKNOWN', destination_account: cfg?.destination_account_label ?? null };
+      return {
+        ...c,
+        ota_deduction: c.revenue - c.net_revenue,
+        avg_net_adr: c.room_nights>0 ? c.net_revenue/c.room_nights : null,
+        collection_method: cfg?.collection_method ?? 'UNKNOWN',
+        destination_account: cfg?.destination_account_label ?? null,
+      };
     }).sort((a,b)=>b.revenue-a.revenue);
-    const totals = channels.reduce((acc,c)=>({ revenue:acc.revenue+c.revenue, payment:acc.payment+c.payment, outstanding:acc.outstanding+c.outstanding, ota_receivable:acc.ota_receivable+c.ota_receivable }), { revenue:0, payment:0, outstanding:0, ota_receivable:0 });
+    const totals = channels.reduce((acc,c)=>({ revenue:acc.revenue+c.revenue, net_revenue:acc.net_revenue+c.net_revenue, payment:acc.payment+c.payment, outstanding:acc.outstanding+c.outstanding, ota_receivable:acc.ota_receivable+c.ota_receivable }), { revenue:0, net_revenue:0, payment:0, outstanding:0, ota_receivable:0 });
     return json({ period:{from,to}, channels, totals, settlement_configs_count: cfgArr.length });
   }
 
@@ -3143,6 +3391,63 @@ Deno.serve(async (req)=>{
     const { data, error } = await query;
     if(error) return err(error.message);
     return json(data ?? []);
+  }
+
+  // ── FINANCE SURVIVAL CONTROL CENTER ─────────────────────────────────────
+
+  if(path==='/finance/property-config' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const { data, error } = await supabase.from('finance_property_config').select('*').order('property_code');
+    if(error) return err(error.message);
+    return json(data ?? []);
+  }
+
+  if(path==='/finance/property-config' && m==='POST'){
+    if(!isAdmin) return forbidden();
+    const body = await req.json();
+    const property_code = String(body.property_code ?? '').trim();
+    if(!property_code) return err('property_code wajib diisi');
+    const { data: existing } = await supabase.from('finance_property_config').select('*').eq('property_code', property_code).maybeSingle();
+    const NUM_FIELDS = ['total_rooms','investor_share_pct','mkh_share_pct','guarantee_per_room','target_net_adr','conservative_net_adr','room_electricity_per_night','payroll_employee_count','payroll_per_employee'];
+    const patch = { property_code, property_name: body.property_name ?? property_code, currency: body.currency ?? 'IDR', active: body.active !== false, notes: body.notes ?? null, updated_by: session.uid, updated_at: new Date().toISOString() };
+    for(const f of NUM_FIELDS){ if(body[f] != null && body[f] !== '') patch[f] = Number(body[f]); }
+    if(!existing){
+      for(const f of NUM_FIELDS){ if(patch[f] == null) return err(`${f} wajib diisi untuk konfigurasi baru`); }
+    }
+    const { data: saved, error } = await supabase.from('finance_property_config').upsert(patch, { onConflict:'property_code' }).select('*').single();
+    if(error) return err(error.message);
+    await writeFinanceAudit({ entity_type:'finance_property_config', entity_id: saved.id, session, action: existing?'update_property_config':'create_property_config', old_value: existing ?? null, new_value: saved, reason: body.reason ?? null });
+    return json(saved);
+  }
+
+  if(path==='/finance/survival' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const property_code = url.searchParams.get('property') ?? 'loonars-1';
+    const { from, to } = financeDateRange();
+    const kpis = await computeSurvivalKpis(property_code, from, to);
+    if(!kpis) return err(`Konfigurasi properti '${property_code}' belum ada`, 404);
+    return json(kpis);
+  }
+
+  if(path==='/finance/scenario' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const property_code = url.searchParams.get('property') ?? 'loonars-1';
+    const config = await getPropertyConfig(property_code);
+    if(!config) return err(`Konfigurasi properti '${property_code}' belum ada`, 404);
+
+    const netAdr = Number(url.searchParams.get('net_adr') ?? config.target_net_adr);
+    const days = Math.max(1, Number(url.searchParams.get('days') ?? 30));
+
+    // Explicit rooms_per_night wins; otherwise derive from an occupancy_pct input.
+    let roomsPerNight = url.searchParams.get('rooms_per_night') != null ? Number(url.searchParams.get('rooms_per_night')) : null;
+    if(roomsPerNight == null){
+      const occupancyPct = Number(url.searchParams.get('occupancy_pct') ?? 0);
+      roomsPerNight = (occupancyPct/100) * Number(config.total_rooms);
+    }
+
+    const custom = computeScenario(config, { netAdr, roomsPerNight, days });
+    const targets = [5,6,7,8].map(r => computeScenario(config, { netAdr: Number(config.target_net_adr), roomsPerNight: r, days: 30 }));
+    return json({ property_code, config, custom, targets });
   }
 
   // ── Database tamu ──────────────────────────────────────────────────────
