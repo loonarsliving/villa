@@ -157,10 +157,52 @@ export default function PaymentGatewayPage() {
   const villaTarif = selectedUnit ? (form.tipe === "harian" ? selectedUnit.tarif_harian : selectedUnit.tarif_bulanan) : 0;
   const stayRange = validateStayRange(form.checkin, form.checkout);
   const malam = nightsBetween(form.checkin, form.checkout);
-  // Perkiraan saja. Nominal final dihitung villa-api (POST /bookings), yang
-  // memakai tarif harian per tanggal dari `villa_rates` kalau ada -- jadi
-  // angka ini bisa berbeda dari tagihan akhir, dan memang dilabeli begitu.
-  const villaEstimasi = form.tipe === "harian" ? villaTarif * malam : villaTarif;
+  // Angka yang benar-benar akan ditagih, diambil dari villa-api
+  // (GET /tarif-preview) yang memanggil computeStayTarif() -- fungsi yang
+  // SAMA dipakai POST /bookings (yang membuat booking ini) dan
+  // /public/bookings (loonars.id). Sebelum ini, kasir menghitung sendiri
+  // tarif_harian flat di browser dan tidak pernah melihat override
+  // `villa_rates` (harga dinamis mesin AI: weekend surcharge, high/low
+  // season, dst.) -- jadi angka di layar kasir bisa berbeda dari harga di
+  // loonars.id dan dari nominal yang akhirnya tercatat di booking yang sama.
+  const [tarifServer, setTarifServer] = useState<number | null>(null);
+  const [tarifServerLoading, setTarifServerLoading] = useState(false);
+  useEffect(() => {
+    if (!selectedUnit || form.kategori !== "villa") {
+      setTarifServer(null);
+      return;
+    }
+    if (form.tipe === "harian" && !stayRange.ok) {
+      setTarifServer(null);
+      return;
+    }
+    let cancelled = false;
+    setTarifServerLoading(true);
+    const params = new URLSearchParams({
+      unit_id: selectedUnit.id,
+      tipe: form.tipe,
+      tgl_checkin: form.checkin,
+    });
+    if (form.tipe === "harian") params.set("tgl_checkout", form.checkout);
+    api
+      .get<{ tarif: number }>(`/tarif-preview?${params.toString()}`)
+      .then((res) => {
+        if (!cancelled) setTarifServer(res.tarif);
+      })
+      .catch(() => {
+        if (!cancelled) setTarifServer(null);
+      })
+      .finally(() => {
+        if (!cancelled) setTarifServerLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedUnit, form.kategori, form.tipe, form.checkin, form.checkout, stayRange.ok]);
+  // Fallback kalau /tarif-preview belum selesai/gagal dimuat -- perkiraan
+  // memakai tarif flat, dilabeli sebagai perkiraan di UI di bawah.
+  const villaEstimasiFlat = form.tipe === "harian" ? villaTarif * malam : villaTarif;
+  const villaEstimasi = tarifServer ?? villaEstimasiFlat;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -630,14 +672,24 @@ export default function PaymentGatewayPage() {
                   )}
                   <Field label="Tarif (Rp)">
                     <div className={`${inputCls} flex items-center justify-between text-ink/70`}>
-                      <span>{selectedUnit ? fmtCurrencyFull(villaEstimasi) : "Pilih unit dulu"}</span>
+                      <span>
+                        {selectedUnit
+                          ? tarifServerLoading
+                            ? "Memuat harga…"
+                            : fmtCurrencyFull(villaEstimasi)
+                          : "Pilih unit dulu"}
+                      </span>
                       {selectedUnit && (
                         <span className="text-[9px] text-ink/30 text-right leading-snug">
-                          {form.tipe === "harian"
-                            ? `Perkiraan ${malam} malam × ${fmtCurrencyFull(villaTarif)} — Unit ${selectedUnit.nomor}`
-                            : `Tarif bulanan Unit ${selectedUnit.nomor}`}
+                          {tarifServer != null
+                            ? `Harga sistem saat ini — sama dengan loonars.id — Unit ${selectedUnit.nomor}`
+                            : form.tipe === "harian"
+                              ? `Perkiraan ${malam} malam × ${fmtCurrencyFull(villaTarif)} — Unit ${selectedUnit.nomor}`
+                              : `Tarif bulanan Unit ${selectedUnit.nomor}`}
                           <br />
-                          Nominal final dihitung sistem saat booking dibuat
+                          {tarifServer != null
+                            ? "Nominal ini yang akan tercatat saat booking dibuat"
+                            : "Perkiraan saja — nominal final dihitung sistem saat booking dibuat"}
                         </span>
                       )}
                     </div>

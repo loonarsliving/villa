@@ -1,4 +1,4 @@
-export type Role = "owner" | "receptionist" | "admin";
+export type Role = "owner" | "receptionist" | "admin" | "finance";
 
 export interface SessionUser {
   id: string;
@@ -314,6 +314,169 @@ export interface CloudbedsLogRow {
   created_at: string;
 }
 
+// ── Finance dashboard ───────────────────────────────────────────────────
+
+export type NormalizedChannel = "DIRECT" | "BOOKING_COM" | "AGODA" | "AIRBNB" | "TRAVELOKA" | "OTHER_OTA" | "UNKNOWN";
+export type CollectionMethod = "DIRECT_PAYMENT" | "OTA_COLLECT" | "VCC" | "PAY_AT_PROPERTY" | "PAYMENT_GATEWAY" | "UNKNOWN";
+export type SettlementStatus = "PENDING" | "READY_TO_COLLECT" | "PROCESSING" | "RECEIVED";
+export type SettlementConfidence = "CONFIGURED" | "UNKNOWN";
+export type ReconciliationStatus = "MATCHED" | "VARIANCE";
+export type PaymentStatus = "PAID" | "UNPAID" | "CANCELLED";
+
+export interface FinanceAlert {
+  type: string;
+  level: "info" | "warning" | "danger";
+  message: string;
+}
+
+export interface FinanceSummary {
+  period: { from: string; to: string };
+  gross_revenue: number;
+  net_revenue: number;
+  net_revenue_note: string;
+  payment_received: number;
+  payment_received_note: string;
+  outstanding: number;
+  ota_receivable: number;
+  ota_receivable_note: string;
+  cash_received: { amount: number; verified: boolean; count: number; note: string };
+  bookings_counted: number;
+  cloudbeds_balance_verified_count: number;
+  cancelled_excluded: number;
+  alerts: FinanceAlert[];
+  last_cloudbeds_activity: string | null;
+  data_caveats: string[];
+}
+
+export interface FinanceChannelRow {
+  sumber: string;
+  normalized_channel: NormalizedChannel;
+  revenue: number;
+  net_revenue: number;
+  ota_deduction: number;
+  avg_net_adr: number | null;
+  payment: number;
+  outstanding: number;
+  ota_receivable: number;
+  settled_count: number;
+  unsettled_count: number;
+  booking_count: number;
+  room_nights: number;
+  collection_method: CollectionMethod;
+  destination_account: string | null;
+}
+
+export interface FinanceChannelBreakdown {
+  period: { from: string; to: string };
+  channels: FinanceChannelRow[];
+  totals: { revenue: number; net_revenue: number; payment: number; outstanding: number; ota_receivable: number };
+  settlement_configs_count: number;
+}
+
+export interface FinanceBookingRow {
+  id: string;
+  unit_nomor: string;
+  guest_nama: string;
+  sumber: string;
+  normalized_channel: NormalizedChannel;
+  status: string;
+  tgl_checkin: string;
+  tgl_checkout: string | null;
+  durasi_malam: number | null;
+  revenue: number;
+  payment_status: PaymentStatus;
+  outstanding: number;
+  /** "cloudbeds_balance" = angka asli dari Cloudbeds; "booking_status_estimate" = perkiraan dari status booking. */
+  payment_status_source: "cloudbeds_balance" | "booking_status_estimate";
+  cloudbeds_reservation_id: string | null;
+  settlement_status: SettlementStatus | null;
+  settlement_confidence: SettlementConfidence | null;
+  expected_settlement_date: string | null;
+}
+
+export interface FinanceBookingList {
+  items: FinanceBookingRow[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface FinanceBookingDetail {
+  reservation: {
+    id: string;
+    guest_nama: string;
+    guests: { nama: string; hp: string | null; email: string | null } | null;
+    sumber: string;
+    normalized_channel: NormalizedChannel;
+    tgl_checkin: string;
+    tgl_checkout: string | null;
+    unit_nomor: string;
+    units: { nomor: string; blok: string } | null;
+    status: string;
+    cloudbeds_reservation_id: string | null;
+  };
+  revenue: { room: number; extras: null; discount: null; tax: null; fee: null; refund: null; net: number; note: string };
+  payment: {
+    paid: boolean;
+    outstanding: number;
+    method: string;
+    payment_date: string | null;
+    source: "cloudbeds_balance" | "booking_status_estimate";
+    cloudbeds_balance: number | null;
+  };
+  settlement: {
+    collection_method: CollectionMethod;
+    expected_settlement_date: string | null;
+    settlement_confidence: SettlementConfidence | null;
+    settlement_status: SettlementStatus | null;
+    settlement_reference: string | null;
+    destination_account: string | null;
+  };
+  bank: {
+    amount_received: number | null;
+    received_date: string | null;
+    bank_reference: string | null;
+    reconciliation_status: ReconciliationStatus | null;
+    variance_amount: number | null;
+  };
+  audit_log: FinanceAuditLogRow[];
+}
+
+export type SettlementBasis = "CHECKIN" | "CHECKOUT";
+export type SettlementSchedule = "FIXED_DELAY" | "MONTHLY_1ST" | "WEEKLY_ON_DAY";
+
+export interface FinanceOtaSettlementConfig {
+  id: string;
+  sumber: string;
+  collection_method: CollectionMethod;
+  settlement_delay_days: number | null;
+  /** Tanggal mana yang jadi acuan settlement_delay_days: CHECKIN (mis. Airbnb, dana dirilis ~24 jam setelah tamu checkin) atau CHECKOUT (mis. Booking.com/Agoda). */
+  settlement_basis: SettlementBasis;
+  /** FIXED_DELAY = settlement_delay_days hari setelah settlement_basis. MONTHLY_1ST = dibayar tanggal 1 bulan berikutnya (mis. Booking.com). WEEKLY_ON_DAY = dibayar hari tertentu tiap minggu (mis. Traveloka), lihat settlement_weekday. */
+  settlement_schedule: SettlementSchedule;
+  /** Untuk WEEKLY_ON_DAY: 0=Minggu..6=Sabtu. Null untuk schedule lain. */
+  settlement_weekday: number | null;
+  destination_account_label: string | null;
+  currency: string;
+  effective_date: string | null;
+  notes: string | null;
+  configured_by: string | null;
+  updated_at: string;
+}
+
+export interface FinanceAuditLogRow {
+  id: string;
+  entity_type: string;
+  entity_id: string;
+  user_id: string | null;
+  user_nama: string | null;
+  action: string;
+  old_value: Record<string, unknown> | null;
+  new_value: Record<string, unknown> | null;
+  reason: string | null;
+  created_at: string;
+}
+
 export type WalkinKategori = "cafe" | "spa" | "lainnya";
 export type WalkinStatus = "pending" | "lunas" | "batal";
 
@@ -327,4 +490,119 @@ export interface WalkinPayment {
   status: WalkinStatus;
   created_at: string;
   paid_at: string | null;
+}
+
+// ── Finance Survival Control Center ─────────────────────────────────────
+
+export interface FinancePropertyConfig {
+  id: string;
+  property_code: string;
+  property_name: string;
+  total_rooms: number;
+  investor_share_pct: number;
+  mkh_share_pct: number;
+  guarantee_per_room: number;
+  target_net_adr: number;
+  conservative_net_adr: number;
+  room_electricity_per_night: number;
+  payroll_employee_count: number;
+  payroll_per_employee: number;
+  currency: string;
+  active: boolean;
+  notes: string | null;
+  updated_by: string | null;
+  updated_at: string;
+  created_at: string;
+}
+
+export type RoomsPerNightBandName = "RED" | "ORANGE" | "GREEN" | "HEALTHY" | "STRONG" | "VERY_STRONG" | "UNKNOWN";
+export interface RoomsPerNightBand {
+  band: RoomsPerNightBandName;
+  label: string;
+  accent: "ruby" | "gold" | "sage" | "neutral";
+}
+
+export type SurvivalStatus = "SAFE" | "WATCH" | "AT_RISK";
+
+export interface FinanceSurvivalKpis {
+  property_code: string;
+  property_name: string;
+  period: { from: string; to: string; days: number };
+  today: { date: string; occupied: number; available: number; occupancy_pct: number | null; has_snapshot: boolean };
+  rolling_30d: { occupancy_pct: number | null; rooms_per_night: number | null; days_with_data: number };
+  rooms_per_night_period: number | null;
+  rooms_per_night_band: RoomsPerNightBand;
+  net_adr: number | null;
+  net_adr_note: string;
+  net_revenue_mtd: number;
+  gross_revenue_mtd: number;
+  ota_commission_mtd: number;
+  commission_source: "cloudbeds_live" | "unavailable_no_api_key";
+  room_nights_mtd: number;
+  booking_count_mtd: number;
+  investor_guarantee: number;
+  investor_entitlement_mtd: number;
+  guarantee_gap: number;
+  mkh_contractual_share_mtd: number;
+  opex_mtd: number;
+  opex_breakdown: { payroll: number; room_electricity: number };
+  opex_source: "ASSUMPTION_FROM_CONFIG";
+  opex_note: string;
+  funds_available_for_opex_if_mkh_zero: number;
+  mkh_operating_result: number;
+  mkh_funding_gap: number;
+  additional_revenue_needed: number;
+  survival_status: SurvivalStatus;
+  simple: FinanceSimpleTargets;
+  config: FinancePropertyConfig;
+}
+
+export interface FinanceSimpleTargetRow {
+  rooms_per_night: number;
+  occupancy_pct: number | null;
+  aman: boolean | null;
+  kurang_malam_per_bulan: number | null;
+}
+
+export interface FinanceSimpleTargets {
+  required_rooms_per_night: number | null;
+  required_room_nights_per_month: number | null;
+  target_table: FinanceSimpleTargetRow[];
+  this_month: {
+    month: string;
+    days_in_month: number;
+    day_of_month: number;
+    days_remaining: number;
+    room_nights_so_far: number;
+    room_nights_required: number | null;
+    room_nights_still_needed: number | null;
+    avg_rooms_per_night_needed_for_rest_of_month: number | null;
+  };
+}
+
+export interface FinanceScenarioResult {
+  days: number;
+  rooms_per_night: number;
+  net_adr: number;
+  available_room_nights: number;
+  occupied_room_nights: number;
+  occupancy_pct: number;
+  net_revenue: number;
+  investor_entitlement: number;
+  mkh_contractual_share: number;
+  monthly_guarantee: number;
+  guarantee_gap: number;
+  payroll: number;
+  room_electricity: number;
+  opex: number;
+  funds_available_for_opex_if_mkh_zero: number;
+  mkh_operating_result: number;
+  mkh_funding_gap: number;
+}
+
+export interface FinanceScenarioResponse {
+  property_code: string;
+  config: FinancePropertyConfig;
+  custom: FinanceScenarioResult;
+  targets: FinanceScenarioResult[];
 }

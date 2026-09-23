@@ -67,3 +67,8 @@ export async function isAdminToken(token: string): Promise<boolean> {
 export async function isStaffToken(token: string): Promise<boolean> {
   return tokenPasses(token, "/summary");
 }
+
+/** Confirms an x-villa-token belongs to a finance OR admin session, by forwarding it to villa-api's own finance-only /finance/whoami. */
+export async function isFinanceToken(token: string): Promise<boolean> {
+  return tokenPasses(token, "/finance/whoami");
+}

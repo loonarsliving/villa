@@ -1,5 +1,6 @@
 import { timingSafeEqual, createHash } from "node:crypto";
 import { getCloudbedsReservationTotals } from "@/lib/cloudbedsApi";
+import { mapSourceNameToSumber } from "@/lib/cloudbedsSourceMapping";
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
@@ -108,24 +109,6 @@ const ReservationSchema = z
     source_name: z.string().nullable().optional(),
   })
   .passthrough();
-
-// Maps Cloudbeds' free-text sourceName (e.g. "Airbnb", "Booking.com (Channel
-// Collect)", "Agoda") to one of bookings.sumber's fixed allowed values
-// (bookings_sumber_check) -- added 2026-09-10 so investor reports can show
-// real per-OTA commission cuts instead of a single flat "cloudbeds" bucket.
-// Falls back to 'cloudbeds' (still a valid value) for anything unrecognized,
-// e.g. Cloudbeds' own booking engine or a channel we don't have a distinct
-// bookings.sumber value for -- never guesses a value the CHECK constraint
-// doesn't already allow.
-function mapSourceNameToSumber(sourceName: string | null | undefined): string {
-  const s = (sourceName ?? "").toLowerCase();
-  if (s.includes("airbnb")) return "airbnb";
-  if (s.includes("booking.com") || s.includes("booking dot com")) return "booking.com";
-  if (s.includes("agoda")) return "agoda";
-  if (s.includes("tiket")) return "tiket";
-  if (s.includes("whatsapp")) return "whatsapp";
-  return "cloudbeds";
-}
 
 const WebhookPayloadSchema = z
   .object({

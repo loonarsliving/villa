@@ -4,6 +4,29 @@ import { timingSafeEqual } from 'node:crypto';
 
 const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
+// npm:imapflow (dipakai oleh scanPaymentInbox, lihat komentar di sana) punya
+// race condition di librarynya sendiri: greeting handler-nya (beginSession)
+// memanggil startSession()/authenticate() lewat then().catch() yang "keluar
+// dari thread parsing saat ini" tanpa di-await, dan di Supabase Edge Runtime
+// continuation itu kadang baru resume SETELAH client sudah ditutup (state
+// LOGOUT) -- baik oleh kode kita sendiri maupun oleh isolate yang dibekukan
+// lalu dipakai ulang untuk request lain. Hasilnya "Already logged out"
+// muncul sebagai unhandled rejection di luar try/catch manapun di kode kita,
+// dan Deno menjatuhkan RESPONS REQUEST LAIN yang kebetulan sedang berjalan
+// di isolate yang sama dengan 503 -- padahal request itu sendiri tidak
+// salah apa-apa. client.close() + client.on('error') (lihat scanPaymentInbox)
+// mengurangi kemungkinannya tapi terbukti dari log production TIDAK
+// menghilangkannya sepenuhnya. Ini jaring pengaman terakhir: menelan HANYA
+// unhandled rejection dengan pesan persis ini, supaya request lain yang
+// tidak berhubungan tidak ikut ditumbangkan olehnya. Error asli lain di
+// aplikasi ini TETAP muncul sebagai unhandled rejection seperti biasa.
+globalThis.addEventListener('unhandledrejection', (event)=>{
+  const msg = String(event.reason?.message ?? event.reason ?? '');
+  if(msg.includes('Already logged out')){
+    event.preventDefault();
+  }
+});
+
 const SESSION_SECRET = Deno.env.get('VILLA_SESSION_SECRET') ?? '';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 
@@ -107,6 +130,179 @@ function redact(value){
 // yang salah sekaligus menandai tamu yang salah sudah lunas.
 function paymentCode(bookingId){
   return bookingId.replace(/-/g,'').slice(-6).toUpperCase();
+}
+
+/**
+ * Kode unik pembayaran: angka 3 digit (100-999) yang ditambahkan ke total
+ * tagihan booking website, supaya nominalnya tidak pernah sama persis
+ * dengan booking lain yang juga sedang menunggu pembayaran. QRIS BTN yang
+ * dipakai statis -- tidak ada ID transaksi per pemesanan di notifikasi
+ * emailnya -- jadi nominal itu SATU-SATUNYA hal yang bisa dipakai
+ * /cron/check-payment-email untuk mencocokkan email masuk ke booking yang
+ * benar. Diperiksa dulu ke seluruh booking 'menunggu_pembayaran' yang
+ * masih hidup supaya tidak bentrok; kalau 20x coba masih bentrok (praktis
+ * mustahil untuk villa sekecil ini), tetap dipakai apa adanya daripada
+ * menggagalkan booking -- kalau sampai bentrok, cron akan menemukan lebih
+ * dari satu kandidat dan membiarkan owner mengonfirmasi manual lewat
+ * WhatsApp seperti biasa, bukan mengonfirmasi booking yang salah.
+ */
+async function generateKodeUnikPembayaran(){
+  const {data:pending} = await supabase.from('bookings')
+    .select('total_bayar').eq('sumber','website').eq('status','menunggu_pembayaran');
+  const dipakai = new Set((pending??[]).map(b=>Number(b.total_bayar)%1000));
+  for(let coba=0; coba<20; coba++){
+    const kandidat = 100 + Math.floor(Math.random()*900);
+    if(!dipakai.has(kandidat)) return kandidat;
+  }
+  return 100 + Math.floor(Math.random()*900);
+}
+
+/**
+ * Mencocokkan satu nominal (dibaca dari email notifikasi BTN QRIS) ke
+ * booking website yang sedang menunggu pembayaran, dan mengunci booking itu
+ * kalau cocok. Dipakai oleh scanPaymentInbox untuk dua mode:
+ * - onlyBookingId kosong (cron latar belakang): mencocokkan ke SEMUA
+ *   booking pending -- kalau nominalnya cocok ke lebih dari satu sekaligus,
+ *   tidak ada yang dikonfirmasi (lihat komentar ambigu di bawah).
+ * - onlyBookingId diisi (dipicu tamu dari halaman booking): dibatasi ke
+ *   booking itu saja, jadi tidak pernah ambigu.
+ */
+async function tryConfirmBookingByNominal(nominal, onlyBookingId){
+  let q = supabase.from('bookings')
+    // Kolom sama persis dengan SELECT_COLS di /bridge/confirm-payment --
+    // cloudbeds_reservation_id WAJIB ikut supaya pushBookingToCloudbeds di
+    // bawah tahu booking ini sudah pernah didorong (kalau ada) dan tidak
+    // membuat reservasi Cloudbeds kedua untuk booking yang sama.
+    .select('id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,total_bayar,created_at,invoice_no,cloudbeds_reservation_id,adults,children')
+    .eq('sumber','website').eq('status','menunggu_pembayaran').eq('total_bayar', nominal);
+  if(onlyBookingId) q = q.eq('id', onlyBookingId);
+  const {data:pendingSama} = await q;
+  if(!pendingSama?.length) return {matched:false};
+
+  if(!onlyBookingId && pendingSama.length > 1){
+    await notif(null, 'all', 'transfer', 'Email pembayaran ambigu -- perlu konfirmasi manual',
+      `Email BTN QRIS Rp ${Math.round(nominal).toLocaleString('id-ID')} cocok dengan ${pendingSama.length} booking yang menunggu pembayaran sekaligus -- sistem tidak mengonfirmasi otomatis supaya tidak salah kunci unit. Mohon cek dan balas LUNAS <kode> secara manual untuk booking yang benar.`, null);
+    return {ambigu:true, nominal, jumlah_booking: pendingSama.length};
+  }
+
+  const booking = pendingSama[0];
+  const invoice_no = booking.invoice_no ?? invoiceNoFor(booking);
+  const {error:lockErr} = await supabase.from('bookings')
+    .update({status:'terjadwal', bukti_pembayaran_at:new Date().toISOString(), invoice_no})
+    .eq('id', booking.id).eq('status','menunggu_pembayaran');
+
+  if(lockErr){
+    if(lockErr.code !== '23P01') return {matched:false};
+    // Unit keburu dikunci booking lain untuk tanggal yang sama. Tamu sudah
+    // membayar, jadi pembayarannya tetap dicatat dan invoice tetap terbit
+    // -- yang tidak dilakukan hanyalah memaksa unitnya masuk kalender.
+    await supabase.from('bookings').update({bukti_pembayaran_at:new Date().toISOString(), invoice_no}).eq('id', booking.id);
+    await notif(null, 'all', 'transfer', 'KONFLIK UNIT -- Booking Website perlu dijadwalkan ulang',
+      `Booking ${String(booking.id).slice(0,8)} (Unit ${booking.unit_nomor}, ${booking.tgl_checkin} s/d ${booking.tgl_checkout}) terkonfirmasi lunas otomatis via email tapi unit sudah terisi booking lain -- mohon segera hubungi tamu untuk reschedule/unit pengganti.`, booking.id);
+    return {matched:false};
+  }
+
+  await notif(null, 'all', 'transfer', `Pembayaran dikonfirmasi otomatis -- Unit ${booking.unit_nomor} terkunci`,
+    `Booking ${String(booking.id).slice(0,8)} (${booking.tgl_checkin} s/d ${booking.tgl_checkout}) dikonfirmasi lunas otomatis dari email BTN QRIS (Rp ${Math.round(nominal).toLocaleString('id-ID')}), unit sudah masuk kalender.`, booking.id);
+  await pushBookingToCloudbeds({...booking, status:'terjadwal'});
+  return {matched:true, booking_id:booking.id, unit_nomor:booking.unit_nomor, nominal};
+}
+
+/**
+ * Login IMAP sekali dan memeriksa email BTN QRIS yang belum dibaca.
+ * onlyBookingId (opsional) membatasi pencocokan ke satu booking saja --
+ * dipakai oleh pemicu dari halaman tamu (POST /public/bookings/check-payment)
+ * supaya satu tamu tidak bisa memicu konfirmasi booking orang lain, dan
+ * supaya email yang TIDAK cocok ke booking itu sengaja TIDAK ditandai
+ * dibaca (dibiarkan untuk cron latar belakang atau tamu lain yang nominalnya
+ * kebetulan sama).
+ */
+async function scanPaymentInbox(cfg, {onlyBookingId} = {}){
+  let ImapFlow, simpleParser;
+  try {
+    ({ ImapFlow } = await import('npm:imapflow@^1.0.0'));
+    ({ simpleParser } = await import('npm:mailparser@^3.6.0'));
+  } catch(e){
+    return {diperiksa:0, dikonfirmasi:[], ambigu:[], gagal:`Gagal memuat library IMAP: ${String(e?.message ?? e)}`};
+  }
+
+  const client = new ImapFlow({
+    host: cfg.host, port: Number(cfg.port ?? 993), secure: cfg.secure !== false,
+    auth: { user: cfg.user, pass: cfg.password }, logger: false,
+  });
+  // Supabase Edge Runtime bisa membekukan lalu memakai ulang isolate yang
+  // sama untuk request lain (terlihat dari "booted"/"shutdown" yang
+  // berselang-seling di log). Kalau ImapFlow masih punya timer latar
+  // belakang (keepalive/IDLE) yang menyala saat isolate itu dibekukan,
+  // timer itu bisa menembak ULANG setelah dibangunkan untuk request LAIN
+  // yang tidak ada hubungannya -- muncul sebagai "event loop error: Error:
+  // Already logged out" yang bikin request itu gagal dengan 503, padahal
+  // request itu sendiri tidak melakukan apa-apa yang salah. Listener ini
+  // menelan error semacam itu supaya tidak merembet ke request lain.
+  client.on('error', ()=>{});
+
+  let diperiksa = 0;
+  const dikonfirmasi = [];
+  const ambigu = [];
+  let gagal = null;
+  try {
+    await client.connect();
+    const lock = await client.getMailboxLock('INBOX');
+    try {
+      const subjectFilter = cfg.subject_contains ?? 'Payment Merchant Success';
+      const uids = await client.search({seen:false, subject:subjectFilter}, {uid:true});
+      for(const uid of (uids ?? [])){
+        diperiksa++;
+        const msg = await client.fetchOne(uid, {source:true}, {uid:true});
+        if(!msg?.source) continue;
+        let bodyText = '';
+        try {
+          const parsed = await simpleParser(msg.source);
+          bodyText = parsed.text ?? parsed.html ?? '';
+        } catch { continue; }
+
+        const cocok = bodyText.match(/Total\s*:?\s*Rp\.?\s*([\d.,]+)/i);
+        if(!cocok){
+          // Format tidak dikenali -- tandai dibaca supaya tidak diulang
+          // terus, baik oleh cron penuh maupun pengecekan per-booking.
+          await client.messageFlagsAdd(uid, ['\\Seen'], {uid:true});
+          continue;
+        }
+        const nominal = Number(cocok[1].replace(/[.,]/g,''));
+        if(!Number.isFinite(nominal) || nominal<=0){
+          await client.messageFlagsAdd(uid, ['\\Seen'], {uid:true});
+          continue;
+        }
+
+        const hasil = await tryConfirmBookingByNominal(nominal, onlyBookingId);
+        if(onlyBookingId){
+          // Hanya tandai dibaca kalau memang cocok ke booking ini -- kalau
+          // tidak, jangan disentuh (lihat komentar di atas fungsi ini).
+          if(hasil.matched) await client.messageFlagsAdd(uid, ['\\Seen'], {uid:true});
+        } else {
+          await client.messageFlagsAdd(uid, ['\\Seen'], {uid:true});
+        }
+        if(hasil.ambigu) ambigu.push(hasil);
+        else if(hasil.matched) dikonfirmasi.push(hasil);
+      }
+    } finally {
+      lock.release();
+    }
+  } catch(e){
+    // e.reason (kalau ada) adalah BYE reason dari server IMAP -- misalnya
+    // "Too many connections" -- yang jauh lebih berguna untuk diagnosis
+    // daripada pesan generik "Unexpected close" saja.
+    const detail = [e?.code, e?.reason].filter(Boolean).join(': ');
+    gagal = detail ? `${String(e?.message ?? e)} (${detail})` : String(e?.message ?? e);
+  } finally {
+    // client.close() (bukan logout()) supaya socket-nya langsung
+    // dihancurkan alih-alih menunggu handshake LOGOUT -- itulah yang
+    // meninggalkan timer latar belakang menyala setelah fungsi ini selesai
+    // (lihat komentar di atas client.on('error', ...)).
+    try { client.close(); } catch {}
+  }
+
+  return {diperiksa, dikonfirmasi, ambigu, gagal};
 }
 
 /**
@@ -758,6 +954,33 @@ async function computeReport(unit_id, periode){
   };
 }
 
+/**
+ * Live per-channel OTA commission %, from Cloudbeds' own getSources --
+ * shared by computeOtaBreakdown() (investor-facing estimate) and the
+ * Survival Control Center engine below, so the two never quietly
+ * disagree about what an OTA's commission is. Empty map (0% everywhere)
+ * if the API key is missing or the call fails -- never invents a number.
+ */
+async function getOtaCommissionPctMap(){
+  const commissionPctBySumber = new Map();
+  const apiKey = cloudbedsApiKey();
+  if (apiKey) {
+    try {
+      const res = await fetch(`${CLOUDBEDS_API_BASE}/getSources`, { headers: { 'x-api-key': apiKey } });
+      const body = await res.json().catch(() => null);
+      for (const s of (body?.data ?? [])) {
+        const name = (s.sourceName ?? '').toLowerCase();
+        if (name.includes('airbnb')) commissionPctBySumber.set('airbnb', Number(s.commission ?? 0));
+        else if (name.includes('booking.com')) commissionPctBySumber.set('booking.com', Number(s.commission ?? 0));
+        else if (name.includes('agoda')) commissionPctBySumber.set('agoda', Number(s.commission ?? 0));
+        else if (name.includes('traveloka')) commissionPctBySumber.set('traveloka', Number(s.commission ?? 0));
+        else if (name.includes('tiket')) commissionPctBySumber.set('tiket', Number(s.commission ?? 0));
+      }
+    } catch { /* Cloudbeds unreachable -- fall through with 0% for OTA sumbers below, never invent a number */ }
+  }
+  return { commissionPctBySumber, commission_source: apiKey ? 'cloudbeds_live' : 'unavailable_no_api_key' };
+}
+
 async function computeOtaBreakdown(periode){
   const [y, mo] = periode.split('-').map(Number);
   const start = `${periode}-01`;
@@ -774,21 +997,7 @@ async function computeOtaBreakdown(periode){
     grossBySumber.set(key, (grossBySumber.get(key) ?? 0) + Number(b.total_bayar ?? 0));
   }
 
-  const commissionPctBySumber = new Map();
-  const apiKey = cloudbedsApiKey();
-  if (apiKey) {
-    try {
-      const res = await fetch(`${CLOUDBEDS_API_BASE}/getSources`, { headers: { 'x-api-key': apiKey } });
-      const body = await res.json().catch(() => null);
-      for (const s of (body?.data ?? [])) {
-        const name = (s.sourceName ?? '').toLowerCase();
-        if (name.includes('airbnb')) commissionPctBySumber.set('airbnb', Number(s.commission ?? 0));
-        else if (name.includes('booking.com')) commissionPctBySumber.set('booking.com', Number(s.commission ?? 0));
-        else if (name.includes('agoda')) commissionPctBySumber.set('agoda', Number(s.commission ?? 0));
-        else if (name.includes('tiket')) commissionPctBySumber.set('tiket', Number(s.commission ?? 0));
-      }
-    } catch { /* Cloudbeds unreachable -- fall through with 0% for OTA sumbers below, never invent a number */ }
-  }
+  const { commissionPctBySumber, commission_source } = await getOtaCommissionPctMap();
 
   const sources = [];
   let total_gross = 0, total_commission = 0;
@@ -803,7 +1012,538 @@ async function computeOtaBreakdown(periode){
 
   return {
     periode, sources, total_gross, total_commission, total_net: total_gross - total_commission,
-    commission_source: apiKey ? 'cloudbeds_live' : 'unavailable_no_api_key',
+    commission_source,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// FINANCE DASHBOARD (Loonars Finance)
+//
+// Cloudbeds' API (verified against what this integration actually pulls,
+// see getCloudbedsReservationTotals) exposes only a reservation-level
+// grandTotal/subTotal via getReservationsWithRateDetails -- there is no
+// separate payment, refund, or settlement/payout endpoint available to
+// this key. So:
+//   - "Revenue" = bookings.total_bayar (what Cloudbeds/direct booking
+//     says the stay costs). There is no itemized room/extras/tax/fee
+//     breakdown or discount/refund feed, so gross === net here; this is
+//     stated explicitly in every response rather than inventing a split.
+//   - "Payment received" vs "outstanding" is inferred from the booking
+//     workflow, not a Cloudbeds payment feed: front-desk check-in
+//     requires "Tandai Lunas" first (see CURRENT_STATE.md 2026-09-19 --
+//     a booking cannot reach status='checkin' unpaid), so
+//     status IN (checkin, checkout) = PAID, status IN (terjadwal,
+//     menunggu_pembayaran) = UNPAID. This is a real, traceable rule
+//     about how this system works, not a guess -- but it is explicitly
+//     NOT the same thing as a Cloudbeds/bank payment confirmation, and
+//     every response says so.
+//   - Settlement/reconciliation is a MANUAL finance workflow
+//     (finance_settlements table) since Cloudbeds provides no OTA
+//     settlement/payout data. calculateExpectedSettlement() only ever
+//     returns confidence:'CONFIGURED' when finance_ota_settlement_config
+//     has a real, owner-entered rule for that channel -- otherwise
+//     'UNKNOWN', never a guessed date.
+//   - "Cash received" only reflects amounts finance staff explicitly
+//     mark as received (with a bank reference) through the Settlement
+//     workflow below -- never equated with Cloudbeds payment status.
+// ═══════════════════════════════════════════════════════════════════════
+
+function normalizedChannel(sumber){
+  const s = String(sumber||'').toLowerCase();
+  // 'google' = Google Hotel Search, a metasearch referral confirmed live in
+  // Cloudbeds' Distribution > Channels (owner screenshot, 20 Sep 2026) --
+  // Google never collects guest money, the guest pays the property directly
+  // via whichever booking engine the click-through lands on, so this is
+  // DIRECT for settlement purposes even though it's a distinct traffic source.
+  if(s==='walk-in' || s==='website' || s==='whatsapp' || s==='google') return 'DIRECT';
+  if(s==='booking.com') return 'BOOKING_COM';
+  if(s==='agoda') return 'AGODA';
+  if(s==='airbnb') return 'AIRBNB';
+  if(s==='traveloka') return 'TRAVELOKA';
+  if(s==='tiket') return 'OTHER_OTA'; // Tiket.com -- distinct company from Traveloka, not a live Cloudbeds channel for this property.
+  return 'UNKNOWN'; // includes raw 'cloudbeds' (source not yet resolved to a named OTA) and anything unmapped.
+}
+
+/**
+ * PAID/UNPAID/CANCELLED.
+ *
+ * Prefers bookings.cloudbeds_balance -- the REAL amount still owed, as
+ * reported by Cloudbeds' own getReservations.balance field (synced by
+ * cloudbedsReservationSync.ts) -- over the workflow-status guess. Only
+ * falls back to the guess (checkin/checkout = paid) when cloudbeds_balance
+ * is null: a non-Cloudbeds booking (direct/walk-in, which has its own
+ * local "Tandai Lunas" payment workflow), or a Cloudbeds booking synced
+ * before this column existed and not yet re-synced.
+ */
+function paymentStatusForBooking(b){
+  if(b.status==='batal') return 'CANCELLED';
+  if(b.cloudbeds_balance != null) return Number(b.cloudbeds_balance) <= 0 ? 'PAID' : 'UNPAID';
+  if(b.status==='checkin' || b.status==='checkout') return 'PAID';
+  return 'UNPAID';
+}
+
+/** Real outstanding amount when Cloudbeds has reported one; otherwise the full stay amount if the workflow-status guess says unpaid. */
+function outstandingForBooking(b, amount){
+  if(b.cloudbeds_balance != null) return Math.max(0, Number(b.cloudbeds_balance));
+  return paymentStatusForBooking(b)==='UNPAID' ? amount : 0;
+}
+
+async function getSettlementConfigMap(){
+  const {data} = await supabase.from('finance_ota_settlement_config').select('*');
+  const map = new Map();
+  for(const row of (data||[])) map.set(row.sumber, row);
+  return map;
+}
+
+/**
+ * calculateExpectedSettlement() per the spec: input source/collection
+ * method/booking, output {expected_settlement_date, settlement_status,
+ * confidence, reason}. Only CONFIGURED when an owner/admin has actually
+ * entered a rule for this sumber in finance_ota_settlement_config --
+ * never hardcodes "Booking.com = 7 hari" or any other OTA-specific
+ * assumption.
+ *
+ * settlement_basis (owner-configured per channel, default CHECKOUT):
+ * most OTAs (Booking.com, Agoda) settle counting from checkout, but
+ * Airbnb's own payout policy releases funds ~24h after the guest CHECKS
+ * IN -- for a multi-night stay, counting from checkout instead would
+ * understate how long the money has actually been outstanding. Never
+ * assumed per-OTA; an admin picks CHECKIN or CHECKOUT explicitly when
+ * configuring that channel.
+ *
+ * settlement_schedule (owner-configured per channel, default
+ * FIXED_DELAY): Booking.com's real "Payments by Booking.com" schedule
+ * (per owner's Extranet screenshot, 20 Sep 2026) is not a fixed N-days
+ * delay -- it's a calendar cutoff, paid on the 1st of the month,
+ * covering every reservation whose settlement_basis date falls before
+ * that payment date. Approximating that as an average day-count would
+ * be wrong for most bookings (a checkout on the 2nd and one on the 29th
+ * both get paid the same 1st), so MONTHLY_1ST is a distinct, exact rule
+ * rather than a guessed number forced into settlement_delay_days.
+ */
+function calculateExpectedSettlement({ sumber, tgl_checkin, tgl_checkout, configMap }){
+  const cfg = configMap.get(sumber);
+  const collection_method = cfg?.collection_method ?? 'UNKNOWN';
+  if(!cfg){
+    return {
+      expected_settlement_date: null,
+      confidence: 'UNKNOWN',
+      reason: `Belum ada aturan settlement yang dikonfigurasi untuk sumber '${sumber}'`,
+      collection_method,
+    };
+  }
+  const basis = cfg.settlement_basis === 'CHECKIN' ? 'CHECKIN' : 'CHECKOUT';
+  const anchorDate = basis === 'CHECKIN' ? tgl_checkin : tgl_checkout;
+  const anchorLabel = basis === 'CHECKIN' ? 'checkin' : 'checkout';
+  if(!anchorDate){
+    return {
+      expected_settlement_date: null,
+      confidence: 'UNKNOWN',
+      reason: `Booking belum punya tanggal ${anchorLabel}`,
+      collection_method,
+    };
+  }
+
+  if(cfg.settlement_schedule === 'MONTHLY_1ST'){
+    // Date.UTC(y, m, 1) directly, NOT setUTCMonth()+setUTCDate() on an
+    // existing date -- setUTCMonth() preserves the day-of-month while
+    // changing the month, so calling it on e.g. "2026-01-31" overflows
+    // into March (Feb only has 28/29 days) before setUTCDate(1) ever
+    // runs, silently landing a month late. Constructing the date fresh
+    // with day=1 from the start has no day component to overflow.
+    const [y, mo] = anchorDate.split('-').map(Number); // mo is 1-based; Date.UTC's month arg is 0-based, so mo alone already means "next month, 0-based".
+    const d = new Date(Date.UTC(y, mo, 1));
+    const expected_settlement_date = d.toISOString().slice(0,10);
+    return {
+      expected_settlement_date,
+      confidence: 'CONFIGURED',
+      reason: `Dibayar tanggal 1 bulan berikutnya setelah ${anchorLabel} (jadwal pembayaran bulanan), sesuai konfigurasi OTA settlement`,
+      collection_method,
+    };
+  }
+
+  if(cfg.settlement_schedule === 'WEEKLY_ON_DAY'){
+    if(cfg.settlement_weekday==null){
+      return {
+        expected_settlement_date: null,
+        confidence: 'UNKNOWN',
+        reason: `Jadwal mingguan dipilih untuk '${sumber}' tapi hari pembayarannya belum diisi`,
+        collection_method,
+      };
+    }
+    const WEEKDAY_NAMES = ['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'];
+    const d = new Date(`${anchorDate}T00:00:00Z`);
+    const currentWeekday = d.getUTCDay();
+    const targetWeekday = Number(cfg.settlement_weekday);
+    // Next occurrence STRICTLY after anchorDate, same "before payment date"
+    // semantics as MONTHLY_1ST: a reservation checking out ON the payment
+    // day itself rolls to the following week's run, not the same day's.
+    let diff = (targetWeekday - currentWeekday + 7) % 7;
+    if(diff === 0) diff = 7;
+    d.setUTCDate(d.getUTCDate() + diff);
+    const expected_settlement_date = d.toISOString().slice(0,10);
+    return {
+      expected_settlement_date,
+      confidence: 'CONFIGURED',
+      reason: `Dibayar hari ${WEEKDAY_NAMES[targetWeekday]} berikutnya setelah ${anchorLabel} (jadwal pembayaran mingguan), sesuai konfigurasi OTA settlement`,
+      collection_method,
+    };
+  }
+
+  if(cfg.settlement_delay_days==null || cfg.settlement_delay_days===''){
+    return {
+      expected_settlement_date: null,
+      confidence: 'UNKNOWN',
+      reason: `Belum ada aturan settlement yang dikonfigurasi untuk sumber '${sumber}'`,
+      collection_method,
+    };
+  }
+  const d = new Date(`${anchorDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + Number(cfg.settlement_delay_days));
+  const expected_settlement_date = d.toISOString().slice(0,10);
+  return {
+    expected_settlement_date,
+    confidence: 'CONFIGURED',
+    reason: `${cfg.settlement_delay_days} hari setelah ${anchorLabel}, sesuai konfigurasi OTA settlement`,
+    collection_method,
+  };
+}
+
+/** Lazily creates a finance_settlements row for any booking that doesn't have one yet. Idempotent (unique booking_id, upsert ignoreDuplicates). */
+async function ensureFinanceSettlements(bookings, configMap){
+  const candidates = bookings.filter(b => b.status !== 'batal');
+  if(!candidates.length) return;
+  const rows = candidates.map(b => {
+    const calc = calculateExpectedSettlement({ sumber: b.sumber, tgl_checkin: b.tgl_checkin, tgl_checkout: b.tgl_checkout, configMap });
+    return {
+      booking_id: b.id,
+      sumber: b.sumber,
+      amount: Number(b.total_bayar ?? b.tarif ?? 0),
+      expected_settlement_date: calc.expected_settlement_date,
+      settlement_confidence: calc.confidence,
+      settlement_status: 'PENDING',
+    };
+  });
+  await supabase.from('finance_settlements').upsert(rows, { onConflict: 'booking_id', ignoreDuplicates: true });
+
+  // Bookings whose expected date has arrived move PENDING -> READY_TO_COLLECT.
+  // Never touches PROCESSING/RECEIVED rows -- those are finance's own actions.
+  const today = todayWIB();
+  await supabase.from('finance_settlements')
+    .update({ settlement_status: 'READY_TO_COLLECT', updated_at: new Date().toISOString() })
+    .eq('settlement_status', 'PENDING')
+    .lte('expected_settlement_date', today)
+    .not('expected_settlement_date', 'is', null);
+}
+
+async function writeFinanceAudit({ entity_type, entity_id, session, action, old_value, new_value, reason }){
+  await supabase.from('finance_audit_log').insert({
+    entity_type, entity_id, user_id: session.uid, user_nama: session.email ?? null,
+    action, old_value: old_value ?? null, new_value: new_value ?? null, reason: reason ?? null,
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// FINANCE SURVIVAL CONTROL CENTER
+//
+// A SEPARATE analysis engine from computeReport() (the frozen,
+// authoritative dividend-payout formula -- see
+// docs/revenue-engine/PHASE0-BASELINE.md §2, which deducts a flat 27.5%
+// marketing + 25% opex before splitting 70/30). This engine splits
+// revenue net of OTA commission directly 70/30, per owner instruction
+// (23 Sep 2026, in response to being asked which formula to use):
+// "Ya pakai, tp bukan di halaman investor, ya ini hanya ada di halaman
+// finance" -- i.e. use this formula, but ONLY on /finance, never
+// surfaced to investors, and never used to actually calculate what an
+// investor is paid. The two engines will show DIFFERENT numbers for the
+// same period by design.
+//
+// All business parameters (rooms, split %, guarantee, ADR targets,
+// payroll, electricity) come from finance_property_config -- nothing
+// here is hardcoded per property, so Loonars 2/3 need only a new config
+// row, never new code.
+// ═══════════════════════════════════════════════════════════════════════
+
+async function getPropertyConfig(property_code){
+  const { data } = await supabase.from('finance_property_config').select('*').eq('property_code', property_code).eq('active', true).maybeSingle();
+  return data ?? null;
+}
+
+function daysInclusive(from, to){
+  return Math.round((new Date(`${to}T00:00:00Z`).getTime() - new Date(`${from}T00:00:00Z`).getTime()) / 86400000) + 1;
+}
+function addDaysStr(dateStr, n){
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0,10);
+}
+
+/**
+ * Net room revenue for bookings whose tgl_checkin falls in [from,to], net
+ * of live Cloudbeds OTA commission (same method computeOtaBreakdown
+ * uses -- getOtaCommissionPctMap() is shared, not duplicated). There is
+ * no tax field anywhere in this schema, so "net of tax" is genuinely
+ * NOT_AVAILABLE -- reported as such (tax_deduction: null), never
+ * silently treated as zero.
+ */
+async function computeNetRevenueForRange(from, to){
+  const { data: bookings } = await supabase.from('bookings')
+    .select('sumber,total_bayar,tarif,durasi_malam,status')
+    .gte('tgl_checkin', from).lte('tgl_checkin', to)
+    .neq('status', 'batal');
+  const rows = bookings ?? [];
+  const { commissionPctBySumber, commission_source } = await getOtaCommissionPctMap();
+  let gross = 0, commission = 0, room_nights = 0;
+  for(const b of rows){
+    const amount = Number(b.total_bayar ?? b.tarif ?? 0);
+    const pct = commissionPctBySumber.get(b.sumber) ?? 0;
+    gross += amount;
+    commission += amount * (pct/100);
+    room_nights += Number(b.durasi_malam ?? 0);
+  }
+  return { gross_revenue: gross, ota_commission: commission, net_revenue: gross - commission, room_nights, booking_count: rows.length, commission_source, tax_deduction: null };
+}
+
+/** Occupied/available room-nights from the daily inventory snapshot -- the SAME table /api/admin/revenue-metrics reads, so occupancy never disagrees between the two dashboards. */
+async function computeOccupiedRoomNights(from, to){
+  const { data } = await supabase.from('villa_daily_inventory_snapshot')
+    .select('snapshot_date,unit_status,on_books')
+    .gte('snapshot_date', from).lte('snapshot_date', to);
+  const rows = data ?? [];
+  const availableRoomNights = rows.filter(r=>r.unit_status!=='maintenance').length;
+  const occupiedRoomNights = rows.filter(r=>r.on_books || r.unit_status==='occupied').length;
+  const daysWithData = new Set(rows.map(r=>r.snapshot_date)).size;
+  return { availableRoomNights, occupiedRoomNights, daysWithData };
+}
+
+/**
+ * Pure scenario calculator. The SAME function backs the What-If
+ * calculator, the 5/6/7/8 rooms/night target table, AND (fed with known
+ * actuals) computeSurvivalKpis() below -- there is exactly one place
+ * this arithmetic exists.
+ *
+ * Guarantee/MKH cascade is THIS ENGINE'S OWN DERIVATION of the owner's
+ * stated worst-case priority (brief, 23 Sep 2026: "1. Operational
+ * continuity 2. Investor guarantee 3. OPEX 4. MKH management profit"),
+ * not a formula the brief gave directly -- flagged for owner
+ * confirmation. Reasoning: net_revenue is fully allocated 70/30 under
+ * the normal split, so if the investor's 70% falls short of the
+ * guarantee, the only pool that can top it up is MKH's 30% share (OPEX
+ * is a separate real cash cost, not part of the split). So MKH's 30%
+ * absorbs the guarantee shortfall AND opex before any profit, and can
+ * go to zero or negative -- negative meaning Loonars must fund the gap
+ * from outside this revenue.
+ */
+function computeScenario(config, { netAdr, roomsPerNight, days = 30 }){
+  const total_rooms = Number(config.total_rooms);
+  const available_room_nights = total_rooms * days;
+  const occupied_room_nights = Math.min(available_room_nights, roomsPerNight * days);
+  const occupancy_pct = available_room_nights > 0 ? (occupied_room_nights / available_room_nights) * 100 : 0;
+
+  const net_revenue = netAdr * occupied_room_nights;
+  const investor_entitlement = net_revenue * Number(config.investor_share_pct);
+  const mkh_contractual_share = net_revenue * Number(config.mkh_share_pct);
+
+  // Guarantee is a MONTHLY figure; prorated here only so a scenario run
+  // for a shorter or longer window than 30 days stays comparable.
+  const monthly_guarantee = total_rooms * Number(config.guarantee_per_room) * (days / 30);
+  const guarantee_gap = Math.max(0, monthly_guarantee - investor_entitlement);
+
+  const payroll = Number(config.payroll_employee_count) * Number(config.payroll_per_employee) * (days / 30);
+  const room_electricity = Number(config.room_electricity_per_night) * occupied_room_nights;
+  const opex = payroll + room_electricity;
+
+  const funds_available_for_opex_if_mkh_zero = Math.max(0, mkh_contractual_share - guarantee_gap);
+  const mkh_operating_result = mkh_contractual_share - guarantee_gap - opex;
+  const mkh_funding_gap = Math.max(0, -mkh_operating_result);
+
+  return {
+    days, rooms_per_night: roomsPerNight, net_adr: netAdr,
+    available_room_nights, occupied_room_nights, occupancy_pct,
+    net_revenue, investor_entitlement, mkh_contractual_share,
+    monthly_guarantee, guarantee_gap,
+    payroll, room_electricity, opex,
+    funds_available_for_opex_if_mkh_zero,
+    mkh_operating_result, mkh_funding_gap,
+  };
+}
+
+/** Additional net revenue needed (over the period) so the contractual split alone covers BOTH the guarantee and OPEX -- the binding constraint is whichever needs more revenue. */
+function computeAdditionalRevenueNeeded(config, actualNetRevenue, monthly_guarantee, opex){
+  const investorPct = Number(config.investor_share_pct);
+  const mkhPct = Number(config.mkh_share_pct);
+  const revenueNeededForGuarantee = investorPct > 0 ? monthly_guarantee / investorPct : 0;
+  const revenueNeededForOpex = mkhPct > 0 ? opex / mkhPct : 0;
+  const required = Math.max(revenueNeededForGuarantee, revenueNeededForOpex);
+  return Math.max(0, required - actualNetRevenue);
+}
+
+/**
+ * Minimum room-nights per (30-day reference) month needed so BOTH the
+ * guarantee and OPEX are covered by the contractual split, expressed
+ * directly in room-nights (kamar-malam) instead of Rupiah -- per owner
+ * feedback (23 Sep 2026): the Rupiah-and-jargon KPI cards are too
+ * confusing to hand to staff; a plain "sudah aman di X malam, kurang Y
+ * malam" table is what's actually usable day to day.
+ *
+ * Solved analytically (not iteratively) at target_net_adr:
+ *   revenueForGuarantee = guarantee / investor_pct
+ *   revenueForOpex solves: revenue*mkh_pct - payroll - electricity*(revenue/adr) = 0
+ *     => revenue = payroll / (mkh_pct - electricity/adr)
+ *   requiredRevenue = MAX(revenueForGuarantee, revenueForOpex)
+ *   requiredRoomNights = requiredRevenue / target_net_adr
+ * Cross-checked against computeScenario() at the resulting room-night
+ * level before shipping -- guarantee_gap and mkh_funding_gap both land
+ * on exactly 0 there, confirming the two formulas agree.
+ */
+function computeRequiredRoomNightsForSafety(config){
+  const investorPct = Number(config.investor_share_pct);
+  const mkhPct = Number(config.mkh_share_pct);
+  const targetAdr = Number(config.target_net_adr);
+  const guarantee = Number(config.total_rooms) * Number(config.guarantee_per_room);
+  const payroll = Number(config.payroll_employee_count) * Number(config.payroll_per_employee);
+  const electricity = Number(config.room_electricity_per_night);
+
+  const revenueForGuarantee = investorPct > 0 ? guarantee / investorPct : Infinity;
+  const denom = mkhPct - (targetAdr > 0 ? electricity / targetAdr : 0);
+  const revenueForOpex = denom > 0 ? payroll / denom : Infinity;
+  const requiredRevenue = Math.max(revenueForGuarantee, revenueForOpex);
+  const requiredRoomNightsPerMonth = targetAdr > 0 && Number.isFinite(requiredRevenue) ? requiredRevenue / targetAdr : null;
+  return { requiredRevenue, requiredRoomNightsPerMonth };
+}
+
+/** Fixed bands per owner's brief (23 Sep 2026) -- not stored in config since the brief gave exact numbers, not "configurable". One place, not scattered across the UI. */
+function roomsPerNightBand(roomsPerNight){
+  if(roomsPerNight == null) return { band:'UNKNOWN', label:'Belum ada data', accent:'neutral' };
+  if(roomsPerNight < 3) return { band:'RED', label:'Kritis', accent:'ruby' };
+  if(roomsPerNight < 5) return { band:'ORANGE', label:'Waspada', accent:'gold' };
+  if(roomsPerNight < 6) return { band:'GREEN', label:'Aman', accent:'sage' };
+  if(roomsPerNight < 7) return { band:'HEALTHY', label:'Sehat', accent:'sage' };
+  if(roomsPerNight < 8) return { band:'STRONG', label:'Kuat', accent:'sage' };
+  return { band:'VERY_STRONG', label:'Sangat Kuat', accent:'sage' };
+}
+
+function survivalStatus(guarantee_gap, mkh_funding_gap){
+  if(guarantee_gap === 0 && mkh_funding_gap === 0) return 'SAFE';
+  if(mkh_funding_gap > 0) return 'AT_RISK';
+  return 'WATCH';
+}
+
+async function computeSurvivalKpis(property_code, from, to){
+  const config = await getPropertyConfig(property_code);
+  if(!config) return null;
+
+  const today = todayWIB();
+  const days = daysInclusive(from, to);
+  const total_rooms = Number(config.total_rooms);
+
+  const netRevenueRange = await computeNetRevenueForRange(from, to);
+  const occRange = await computeOccupiedRoomNights(from, to);
+
+  const { data: todayRows } = await supabase.from('villa_daily_inventory_snapshot')
+    .select('unit_status,on_books').eq('snapshot_date', today);
+  const todayOccupied = (todayRows ?? []).filter(r=>r.on_books || r.unit_status==='occupied').length;
+  const todayAvailable = (todayRows ?? []).filter(r=>r.unit_status!=='maintenance').length;
+
+  const occ30 = await computeOccupiedRoomNights(addDaysStr(today,-29), today);
+  const occupancy_30d_pct = occ30.availableRoomNights>0 ? (occ30.occupiedRoomNights/occ30.availableRoomNights)*100 : null;
+  const rooms_per_night_30d = occ30.daysWithData>0 ? occ30.occupiedRoomNights/occ30.daysWithData : null;
+  const rooms_per_night_period = days>0 ? occRange.occupiedRoomNights/days : null;
+
+  const net_adr = occRange.occupiedRoomNights>0 ? netRevenueRange.net_revenue/occRange.occupiedRoomNights : null;
+
+  const monthly_guarantee = total_rooms * Number(config.guarantee_per_room);
+  const investor_entitlement = netRevenueRange.net_revenue * Number(config.investor_share_pct);
+  const mkh_contractual_share = netRevenueRange.net_revenue * Number(config.mkh_share_pct);
+  const guarantee_gap = Math.max(0, monthly_guarantee - investor_entitlement);
+
+  const payroll_mtd = Number(config.payroll_employee_count)*Number(config.payroll_per_employee)*(days/30);
+  const room_electricity_mtd = Number(config.room_electricity_per_night) * occRange.occupiedRoomNights;
+  const opex_mtd = payroll_mtd + room_electricity_mtd;
+
+  const funds_available_for_opex_if_mkh_zero = Math.max(0, mkh_contractual_share - guarantee_gap);
+  const mkh_operating_result = mkh_contractual_share - guarantee_gap - opex_mtd;
+  const mkh_funding_gap = Math.max(0, -mkh_operating_result);
+
+  const additional_revenue_needed = computeAdditionalRevenueNeeded(config, netRevenueRange.net_revenue, monthly_guarantee, opex_mtd);
+  const band = roomsPerNightBand(rooms_per_night_30d ?? rooms_per_night_period);
+  const status = survivalStatus(guarantee_gap, mkh_funding_gap);
+
+  // ── Simple, staff-readable version: everything in room-nights (kamar-malam), no Rupiah, no jargon ──
+  const { requiredRoomNightsPerMonth } = computeRequiredRoomNightsForSafety(config);
+  const requiredRoomsPerNight = requiredRoomNightsPerMonth != null ? requiredRoomNightsPerMonth / 30 : null;
+
+  const monthStr = monthWIB();
+  const monthStart = `${monthStr}-01`;
+  const [my, mo2] = monthStr.split('-').map(Number);
+  const daysInCurrentMonth = new Date(Date.UTC(my, mo2, 0)).getUTCDate();
+  const dayOfMonth = Number(today.slice(8,10));
+  const occThisMonthSoFar = await computeOccupiedRoomNights(monthStart, today);
+  const requiredRoomNightsThisMonth = requiredRoomNightsPerMonth != null ? requiredRoomNightsPerMonth * (daysInCurrentMonth/30) : null;
+  const roomNightsStillNeededThisMonth = requiredRoomNightsThisMonth != null ? Math.max(0, requiredRoomNightsThisMonth - occThisMonthSoFar.occupiedRoomNights) : null;
+  const daysRemainingInMonth = Math.max(0, daysInCurrentMonth - dayOfMonth);
+  const avgRoomsPerNightNeededForRestOfMonth = roomNightsStillNeededThisMonth != null
+    ? (daysRemainingInMonth > 0 ? roomNightsStillNeededThisMonth / daysRemainingInMonth : (roomNightsStillNeededThisMonth > 0 ? null : 0))
+    : null;
+
+  const simple_target_table = [];
+  for(let level = 1; level <= total_rooms; level++){
+    const roomNightsAtLevel = level * 30;
+    const shortfall = requiredRoomNightsPerMonth != null ? Math.max(0, requiredRoomNightsPerMonth - roomNightsAtLevel) : null;
+    simple_target_table.push({
+      rooms_per_night: level,
+      occupancy_pct: total_rooms > 0 ? (level/total_rooms)*100 : null,
+      aman: shortfall != null ? shortfall <= 0 : null,
+      kurang_malam_per_bulan: shortfall != null ? Math.ceil(shortfall) : null,
+    });
+  }
+
+  return {
+    property_code, property_name: config.property_name, period: { from, to, days },
+    today: {
+      date: today, occupied: todayOccupied, available: todayAvailable,
+      occupancy_pct: todayAvailable>0 ? (todayOccupied/todayAvailable)*100 : null,
+      has_snapshot: (todayRows ?? []).length > 0,
+    },
+    rolling_30d: { occupancy_pct: occupancy_30d_pct, rooms_per_night: rooms_per_night_30d, days_with_data: occ30.daysWithData },
+    rooms_per_night_period,
+    rooms_per_night_band: band,
+    net_adr,
+    net_adr_note: 'Net dari komisi OTA live Cloudbeds; TIDAK termasuk potongan pajak -- tidak ada field pajak di sistem ini (NOT_AVAILABLE).',
+    net_revenue_mtd: netRevenueRange.net_revenue,
+    gross_revenue_mtd: netRevenueRange.gross_revenue,
+    ota_commission_mtd: netRevenueRange.ota_commission,
+    commission_source: netRevenueRange.commission_source,
+    room_nights_mtd: netRevenueRange.room_nights,
+    booking_count_mtd: netRevenueRange.booking_count,
+    investor_guarantee: monthly_guarantee,
+    investor_entitlement_mtd: investor_entitlement,
+    guarantee_gap,
+    mkh_contractual_share_mtd: mkh_contractual_share,
+    opex_mtd,
+    opex_breakdown: { payroll: payroll_mtd, room_electricity: room_electricity_mtd },
+    opex_source: 'ASSUMPTION_FROM_CONFIG',
+    opex_note: 'Dihitung dari asumsi Konfigurasi Properti (payroll + listrik kamar per malam terisi), bukan dari pencatatan opex aktual -- opex_bulanan (tabel itemized) masih kosong. Ubah asumsi di halaman Konfigurasi Properti kalau ada perubahan jumlah pegawai/tarif listrik.',
+    funds_available_for_opex_if_mkh_zero,
+    mkh_operating_result, mkh_funding_gap,
+    additional_revenue_needed,
+    survival_status: status,
+    simple: {
+      required_rooms_per_night: requiredRoomsPerNight,
+      required_room_nights_per_month: requiredRoomNightsPerMonth,
+      target_table: simple_target_table,
+      this_month: {
+        month: monthStr,
+        days_in_month: daysInCurrentMonth,
+        day_of_month: dayOfMonth,
+        days_remaining: daysRemainingInMonth,
+        room_nights_so_far: occThisMonthSoFar.occupiedRoomNights,
+        room_nights_required: requiredRoomNightsThisMonth,
+        room_nights_still_needed: roomNightsStillNeededThisMonth,
+        avg_rooms_per_night_needed_for_rest_of_month: avgRoomsPerNightNeededForRestOfMonth,
+      },
+    },
+    config,
   };
 }
 
@@ -1138,13 +1878,33 @@ Deno.serve(async (req)=>{
 
     const {data:g} = await supabase.from('guests').insert({nama, hp, email}).select('id').single();
 
+    // Kode unik pembayaran (owner 2026-09-20): ditambahkan ke total_bayar
+    // supaya setiap booking website yang menunggu pembayaran punya nominal
+    // PERSIS berbeda dari yang lain. QRIS BTN yang dipakai bersifat statis
+    // (satu kode QR yang sama untuk semua transaksi, tidak ada ID transaksi
+    // per pemesanan di notifikasi emailnya) -- kalau dua tamu kebetulan
+    // pesan tipe unit yang sama di waktu berdekatan, nominalnya akan sama
+    // persis dan cron pembaca email (lihat /cron/check-payment-email) tidak
+    // bisa tahu email mana untuk siapa. Kode unik ini yang membuat
+    // pencocokan otomatis itu selalu tepat satu booking, bukan tebakan.
+    // `tarif` TETAP harga asli (tidak dibubuhi) -- yang dibubuhi cuma
+    // `total_bayar`, karena itu yang ditagih ke tamu dan yang dicocokkan
+    // ke email, sedangkan `tarif` dipakai laporan/rekap harga.
+    const kodeUnik = seluruhnyaGratis || computedTarif <= 0 ? 0 : await generateKodeUnikPembayaran();
+    const totalDitagih = computedTarif > 0 ? computedTarif + kodeUnik : computedTarif;
+
     // Status starts as 'menunggu_pembayaran' -- deliberately OUTSIDE the
     // bookings_no_overlap_active exclusion constraint (which only covers
     // 'terjadwal'/'checkin'), so the unit is NOT locked and does not appear
     // in the staff calendar yet. It only becomes a real, unit-locking
-    // 'terjadwal' booking once the guest uploads proof of transfer via
-    // /public/bookings/confirm-payment (owner's explicit instruction,
-    // 2026-09-11 -- booking used to lock the unit immediately on submit).
+    // 'terjadwal' booking once payment is confirmed -- either automatically
+    // from the BTN QRIS email (scanPaymentInbox, triggered by the guest's
+    // own booking page and by the /cron/check-payment-email safety net) or
+    // manually by the owner replying "LUNAS <kode>" on WhatsApp
+    // (/bridge/confirm-payment). Guests no longer upload proof of transfer
+    // (owner's explicit instruction, 2026-09-21 -- that upload step, and
+    // /public/bookings/confirm-payment which handled it, were removed once
+    // the email-based auto-confirmation shipped).
     // Menginap gratis langsung 'terjadwal' -- tidak ada yang perlu dibayar,
     // jadi tidak ada alasan menahannya di 'menunggu_pembayaran' lalu
     // membiarkannya dibatalkan mesin sejam kemudian. Kata owner: "dia hanya
@@ -1161,7 +1921,7 @@ Deno.serve(async (req)=>{
         unit_id: freeUnit.id, unit_nomor: freeUnit.nomor, guest_id: g?.id ?? null, guest_nama: nama,
         tipe: 'harian', sumber: voucherTerpakai ? 'investor' : 'website', tgl_checkin, tgl_checkout,
         durasi_malam: nights, checkin_time: '14:00:00', adults, children,
-        tarif: computedTarif, total_bayar: computedTarif, status: 'menunggu_pembayaran',
+        tarif: computedTarif, total_bayar: totalDitagih, status: 'menunggu_pembayaran',
         // Menginap lebih dari semalam bukan menginap gratis: hanya SATU
         // malamnya yang ditanggung voucher, sisanya dibayar seperti tamu
         // lain. Karena itu is_free_stay tetap false -- malam-malam yang
@@ -1226,105 +1986,28 @@ Deno.serve(async (req)=>{
 
     const kode = paymentCode(booking.id);
     await notif(freeUnit.id, 'all', 'booking', `Booking baru dari Website (menunggu pembayaran) -- Unit ${freeUnit.nomor}`,
-      `${nama} (${hp}) - ${tgl_checkin} s/d ${tgl_checkout} - Rp ${Math.round(computedTarif).toLocaleString('id-ID')} -- unit belum terkunci, menunggu konfirmasi pembayaran (kode ${kode})`, booking.id);
+      `${nama} (${hp}) - ${tgl_checkin} s/d ${tgl_checkout} - Rp ${Math.round(totalDitagih).toLocaleString('id-ID')} -- unit belum terkunci, menunggu konfirmasi pembayaran (kode ${kode})`, booking.id);
 
     // WA ke owner supaya dia bisa mengunci unit hanya dengan membalas kode
     // ini begitu notifikasi QRIS masuk di HP-nya. Nomornya dari
     // integration_settings.villa_notify.owner_hp -- kalau belum diisi,
     // sendWa() mencatat 'skipped_no_phone' dan booking tetap berjalan
     // normal, jadi fitur ini tidak pernah bisa menggagalkan pemesanan.
+    // Nominal yang disebutkan ke owner sudah termasuk kode unik 3 digit di
+    // belakangnya (lihat generateKodeUnikPembayaran) -- itu jugalah yang
+    // ditampilkan ke tamu, supaya keduanya melihat angka yang sama persis.
     const notifySetting = await getSetting('villa_notify');
     await sendWa(notifySetting?.owner_hp ?? null,
-      `Booking baru dari website\n\n${nama} (${hp})\nUnit ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\nTotal: Rp ${Math.round(computedTarif).toLocaleString('id-ID')}${promoTerpakai ? `\nPromo ${promoTerpakai.promo.kode} (normal Rp ${Math.round(promoTerpakai.hasil.harga_normal).toLocaleString('id-ID')})` : ''}${voucherTerpakai ? `\nKode investor ${voucherTerpakai.voucher.kode} (${voucherTerpakai.pemilik.nama}) -- malam pertama gratis Rp ${Math.round(nilaiMalamGratis).toLocaleString('id-ID')}` : ''}\n\nKalau dana sudah masuk, balas:\nLUNAS ${kode}`,
+      `Booking baru dari website\n\n${nama} (${hp})\nUnit ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\nTotal (dengan kode unik): Rp ${Math.round(totalDitagih).toLocaleString('id-ID')}${promoTerpakai ? `\nPromo ${promoTerpakai.promo.kode} (normal Rp ${Math.round(promoTerpakai.hasil.harga_normal).toLocaleString('id-ID')})` : ''}${voucherTerpakai ? `\nKode investor ${voucherTerpakai.voucher.kode} (${voucherTerpakai.pemilik.nama}) -- malam pertama gratis Rp ${Math.round(nilaiMalamGratis).toLocaleString('id-ID')}` : ''}\n\nKalau dana sudah masuk, sistem akan mengonfirmasi otomatis lewat email. Kalau belum juga terkonfirmasi, balas:\nLUNAS ${kode}`,
       {booking_id: booking.id, unit_id: freeUnit.id, template_type:'website_booking_awaiting_payment'});
 
     return json({
       booking_id: booking.id, unit_nomor: freeUnit.nomor,
       tgl_checkin, tgl_checkout, durasi_malam: nights,
-      tarif: computedTarif, total_bayar: computedTarif, status: booking.status,
+      tarif: computedTarif, total_bayar: totalDitagih, kode_unik: kodeUnik, status: booking.status,
       promo: promoTerpakai ? {kode: promoTerpakai.promo.kode, nama: promoTerpakai.promo.nama, harga_normal: promoTerpakai.hasil.harga_normal, hemat: promoTerpakai.hasil.hemat} : null,
       menginap_gratis: voucherTerpakai ? {kode: voucherTerpakai.voucher.kode, malam_gratis: 1, hemat: nilaiMalamGratis} : null,
     }, 201);
-  }
-
-  // Konfirmasi pembayaran (upload bukti transfer) dari tamu di public booking
-  // site. QRIS pembayaran tetap statis (tidak ada verifikasi otomatis via
-  // payment gateway) -- tamu dianggap sudah bayar begitu mereka mengupload
-  // bukti transfer di sini, lalu tombol "Cetak Invoice" di frontend terbuka.
-  // Cocokkan booking_id + hp supaya orang lain tidak bisa mengisi bukti untuk
-  // booking milik tamu lain.
-  //
-  // Ini juga titik di mana booking benar-benar "mengunci" unit: status
-  // berubah dari 'menunggu_pembayaran' -> 'terjadwal' di sini, BUKAN saat
-  // booking pertama kali dibuat (owner's explicit instruction, 2026-09-11).
-  // Karena exclusion constraint bookings_no_overlap_active hanya berlaku
-  // untuk status 'terjadwal'/'checkin', UPDATE status ini otomatis gagal
-  // (23P01) kalau ternyata unit sudah keburu dikunci booking lain untuk
-  // tanggal yang sama -- jadi tidak perlu app-level conflict re-check
-  // terpisah yang rawan race condition, Postgres yang menjaminnya.
-  if(path==='/public/bookings/confirm-payment' && m==='POST'){
-    const b = await req.json().catch(()=>null);
-    if(!b) return err('Body tidak valid');
-    const booking_id = String(b.booking_id??'').trim();
-    const hp = String(b.hp??'').trim();
-    const dataUrl = String(b.dataUrl??'');
-    if(!/^[0-9a-f-]{36}$/i.test(booking_id)) return err('booking_id tidak valid');
-    if(!hp) return err('Nomor WhatsApp wajib diisi');
-    const match = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/);
-    if(!match) return err('Bukti transfer harus berupa gambar (JPG/PNG)');
-    const [, ext, base64] = match;
-    let bytes;
-    try{ bytes = Uint8Array.from(atob(base64), c=>c.charCodeAt(0)); } catch { return err('Bukti transfer tidak valid'); }
-    if(bytes.length > 8*1024*1024) return err('Bukti transfer terlalu besar (maks 8MB)');
-
-    const {data:booking} = await supabase.from('bookings').select('id,guest_id,sumber,invoice_no,created_at,status,unit_id,unit_nomor,guest_nama,cloudbeds_reservation_id,tgl_checkin,tgl_checkout,adults,children').eq('id',booking_id).maybeSingle();
-    if(!booking) return err('Booking tidak ditemukan', 404);
-    if(booking.sumber !== 'website') return err('Booking ini tidak bisa dikonfirmasi lewat jalur ini', 403);
-    let guestHp = null;
-    if(booking.guest_id){
-      const {data:g} = await supabase.from('guests').select('hp').eq('id',booking.guest_id).maybeSingle();
-      guestHp = g?.hp ?? null;
-    }
-    if(!guestHp || guestHp.trim() !== hp) return err('Nomor WhatsApp tidak cocok dengan booking ini', 403);
-
-    const path = `bukti-bayar/${booking_id}-${Date.now()}.${ext}`;
-    const {error:upErr} = await supabase.storage.from('guest-documents').upload(path, bytes, {contentType:`image/${ext}`, upsert:false});
-    if(upErr) return err(upErr.message, 500);
-
-    let invoice_no = booking.invoice_no;
-    if(!invoice_no){
-      const ymd = todayWIB(new Date(booking.created_at)).replace(/-/g,'');
-      invoice_no = `INV-LV-${ymd}-${booking_id.slice(0,8).toUpperCase()}`;
-    }
-
-    const shouldLockUnit = booking.status === 'menunggu_pembayaran';
-    const basePatch = { bukti_pembayaran_path: path, bukti_pembayaran_at: new Date().toISOString(), invoice_no };
-    let unitLocked = booking.status === 'terjadwal';
-
-    if(shouldLockUnit){
-      const {error:lockErr} = await supabase.from('bookings').update({...basePatch, status:'terjadwal'}).eq('id', booking_id);
-      if(lockErr && lockErr.code !== '23P01') return err(lockErr.message, 500);
-      unitLocked = !lockErr;
-    }
-    if(!unitLocked){
-      // Unit sudah dikunci booking lain untuk tanggal yang sama duluan --
-      // tetap simpan bukti pembayarannya (tamu sudah bayar) dan tetap
-      // terbitkan invoice, tapi status booking dibiarkan 'menunggu_pembayaran'
-      // (tidak masuk kalender) sampai staff menjadwalkan ulang secara manual.
-      const {error:saveErr} = await supabase.from('bookings').update(basePatch).eq('id', booking_id);
-      if(saveErr) return err(saveErr.message, 500);
-      await notif(null, 'all', 'transfer', `KONFLIK UNIT -- Booking Website perlu dijadwalkan ulang`,
-        `Booking ${booking_id.slice(0,8)} (Unit ${booking.unit_nomor}, ${booking.tgl_checkin} s/d ${booking.tgl_checkout}) sudah bayar tapi unit sudah terisi booking lain -- mohon segera hubungi tamu untuk reschedule/unit pengganti.`, booking_id);
-      return json({success:true, invoice_no});
-    }
-
-    await notif(null, 'all', 'transfer', `Pembayaran dikonfirmasi -- Unit ${booking.unit_nomor} terkunci`,
-      `Booking ${booking_id.slice(0,8)} (${booking.tgl_checkin} s/d ${booking.tgl_checkout}) sudah upload bukti transfer, unit sudah masuk kalender.`, booking_id);
-
-    // Same reason as the WhatsApp confirmation path above.
-    await pushBookingToCloudbeds({...booking, id: booking_id, status:'terjadwal'});
-
-    return json({success:true, invoice_no});
   }
 
   // Tamu menanyakan apakah pembayarannya sudah dikonfirmasi owner. Dipanggil
@@ -2343,11 +3026,507 @@ Deno.serve(async (req)=>{
     }
   }
 
+  // ── Baca notifikasi pembayaran QRIS BTN dari email (kode unik) ─────────
+  // QRIS BTN yang dipakai statis: tidak ada payment gateway, tidak ada
+  // webhook, dan tidak ada ID transaksi per pemesanan -- satu-satunya
+  // sinyal "sudah dibayar" yang tersedia adalah email notifikasi BTN yang
+  // masuk ke inbox pemilik. Cron ini membaca inbox itu lewat IMAP setiap
+  // beberapa menit, mencocokkan NOMINAL PERSIS (termasuk kode unik 3 digit
+  // dari generateKodeUnikPembayaran) ke booking yang sedang
+  // 'menunggu_pembayaran', dan kalau cocok TEPAT SATU booking, menguncinya
+  // -- meniru persis yang dilakukan owner secara manual lewat WhatsApp
+  // "LUNAS <kode>" (lihat /bridge/confirm-payment). Ditambahkan 2026-09-20
+  // atas instruksi owner: "tetap qris statis dr btn, pakai kode unik".
+  //
+  // Sengaja TIDAK mengonfirmasi kalau nominalnya cocok ke LEBIH dari satu
+  // booking sekaligus (kode unik kebetulan bentrok -- kejadian yang sangat
+  // jarang untuk villa sekecil ini) -- dibiarkan untuk konfirmasi manual
+  // owner, karena mengunci unit yang salah jauh lebih mahal daripada
+  // membiarkan satu booking menunggu sedikit lebih lama.
+  //
+  // Kredensial IMAP-nya di integration_settings.payment_email (host, port,
+  // user, password, secure, subject_contains) -- pola yang sama dengan
+  // secret lain di sistem ini (cron.secret, vercel_bridge.secret). Import
+  // library IMAP-nya sengaja dynamic (bukan di atas file) supaya cold
+  // start rute lain tidak ikut menanggung biaya memuatnya.
+  if(path==='/cron/check-payment-email' && m==='POST'){
+    const cron = await getSetting('cron');
+    const provided = req.headers.get('x-cron-secret') ?? '';
+    if(!cron.secret) return err('Cron belum dikonfigurasi (integration_settings.cron.secret)',503);
+    if(!await secretsMatch(provided, cron.secret)) return err('Unauthorized',401);
+
+    const cfg = await getSetting('payment_email');
+    if(!cfg.host || !cfg.user || !cfg.password){
+      return err('Email pembayaran belum dikonfigurasi (integration_settings.payment_email: host, user, password)',503);
+    }
+
+    const hasil = await scanPaymentInbox(cfg);
+    if(hasil.gagal) return err(`Gagal membaca email: ${hasil.gagal}`, 502);
+    return json({success:true, diperiksa:hasil.diperiksa, dikonfirmasi:hasil.dikonfirmasi, ambigu:hasil.ambigu});
+  }
+
+  // Dipanggil dari halaman booking begitu QRIS ditampilkan (dan diulang
+  // berkala oleh polling status di sana) supaya tamu tidak perlu menunggu
+  // sampai 5 menit giliran cron berikutnya -- lihat CATATAN di atas fungsi
+  // scanPaymentInbox soal kenapa email tetap jadi satu-satunya sinyal.
+  // Ditambahkan 2026-09-21 karena cron latar belakang tiap 5 menit dianggap
+  // terlalu jarang untuk pengalaman tamu (owner minta pemicu dari sisi
+  // tamu, bukan cuma jadwal tetap).
+  if(path==='/public/bookings/check-payment' && m==='POST'){
+    const b = await req.json().catch(()=>null);
+    if(!b) return err('Body tidak valid');
+    const booking_id = String(b.booking_id??'').trim();
+    const hp = String(b.hp??'').trim();
+    if(!/^[0-9a-f-]{36}$/i.test(booking_id)) return err('booking_id tidak valid');
+    if(!hp) return err('Nomor WhatsApp wajib diisi');
+
+    const {data:booking} = await supabase.from('bookings')
+      .select('id,guest_id,sumber,status').eq('id',booking_id).maybeSingle();
+    if(!booking) return err('Booking tidak ditemukan', 404);
+    if(booking.sumber !== 'website') return err('Booking ini tidak bisa dicek lewat jalur ini', 403);
+
+    let guestHp = null;
+    if(booking.guest_id){
+      const {data:g} = await supabase.from('guests').select('hp').eq('id',booking.guest_id).maybeSingle();
+      guestHp = g?.hp ?? null;
+    }
+    if(!guestHp || guestHp.trim() !== hp) return err('Nomor WhatsApp tidak cocok dengan booking ini', 403);
+
+    // Sudah lunas/batal duluan (misalnya oleh cron latar belakang atau balasan
+    // WA manual owner) -- tidak perlu login IMAP sama sekali.
+    if(booking.status !== 'menunggu_pembayaran'){
+      return json({success:true, checked:false, confirmed: booking.status === 'terjadwal'});
+    }
+
+    const cfg = await getSetting('payment_email');
+    if(!cfg.host || !cfg.user || !cfg.password){
+      // Belum dikonfigurasi -- diam-diam saja untuk tamu, ini bukan masalah
+      // di sisi mereka. Cron latar belakang (kalau menyala) atau owner akan
+      // tetap mengonfirmasi manual lewat WA.
+      return json({success:true, checked:false, confirmed:false});
+    }
+
+    const hasil = await scanPaymentInbox(cfg, {onlyBookingId: booking_id});
+    if(hasil.gagal){
+      return json({success:true, checked:false, confirmed:false});
+    }
+    return json({success:true, checked:true, confirmed: hasil.dikonfirmasi.length>0});
+  }
+
   const session = await requireAuth(req);
   if(!session) return err('Unauthorized',401);
   const isAdmin = session.role==='admin';
   const isStaff = session.role==='receptionist' || isAdmin;
   const isOwner = session.role==='owner';
+  const isFinance = session.role==='finance' || isAdmin;
+
+  // ── FINANCE DASHBOARD ───────────────────────────────────────────────────
+  // See the module comment above calculateExpectedSettlement() for the data
+  // model this is built on (Cloudbeds reservation totals + a manual
+  // settlement/reconciliation workflow -- no fabricated payment/settlement
+  // data). Role: 'finance' or 'admin' can view/reconcile/process/mark
+  // received; only 'admin' can write OTA settlement configuration, per the
+  // mandate ("OTA settlement configuration hanya OWNER/ADMIN").
+
+  if(path==='/finance/whoami' && m==='GET'){
+    if(!isFinance) return forbidden();
+    return json({ ok:true, role: session.role });
+  }
+
+  function financeDateRange(){
+    const to = url.searchParams.get('to') || todayWIB();
+    const from = url.searchParams.get('from') || `${monthWIB()}-01`;
+    return { from, to };
+  }
+
+  if(path==='/finance/summary' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const { from, to } = financeDateRange();
+    const { data: rows, error } = await supabase.from('bookings')
+      .select('id,sumber,status,tgl_checkin,tgl_checkout,total_bayar,tarif,cloudbeds_balance')
+      .gte('tgl_checkin', from).lte('tgl_checkin', to);
+    if(error) return err(error.message);
+    const bookings = rows ?? [];
+    const configMap = await getSettlementConfigMap();
+    await ensureFinanceSettlements(bookings, configMap);
+
+    const active = bookings.filter(b=>b.status!=='batal');
+    const cancelled = bookings.length - active.length;
+    const amountOf = b => Number(b.total_bayar ?? b.tarif ?? 0);
+    const gross_revenue = active.reduce((s,b)=>s+amountOf(b),0);
+    const payment_received = active.filter(b=>paymentStatusForBooking(b)==='PAID').reduce((s,b)=>s+amountOf(b),0);
+    const outstanding = active.reduce((s,b)=>s+outstandingForBooking(b, amountOf(b)),0);
+    const cloudbedsVerifiedCount = active.filter(b=>b.cloudbeds_balance != null).length;
+
+    const activeIds = active.map(b=>b.id);
+    let otaReceivable = 0, alertsUnknown = 0, alertsOverdue = 0, alertsDueToday = 0;
+    let cashReceivedAmount = 0, cashReceivedCount = 0;
+    if(activeIds.length){
+      const { data: settlements } = await supabase.from('finance_settlements')
+        .select('booking_id,sumber,amount,settlement_status,settlement_confidence,expected_settlement_date,amount_received,received_date')
+        .in('booking_id', activeIds);
+      const today = todayWIB();
+      for(const s of (settlements ?? [])){
+        const isOta = normalizedChannel(s.sumber) !== 'DIRECT';
+        if(isOta && s.settlement_status !== 'RECEIVED') otaReceivable += Number(s.amount ?? 0);
+        if(s.settlement_status !== 'RECEIVED' && s.settlement_confidence==='UNKNOWN') alertsUnknown++;
+        if(s.settlement_status !== 'RECEIVED' && s.expected_settlement_date){
+          if(s.expected_settlement_date < today) alertsOverdue++;
+          else if(s.expected_settlement_date === today) alertsDueToday++;
+        }
+        if(s.settlement_status==='RECEIVED' && s.received_date && s.received_date>=from && s.received_date<=to){
+          cashReceivedAmount += Number(s.amount_received ?? 0);
+          cashReceivedCount++;
+        }
+      }
+    }
+
+    const { data: lastEvent } = await supabase.from('cloudbeds_events_log').select('created_at').order('created_at',{ascending:false}).limit(1).maybeSingle();
+
+    const alerts = [];
+    if(outstanding>0) alerts.push({ type:'outstanding', level:'warning', message:`Rp ${Math.round(outstanding).toLocaleString('id-ID')} masih outstanding (belum lunas).` });
+    if(alertsDueToday>0) alerts.push({ type:'settlement_due', level:'info', message:`${alertsDueToday} settlement diperkirakan cair hari ini.` });
+    if(alertsOverdue>0) alerts.push({ type:'overdue', level:'danger', message:`${alertsOverdue} settlement sudah lewat tanggal perkiraan cair dan belum diterima.` });
+    if(alertsUnknown>0) alerts.push({ type:'unknown_settlement_rule', level:'warning', message:`${alertsUnknown} transaksi punya aturan settlement yang belum dikonfigurasi (UNKNOWN).` });
+
+    return json({
+      period: { from, to },
+      gross_revenue, net_revenue: gross_revenue,
+      net_revenue_note: 'Sama dengan Gross Revenue -- integrasi Cloudbeds ini hanya membawa total reservasi (grandTotal), tidak ada feed diskon/refund terpisah untuk dikurangkan.',
+      payment_received,
+      payment_received_note: cloudbedsVerifiedCount>0
+        ? `Untuk ${cloudbedsVerifiedCount} dari ${active.length} booking, dihitung dari saldo asli Cloudbeds (getReservations.balance). Sisanya (booking direct/walk-in atau belum tersinkron) memakai status booking (checkin/checkout = lunas, sesuai alur "Tandai Lunas" front desk) sebagai perkiraan.`
+        : 'Dihitung dari status booking (checkin/checkout = sudah bayar penuh, sesuai alur "Tandai Lunas" front desk) -- belum ada booking dengan saldo asli Cloudbeds tersinkron pada periode ini. Jalankan "Tarik Reservasi" di Admin > Cloudbeds untuk mengisinya.',
+      outstanding,
+      ota_receivable: otaReceivable,
+      ota_receivable_note: 'Total revenue booking OTA (non-direct) yang statusnya belum RECEIVED di alur settlement manual Finance.',
+      cash_received: {
+        amount: cashReceivedAmount,
+        verified: cashReceivedCount>0,
+        count: cashReceivedCount,
+        note: cashReceivedCount>0
+          ? 'Berdasarkan input manual Finance (Tandai Diterima + referensi bank) pada periode ini.'
+          : 'NOT VERIFIED -- belum ada settlement yang ditandai diterima (dengan referensi bank) untuk periode ini.',
+      },
+      bookings_counted: active.length,
+      cloudbeds_balance_verified_count: cloudbedsVerifiedCount,
+      cancelled_excluded: cancelled,
+      alerts,
+      last_cloudbeds_activity: lastEvent?.created_at ?? null,
+      data_caveats: [
+        'Balance mismatch check (Cloudbeds balance vs calculated) NOT_AVAILABLE -- belum ada perbandingan otomatis antara total kami dan balance Cloudbeds; balance Cloudbeds sekarang dipakai langsung sebagai sumber status bayar/outstanding, bukan dibandingkan.',
+        'Refund tracking NOT_AVAILABLE -- tidak ada endpoint refund yang tersinkron dari Cloudbeds ke sistem ini.',
+        'Sync run history (jumlah reservasi/transaksi/pembayaran per sync) NOT_AVAILABLE sebagai log tersimpan -- lihat halaman Admin > Cloudbeds untuk menjalankan sync dan melihat ringkasannya secara langsung.',
+      ],
+    });
+  }
+
+  if(path==='/finance/channel-breakdown' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const { from, to } = financeDateRange();
+    const { data: rows, error } = await supabase.from('bookings')
+      .select('id,sumber,status,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_balance')
+      .gte('tgl_checkin', from).lte('tgl_checkin', to).neq('status','batal');
+    if(error) return err(error.message);
+    const bookings = rows ?? [];
+    const configMap = await getSettlementConfigMap();
+    await ensureFinanceSettlements(bookings, configMap);
+    const { commissionPctBySumber } = await getOtaCommissionPctMap();
+
+    const ids = bookings.map(b=>b.id);
+    const settlementByBooking = new Map();
+    if(ids.length){
+      const { data: settlements } = await supabase.from('finance_settlements').select('*').in('booking_id', ids);
+      for(const s of (settlements ?? [])) settlementByBooking.set(s.booking_id, s);
+    }
+
+    const bySumber = new Map();
+    for(const b of bookings){
+      const key = b.sumber ?? 'other';
+      const cur = bySumber.get(key) ?? { sumber:key, normalized_channel: normalizedChannel(key), revenue:0, net_revenue:0, payment:0, outstanding:0, ota_receivable:0, settled_count:0, unsettled_count:0, booking_count:0, room_nights:0 };
+      const amount = Number(b.total_bayar ?? b.tarif ?? 0);
+      const commissionPct = commissionPctBySumber.get(b.sumber) ?? 0;
+      const bOutstanding = outstandingForBooking(b, amount);
+      cur.revenue += amount;
+      cur.net_revenue += amount * (1 - commissionPct/100);
+      cur.booking_count++;
+      cur.room_nights += Number(b.durasi_malam ?? 0);
+      cur.payment += amount - bOutstanding;
+      cur.outstanding += bOutstanding;
+      const s = settlementByBooking.get(b.id);
+      const settled = s?.settlement_status==='RECEIVED';
+      if(settled) cur.settled_count++; else cur.unsettled_count++;
+      if(cur.normalized_channel!=='DIRECT' && !settled) cur.ota_receivable += amount;
+      bySumber.set(key, cur);
+    }
+    const cfgArr = [...configMap.values()];
+    const channels = [...bySumber.values()].map(c=>{
+      const cfg = configMap.get(c.sumber);
+      return {
+        ...c,
+        ota_deduction: c.revenue - c.net_revenue,
+        avg_net_adr: c.room_nights>0 ? c.net_revenue/c.room_nights : null,
+        collection_method: cfg?.collection_method ?? 'UNKNOWN',
+        destination_account: cfg?.destination_account_label ?? null,
+      };
+    }).sort((a,b)=>b.revenue-a.revenue);
+    const totals = channels.reduce((acc,c)=>({ revenue:acc.revenue+c.revenue, net_revenue:acc.net_revenue+c.net_revenue, payment:acc.payment+c.payment, outstanding:acc.outstanding+c.outstanding, ota_receivable:acc.ota_receivable+c.ota_receivable }), { revenue:0, net_revenue:0, payment:0, outstanding:0, ota_receivable:0 });
+    return json({ period:{from,to}, channels, totals, settlement_configs_count: cfgArr.length });
+  }
+
+  if(path==='/finance/bookings' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const { from, to } = financeDateRange();
+    const sumber = url.searchParams.get('sumber');
+    const payment_status = url.searchParams.get('payment_status');
+    const settlement_status = url.searchParams.get('settlement_status');
+    const q = String(url.searchParams.get('q') ?? '').trim();
+    const limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit') ?? 50)));
+    const offset = Math.max(0, Number(url.searchParams.get('offset') ?? 0));
+
+    let query = supabase.from('bookings')
+      .select('id,unit_nomor,guest_nama,sumber,status,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_balance,cloudbeds_reservation_id,created_at', {count:'exact'})
+      .gte('tgl_checkin', from).lte('tgl_checkin', to)
+      .order('tgl_checkin',{ascending:false});
+    if(sumber) query = query.eq('sumber', sumber);
+    if(q) query = query.ilike('guest_nama', `%${q}%`);
+    const { data: rows, error, count } = await query.range(offset, offset+limit-1);
+    if(error) return err(error.message);
+    let bookings = rows ?? [];
+
+    const configMap = await getSettlementConfigMap();
+    await ensureFinanceSettlements(bookings.filter(b=>b.status!=='batal'), configMap);
+    const ids = bookings.map(b=>b.id);
+    const settlementByBooking = new Map();
+    if(ids.length){
+      const { data: settlements } = await supabase.from('finance_settlements').select('*').in('booking_id', ids);
+      for(const s of (settlements ?? [])) settlementByBooking.set(s.booking_id, s);
+    }
+
+    let items = bookings.map(b=>{
+      const amount = Number(b.total_bayar ?? b.tarif ?? 0);
+      const pay = paymentStatusForBooking(b);
+      const s = settlementByBooking.get(b.id) ?? null;
+      return {
+        id: b.id, unit_nomor: b.unit_nomor, guest_nama: b.guest_nama, sumber: b.sumber,
+        normalized_channel: normalizedChannel(b.sumber), status: b.status,
+        tgl_checkin: b.tgl_checkin, tgl_checkout: b.tgl_checkout, durasi_malam: b.durasi_malam,
+        revenue: amount, payment_status: pay, outstanding: outstandingForBooking(b, amount),
+        payment_status_source: b.cloudbeds_balance != null ? 'cloudbeds_balance' : 'booking_status_estimate',
+        cloudbeds_reservation_id: b.cloudbeds_reservation_id,
+        settlement_status: s?.settlement_status ?? null,
+        settlement_confidence: s?.settlement_confidence ?? null,
+        expected_settlement_date: s?.expected_settlement_date ?? null,
+      };
+    });
+    if(payment_status) items = items.filter(i=>i.payment_status===payment_status);
+    if(settlement_status) items = items.filter(i=>i.settlement_status===settlement_status);
+
+    return json({ items, total: count ?? items.length, limit, offset });
+  }
+
+  if(path==='/finance/booking' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const id = url.searchParams.get('id');
+    if(!id) return err('id wajib diisi');
+    const { data: b, error } = await supabase.from('bookings')
+      .select('*, guests(nama,hp,email), units(nomor,blok)')
+      .eq('id', id).maybeSingle();
+    if(error) return err(error.message);
+    if(!b) return err('Booking tidak ditemukan',404);
+
+    const configMap = await getSettlementConfigMap();
+    await ensureFinanceSettlements([b], configMap);
+    const { data: settlement } = await supabase.from('finance_settlements').select('*').eq('booking_id', id).maybeSingle();
+    const cfg = configMap.get(b.sumber) ?? null;
+    const { data: auditLog } = settlement
+      ? await supabase.from('finance_audit_log').select('*').eq('entity_type','finance_settlement').eq('entity_id', settlement.id).order('created_at',{ascending:false}).limit(20)
+      : { data: [] };
+
+    const amount = Number(b.total_bayar ?? b.tarif ?? 0);
+    return json({
+      reservation: {
+        id: b.id, guest_nama: b.guest_nama, guests: b.guests ?? null, sumber: b.sumber,
+        normalized_channel: normalizedChannel(b.sumber), tgl_checkin: b.tgl_checkin, tgl_checkout: b.tgl_checkout,
+        unit_nomor: b.unit_nomor, units: b.units ?? null, status: b.status, cloudbeds_reservation_id: b.cloudbeds_reservation_id,
+      },
+      revenue: { room: amount, extras: null, discount: null, tax: null, fee: null, refund: null, net: amount, note: 'Tidak ada breakdown room/extras/tax/fee terpisah dari Cloudbeds untuk API key ini -- hanya total reservasi.' },
+      payment: {
+        paid: paymentStatusForBooking(b)==='PAID',
+        outstanding: outstandingForBooking(b, amount),
+        method: 'UNKNOWN',
+        payment_date: b.checkin_at ?? null,
+        source: b.cloudbeds_balance != null ? 'cloudbeds_balance' : 'booking_status_estimate',
+        cloudbeds_balance: b.cloudbeds_balance ?? null,
+      },
+      settlement: {
+        collection_method: cfg?.collection_method ?? 'UNKNOWN',
+        expected_settlement_date: settlement?.expected_settlement_date ?? null,
+        settlement_confidence: settlement?.settlement_confidence ?? 'UNKNOWN',
+        settlement_status: settlement?.settlement_status ?? null,
+        settlement_reference: settlement?.settlement_reference ?? null,
+        destination_account: cfg?.destination_account_label ?? null,
+      },
+      bank: {
+        amount_received: settlement?.amount_received ?? null,
+        received_date: settlement?.received_date ?? null,
+        bank_reference: settlement?.bank_reference ?? null,
+        reconciliation_status: settlement?.reconciliation_status ?? null,
+        variance_amount: settlement?.variance_amount ?? null,
+      },
+      audit_log: auditLog ?? [],
+    });
+  }
+
+  if(path==='/finance/ota-settlement-config' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const { data, error } = await supabase.from('finance_ota_settlement_config').select('*').order('sumber');
+    if(error) return err(error.message);
+    return json(data ?? []);
+  }
+
+  if(path==='/finance/ota-settlement-config' && m==='POST'){
+    if(!isAdmin) return forbidden();
+    const body = await req.json();
+    const sumber = String(body.sumber ?? '').trim();
+    if(!sumber) return err('sumber wajib diisi');
+    const { data: existing } = await supabase.from('finance_ota_settlement_config').select('*').eq('sumber', sumber).maybeSingle();
+    const patch = {
+      sumber,
+      collection_method: body.collection_method ?? 'UNKNOWN',
+      settlement_delay_days: body.settlement_delay_days === '' || body.settlement_delay_days == null ? null : Number(body.settlement_delay_days),
+      settlement_basis: body.settlement_basis === 'CHECKIN' ? 'CHECKIN' : 'CHECKOUT',
+      settlement_schedule: ['MONTHLY_1ST','WEEKLY_ON_DAY'].includes(body.settlement_schedule) ? body.settlement_schedule : 'FIXED_DELAY',
+      settlement_weekday: body.settlement_weekday === '' || body.settlement_weekday == null ? null : Number(body.settlement_weekday),
+      destination_account_label: body.destination_account_label ?? null,
+      currency: body.currency ?? 'IDR',
+      effective_date: body.effective_date || null,
+      notes: body.notes ?? null,
+      configured_by: session.uid,
+      updated_at: new Date().toISOString(),
+    };
+    const { data: saved, error } = await supabase.from('finance_ota_settlement_config').upsert(patch, { onConflict:'sumber' }).select('*').single();
+    if(error) return err(error.message);
+    await writeFinanceAudit({ entity_type:'finance_ota_settlement_config', entity_id: saved.id, session, action: existing?'update_settlement_config':'create_settlement_config', old_value: existing ?? null, new_value: saved, reason: body.reason ?? null });
+    return json(saved);
+  }
+
+  if(path==='/finance/ota-settlement-config' && m==='DELETE'){
+    if(!isAdmin) return forbidden();
+    const sumber = url.searchParams.get('sumber');
+    if(!sumber) return err('sumber wajib diisi');
+    const { data: existing } = await supabase.from('finance_ota_settlement_config').select('*').eq('sumber', sumber).maybeSingle();
+    if(!existing) return err('Konfigurasi tidak ditemukan',404);
+    const { error } = await supabase.from('finance_ota_settlement_config').delete().eq('sumber', sumber);
+    if(error) return err(error.message);
+    await writeFinanceAudit({ entity_type:'finance_ota_settlement_config', entity_id: existing.id, session, action:'delete_settlement_config', old_value: existing, new_value: null });
+    return json({ success:true });
+  }
+
+  if(path==='/finance/settlements/process' && m==='POST'){
+    if(!isFinance) return forbidden();
+    const body = await req.json();
+    const booking_id = body.booking_id;
+    if(!booking_id) return err('booking_id wajib diisi');
+    const { data: s } = await supabase.from('finance_settlements').select('*').eq('booking_id', booking_id).maybeSingle();
+    if(!s) return err('Settlement belum ada untuk booking ini -- buka detail booking dulu supaya settlement dibuat.',404);
+    if(s.settlement_status==='RECEIVED') return err('Settlement ini sudah RECEIVED.',400);
+    const patch = { settlement_status:'PROCESSING', settlement_reference: body.settlement_reference ?? null, processed_by: session.uid, processed_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+    const { data: saved, error } = await supabase.from('finance_settlements').update(patch).eq('id', s.id).select('*').single();
+    if(error) return err(error.message);
+    await writeFinanceAudit({ entity_type:'finance_settlement', entity_id: s.id, session, action:'process_settlement', old_value: s, new_value: saved, reason: body.reason ?? null });
+    return json(saved);
+  }
+
+  if(path==='/finance/settlements/receive' && m==='POST'){
+    if(!isFinance) return forbidden();
+    const body = await req.json();
+    const booking_id = body.booking_id;
+    if(!booking_id) return err('booking_id wajib diisi');
+    if(body.amount_received == null || body.received_date == null) return err('amount_received dan received_date wajib diisi');
+    const { data: s } = await supabase.from('finance_settlements').select('*').eq('booking_id', booking_id).maybeSingle();
+    if(!s) return err('Settlement belum ada untuk booking ini.',404);
+    const amount_received = Number(body.amount_received);
+    const variance_amount = amount_received - Number(s.amount);
+    const reconciliation_status = variance_amount === 0 ? 'MATCHED' : 'VARIANCE';
+    const patch = {
+      settlement_status:'RECEIVED', amount_received, received_date: body.received_date,
+      bank_reference: body.bank_reference ?? null, notes: body.notes ?? s.notes ?? null,
+      reconciliation_status, variance_amount, updated_at: new Date().toISOString(),
+    };
+    const { data: saved, error } = await supabase.from('finance_settlements').update(patch).eq('id', s.id).select('*').single();
+    if(error) return err(error.message);
+    await writeFinanceAudit({ entity_type:'finance_settlement', entity_id: s.id, session, action:'mark_received', old_value: s, new_value: saved, reason: body.reason ?? null });
+    return json(saved);
+  }
+
+  if(path==='/finance/audit-log' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit') ?? 50)));
+    let query = supabase.from('finance_audit_log').select('*').order('created_at',{ascending:false}).limit(limit);
+    const entity_type = url.searchParams.get('entity_type');
+    if(entity_type) query = query.eq('entity_type', entity_type);
+    const { data, error } = await query;
+    if(error) return err(error.message);
+    return json(data ?? []);
+  }
+
+  // ── FINANCE SURVIVAL CONTROL CENTER ─────────────────────────────────────
+
+  if(path==='/finance/property-config' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const { data, error } = await supabase.from('finance_property_config').select('*').order('property_code');
+    if(error) return err(error.message);
+    return json(data ?? []);
+  }
+
+  if(path==='/finance/property-config' && m==='POST'){
+    if(!isAdmin) return forbidden();
+    const body = await req.json();
+    const property_code = String(body.property_code ?? '').trim();
+    if(!property_code) return err('property_code wajib diisi');
+    const { data: existing } = await supabase.from('finance_property_config').select('*').eq('property_code', property_code).maybeSingle();
+    const NUM_FIELDS = ['total_rooms','investor_share_pct','mkh_share_pct','guarantee_per_room','target_net_adr','conservative_net_adr','room_electricity_per_night','payroll_employee_count','payroll_per_employee'];
+    const patch = { property_code, property_name: body.property_name ?? property_code, currency: body.currency ?? 'IDR', active: body.active !== false, notes: body.notes ?? null, updated_by: session.uid, updated_at: new Date().toISOString() };
+    for(const f of NUM_FIELDS){ if(body[f] != null && body[f] !== '') patch[f] = Number(body[f]); }
+    if(!existing){
+      for(const f of NUM_FIELDS){ if(patch[f] == null) return err(`${f} wajib diisi untuk konfigurasi baru`); }
+    }
+    const { data: saved, error } = await supabase.from('finance_property_config').upsert(patch, { onConflict:'property_code' }).select('*').single();
+    if(error) return err(error.message);
+    await writeFinanceAudit({ entity_type:'finance_property_config', entity_id: saved.id, session, action: existing?'update_property_config':'create_property_config', old_value: existing ?? null, new_value: saved, reason: body.reason ?? null });
+    return json(saved);
+  }
+
+  if(path==='/finance/survival' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const property_code = url.searchParams.get('property') ?? 'loonars-1';
+    const { from, to } = financeDateRange();
+    const kpis = await computeSurvivalKpis(property_code, from, to);
+    if(!kpis) return err(`Konfigurasi properti '${property_code}' belum ada`, 404);
+    return json(kpis);
+  }
+
+  if(path==='/finance/scenario' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const property_code = url.searchParams.get('property') ?? 'loonars-1';
+    const config = await getPropertyConfig(property_code);
+    if(!config) return err(`Konfigurasi properti '${property_code}' belum ada`, 404);
+
+    const netAdr = Number(url.searchParams.get('net_adr') ?? config.target_net_adr);
+    const days = Math.max(1, Number(url.searchParams.get('days') ?? 30));
+
+    // Explicit rooms_per_night wins; otherwise derive from an occupancy_pct input.
+    let roomsPerNight = url.searchParams.get('rooms_per_night') != null ? Number(url.searchParams.get('rooms_per_night')) : null;
+    if(roomsPerNight == null){
+      const occupancyPct = Number(url.searchParams.get('occupancy_pct') ?? 0);
+      roomsPerNight = (occupancyPct/100) * Number(config.total_rooms);
+    }
+
+    const custom = computeScenario(config, { netAdr, roomsPerNight, days });
+    const targets = [5,6,7,8].map(r => computeScenario(config, { netAdr: Number(config.target_net_adr), roomsPerNight: r, days: 30 }));
+    return json({ property_code, config, custom, targets });
+  }
 
   // ── Database tamu ──────────────────────────────────────────────────────
   // Tujuan owner 2026-09-12: "kt punya database tamu" dari OTA maupun web.
@@ -3062,6 +4241,40 @@ Deno.serve(async (req)=>{
     })));
   }
 
+  // Perkiraan harga untuk layar kasir/walk-in SEBELUM booking dibuat --
+  // memanggil computeStayTarif yang SAMA dengan yang dipakai POST /bookings
+  // (staf) dan /public/bookings (loonars.id), supaya angka yang dilihat
+  // kasir tidak pernah bisa berbeda dari yang benar-benar ditagih maupun
+  // dari yang tamu lihat di loonars.id. Sebelum route ini ada, kasir
+  // menghitung sendiri di browser pakai tarif_harian flat -- tidak pernah
+  // melihat override villa_rates (harga dinamis mesin AI), sehingga
+  // perkiraan di layar kasir bisa beda dari harga yang dipakai loonars.id
+  // dan bahkan dari nominal yang akhirnya tercatat di booking yang sama.
+  if(path==='/tarif-preview' && m==='GET'){
+    if(!isStaff) return forbidden();
+    const unit_id = url.searchParams.get('unit_id');
+    const tgl_checkin = url.searchParams.get('tgl_checkin');
+    const tgl_checkout = url.searchParams.get('tgl_checkout');
+    const tipe = url.searchParams.get('tipe');
+    if(!unit_id || !tgl_checkin) return err('unit_id dan tgl_checkin wajib diisi');
+    if(!isValidDateStr(tgl_checkin)) return err('tgl_checkin tidak valid');
+    if(tgl_checkout != null && !isValidDateStr(tgl_checkout)) return err('tgl_checkout tidak valid');
+    if(!['harian','bulanan'].includes(tipe)) return err('tipe tidak valid (harus harian atau bulanan)');
+
+    const {data:unit, error:unitErr} = await supabase.from('units')
+      .select('tarif_harian,tarif_bulanan,room_type_id').eq('id', unit_id).single();
+    if(unitErr || !unit) return err('Unit tidak ditemukan', 404);
+
+    if(tipe === 'bulanan'){
+      return json({tarif: Number(unit.tarif_bulanan ?? 0), nights: null});
+    }
+    const nights = tgl_checkout
+      ? Math.max(1, Math.round((new Date(tgl_checkout).getTime() - new Date(tgl_checkin).getTime()) / 86400000))
+      : 1;
+    const tarif = await computeStayTarif(unit, tgl_checkin, nights);
+    return json({tarif, nights});
+  }
+
   if(path==='/bookings' && m==='POST'){
     if(!isStaff) return forbidden();
     const b=await req.json();
@@ -3090,34 +4303,11 @@ Deno.serve(async (req)=>{
       const nights = b.tgl_checkout
         ? Math.max(1, Math.round((new Date(b.tgl_checkout).getTime() - new Date(b.tgl_checkin).getTime()) / 86400000))
         : 1;
-      const flatTarif = Number(unit.tarif_harian ?? 0);
-
-      let plannedByDate = new Map();
-      if(unit.room_type_id){
-        const nightDates = [];
-        for(let i=0;i<nights;i++){
-          const d = new Date(`${b.tgl_checkin}T00:00:00Z`);
-          d.setUTCDate(d.getUTCDate()+i);
-          nightDates.push(d.toISOString().slice(0,10));
-        }
-        const {data:plannedRates} = await supabase.from('villa_rates')
-          .select('date,rate')
-          .eq('room_type_id', unit.room_type_id)
-          .in('date', nightDates);
-        for(const r of (plannedRates??[])) plannedByDate.set(r.date, Number(r.rate));
-      }
-
-      if(plannedByDate.size > 0){
-        computedTarif = 0;
-        for(let i=0;i<nights;i++){
-          const d = new Date(`${b.tgl_checkin}T00:00:00Z`);
-          d.setUTCDate(d.getUTCDate()+i);
-          const dateStr = d.toISOString().slice(0,10);
-          computedTarif += plannedByDate.has(dateStr) ? plannedByDate.get(dateStr) : flatTarif;
-        }
-      } else {
-        computedTarif = flatTarif * nights;
-      }
+      // Sama persis dengan /public/bookings dan /tarif-preview -- satu
+      // fungsi harga, supaya kasir, loonars.id, dan nominal yang tercatat
+      // di sini tidak pernah bisa berbeda pendapat (lihat komentar di
+      // computeStayTarif).
+      computedTarif = await computeStayTarif(unit, b.tgl_checkin, nights);
     }
     if(computedTarif <= 0) return err('Tarif unit belum diatur — hubungi admin', 409);
 

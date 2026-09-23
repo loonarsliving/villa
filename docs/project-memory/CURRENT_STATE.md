@@ -96,6 +96,126 @@ yang sengaja melempar, bukan mengembalikan false. +7 tes.
 
 `load()` di Kalender Booking juga tidak punya penanganan galat — kalendernya
 tampil KOSONG saat gagal memuat, terbaca seperti "tidak ada booking".
+## 2026-09-21 — kasir (Payment Gateway) dan loonars.id disatukan sumber harganya
+
+Owner bertanya kenapa harga di sistem kasir berbeda dengan loonars.id.
+Root cause (dibaca langsung dari kode, bukan tebakan): **loonars.id**
+(`/public/bookings`, `/public/availability`) sudah lama memakai
+`computeStayTarif()` di `villa-api`, yang mengambil harga dinamis per
+tanggal dari `villa_rates` (hasil mesin harga AI) kalau ada, baru jatuh
+ke `units.tarif_harian` flat kalau tidak. **Layar kasir** (`/front-desk/
+payment-gateway`) sebaliknya menghitung sendiri di browser pakai
+`tarif_harian` flat × jumlah malam — tidak pernah menanyakan
+`villa_rates` — jadi setiap kali mesin harga AI sedang menetapkan harga
+berbeda dari flat rate untuk tanggal itu (weekend surcharge, high/low
+season), angka di layar kasir bisa beda dari loonars.id, dan bahkan dari
+nominal yang akhirnya tercatat (karena `POST /bookings` staf memang
+sudah menghitung ulang di server dengan logika yang sama seperti
+loonars.id -- yang beda cuma tampilan di layar kasir SEBELUM booking
+dibuat).
+
+**Diperbaiki (branch `claude/kasir-loonars-price-diff-tn923p`,
+owner-approved di chat 2026-09-21 -- ini soal harga tamu, jadi tidak
+di-merge sendiri tanpa itu):**
+- Route baru staf-only `GET /tarif-preview` di villa-api, memanggil
+  `computeStayTarif()` yang SAMA dipakai `/public/bookings` -- kasir
+  sekarang menanyakan harga real-time ke server, bukan menghitung
+  sendiri.
+- `POST /bookings` (jalur kasir) yang tadinya menyalin ulang logika
+  `villa_rates`-lookup-nya sendiri (kode duplikat, berisiko menyimpang
+  dari `computeStayTarif` suatu saat) sekarang memanggil fungsi yang
+  sama juga -- tiga jalur (`/tarif-preview`, `POST /bookings`,
+  `/public/bookings`) sekarang satu fungsi harga, bukan tiga salinan.
+- `payment-gateway/page.tsx` memanggil `/tarif-preview` setiap kali
+  unit/tanggal/tipe berubah dan menampilkan angka itu ("Harga sistem
+  saat ini — sama dengan loonars.id"), dengan fallback ke perkiraan
+  flat (dilabeli jelas sebagai perkiraan) kalau panggilan itu gagal.
+
+**Belum aktif sampai di-deploy:** perubahan `villa-api` di repo ini
+hanya snapshot -- baru live setelah branch ini di-merge ke `main` DAN
+`deploy-villa-api.yml` berhasil. Per catatan 2026-09-20 di atas,
+`SUPABASE_ACCESS_TOKEN` (GitHub secret) sedang kedaluwarsa sehingga
+workflow itu gagal 401 -- **wajib dicek ulang setelah merge** (Actions
+hijau + versi fungsi naik di `mcp__Supabase__list_edge_functions`)
+sebelum menganggap perbaikan ini benar-benar berlaku di produksi. Kalau
+token belum diperbaiki, `/tarif-preview` akan 404 di produksi dan kasir
+otomatis kembali ke perkiraan flat lama (aman, tidak crash, tapi
+perbaikannya belum jalan).
+
+**Diverifikasi sebelum push:** `npx tsc --noEmit` bersih, `npm test`
+70/70 hijau, `npm run build` sukses. `npm run lint` tidak bisa
+dijalankan non-interaktif di sesi ini (`next lint` meminta pemilihan
+konfigurasi ESLint interaktif -- repo ini memang belum punya
+`.eslintrc`/`eslint.config.*`, bukan regresi dari perubahan ini).
+
+## 2026-09-20 — Finance dashboard (`/finance`) built, on branch, NOT merged/deployed yet
+
+Owner requested a dedicated Finance dashboard answering 5 questions
+(revenue, payment received, outstanding, settlement, cash actually in the
+bank). Built on branch `claude/loonars-finance-dashboard-wq1oha`, **not
+merged to `main`** — owner explicitly approved the schema/architecture
+decisions below via AskUserQuestion, but merge itself is a separate gate
+this session did not take (schema changes require owner sign-off on the
+PR, per MERGE AUTHORITY in this file's parent CLAUDE.md).
+
+**Audit finding that shaped the design:** Cloudbeds' API, as actually
+used by this integration (`getReservationsWithRateDetails`), only ever
+supplies a reservation grand total — there is no separate
+payment/refund/settlement/payout endpoint available to this key. No
+`payments`, `refunds`, `settlements`, or `bank_transactions` table
+existed anywhere in the schema before this work; `bookings` had only one
+Cloudbeds ID column (`cloudbeds_reservation_id`).
+
+**Schema added** (owner-approved 2026-09-20, migration
+`finance_dashboard_schema`): `finance_ota_settlement_config` (per-channel
+collection method / settlement delay / destination account, admin-only
+write), `finance_settlements` (one row per booking: expected settlement
+date + confidence, settlement status, amount received, bank reference,
+reconciliation status/variance), `finance_audit_log` (every manual
+Finance change). `villa_users_role_check` extended with a new `'finance'`
+role (owner-approved instead of reusing `admin`).
+
+**villa-api additions** (in the repo's snapshot,
+`supabase/functions/villa-api/index.ts` — **not yet deployed**, see
+below): `calculateExpectedSettlement()` only ever returns
+`confidence:'CONFIGURED'` when an admin has actually entered a
+`settlement_delay_days` rule for that channel in
+`finance_ota_settlement_config` — never a hardcoded "Booking.com = 7
+hari" guess. Routes: `/finance/summary`, `/finance/channel-breakdown`,
+`/finance/bookings`(+`/finance/booking` detail), `/finance/ota-settlement-config`
+(GET for finance+admin, POST/DELETE admin-only), `/finance/settlements/process`,
+`/finance/settlements/receive`, `/finance/audit-log`, `/finance/whoami`.
+
+**Known, stated (not hidden) data limitations** — every one of these is
+surfaced in the dashboard itself, never silently assumed:
+- Gross revenue = Net revenue (no itemized room/extras/tax/fee or
+  discount/refund feed from Cloudbeds for this key).
+- "Payment received" vs "outstanding" is inferred from booking workflow
+  status (`checkin`/`checkout` = paid, per the existing "Tandai
+  Lunas"-before-check-in rule), **not** a Cloudbeds payment feed — stated
+  explicitly in the API response, not presented as authoritative.
+- "Cash Received" only ever shows a real figure once Finance staff
+  manually mark a settlement RECEIVED with a bank reference; otherwise it
+  reads **NOT VERIFIED**, exactly per the mandate ("Jangan menyamakan
+  Cloudbeds Payment = Bank Cash").
+- Cloudbeds-balance-vs-calculated-balance mismatch detection and refund
+  tracking are marked **NOT_AVAILABLE** in every summary response — this
+  integration does not sync a separate balance/refund field to compare
+  against.
+
+**NOT done yet, needs the PR merged + explicit deploy first:**
+1. PR not opened/merged (branch pushed only, per this session's
+   instructions not to merge/PR without being asked).
+2. Even once merged, villa-api will **not** auto-update: per the
+   2026-09-20 entry above, `deploy-villa-api.yml` is currently failing
+   (`SUPABASE_ACCESS_TOKEN` expired) — the Finance routes exist in the
+   repo's snapshot but are **not live** on the Supabase Edge Function
+   until that token is fixed and the workflow re-run.
+3. No `finance`-role user exists yet — an admin must create one via
+   Admin → Pengguna (role dropdown now includes "Finance").
+4. `finance_ota_settlement_config` is empty — every channel will show
+   settlement confidence `UNKNOWN` until an admin fills in real delay
+   days per OTA contract via `/finance/settlement-config`.
 
 ## 2026-09-20 — branch check-in/QRIS/WIB di-merge; villa-api GAGAL ter-deploy
 
