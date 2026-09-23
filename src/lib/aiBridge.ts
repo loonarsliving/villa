@@ -127,6 +127,9 @@ export interface CompetitorRateInput {
   location_label: string;
   room_type_name: string;
   room_type_description: string;
+  /** Harga untuk malam tertentu (tanggal puncak), bukan malam biasa. Butuh Mkhsistem yang sudah mengenalnya; versi lama mengabaikannya. */
+  stay_date?: string;
+  occasion?: string;
 }
 
 export interface CompetitorRateResult {

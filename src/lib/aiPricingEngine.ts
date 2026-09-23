@@ -271,7 +271,103 @@ const MARKET_SEARCH_STALE_DAYS = 45;
  * "biasa saja" adalah cara paling halus untuk membuat sistem percaya diri
  * pada data yang tidak ada.
  */
-const SIGNAL_WEIGHTS = { occupancy: 0.6, pace: 0.28, market_search: 0.12 } as const;
+const SIGNAL_WEIGHTS = { occupancy: 0.6, pace: 0.28, market_search: 0.12, search_demand: 0.15 } as const;
+
+/**
+ * SINYAL 5 (owner 2026-09-24): pencarian tanggal di website loonars.id.
+ *
+ * Sistem revenue hotel besar (Duetto dan sejenisnya) membaca permintaan
+ * juga dari orang yang MENCARI sebuah tanggal, bukan hanya dari yang sudah
+ * memesan: pencarian bergerak berminggu-minggu sebelum okupansi. Dicatat
+ * villa-api ke villa_availability_searches (tanpa data pribadi).
+ *
+ * Hanya menaikkan, tidak pernah menurunkan. Orang yang mencari adalah bukti
+ * minat; tidak ada yang mencari -- dengan trafik website sekecil ini --
+ * bukan bukti tidak ada minat, dan diskon karena "sepi dicari" akan
+ * menghukum tanggal yang sebenarnya hanya belum sempat dilihat orang.
+ *
+ * Satu orang dihitung sekali per tanggal (session_id), baseline adalah
+ * rata-rata pencari per malam untuk SEARCH_HORIZON_DAYS ke depan, dan
+ * sinyal baru menyala setelah SEARCH_MIN_SESSIONS orang berbeda mencari
+ * dalam SEARCH_LOOKBACK_DAYS terakhir -- di bawah itu satu-dua pencarian
+ * akan terlihat seperti lonjakan.
+ */
+const SEARCH_LOOKBACK_DAYS = 30;
+const SEARCH_HORIZON_DAYS = 180;
+const SEARCH_MIN_SESSIONS = 30;
+/** Pencari minimal dua kali lipat baseline baru dianggap berarti. */
+const SEARCH_SIGNIFICANT_RATIO = 1;
+const SEARCH_MAX_ADJUSTMENT_PCT = 0.06;
+
+export interface AvailabilitySearchRow {
+  id?: number | string;
+  checkin: string;
+  checkout: string;
+  room_type: string | null;
+  session_id: string | null;
+  searched_at?: string;
+}
+
+export interface SearchDemand {
+  usable: boolean;
+  sessions: number;
+  baseline: number;
+  byDate: Map<string, number>;
+}
+
+/** Pencari unik per malam menginap, untuk satu tipe unit. Fungsi murni. */
+export function buildSearchDemand(rows: AvailabilitySearchRow[], today: string, roomTypeCode: string): SearchDemand {
+  const horizonEnd = addDaysUtc(today, SEARCH_HORIZON_DAYS - 1);
+  const sessionsByDate = new Map<string, Set<string>>();
+  const allSessions = new Set<string>();
+  rows.forEach((r, i) => {
+    if (r.room_type && r.room_type !== roomTypeCode) return;
+    const who = r.session_id ?? `row-${r.id ?? i}`;
+    allSessions.add(who);
+    for (let d = r.checkin; d < r.checkout; d = addDaysUtc(d, 1)) {
+      if (d < today || d > horizonEnd) continue;
+      if (!sessionsByDate.has(d)) sessionsByDate.set(d, new Set());
+      sessionsByDate.get(d)!.add(who);
+    }
+  });
+  const byDate = new Map([...sessionsByDate].map(([d, s]) => [d, s.size]));
+  const total = [...byDate.values()].reduce((a, n) => a + n, 0);
+  const baseline = total / SEARCH_HORIZON_DAYS;
+  return { usable: allSessions.size >= SEARCH_MIN_SESSIONS && baseline > 0, sessions: allSessions.size, baseline, byDate };
+}
+
+/** Simpangan relatif pencari tanggal ini terhadap baseline, atau null kalau sinyalnya belum bisa dipakai. */
+export function searchDemandRelativeFor(demand: SearchDemand, date: string): number | null {
+  if (!demand.usable) return null;
+  const n = demand.byDate.get(date) ?? 0;
+  return (n - demand.baseline) / demand.baseline;
+}
+
+/**
+ * Harga kompetitor untuk TANGGAL PUNCAK (owner 2026-09-24).
+ *
+ * Harga malam biasa tetangga sengaja tidak dipakai pada puncak pasti (lihat
+ * langkah 6 di decideRateForDate), sehingga malam tahun baru dan Lebaran
+ * selama ini dihargai tanpa pembanding pasar sama sekali. Riset per malam
+ * (villa_competitor_rates.stay_date) mengisi celah itu, dengan dua arah:
+ *  - CAP: kalau harga kita di atas median villa tetangga untuk malam itu,
+ *    diturunkan ke sana (tidak di bawah rate plan pemilik) -- aturan yang
+ *    sama dengan malam biasa;
+ *  - RUANG NAIK: kalau tetangga jauh lebih mahal pada malam itu, harga kita
+ *    boleh mendekatinya, tapi paling banyak PEAK_COMPETITOR_MAX_UPLIFT_PCT
+ *    per keputusan. Tetap kena rem harian dan max_rate.
+ * Hanya dengan minimal COMPETITOR_MIN_SAMPLES villa (bukan hotel) dan data
+ * tidak lebih tua dari PEAK_COMPETITOR_MAX_AGE_DAYS. Angka dari riset AI
+ * tidak pernah boleh menggerakkan harga sendirian tanpa sampel yang cukup.
+ */
+const PEAK_COMPETITOR_MAX_UPLIFT_PCT = 0.1;
+const PEAK_COMPETITOR_MAX_AGE_DAYS = 30;
+const PEAK_COMPETITOR_STALE_DAYS = 14;
+const PEAK_RESEARCH_HORIZON_DAYS = 200;
+
+function addDaysUtc(dateStr: string, days: number): string {
+  return new Date(Date.parse(`${dateStr}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+}
 
 function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
@@ -469,6 +565,7 @@ export async function refreshCompetitorDataIfStale(
     .from("villa_competitor_rates")
     .select("id")
     .eq("room_type_id", roomType.id)
+    .is("stay_date", null)
     .gte("observed_at", staleSince)
     .limit(1);
   if (recent && recent.length > 0) return { refreshed: false, skipped_reason: "existing data still fresh" };
@@ -502,6 +599,111 @@ export async function refreshCompetitorDataIfStale(
     })),
   );
   return { refreshed: true, rows_inserted: results.length };
+}
+
+export interface PeakCompetitorRefreshResult {
+  refreshed: boolean;
+  room_type_code?: string;
+  stay_date?: string;
+  occasion?: string;
+  rows_inserted?: number;
+  skipped_reason?: string;
+  error?: string;
+}
+
+/**
+ * Riset harga tetangga untuk SATU pasangan (tipe unit, malam puncak) per
+ * run -- yang paling dekat dan datanya paling basi. Malam puncaknya: 31 Des
+ * berikutnya, dan malam pertama setiap periode puncak pasti (bukan event
+ * spekulatif) dalam PEAK_RESEARCH_HORIZON_DAYS ke depan. Dipanggil di AKHIR
+ * run, setelah harga didorong: hasilnya baru dipakai malam berikutnya, dan
+ * batas 60 detik Vercel tidak pernah bisa mengorbankan push harga malam ini.
+ */
+export async function refreshPeakCompetitorDataIfStale(
+  supabase: SupabaseClient,
+  roomTypes: RoomTypeForPricing[],
+  today: string,
+): Promise<PeakCompetitorRefreshResult> {
+  const { data: settingRow } = await supabase.from("integration_settings").select("value").eq("key", "revenue_engine").maybeSingle();
+  const locationLabel = (settingRow?.value as { location_label?: string } | undefined)?.location_label;
+  if (!locationLabel) return { refreshed: false, skipped_reason: "no location_label configured" };
+
+  const horizonEnd = addDaysUtc(today, PEAK_RESEARCH_HORIZON_DAYS);
+  const anchors: { date: string; occasion: string }[] = [];
+  const nye = `${today.slice(0, 4)}-12-31`;
+  anchors.push({ date: nye >= today ? nye : `${Number(today.slice(0, 4)) + 1}-12-31`, occasion: "malam tahun baru" });
+  const { data: periods } = await supabase
+    .from("villa_high_season_periods")
+    .select("label, start_date, suggested_adjustment_pct, created_by")
+    .eq("active", true)
+    .gte("start_date", today)
+    .lte("start_date", horizonEnd);
+  for (const p of (periods ?? []) as { label: string; start_date: string; suggested_adjustment_pct: number; created_by: string | null }[]) {
+    if (Number(p.suggested_adjustment_pct) > 0 && appliesWithoutPickup(p.created_by) && !anchors.some((a) => a.date === p.start_date)) {
+      anchors.push({ date: p.start_date, occasion: p.label });
+    }
+  }
+  const candidates = anchors.filter((a) => a.date <= horizonEnd).sort((a, b) => a.date.localeCompare(b.date));
+
+  const staleSince = addDaysUtc(today, -PEAK_COMPETITOR_STALE_DAYS);
+  for (const anchor of candidates) {
+    for (const rt of roomTypes) {
+      const { data: recent } = await supabase
+        .from("villa_competitor_rates")
+        .select("id")
+        .eq("room_type_id", rt.id)
+        .eq("stay_date", anchor.date)
+        .gte("observed_at", staleSince)
+        .limit(1);
+      if (recent && recent.length > 0) continue;
+
+      let results: Awaited<ReturnType<typeof researchCompetitorRates>>;
+      try {
+        results = await researchCompetitorRates({
+          location_label: locationLabel,
+          room_type_name: rt.name,
+          room_type_description: rt.description ?? "",
+          stay_date: anchor.date,
+          occasion: anchor.occasion,
+        });
+      } catch (e) {
+        return { refreshed: false, room_type_code: rt.code, stay_date: anchor.date, error: e instanceof Error ? e.message : String(e) };
+      }
+      // Dicatat walau kosong, supaya pasangan yang sama tidak diriset ulang
+      // setiap malam: baris penanda harga 0 tidak ikut median (disaring > 0).
+      const rows = results.length > 0
+        ? results.map((r) => ({
+            room_type_id: rt.id,
+            location_label: locationLabel,
+            competitor_name: r.competitor_name.slice(0, 200),
+            competitor_type: (["hotel", "villa", "other"].includes(r.competitor_type) ? r.competitor_type : "other") as "hotel" | "villa" | "other",
+            price: r.price,
+            currency: "IDR",
+            source: "ai_research" as const,
+            source_note: r.source_note?.slice(0, 500) ?? null,
+            observed_at: today,
+            stay_date: anchor.date,
+            created_by: "ai_peak_competitor_research",
+          }))
+        : [{
+            room_type_id: rt.id,
+            location_label: locationLabel,
+            competitor_name: "(tidak ditemukan harga publik untuk malam ini)",
+            competitor_type: "other" as const,
+            price: 0,
+            currency: "IDR",
+            source: "ai_research" as const,
+            source_note: `Riset ${anchor.occasion} tidak menemukan harga per malam yang bisa dipercaya.`,
+            observed_at: today,
+            stay_date: anchor.date,
+            created_by: "ai_peak_competitor_research",
+          }];
+      const { error } = await supabase.from("villa_competitor_rates").insert(rows);
+      if (error) return { refreshed: false, room_type_code: rt.code, stay_date: anchor.date, error: error.message };
+      return { refreshed: true, room_type_code: rt.code, stay_date: anchor.date, occasion: anchor.occasion, rows_inserted: results.length };
+    }
+  }
+  return { refreshed: false, skipped_reason: "semua malam puncak sudah diriset dalam 14 hari terakhir" };
 }
 
 /**
@@ -794,6 +996,10 @@ export interface DateDecisionInput {
   maxRate: number | null;
   /** Jendela diskon lead time; bawaan 14/45 hari. Lihat learnDiscountWindow. */
   discountWindow?: Pick<DiscountWindow, "fullDays" | "halfDays">;
+  /** SINYAL 5: simpangan pencari tanggal ini dari baseline. null = belum ada data cukup. */
+  searchDemandRelative?: number | null;
+  /** Median harga villa tetangga untuk MALAM INI (tanggal puncak), atau null. */
+  peakCompetitorMedian?: number | null;
 }
 
 /**
@@ -938,6 +1144,17 @@ export function decideRateForDate(input: DateDecisionInput): DatePriceDecision {
     signals.push({ code: marketTrend === "naik" ? "market_interest_up" : "market_interest_down", pct: trendPct, weight: SIGNAL_WEIGHTS.market_search });
   }
 
+  // S5 · pencarian tanggal di website. Hanya menaikkan -- lihat SINYAL 5.
+  const searchRel = input.searchDemandRelative ?? null;
+  if (searchRel !== null && searchRel >= SEARCH_SIGNIFICANT_RATIO) {
+    if (coldStart) {
+      reasonCodes.push("search_demand_held_cold_start");
+    } else {
+      const searchDemandPct = Math.min(SEARCH_MAX_ADJUSTMENT_PCT, (searchRel / 2) * SEARCH_MAX_ADJUSTMENT_PCT);
+      signals.push({ code: "search_demand_high", pct: searchDemandPct, weight: SIGNAL_WEIGHTS.search_demand });
+    }
+  }
+
   const combined = combineDemandSignals(signals);
   for (const code of combined.codes) if (!reasonCodes.includes(code)) reasonCodes.push(code);
   decidedRate = Math.round(decidedRate * (1 + combined.pct));
@@ -1011,7 +1228,19 @@ export function decideRateForDate(input: DateDecisionInput): DatePriceDecision {
   // A TROUGH is the opposite case and keeps the cap: pricing below the
   // neighbours during Ramadan is the entire intent, and the cap only ever
   // pushes down.
-  const competitorCapApplies = competitorMedian !== null && !(isPeakPeriod && appliesWithoutPickup(period.created_by));
+  const isCertainPeak = isPeakPeriod && appliesWithoutPickup(period.created_by);
+  const peakMedian = input.peakCompetitorMedian ?? null;
+  if (isCertainPeak && peakMedian !== null) {
+    const peakCap = Math.max(Math.round(peakMedian), structuralRate);
+    if (decidedRate > peakCap) {
+      decidedRate = peakCap;
+      reasonCodes.push("peak_competitor_cap");
+    } else if (decidedRate < peakMedian) {
+      decidedRate = Math.min(Math.round(peakMedian), Math.round(decidedRate * (1 + PEAK_COMPETITOR_MAX_UPLIFT_PCT)));
+      reasonCodes.push("peak_competitor_headroom");
+    }
+  }
+  const competitorCapApplies = competitorMedian !== null && !isCertainPeak;
   if (competitorCapApplies && competitorMedian !== null) {
     const cap = Math.max(Math.round(competitorMedian), structuralRate);
     if (decidedRate > cap) {
@@ -1123,7 +1352,10 @@ function narrateDecision(codes: string[], guardrail: DatePriceDecision["guardrai
   else if (has("market_interest_up")) parts.push("sedikit dinaikkan karena minat pencarian villa sedang naik");
   else if (has("market_interest_down")) parts.push("sedikit diturunkan karena minat pencarian villa sedang turun");
 
+  if (has("search_demand_high")) parts.push("sedikit dinaikkan karena tanggal ini banyak dicari di website");
   if (has("competitor_market_cap")) parts.push("lalu dibatasi agar tidak melewati harga tengah villa sekitar");
+  if (has("peak_competitor_cap")) parts.push("lalu dibatasi agar tidak melewati harga tengah villa sekitar untuk malam itu");
+  if (has("peak_competitor_headroom")) parts.push("lalu dinaikkan mendekati harga villa sekitar untuk malam itu");
   if (has("near_arrival_no_increase")) parts.push("dan tidak dinaikkan karena sudah dekat tanggal menginap tapi masih kosong");
 
   if (guardrail === "clamped_movement") parts.push("terakhir direm agar tidak berubah drastis dari harga hari ini");
@@ -1194,7 +1426,34 @@ export async function decideRatesForRoomType(
     .select("price, observed_at")
     .eq("room_type_id", roomType.id)
     .eq("competitor_type", "villa")
+    .is("stay_date", null)
     .gte("observed_at", competitorSince);
+
+  // Harga tetangga per malam puncak (stay_date terisi), median per tanggal.
+  const peakSince = addDaysUtc(today, -PEAK_COMPETITOR_MAX_AGE_DAYS);
+  const { data: peakRates } = await supabase
+    .from("villa_competitor_rates")
+    .select("price, stay_date")
+    .eq("room_type_id", roomType.id)
+    .eq("competitor_type", "villa")
+    .gte("stay_date", today)
+    .gte("observed_at", peakSince);
+  const peakPricesByDate = new Map<string, number[]>();
+  for (const r of (peakRates ?? []) as { price: number; stay_date: string }[]) {
+    const n = Number(r.price);
+    if (!Number.isFinite(n) || n <= 0) continue;
+    if (!peakPricesByDate.has(r.stay_date)) peakPricesByDate.set(r.stay_date, []);
+    peakPricesByDate.get(r.stay_date)!.push(n);
+  }
+  const peakMedianByDate = new Map([...peakPricesByDate].filter(([, v]) => v.length >= COMPETITOR_MIN_SAMPLES).map(([d, v]) => [d, median(v)]));
+
+  const searchSince = new Date(Date.now() - SEARCH_LOOKBACK_DAYS * 86400000).toISOString();
+  const { data: searchRows } = await supabase
+    .from("villa_availability_searches")
+    .select("id, checkin, checkout, room_type, session_id")
+    .gte("searched_at", searchSince)
+    .gte("checkout", today);
+  const searchDemand = buildSearchDemand((searchRows ?? []) as AvailabilitySearchRow[], today, roomType.code);
   const competitorPrices = (competitorRates ?? []).map((r) => Number(r.price)).filter((n) => Number.isFinite(n) && n > 0);
   const competitorMedian = competitorPrices.length >= COMPETITOR_MIN_SAMPLES ? median(competitorPrices) : null;
 
@@ -1238,6 +1497,10 @@ export async function decideRatesForRoomType(
     const covering: SeasonPeriod[] = (seasonPeriods ?? []).filter((p) => p.start_date <= targetDate && p.end_date >= targetDate);
     const fixedPeak = fixedCalendarPeriodFor(targetDate);
     if (fixedPeak) covering.push(fixedPeak);
+    // Riset puncak dicatat per "tanggal jangkar": malam itu sendiri untuk 31
+    // Des, atau malam pertama periode puncak yang menutupinya.
+    const peakAnchors = [targetDate, ...(seasonPeriods ?? []).filter((p) => p.start_date <= targetDate && p.end_date >= targetDate).map((p) => p.start_date)];
+    const peakAnchor = peakAnchors.find((d) => peakMedianByDate.has(d));
 
     const daysToArrival = daysBetween(today, targetDate);
     const paceBaseline = isWeekendJakarta(targetDate) ? paceWeekend : paceWeekday;
@@ -1265,6 +1528,8 @@ export async function decideRatesForRoomType(
       minRate,
       maxRate,
       discountWindow,
+      searchDemandRelative: searchDemandRelativeFor(searchDemand, targetDate),
+      peakCompetitorMedian: peakAnchor ? peakMedianByDate.get(peakAnchor) ?? null : null,
     });
   });
 }

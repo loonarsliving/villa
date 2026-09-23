@@ -134,6 +134,8 @@ export async function GET(request: Request) {
     const { data: competitorRates } = await supabase
       .from("villa_competitor_rates")
       .select("room_type_id, price, observed_at")
+      // Harga malam biasa saja; baris stay_date adalah harga malam puncak.
+      .is("stay_date", null)
       .gte("observed_at", competitorSince);
 
     function highSeasonPeriodFor(dateStr: string) {
