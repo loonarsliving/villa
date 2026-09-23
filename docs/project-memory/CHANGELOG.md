@@ -4,6 +4,12 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-09-23 — Riset AI harga hidup lagi (owner-approved)
+- **Bug:** sejak 2026-09-13 riset kompetitor, riset minat pasar/event, dan pricing insight gagal diam-diam. `src/lib/aiBridge.ts` membaca `integration_settings.vercel_bridge.base_url`, yang hari itu dipindah ke villa sendiri untuk WA; villa tidak punya rute `/api/villa/ai/*`. Mesin harga tetap jalan tanpa data pasar.
+- **Perbaikan:** jembatan AI membaca key terpisah `integration_settings.ai_bridge` (`base_url` wajib, `secret` jatuh ke `vercel_bridge.secret`), tanpa fallback ke alamat WA. Baris dibuat: `base_url = https://mkh.haluoleo.id`. 5 tes baru (`aiBridge.test.ts`).
+- **Data:** periode `ai_recurring_peak` "Libur Idul Fitri" 20–30 Mar 2027 (+20%) dinonaktifkan — tanggalnya salah; riset baru menempatkan Lebaran 10–18 Mar 2027.
+- Tidak ada perubahan skema. Detail audit dan simulasi di CURRENT_STATE.md.
+
 ### 2026-09-23 — Cloudbeds menghapus check-in resepsionis; KTP & tanda tangan bisa dilihat kembali
 - **Bug uang, ditemukan dari data nyata**: webhook Cloudbeds meng-upsert `status: "terjadwal"` yang dipatok keras, dan sync memakai `statusToVilla()` yang hanya mengembalikan `checkin` kalau Cloudbeds sendiri bilang begitu — padahal resepsionis menandai check-in di sini, bukan di Cloudbeds. Check-in sungguhan tamu Unit A1 (20 Sep, lengkap dengan KTP, tanda tangan, PIN, dan pemasukan Rp1.188.297) terhapus jadi "Menunggu Check-In". Akibatnya tamu tidak bisa di-check-out, dan check-in ulang akan mencatat pemasukan DUA KALI ke bagi hasil investor.
 - **Diperbaiki** lewat `src/lib/bookingStatusSync.ts` (+8 tes): Cloudbeds berwenang atas reservasinya, meja depan berwenang atas keadaan tamu di properti. `checkin`/`checkout` tidak pernah ditarik mundur; `terjadwal` → `checkin` masih boleh. Data produksi dipulihkan (status saja, tidak ada transaksi disentuh).
