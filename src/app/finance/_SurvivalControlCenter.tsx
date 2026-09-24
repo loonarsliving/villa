@@ -95,7 +95,7 @@ export function SurvivalControlCenter({ from, to }: { from: string; to: string }
             <span className="text-[10px] text-ink/40 uppercase tracking-wide">Status Loonars 1</span>
           </div>
           <div className="text-[13px] text-ink/80 leading-relaxed">
-            Rata-rata <strong>{fmtRoomsPerNight(roomsPerNightNow)}</strong> (bulan ini sampai hari ini). Supaya AMAN, butuh minimal{" "}
+            Rata-rata <strong>{fmtRoomsPerNight(roomsPerNightNow)}</strong> ({s.this_month.room_nights_so_far} malam terisi ÷ hari ke-{s.this_month.day_of_month} bulan ini). Supaya AMAN, butuh minimal{" "}
             <strong>{s.required_rooms_per_night != null ? `${s.required_rooms_per_night.toFixed(1)} kamar/malam` : "—"}</strong> rata-rata sebulan.
             {currentRow?.aman === false && currentRow.kurang_malam_per_bulan != null && (
               <>
