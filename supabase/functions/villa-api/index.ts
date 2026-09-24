@@ -1511,7 +1511,18 @@ async function computeSurvivalKpis(property_code, from, to){
   const daysInCurrentMonth = new Date(Date.UTC(my, mo2, 0)).getUTCDate();
   const dayOfMonth = Number(today.slice(8,10));
   const occThisMonthSoFar = await computeOccupiedRoomNights(monthStart, today);
-  const mtdAvgRoomsPerNight = dayOfMonth > 0 ? occThisMonthSoFar.occupiedRoomNights / dayOfMonth : null;
+
+  // One-off: Loonars 1 baru mulai beroperasi 20 Sept 2026, bukan tgl 1
+  // kalender. Rata-rata bulan-berjalan dihitung dari tanggal BUKA, supaya
+  // hari-hari sebelum buka tidak ikut jadi pembagi (yang membuat rata-rata
+  // kelihatan lebih rendah dari kondisi sebenarnya). Hanya berlaku untuk
+  // bulan Sept 2026 -- bulan berikutnya otomatis kembali dihitung dari tgl 1.
+  const OPERATIONAL_START_OVERRIDE = { '2026-09': '2026-09-20' };
+  const effectiveMonthStart = OPERATIONAL_START_OVERRIDE[monthStr] && OPERATIONAL_START_OVERRIDE[monthStr] > monthStart
+    ? OPERATIONAL_START_OVERRIDE[monthStr]
+    : monthStart;
+  const daysSinceOperationalStart = today >= effectiveMonthStart ? daysInclusive(effectiveMonthStart, today) : 0;
+  const mtdAvgRoomsPerNight = daysSinceOperationalStart > 0 ? occThisMonthSoFar.occupiedRoomNights / daysSinceOperationalStart : null;
   const band = roomsPerNightBand(mtdAvgRoomsPerNight);
 
   const requiredRoomNightsThisMonth = requiredRoomNightsPerMonth != null ? requiredRoomNightsPerMonth * (daysInCurrentMonth/30) : null;
@@ -1572,6 +1583,8 @@ async function computeSurvivalKpis(property_code, from, to){
         month: monthStr,
         days_in_month: daysInCurrentMonth,
         day_of_month: dayOfMonth,
+        operational_start_date: effectiveMonthStart,
+        days_since_operational_start: daysSinceOperationalStart,
         days_remaining: daysRemainingInMonth,
         room_nights_so_far: occThisMonthSoFar.occupiedRoomNights,
         room_nights_required: requiredRoomNightsThisMonth,
