@@ -42,7 +42,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: "WHACENTER_DEVICE_ID belum diisi" }, { status: 503 });
   }
 
-  let body: { phone?: unknown; message?: unknown };
+  let body: { phone?: unknown; message?: unknown; file?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -51,6 +51,7 @@ export async function POST(request: Request) {
 
   const phone = typeof body.phone === "string" ? body.phone.trim() : "";
   const message = typeof body.message === "string" ? body.message.trim() : "";
+  const file = typeof body.file === "string" && body.file.trim() ? body.file.trim() : undefined;
   if (!phone || !message) {
     return NextResponse.json({ success: false, error: "phone dan message wajib diisi" }, { status: 400 });
   }
@@ -60,7 +61,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: "pesan melebihi 4096 karakter" }, { status: 400 });
   }
 
-  const result = await sendWhatsAppText(phone, message);
+  const result = await sendWhatsAppText(phone, message, file);
   if (!result.success) {
     console.error("[wa/send] gagal mengirim", result.error);
     return NextResponse.json({ success: false, error: result.error }, { status: 502 });

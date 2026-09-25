@@ -573,6 +573,8 @@ export interface FinanceSimpleTargets {
     month: string;
     days_in_month: number;
     day_of_month: number;
+    operational_start_date: string;
+    days_since_operational_start: number;
     days_remaining: number;
     room_nights_so_far: number;
     room_nights_required: number | null;

@@ -348,6 +348,12 @@ const EXPIRED_HOLD_MARK = '[Kedaluwarsa otomatis]';
 const WIB_TZ = 'Asia/Jakarta';
 function todayWIB(d = new Date()){ return d.toLocaleDateString('en-CA', {timeZone: WIB_TZ}); }
 function monthWIB(d = new Date()){ return todayWIB(d).slice(0,7); }
+const NAMA_BULAN_ID = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+/** "2026-09" -> "September 2026". */
+function namaBulanID(periodeYYYYMM){
+  const [y, mo] = periodeYYYYMM.split('-').map(Number);
+  return `${NAMA_BULAN_ID[mo-1] ?? periodeYYYYMM} ${y}`;
+}
 function prevMonthWIB(d = new Date()){
   const [y, mo] = monthWIB(d).split('-').map(Number);
   const total = y*12 + (mo-1) - 1;
@@ -652,6 +658,9 @@ async function sendWa(phone, message, meta){
   const KOLOM_LOG = ['booking_id','unit_id','template_type'];
   const metaAman = {};
   for(const k of KOLOM_LOG){ if(meta && meta[k] !== undefined) metaAman[k] = meta[k]; }
+  // 'file' (URL lampiran, mis. foto bukti transfer) diteruskan ke bridge tapi
+  // TIDAK ikut metaAman -- wa_messages_log tidak punya kolom untuk itu.
+  const file = meta && typeof meta.file === 'string' && meta.file ? meta.file : undefined;
 
   const catat = async (row) => {
     const {error} = await supabase.from('wa_messages_log').insert(row);
@@ -671,7 +680,7 @@ async function sendWa(phone, message, meta){
     const r = await fetch(`${bridge.base_url.replace(/\/+$/,'')}/api/wa/send`, {
       method:'POST',
       headers:{'Content-Type':'application/json','x-internal-secret':bridge.secret},
-      body: JSON.stringify({phone, message, ...metaAman}),
+      body: JSON.stringify({phone, message, ...metaAman, ...(file ? {file} : {})}),
     });
     const result = await r.json().catch(()=>null);
     const berhasil = r.ok && result?.success === true;
@@ -1511,7 +1520,18 @@ async function computeSurvivalKpis(property_code, from, to){
   const daysInCurrentMonth = new Date(Date.UTC(my, mo2, 0)).getUTCDate();
   const dayOfMonth = Number(today.slice(8,10));
   const occThisMonthSoFar = await computeOccupiedRoomNights(monthStart, today);
-  const mtdAvgRoomsPerNight = dayOfMonth > 0 ? occThisMonthSoFar.occupiedRoomNights / dayOfMonth : null;
+
+  // One-off: Loonars 1 baru mulai beroperasi 20 Sept 2026, bukan tgl 1
+  // kalender. Rata-rata bulan-berjalan dihitung dari tanggal BUKA, supaya
+  // hari-hari sebelum buka tidak ikut jadi pembagi (yang membuat rata-rata
+  // kelihatan lebih rendah dari kondisi sebenarnya). Hanya berlaku untuk
+  // bulan Sept 2026 -- bulan berikutnya otomatis kembali dihitung dari tgl 1.
+  const OPERATIONAL_START_OVERRIDE = { '2026-09': '2026-09-20' };
+  const effectiveMonthStart = OPERATIONAL_START_OVERRIDE[monthStr] && OPERATIONAL_START_OVERRIDE[monthStr] > monthStart
+    ? OPERATIONAL_START_OVERRIDE[monthStr]
+    : monthStart;
+  const daysSinceOperationalStart = today >= effectiveMonthStart ? daysInclusive(effectiveMonthStart, today) : 0;
+  const mtdAvgRoomsPerNight = daysSinceOperationalStart > 0 ? occThisMonthSoFar.occupiedRoomNights / daysSinceOperationalStart : null;
   const band = roomsPerNightBand(mtdAvgRoomsPerNight);
 
   const requiredRoomNightsThisMonth = requiredRoomNightsPerMonth != null ? requiredRoomNightsPerMonth * (daysInCurrentMonth/30) : null;
@@ -1572,6 +1592,8 @@ async function computeSurvivalKpis(property_code, from, to){
         month: monthStr,
         days_in_month: daysInCurrentMonth,
         day_of_month: dayOfMonth,
+        operational_start_date: effectiveMonthStart,
+        days_since_operational_start: daysSinceOperationalStart,
         days_remaining: daysRemainingInMonth,
         room_nights_so_far: occThisMonthSoFar.occupiedRoomNights,
         room_nights_required: requiredRoomNightsThisMonth,
@@ -2319,6 +2341,44 @@ Deno.serve(async (req)=>{
     });
   }
 
+  // Owner kirim foto bukti transfer dividen via WA dengan caption kode unit
+  // (mis. "A2") ke nomor villa -- sistem cari investor aktif unit itu lalu
+  // forward foto + pesan ucapan ke WA investor tsb. Dikunci ke admin aktif
+  // saja (bukan cuma secret bridge seperti LUNAS/PROMO) karena ini mengirim
+  // konfirmasi pencairan dana ke pihak ketiga, bukan sekadar update status
+  // booking internal.
+  if(path==='/bridge/dividend-proof-forward' && m==='POST'){
+    const bridge = await getVercelBridge();
+    if(!bridge.secret) return err('Jembatan belum dikonfigurasi (integration_settings.vercel_bridge.secret)',503);
+    const provided = req.headers.get('x-internal-secret') ?? '';
+    if(!await secretsMatch(provided, bridge.secret)) return err('Unauthorized',401);
+
+    const b = await req.json().catch(()=>null);
+    const unitCode = String(b?.unit_code ?? '').trim().toUpperCase();
+    const mediaUrl = String(b?.media_url ?? '').trim();
+    const senderDigits = String(b?.sender ?? '').replace(/[^0-9]/g,'');
+    if(!unitCode) return json({success:false, reason:'unit_code_kosong'});
+    if(!mediaUrl) return json({success:false, reason:'media_kosong'});
+
+    const {data:admins} = await supabase.from('villa_users').select('hp').eq('role','admin').eq('is_active',true);
+    const isAdmin = (admins ?? []).some(a => {
+      const d = String(a.hp ?? '').replace(/[^0-9]/g,'');
+      return d.length >= 8 && senderDigits.length >= 8 && (senderDigits.endsWith(d.slice(-9)) || d.endsWith(senderDigits.slice(-9)));
+    });
+    if(!isAdmin) return json({success:false, reason:'bukan_admin'});
+
+    const {data:investor} = await supabase.from('villa_users')
+      .select('id,nama,hp').eq('role','owner').eq('unit_nomor',unitCode).eq('is_active',true)
+      .not('hp','is',null).limit(1).maybeSingle();
+    if(!investor?.hp) return json({success:false, reason:'investor_tidak_ditemukan', unit_code:unitCode});
+
+    const periode = monthWIB();
+    const pesan = `Assalamu'alaikum/Salam sejahtera, Bapak/Ibu ${investor.nama}.\n\nDengan penuh rasa syukur, kami sampaikan bahwa dividen Anda dari Loonars Private Living 1 periode ${namaBulanID(periode)} telah kami transfer ke rekening Anda. Bukti transfer terlampir.\n\nTerima kasih atas kepercayaan Bapak/Ibu berinvestasi bersama kami. Semoga kerja sama ini terus membawa berkah untuk kita semua.\n\nSalam hangat,\nLoonars Private Living 1`;
+
+    const terkirim = await sendWa(investor.hp, pesan, {template_type:'dividend_proof_forward', file:mediaUrl});
+    return json({success:terkirim, unit_code:unitCode, investor_nama:investor.nama, terkirim});
+  }
+
   // ── Jembatan promo untuk AI (Mkhsistem) ────────────────────────────────
   // Owner memilih: AI mengusulkan, owner menyetujui lewat WA. Jadi alurnya
   // sengaja dipecah tiga: cari calon penerima -> ajukan (tersimpan sebagai
@@ -3021,6 +3081,38 @@ Deno.serve(async (req)=>{
       sent++;
     }
     return json({success:true, periode, sent_to_admins:sent, investor_count:list.investor_count});
+  }
+
+  // Owner: kirim 1 jam sebelum batas transfer dividen jam 20:00 WIB tgl 25
+  // (dipicu jam 19:00 WIB oleh vercel.json). Sama seperti /cron/dividend-list
+  // (reuse computeDividendList, tidak duplikasi logika), bedanya hanya framing
+  // pesan sebagai pengingat mendesak "1 jam lagi".
+  if(path==='/cron/dividend-transfer-reminder' && m==='POST'){
+    const cron = await getSetting('cron');
+    const provided = req.headers.get('x-cron-secret') ?? '';
+    if(!cron.secret) return err('Cron belum dikonfigurasi (integration_settings.cron.secret)',503);
+    if(!await secretsMatch(provided, cron.secret)) return err('Unauthorized',401);
+
+    const periode = monthWIB();
+    let list;
+    try { list = await computeDividendList(periode); } catch(e){ return err(e.message,500); }
+
+    const lines = list.investors.map(inv => {
+      const rek = inv.rekening_lengkap
+        ? `${inv.bank_nama} ${inv.no_rekening} a.n ${inv.nama_pemilik_rekening || inv.nama}`
+        : 'REKENING BELUM DIISI';
+      const tanda = inv.pemasukan_tetap ? ' (pemasukan tetap)' : inv.unit_dimiliki > 1 ? ` (${inv.unit_dimiliki} unit)` : '';
+      return `• Unit ${inv.unit_nomor} — ${inv.nama}: Rp ${Math.round(inv.jumlah).toLocaleString('id-ID')}${tanda} → ${rek}`;
+    }).join('\n');
+    const message = `*Pengingat: 1 Jam Lagi Batas Transfer Dividen — Periode ${periode}*\n\nTransfer harus selesai jam 20:00 WIB malam ini.\n\nBagian per investor: Rp ${Math.round(list.per_investor_amount).toLocaleString('id-ID')} (${list.investor_count} investor aktif)\n\n${lines || '(belum ada investor aktif)'}\n\nMohon segera diproses.`;
+
+    const {data:admins2} = await supabase.from('villa_users').select('hp').eq('role','admin').eq('is_active',true);
+    let sent2=0;
+    for(const a of admins2 ?? []){
+      await sendWa(a.hp, message, {template_type:'dividend_transfer_reminder'});
+      sent2++;
+    }
+    return json({success:true, periode, sent_to_admins:sent2, investor_count:list.investor_count});
   }
 
   if(path==='/cron/sync-mkh-income' && m==='POST'){
