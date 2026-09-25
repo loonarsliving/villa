@@ -30,7 +30,7 @@ const PROMO_RE = /^\s*promo\s+([0-9a-f]{6})\s*$/i;
 const TOLAK_RE = /^\s*(?:tolak|batal)\s+([0-9a-f]{6})\s*$/i;
 const BERHENTI_RE = /^\s*(?:berhenti|stop|unsubscribe)\s*$/i;
 /** Caption foto bukti transfer dividen: kode unit saja, mis. "A2", "C10". */
-const UNIT_CODE_RE = /^\s*([A-Za-z]\d{1,2})\s*$/;
+const UNIT_CODE_RE = /^\s*([A-Za-z]\d{1,2}|TETAP)\s*$/i;
 
 async function bridgeSecret(): Promise<string | null> {
   const { data } = await supabaseAdmin().from("integration_settings").select("value").eq("key", "vercel_bridge").maybeSingle();

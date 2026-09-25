@@ -2367,8 +2367,12 @@ Deno.serve(async (req)=>{
     });
     if(!isAdmin) return json({success:false, reason:'bukan_admin'});
 
+    // "TETAP" -- caption khusus untuk akun pemasukan tetap (mis. mega
+    // pramesti cahyani, skema A4+A5), yang unit_nomor-nya bukan kode unit
+    // biasa jadi tidak bisa dikenali lewat pencocokan unit_code standar.
+    const targetUnitNomor = unitCode === 'TETAP' ? 'Pemasukan Tetap' : unitCode;
     const {data:investor} = await supabase.from('villa_users')
-      .select('id,nama,hp').eq('role','owner').eq('unit_nomor',unitCode).eq('is_active',true)
+      .select('id,nama,hp').eq('role','owner').eq('unit_nomor',targetUnitNomor).eq('is_active',true)
       .not('hp','is',null).limit(1).maybeSingle();
     if(!investor?.hp) return json({success:false, reason:'investor_tidak_ditemukan', unit_code:unitCode});
 
