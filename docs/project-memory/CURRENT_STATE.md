@@ -2,6 +2,23 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-26 — riset kompetitor malam puncak dipindah ke cron sendiri
+
+Selama dua malam pertama riset ini tidak pernah jalan. Log Vercel 26 Sep
+mencatat `"peak_competitor_refresh":{"skipped_reason":"run already took
+34s"}`. Syarat "run harga belum lewat 25 detik" yang saya pasang di #114
+selalu gagal, karena run harga normal ~34 detik (push, tunggu 4 detik, baca
+balik, sinkron). Push & baca balik sendiri sehat: 365/365 tanggal cocok untuk
+kedua tipe.
+
+Perbaikan (owner-approved): cron baru `/api/cron/peak-competitor-research`,
+jadwal `0 18 * * *` UTC (01:00 WIB). Sengaja satu jam setelah cron harga,
+karena cron plan Hobby bisa berjalan kapan saja di dalam jam yang
+dijadwalkan (cron `10 17` teramati berjalan 17:21). Riset ini punya jatah 60
+detiknya sendiri dan hanya menulis `villa_competitor_rates`; mesin harga
+memakainya mulai run berikutnya. Syarat pemakaian (≥3 villa, ≥10% di atas
+malam biasa, maks +10%) tidak berubah. Tanpa perubahan database.
+
 ## 2026-09-24 — dua sumber data baru untuk harga: pencarian website + harga tetangga malam puncak
 
 Owner menyetujui keduanya, dan menolak minimum menginap. Repo yang ikut berubah:

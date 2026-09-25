@@ -5,8 +5,6 @@ import { syncCloudbedsRates, type RateSyncSummary } from "@/lib/cloudbedsRateSyn
 import {
   refreshCompetitorDataIfStale,
   refreshMarketDemandIfStale,
-  refreshPeakCompetitorDataIfStale,
-  type PeakCompetitorRefreshResult,
   decideRatesForRoomType,
   type PricingSettings,
   type RoomTypeForPricing,
@@ -61,8 +59,6 @@ const JAKARTA_TZ = "Asia/Jakarta";
  * when the first full-year push was rejected outright.
  */
 const WINDOW_DAYS = 365;
-/** Riset puncak hanya dimulai kalau run ini belum memakan lebih dari ini (batas Vercel 60 detik). */
-const PEAK_RESEARCH_MAX_ELAPSED_MS = 25000;
 
 function fmtDateJakarta(d: Date): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: JAKARTA_TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
@@ -97,7 +93,6 @@ export interface AiPricingRunSummary {
   autopush_enabled: boolean;
   push_requested: boolean;
   market_demand: MarketDemandRefreshResult;
-  peak_competitor_refresh?: PeakCompetitorRefreshResult;
   results: AiPricingRoomTypeResult[];
   reconciled: RateSyncSummary | null;
 }
@@ -108,7 +103,6 @@ export interface AiPricingRunSummary {
  * villa_pricing_settings.ai_autopush_enabled (default false).
  */
 export async function runAiDynamicPricing(supabase: SupabaseClient, pushOverride?: boolean): Promise<AiPricingRunSummary> {
-  const startedAt = Date.now();
   const today = todayJakarta();
   const toDate = addDays(today, WINDOW_DAYS - 1);
   const targetDates: string[] = [];
@@ -265,20 +259,5 @@ export async function runAiDynamicPricing(supabase: SupabaseClient, pushOverride
     reconciled = await syncCloudbedsRates(supabase);
   }
 
-  // Riset harga tetangga untuk malam puncak, paling akhir dan hanya kalau
-  // tidak ada riset AI lain di run ini dan waktunya masih longgar: satu
-  // panggilan Gemini + Google Search memakan 10-30 detik dan fungsi ini
-  // dibatasi 60 detik. Hasilnya dipakai mulai run berikutnya.
-  const researchUsedThisRun = marketDemand.refreshed || !!marketDemand.error || results.some((r) => r.competitor_refresh.refreshed || !!r.competitor_refresh.error);
-  const elapsedMs = Date.now() - startedAt;
-  let peakCompetitorRefresh: PeakCompetitorRefreshResult;
-  if (researchUsedThisRun) {
-    peakCompetitorRefresh = { refreshed: false, skipped_reason: "research budget used this run (Vercel 60s limit)" };
-  } else if (elapsedMs > PEAK_RESEARCH_MAX_ELAPSED_MS) {
-    peakCompetitorRefresh = { refreshed: false, skipped_reason: `run already took ${Math.round(elapsedMs / 1000)}s` };
-  } else {
-    peakCompetitorRefresh = await refreshPeakCompetitorDataIfStale(supabase, (roomTypes ?? []) as RoomTypeForPricing[], today);
-  }
-
-  return { ok: true, today, window_days: WINDOW_DAYS, autopush_enabled: autopushEnabled, push_requested: pushRequested, market_demand: marketDemand, peak_competitor_refresh: peakCompetitorRefresh, results, reconciled };
+  return { ok: true, today, window_days: WINDOW_DAYS, autopush_enabled: autopushEnabled, push_requested: pushRequested, market_demand: marketDemand, results, reconciled };
 }
