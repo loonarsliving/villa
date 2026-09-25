@@ -3036,6 +3036,38 @@ Deno.serve(async (req)=>{
     return json({success:true, periode, sent_to_admins:sent, investor_count:list.investor_count});
   }
 
+  // Owner: kirim 1 jam sebelum batas transfer dividen jam 20:00 WIB tgl 25
+  // (dipicu jam 19:00 WIB oleh vercel.json). Sama seperti /cron/dividend-list
+  // (reuse computeDividendList, tidak duplikasi logika), bedanya hanya framing
+  // pesan sebagai pengingat mendesak "1 jam lagi".
+  if(path==='/cron/dividend-transfer-reminder' && m==='POST'){
+    const cron = await getSetting('cron');
+    const provided = req.headers.get('x-cron-secret') ?? '';
+    if(!cron.secret) return err('Cron belum dikonfigurasi (integration_settings.cron.secret)',503);
+    if(!await secretsMatch(provided, cron.secret)) return err('Unauthorized',401);
+
+    const periode = monthWIB();
+    let list;
+    try { list = await computeDividendList(periode); } catch(e){ return err(e.message,500); }
+
+    const lines = list.investors.map(inv => {
+      const rek = inv.rekening_lengkap
+        ? `${inv.bank_nama} ${inv.no_rekening} a.n ${inv.nama_pemilik_rekening || inv.nama}`
+        : 'REKENING BELUM DIISI';
+      const tanda = inv.pemasukan_tetap ? ' (pemasukan tetap)' : inv.unit_dimiliki > 1 ? ` (${inv.unit_dimiliki} unit)` : '';
+      return `• Unit ${inv.unit_nomor} — ${inv.nama}: Rp ${Math.round(inv.jumlah).toLocaleString('id-ID')}${tanda} → ${rek}`;
+    }).join('\n');
+    const message = `*Pengingat: 1 Jam Lagi Batas Transfer Dividen — Periode ${periode}*\n\nTransfer harus selesai jam 20:00 WIB malam ini.\n\nBagian per investor: Rp ${Math.round(list.per_investor_amount).toLocaleString('id-ID')} (${list.investor_count} investor aktif)\n\n${lines || '(belum ada investor aktif)'}\n\nMohon segera diproses.`;
+
+    const {data:admins2} = await supabase.from('villa_users').select('hp').eq('role','admin').eq('is_active',true);
+    let sent2=0;
+    for(const a of admins2 ?? []){
+      await sendWa(a.hp, message, {template_type:'dividend_transfer_reminder'});
+      sent2++;
+    }
+    return json({success:true, periode, sent_to_admins:sent2, investor_count:list.investor_count});
+  }
+
   if(path==='/cron/sync-mkh-income' && m==='POST'){
     const cron = await getSetting('cron');
     const provided = req.headers.get('x-cron-secret') ?? '';
