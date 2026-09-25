@@ -29,6 +29,8 @@ const LUNAS_RE = /^\s*lunas\s+([0-9a-f]{6})\s*$/i;
 const PROMO_RE = /^\s*promo\s+([0-9a-f]{6})\s*$/i;
 const TOLAK_RE = /^\s*(?:tolak|batal)\s+([0-9a-f]{6})\s*$/i;
 const BERHENTI_RE = /^\s*(?:berhenti|stop|unsubscribe)\s*$/i;
+/** Caption foto bukti transfer dividen: kode unit saja, mis. "A2", "C10". */
+const UNIT_CODE_RE = /^\s*([A-Za-z]\d{1,2})\s*$/;
 
 async function bridgeSecret(): Promise<string | null> {
   const { data } = await supabaseAdmin().from("integration_settings").select("value").eq("key", "vercel_bridge").maybeSingle();
@@ -82,11 +84,13 @@ export async function POST(request: Request) {
   const promo = text.match(PROMO_RE);
   const tolak = text.match(TOLAK_RE);
   const berhenti = BERHENTI_RE.test(text);
+  // Foto bukti transfer dividen: caption-nya kode unit saja (mis. "A2").
+  const unitCode = inbound.mediaUrl ? text.match(UNIT_CODE_RE) : null;
 
   // Pesan biasa tidak dibalas apa pun. Villa bukan asisten percakapan;
   // membalas setiap pesan tamu dengan sesuatu akan lebih membingungkan
   // daripada diam.
-  if (!lunas && !promo && !tolak && !berhenti) {
+  if (!lunas && !promo && !tolak && !berhenti && !unitCode) {
     return NextResponse.json({ ok: true, skipped: "bukan perintah yang dikenali" });
   }
 
@@ -98,7 +102,15 @@ export async function POST(request: Request) {
 
   let reply: string | null = null;
 
-  if (berhenti) {
+  if (unitCode) {
+    const kodeUnit = unitCode[1].toUpperCase();
+    const b = await callBridge("/bridge/dividend-proof-forward", { unit_code: kodeUnit, media_url: inbound.mediaUrl, sender: inbound.sender }, secret);
+    if (!b) reply = `Gagal memproses bukti transfer unit ${kodeUnit}: server villa tidak bisa dihubungi.`;
+    else if (b.success === true) reply = `Siap, bukti transfer sudah diteruskan ke ${b.investor_nama ?? "investor"} (unit ${kodeUnit}).`;
+    else if (b.reason === "investor_tidak_ditemukan") reply = `Unit ${kodeUnit} tidak ditemukan atau investornya belum punya nomor HP terdaftar.`;
+    else if (b.reason === "bukan_admin") reply = `Nomor ini belum terdaftar sebagai admin, jadi bukti transfer tidak diteruskan.`;
+    else reply = `Bukti transfer unit ${kodeUnit} tidak terkirim (${b.reason ?? "sebab tidak diketahui"}).`;
+  } else if (berhenti) {
     const body = await callBridge("/bridge/guest-opt-out", { hp: inbound.sender }, secret);
     reply =
       body?.success === true

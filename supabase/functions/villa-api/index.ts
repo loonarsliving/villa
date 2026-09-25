@@ -348,6 +348,12 @@ const EXPIRED_HOLD_MARK = '[Kedaluwarsa otomatis]';
 const WIB_TZ = 'Asia/Jakarta';
 function todayWIB(d = new Date()){ return d.toLocaleDateString('en-CA', {timeZone: WIB_TZ}); }
 function monthWIB(d = new Date()){ return todayWIB(d).slice(0,7); }
+const NAMA_BULAN_ID = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+/** "2026-09" -> "September 2026". */
+function namaBulanID(periodeYYYYMM){
+  const [y, mo] = periodeYYYYMM.split('-').map(Number);
+  return `${NAMA_BULAN_ID[mo-1] ?? periodeYYYYMM} ${y}`;
+}
 function prevMonthWIB(d = new Date()){
   const [y, mo] = monthWIB(d).split('-').map(Number);
   const total = y*12 + (mo-1) - 1;
@@ -652,6 +658,9 @@ async function sendWa(phone, message, meta){
   const KOLOM_LOG = ['booking_id','unit_id','template_type'];
   const metaAman = {};
   for(const k of KOLOM_LOG){ if(meta && meta[k] !== undefined) metaAman[k] = meta[k]; }
+  // 'file' (URL lampiran, mis. foto bukti transfer) diteruskan ke bridge tapi
+  // TIDAK ikut metaAman -- wa_messages_log tidak punya kolom untuk itu.
+  const file = meta && typeof meta.file === 'string' && meta.file ? meta.file : undefined;
 
   const catat = async (row) => {
     const {error} = await supabase.from('wa_messages_log').insert(row);
@@ -671,7 +680,7 @@ async function sendWa(phone, message, meta){
     const r = await fetch(`${bridge.base_url.replace(/\/+$/,'')}/api/wa/send`, {
       method:'POST',
       headers:{'Content-Type':'application/json','x-internal-secret':bridge.secret},
-      body: JSON.stringify({phone, message, ...metaAman}),
+      body: JSON.stringify({phone, message, ...metaAman, ...(file ? {file} : {})}),
     });
     const result = await r.json().catch(()=>null);
     const berhasil = r.ok && result?.success === true;
@@ -2330,6 +2339,44 @@ Deno.serve(async (req)=>{
       tgl_checkin:booking.tgl_checkin, tgl_checkout:booking.tgl_checkout,
       total_bayar:booking.total_bayar, invoice_no,
     });
+  }
+
+  // Owner kirim foto bukti transfer dividen via WA dengan caption kode unit
+  // (mis. "A2") ke nomor villa -- sistem cari investor aktif unit itu lalu
+  // forward foto + pesan ucapan ke WA investor tsb. Dikunci ke admin aktif
+  // saja (bukan cuma secret bridge seperti LUNAS/PROMO) karena ini mengirim
+  // konfirmasi pencairan dana ke pihak ketiga, bukan sekadar update status
+  // booking internal.
+  if(path==='/bridge/dividend-proof-forward' && m==='POST'){
+    const bridge = await getVercelBridge();
+    if(!bridge.secret) return err('Jembatan belum dikonfigurasi (integration_settings.vercel_bridge.secret)',503);
+    const provided = req.headers.get('x-internal-secret') ?? '';
+    if(!await secretsMatch(provided, bridge.secret)) return err('Unauthorized',401);
+
+    const b = await req.json().catch(()=>null);
+    const unitCode = String(b?.unit_code ?? '').trim().toUpperCase();
+    const mediaUrl = String(b?.media_url ?? '').trim();
+    const senderDigits = String(b?.sender ?? '').replace(/[^0-9]/g,'');
+    if(!unitCode) return json({success:false, reason:'unit_code_kosong'});
+    if(!mediaUrl) return json({success:false, reason:'media_kosong'});
+
+    const {data:admins} = await supabase.from('villa_users').select('hp').eq('role','admin').eq('is_active',true);
+    const isAdmin = (admins ?? []).some(a => {
+      const d = String(a.hp ?? '').replace(/[^0-9]/g,'');
+      return d.length >= 8 && senderDigits.length >= 8 && (senderDigits.endsWith(d.slice(-9)) || d.endsWith(senderDigits.slice(-9)));
+    });
+    if(!isAdmin) return json({success:false, reason:'bukan_admin'});
+
+    const {data:investor} = await supabase.from('villa_users')
+      .select('id,nama,hp').eq('role','owner').eq('unit_nomor',unitCode).eq('is_active',true)
+      .not('hp','is',null).limit(1).maybeSingle();
+    if(!investor?.hp) return json({success:false, reason:'investor_tidak_ditemukan', unit_code:unitCode});
+
+    const periode = monthWIB();
+    const pesan = `Assalamu'alaikum/Salam sejahtera, Bapak/Ibu ${investor.nama}.\n\nDengan penuh rasa syukur, kami sampaikan bahwa dividen Anda dari Loonars Private Living 1 periode ${namaBulanID(periode)} telah kami transfer ke rekening Anda. Bukti transfer terlampir.\n\nTerima kasih atas kepercayaan Bapak/Ibu berinvestasi bersama kami. Semoga kerja sama ini terus membawa berkah untuk kita semua.\n\nSalam hangat,\nLoonars Private Living 1`;
+
+    const terkirim = await sendWa(investor.hp, pesan, {template_type:'dividend_proof_forward', file:mediaUrl});
+    return json({success:terkirim, unit_code:unitCode, investor_nama:investor.nama, terkirim});
   }
 
   // ── Jembatan promo untuk AI (Mkhsistem) ────────────────────────────────

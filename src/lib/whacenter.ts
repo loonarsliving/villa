@@ -121,6 +121,7 @@ export interface NormalizedInbound {
   sender: string;
   senderName?: string;
   text: string;
+  mediaUrl?: string;
 }
 
 /**
@@ -130,10 +131,12 @@ export interface NormalizedInbound {
  * sudah terbukti terhadap payload asli: {pushName, from, to, message,
  * media, is_group, timestamp, source:"WHACENTER", ad_reply:{...}}.
  *
- * Villa hanya perlu teks: seluruh balasan yang dikenalinya (LUNAS, PROMO,
- * TOLAK, BERHENTI) berupa teks pendek. Lampiran sengaja diabaikan, bukan
- * ditebak-tebak bentuknya — bentuk media WhaCenter belum pernah
- * terverifikasi bahkan di Mkhsistem.
+ * `media` BELUM PERNAH terverifikasi bahkan di Mkhsistem -- hanya field
+ * `message` (teks) yang sudah terbukti. extractMediaUrl() di bawah adalah
+ * TEBAKAN paling masuk akal (string URL langsung, atau salah satu key
+ * umum {url,link,file_url,media_url,path}), dipakai untuk fitur
+ * forward-bukti-transfer (2026-09-25) yang SENGAJA diuji dengan kiriman
+ * foto sungguhan sebelum dianggap benar -- lihat CURRENT_STATE.md.
  *
  * Pesan grup dibuang: perintah seperti LUNAS tidak boleh bisa dipicu dari
  * dalam grup yang isinya bisa siapa saja.
@@ -147,10 +150,23 @@ export function normalizeInbound(rawPayload: unknown): NormalizedInbound | null 
   if (typeof sender !== "string" || sender.length === 0) return null;
 
   const text = typeof payload.message === "string" ? payload.message : "";
-  if (text.trim().length === 0) return null;
+  const mediaUrl = extractMediaUrl(payload.media);
+  if (text.trim().length === 0 && !mediaUrl) return null;
 
   const pushName = typeof payload.pushName === "string" && payload.pushName.length > 0 ? payload.pushName : undefined;
-  return { sender, senderName: pushName, text };
+  return { sender, senderName: pushName, text, mediaUrl };
+}
+
+/** Tebakan terbaik untuk bentuk field `media` WhaCenter -- lihat catatan di normalizeInbound(). */
+function extractMediaUrl(media: unknown): string | undefined {
+  if (typeof media === "string" && /^https?:\/\//i.test(media)) return media;
+  const rec = asRecord(media);
+  if (!rec) return undefined;
+  for (const k of ["url", "link", "file_url", "media_url", "path"]) {
+    const v = rec[k];
+    if (typeof v === "string" && /^https?:\/\//i.test(v)) return v;
+  }
+  return undefined;
 }
 
 /**
