@@ -131,17 +131,19 @@ export interface NormalizedInbound {
  * sudah terbukti terhadap payload asli: {pushName, from, to, message,
  * media, is_group, timestamp, source:"WHACENTER", ad_reply:{...}}.
  *
- * `media` BELUM PERNAH terverifikasi bahkan di Mkhsistem (dicek langsung
- * 2026-09-25 di lib/ai/connectors/whatsapp-connector.ts -- komentarnya
- * sendiri masih bilang "UNVERIFIED against a real Whacenter image
- * webhook"). Alur foto Mkhsistem yang SUDAH terbukti (contractor nota
- * report, 66 baris nyata) lewat jalur BERBEDA -- Meta WhatsApp Cloud API
- * resmi, bukan WhaCenter -- jadi tidak ada bentuk payload WhaCenter yang
- * terbukti untuk disalin. extractMediaUrl() di bawah disamakan dengan
- * daftar key tebakan Mkhsistem (union keduanya, union lebih besar = lebih
- * mungkin cocok), dipakai untuk fitur forward-bukti-transfer (2026-09-25)
- * yang SENGAJA diuji dengan kiriman foto sungguhan sebelum dianggap benar
- * -- lihat CURRENT_STATE.md.
+ * Parsing `media`/`document`/`file` di bawah ini SUDAH TERBUKTI di
+ * produksi Mkhsistem -- bukan tebakan belum teruji seperti yang sempat
+ * ditulis di sini sebelumnya (2026-09-25, keliru). WhaCenter adalah
+ * satu-satunya kanal WhatsApp Mkhsistem yang benar-benar hidup (lihat
+ * lib/ai/config.ts: 4 var WHATSAPP_* lain adalah "Meta Cloud API
+ * leftovers", cuma whacenterDeviceId yang dipakai WhatsAppConnector.
+ * dispatch), dan puluhan alur foto nyata -- nota kontraktor
+ * (contractor_expense_reports), bukti transfer gaji
+ * (employee_salary_submissions), foto progress konstruksi
+ * (construction_progress_photos) -- semuanya lewat parsing field media
+ * yang sama persis ini. Disalin verbatim (union nama key dari kedua
+ * sistem) supaya villa langsung dapat implementasi yang sudah terbukti,
+ * bukan mengulang dari nol.
  *
  * Pesan grup dibuang: perintah seperti LUNAS tidak boleh bisa dipicu dari
  * dalam grup yang isinya bisa siapa saja.
@@ -155,9 +157,8 @@ export function normalizeInbound(rawPayload: unknown): NormalizedInbound | null 
   if (typeof sender !== "string" || sender.length === 0) return null;
 
   const text = typeof payload.message === "string" ? payload.message : "";
-  // Cek document/file di level atas juga (bukan cuma media) -- Mkhsistem
-  // sama-sama menebak lampiran dokumen bisa diletakkan WhaCenter di field
-  // berbeda dari foto, sama-sama belum terverifikasi.
+  // Cek document/file di level atas juga (bukan cuma media) -- pola yang
+  // sama dengan normalizeIncomingMessage() Mkhsistem.
   const mediaUrl = extractMediaUrl(payload.media ?? payload.document ?? payload.file);
   if (text.trim().length === 0 && !mediaUrl) return null;
 
@@ -165,7 +166,7 @@ export function normalizeInbound(rawPayload: unknown): NormalizedInbound | null 
   return { sender, senderName: pushName, text, mediaUrl };
 }
 
-/** Tebakan terbaik untuk bentuk field media/document/file WhaCenter -- lihat catatan di normalizeInbound(). */
+/** Bentuk field media/document/file WhaCenter, disalin dari implementasi Mkhsistem yang sudah terbukti -- lihat catatan di normalizeInbound(). */
 function extractMediaUrl(media: unknown): string | undefined {
   if (typeof media === "string" && /^https?:\/\//i.test(media)) return media;
   const rec = asRecord(media);
