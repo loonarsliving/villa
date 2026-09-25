@@ -131,12 +131,17 @@ export interface NormalizedInbound {
  * sudah terbukti terhadap payload asli: {pushName, from, to, message,
  * media, is_group, timestamp, source:"WHACENTER", ad_reply:{...}}.
  *
- * `media` BELUM PERNAH terverifikasi bahkan di Mkhsistem -- hanya field
- * `message` (teks) yang sudah terbukti. extractMediaUrl() di bawah adalah
- * TEBAKAN paling masuk akal (string URL langsung, atau salah satu key
- * umum {url,link,file_url,media_url,path}), dipakai untuk fitur
- * forward-bukti-transfer (2026-09-25) yang SENGAJA diuji dengan kiriman
- * foto sungguhan sebelum dianggap benar -- lihat CURRENT_STATE.md.
+ * `media` BELUM PERNAH terverifikasi bahkan di Mkhsistem (dicek langsung
+ * 2026-09-25 di lib/ai/connectors/whatsapp-connector.ts -- komentarnya
+ * sendiri masih bilang "UNVERIFIED against a real Whacenter image
+ * webhook"). Alur foto Mkhsistem yang SUDAH terbukti (contractor nota
+ * report, 66 baris nyata) lewat jalur BERBEDA -- Meta WhatsApp Cloud API
+ * resmi, bukan WhaCenter -- jadi tidak ada bentuk payload WhaCenter yang
+ * terbukti untuk disalin. extractMediaUrl() di bawah disamakan dengan
+ * daftar key tebakan Mkhsistem (union keduanya, union lebih besar = lebih
+ * mungkin cocok), dipakai untuk fitur forward-bukti-transfer (2026-09-25)
+ * yang SENGAJA diuji dengan kiriman foto sungguhan sebelum dianggap benar
+ * -- lihat CURRENT_STATE.md.
  *
  * Pesan grup dibuang: perintah seperti LUNAS tidak boleh bisa dipicu dari
  * dalam grup yang isinya bisa siapa saja.
@@ -150,19 +155,22 @@ export function normalizeInbound(rawPayload: unknown): NormalizedInbound | null 
   if (typeof sender !== "string" || sender.length === 0) return null;
 
   const text = typeof payload.message === "string" ? payload.message : "";
-  const mediaUrl = extractMediaUrl(payload.media);
+  // Cek document/file di level atas juga (bukan cuma media) -- Mkhsistem
+  // sama-sama menebak lampiran dokumen bisa diletakkan WhaCenter di field
+  // berbeda dari foto, sama-sama belum terverifikasi.
+  const mediaUrl = extractMediaUrl(payload.media ?? payload.document ?? payload.file);
   if (text.trim().length === 0 && !mediaUrl) return null;
 
   const pushName = typeof payload.pushName === "string" && payload.pushName.length > 0 ? payload.pushName : undefined;
   return { sender, senderName: pushName, text, mediaUrl };
 }
 
-/** Tebakan terbaik untuk bentuk field `media` WhaCenter -- lihat catatan di normalizeInbound(). */
+/** Tebakan terbaik untuk bentuk field media/document/file WhaCenter -- lihat catatan di normalizeInbound(). */
 function extractMediaUrl(media: unknown): string | undefined {
   if (typeof media === "string" && /^https?:\/\//i.test(media)) return media;
   const rec = asRecord(media);
   if (!rec) return undefined;
-  for (const k of ["url", "link", "file_url", "media_url", "path"]) {
+  for (const k of ["url", "link", "file_url", "media_url", "path", "mediaUrl", "file", "documentUrl", "fileUrl"]) {
     const v = rec[k];
     if (typeof v === "string" && /^https?:\/\//i.test(v)) return v;
   }
