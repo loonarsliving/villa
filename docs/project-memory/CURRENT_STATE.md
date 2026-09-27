@@ -2,6 +2,44 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-27 — akun resepsionis SENGAJA dikecualikan dari "wajib ganti password"
+
+Keputusan owner, jangan "diperbaiki" balik oleh sesi berikutnya.
+
+`reception@loonars.com` (role `receptionist`) kini punya
+`must_change_password = false` **dengan sengaja**. Owner memegang dan
+menyimpan sendiri password akun ini, dan memintanya menetap:
+*"pertahankan pass ini untuk receptionis jgan suruh dia merubah pass lg jika
+login nti"*.
+
+**Kenapa ini muncul:** dua reset sebelumnya (19 dan 27 Sep) disetel
+`must_change_password = true`. Resepsionis login, diminta membuat password
+sendiri, dan salinan yang dipegang owner langsung basi — owner harus minta
+password baru lagi. Itu alur yang benar untuk akun pribadi (investor), tapi
+salah untuk akun bersama yang passwordnya memang dipegang manajemen.
+
+**Passwordnya TIDAK dicatat di sini, dan tidak boleh dicatat di berkas mana
+pun** (lihat aturan di CLAUDE.md). Kalau perlu, terbitkan ulang lewat
+`/admin/users` dan sampaikan langsung ke owner.
+
+**Jebakan yang ikut ditutup hari ini:** tombol Reset Password di
+`/admin/users` tidak pernah mengirim `force_password_change`, dan villa-api
+menganggapnya `true` secara bawaan (`b.force_password_change !== false`).
+Artinya reset password berikutnya akan menyalakan lagi "wajib ganti" dan
+membatalkan keputusan di atas tanpa ada yang sadar. Sekarang ada centang
+**"Minta pengguna mengganti password ini saat login berikutnya"** di layar
+reset — **bawaannya tetap menyala**, jadi perilaku untuk akun investor tidak
+berubah; yang baru hanyalah kemampuan mematikannya untuk akun bersama.
+
+Ikut diperbaiki di layar yang sama: batas panjang password disamakan jadi
+**8 karakter**. Layar itu dulu meloloskan 6, sementara villa-api menolak di
+bawah 8 — password 6–7 karakter lolos di layar lalu ditolak server dengan
+pesan yang berbeda dari yang tertulis.
+
+**Belum ditindaklanjuti:** akun resepsionis kedua `resep@loonars.id` masih
+aktif, login terakhir 9 Agustus, sisa akun bawaan dari setup awal. Sudah
+ditawarkan ke owner untuk dinonaktifkan; belum ada jawaban.
+
 ## 2026-09-26 — riset kompetitor malam puncak dipindah ke cron sendiri
 
 Selama dua malam pertama riset ini tidak pernah jalan. Log Vercel 26 Sep

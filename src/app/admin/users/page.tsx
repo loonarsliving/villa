@@ -19,6 +19,14 @@ export default function AdminUsersPage() {
   const [form, setForm] = useState({ nama: "", email: "", password: "", role: "owner" as Role, unit_id: "", hp: "" });
   const [resetTarget, setResetTarget] = useState<VillaUserRow | null>(null);
   const [resetPass, setResetPass] = useState("");
+  // Bawaannya TETAP true supaya perilaku lama tidak berubah: akun investor
+  // memang harus memilih passwordnya sendiri saat login pertama. Yang baru
+  // hanyalah kemampuan MEMATIKANNYA -- dipakai untuk akun bersama seperti
+  // resepsionis, yang passwordnya sengaja dipegang owner dan tidak boleh
+  // berubah sendiri (instruksi owner 2026-09-27). Sebelum ini tombol Reset
+  // selalu menyalakan "wajib ganti" tanpa cara mematikannya, sehingga
+  // keputusan itu ikut terbatalkan diam-diam setiap kali password direset.
+  const [resetWajibGanti, setResetWajibGanti] = useState(true);
 
   async function load() {
     setLoading(true);
@@ -64,15 +72,30 @@ export default function AdminUsersPage() {
   }
 
   async function doResetPassword() {
-    if (!resetTarget || resetPass.length < 6) {
-      toast("⚠", "Password terlalu pendek", "Minimal 6 karakter.", "ruby");
+    // villa-api menolak di bawah 8 ('Password minimal 8 karakter'), sementara
+    // layar ini dulu meloloskan 6 -- password 6-7 karakter lolos di sini lalu
+    // ditolak server dengan pesan yang berbeda dari yang tertulis di layar.
+    if (!resetTarget || resetPass.length < 8) {
+      toast("⚠", "Password terlalu pendek", "Minimal 8 karakter.", "ruby");
       return;
     }
     try {
-      await api.patch("/admin/users", { id: resetTarget.id, new_password: resetPass });
-      toast("✓", "Password direset", `${resetTarget.nama} wajib ganti password di login berikutnya.`, "sage");
+      await api.patch("/admin/users", {
+        id: resetTarget.id,
+        new_password: resetPass,
+        force_password_change: resetWajibGanti,
+      });
+      toast(
+        "✓",
+        "Password direset",
+        resetWajibGanti
+          ? `${resetTarget.nama} wajib ganti password di login berikutnya.`
+          : `Password ${resetTarget.nama} tetap seperti yang diisi — tidak diminta ganti saat login.`,
+        "sage",
+      );
       setResetTarget(null);
       setResetPass("");
+      setResetWajibGanti(true);
       load();
     } catch (e) {
       toast("⚠", "Gagal", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby");
@@ -162,14 +185,25 @@ export default function AdminUsersPage() {
       <Modal
         open={!!resetTarget}
         title={`Reset Password — ${resetTarget?.nama || ""}`}
-        onClose={() => { setResetTarget(null); setResetPass(""); }}
-        footer={<><Btn onClick={() => { setResetTarget(null); setResetPass(""); }}>Batal</Btn><Btn variant="primary" onClick={doResetPassword}>Reset</Btn></>}
+        onClose={() => { setResetTarget(null); setResetPass(""); setResetWajibGanti(true); }}
+        footer={<><Btn onClick={() => { setResetTarget(null); setResetPass(""); setResetWajibGanti(true); }}>Batal</Btn><Btn variant="primary" onClick={doResetPassword}>Reset</Btn></>}
       >
         <Field label="Password Baru">
-          <input className={inputCls} value={resetPass} onChange={(e) => setResetPass(e.target.value)} placeholder="Minimal 6 karakter" />
+          <input className={inputCls} value={resetPass} onChange={(e) => setResetPass(e.target.value)} placeholder="Minimal 8 karakter" />
         </Field>
-        <div className="text-[10.5px] text-ink/30 leading-relaxed">
-          Pengguna akan wajib ganti password ini saat login berikutnya.
+        <label className="flex items-start gap-2 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={resetWajibGanti}
+            onChange={(e) => setResetWajibGanti(e.target.checked)}
+            className="mt-0.5 w-4 h-4 accent-sage-500 cursor-pointer shrink-0"
+          />
+          <span className="text-[10.5px] text-ink/70">Minta pengguna mengganti password ini saat login berikutnya</span>
+        </label>
+        <div className="text-[10.5px] text-ink/30 leading-relaxed mt-2">
+          {resetWajibGanti
+            ? "Password di atas sekali pakai — pengguna memilih passwordnya sendiri saat login, jadi jangan disimpan."
+            : "Password di atas menetap dan bisa disimpan. Matikan centang ini hanya untuk akun bersama (mis. resepsionis) yang passwordnya dipegang manajemen."}
         </div>
       </Modal>
     </AdminShell>
