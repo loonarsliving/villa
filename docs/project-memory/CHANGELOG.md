@@ -4,6 +4,13 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-09-28 — Chat dirombak untuk HP, tablet, dan laptop
+- Pola WhatsApp: di HP dan tablet, daftar dan isi percakapan tampil bergantian. Di HP isi percakapan menutupi layar (menu bawah tertutup) dan tombol kembali HP ikut menutupnya (`history.pushState`). Mulai 1024px keduanya berdampingan setinggi layar.
+- Empat kartu statistik diganti kolom cari (nama/nomor) dan chip filter berjumlah: Semua, Belum dibaca, Menginap, Prospek, Selesai.
+- Pesan 15px di HP, kolom ketik 16px (iPhone tidak zoom), kolom ketik bisa beberapa baris, dan tombol kirim/kembali 44px. Enter mengirim di laptop; di layar sentuh Enter membuat baris baru. Pemisah hari dan jam singkat WIB ada di `src/lib/chatFormat.ts` (+5 tes).
+- `DashboardShell`: kolom konten diberi `min-w-0`. Sebelumnya baris lebar apa pun (mis. chip filter) membuat seluruh halaman melebar melebihi layar HP. Label menu bawah HP kini terpotong rapi, tidak lagi saling menimpa di layar 320px.
+- Diuji di Chromium pada iPhone SE (320), iPhone 14, iPad tegak dan mendatar, serta laptop: tidak meluber, kolom ketik di dalam layar, tombol kembali (layar dan HP) berfungsi, filter/cari berfungsi, dan perilaku Enter benar.
+
 ### 2026-09-27 (malam, lanjutan 2) — Tamu villa dijawab resepsionis, bukan AI Mkhsistem
 - Owner melihat balasan AI Mkhsistem ("LEON, COO") ke pertanyaan menginap: ada placeholder, meminta nomor, dan menawarkan skincare. Pengirimnya ternyata karyawan super_admin, jadi yang menjawab asisten AI internal. Tamu biasa pun mendapat "pilih proyek" dan bot nurture.
 - `/api/wa/mirror` kini menjawab `{villa: boolean}`. Kalau `true`, Mkhsistem tidak membalas apa pun. Villa mengirim **satu** sapaan hanya untuk nomor baru (`teksSapaanPertama`, lewat `after()`): tanpa pertanyaan, tanpa tawaran, menyerahkan ke tim Hospitality Management. Sapaan tercatat di Chat sebagai "otomatis sistem".
