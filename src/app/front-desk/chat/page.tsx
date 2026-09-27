@@ -45,7 +45,8 @@ export default function ChatPage() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
-  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const threadRef = useRef<HTMLDivElement | null>(null);
+  const activeIdRef = useRef<string | null>(null);
 
   const loadConversations = useCallback(() => {
     localApi<WaConversationRow[]>("/api/chat/conversations")
@@ -67,27 +68,45 @@ export default function ChatPage() {
     return () => clearInterval(id);
   }, [user, loadConversations]);
 
-  const loadMessages = useCallback((id: string) => {
-    setLoadingMessages(true);
+  // `diam`: pembaruan berkala di latar belakang -- tanpa "Memuat…" (yang
+  // mengosongkan percakapan sesaat tiap 8 detik) dan tanpa toast galat.
+  const loadMessages = useCallback((id: string, diam = false) => {
+    if (!diam) setLoadingMessages(true);
     localApi<WaConversationMessageRow[]>(`/api/chat/conversations/${id}/messages`)
       .then((rows) => {
-        setMessages(rows || []);
-        setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, unread_count: 0 } : c)));
+        // Jawaban untuk percakapan yang sudah ditinggalkan tidak boleh menimpa yang sedang dibuka.
+        if (activeIdRef.current !== id) return;
+        const baru = rows || [];
+        setMessages((prev) =>
+          prev.length === baru.length && prev[prev.length - 1]?.id === baru[baru.length - 1]?.id ? prev : baru,
+        );
+        setConversations((prev) =>
+          prev.some((c) => c.id === id && c.unread_count > 0) ? prev.map((c) => (c.id === id ? { ...c, unread_count: 0 } : c)) : prev,
+        );
       })
-      .catch((e) => toast("⚠", "Gagal memuat percakapan", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby"))
-      .finally(() => setLoadingMessages(false));
+      .catch((e) => {
+        if (!diam) toast("⚠", "Gagal memuat percakapan", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby");
+      })
+      .finally(() => {
+        if (!diam) setLoadingMessages(false);
+      });
   }, [toast]);
 
   useEffect(() => {
+    activeIdRef.current = activeId;
     if (!activeId) return;
+    setMessages([]);
     loadMessages(activeId);
-    const id = setInterval(() => loadMessages(activeId), POLL_MS);
+    const id = setInterval(() => loadMessages(activeId, true), POLL_MS);
     return () => clearInterval(id);
   }, [activeId, loadMessages]);
 
+  // Gulir hanya kotak percakapan (bukan seluruh halaman), dan hanya saat ada pesan baru.
+  const lastMessageId = messages[messages.length - 1]?.id;
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [messages]);
+    const el = threadRef.current;
+    if (el && lastMessageId) el.scrollTop = el.scrollHeight;
+  }, [lastMessageId]);
 
   async function kirimBalasan() {
     if (!activeId || !draft.trim() || sending) return;
@@ -99,7 +118,7 @@ export default function ChatPage() {
         body: JSON.stringify({ message: isi, staffName: user?.nama }),
       });
       setDraft("");
-      loadMessages(activeId);
+      loadMessages(activeId, true);
       loadConversations();
     } catch (e) {
       toast("⚠", "Gagal Mengirim", e instanceof ApiError ? e.message : "Pesan tidak terkirim ke WhatsApp.", "ruby");
@@ -192,7 +211,7 @@ export default function ChatPage() {
                   subtitle={`${formatPhoneDisplay(active.phone)}${active.bookings ? ` · Unit ${active.bookings.unit_nomor}` : ""}`}
                   action={<Badge tone={statusTone[active.status_tamu]}>{statusLabel[active.status_tamu]}</Badge>}
                 />
-                <div className="flex-1 overflow-y-auto px-4 sm:px-5 py-4 space-y-2.5" style={{ maxHeight: 440 }}>
+                <div ref={threadRef} className="flex-1 overflow-y-auto px-4 sm:px-5 py-4 space-y-2.5" style={{ maxHeight: 440 }}>
                   {loadingMessages ? (
                     <Loading />
                   ) : messages.length === 0 ? (
@@ -220,7 +239,6 @@ export default function ChatPage() {
                       </div>
                     ))
                   )}
-                  <div ref={bottomRef} />
                 </div>
                 <div className="px-4 sm:px-5 py-3 border-t border-ink/[0.05] flex gap-2">
                   <input
