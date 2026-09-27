@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { periksaTokenStaf } from "@/lib/villaApiAuth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { sendWhatsAppText } from "@/lib/whacenter";
+import { kirimDariNomorUtama } from "@/lib/mkhsistemWa";
 import { catatPesan } from "@/lib/waChat";
 
 export const runtime = "nodejs";
@@ -10,9 +10,9 @@ export const dynamic = "force-dynamic";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * Balasan staf dari halaman Chat Front Desk. Memakai pengirim WA yang
- * sudah ada (sendWhatsAppText -> WhaCenter, nomor villa sendiri) --
- * tidak ada infrastruktur pengiriman baru di sini.
+ * Balasan staf dari halaman Chat Front Desk, dikirim dari nomor utama
+ * 082228885223 (perangkat Mkhsistem) -- nomor yang sama dengan tempat
+ * tamu mengirim pesan, supaya balasan tidak datang dari nomor asing.
  *
  * Pesan HANYA dicatat ke riwayat kalau benar-benar terkirim -- kalau
  * tidak, layar chat akan menampilkan "terkirim" untuk pesan yang
@@ -48,7 +48,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (findError) return NextResponse.json({ error: findError.message }, { status: 500 });
   if (!percakapan) return NextResponse.json({ error: "Percakapan tidak ditemukan" }, { status: 404 });
 
-  const sent = await sendWhatsAppText(percakapan.phone, isi);
+  const sent = await kirimDariNomorUtama(percakapan.phone, isi);
   if (!sent.success) {
     return NextResponse.json({ error: sent.error ?? "Pesan gagal terkirim ke WhatsApp" }, { status: 502 });
   }

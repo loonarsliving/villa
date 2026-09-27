@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { nationalSignificantNumber, onlyDigits, samePhoneNumber } from "./phone";
+import { nationalSignificantNumber, nomorKanonik, samePhoneNumber } from "./phone";
+
+describe("nomorKanonik", () => {
+  it("awalan 0 dari WhaCenter jadi 62 (kasus nyata payload 27 Sep)", () => {
+    expect(nomorKanonik("0811400441")).toBe("62811400441");
+  });
+  it("nomor yang sudah 62 dibiarkan", () => {
+    expect(nomorKanonik("6282228885223")).toBe("6282228885223");
+  });
+  it("membersihkan karakter non-digit", () => {
+    expect(nomorKanonik("+62 822-2888-5223")).toBe("6282228885223");
+  });
+  it("nomor luar negeri tanpa awalan 0 tidak diberi 62", () => {
+    expect(nomorKanonik("14155550123")).toBe("14155550123");
+  });
+});
 
 describe("nationalSignificantNumber", () => {
   it("membuang awalan 62", () => {

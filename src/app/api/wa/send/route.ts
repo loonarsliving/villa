@@ -1,7 +1,6 @@
-import { timingSafeEqual } from "node:crypto";
-
 import { NextResponse } from "next/server";
 
+import { secretsMatch } from "@/lib/internalSecret";
 import { sendWhatsAppText, isWhacenterConfigured } from "@/lib/whacenter";
 
 export const runtime = "nodejs";
@@ -17,16 +16,6 @@ export const dynamic = "force-dynamic";
  * Tidak ada satu baris pun di villa-api yang perlu diubah, dan kalau
  * perangkat baru bermasalah, mengembalikannya juga cukup satu nilai itu.
  */
-
-function secretsMatch(provided: string, expected: string): boolean {
-  const a = Buffer.from(provided, "utf8");
-  const b = Buffer.from(expected, "utf8");
-  if (a.length !== b.length) {
-    timingSafeEqual(b, b);
-    return false;
-  }
-  return timingSafeEqual(a, b);
-}
 
 export async function POST(request: Request) {
   const expected = (process.env.VILLA_BRIDGE_SECRET ?? "").trim();

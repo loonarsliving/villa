@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { onlyDigits, samePhoneNumber } from "./phone";
+import { nomorKanonik, samePhoneNumber } from "./phone";
 
 /**
  * Inti penyimpanan percakapan WhatsApp dua-arah (persetujuan owner
@@ -93,7 +93,7 @@ export async function cariAtauBuatPercakapan(
   phoneMentah: string,
   namaTampilan?: string,
 ): Promise<ConversationMatch> {
-  const phone = onlyDigits(phoneMentah);
+  const phone = nomorKanonik(phoneMentah);
   const cocok = await cariGuestDanBooking(supabase, phone);
 
   const { data: existing } = await supabase.from("wa_conversations").select("id").eq("phone", phone).maybeSingle();

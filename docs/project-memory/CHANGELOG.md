@@ -4,7 +4,12 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
-### 2026-09-27 — Chat WhatsApp dua arah untuk Front Desk (belum di-merge)
+### 2026-09-27 (malam) — Chat tersambung ke nomor 0822 lewat Mkhsistem
+- **Bug:** pesan nyata pertama ke 0822 tidak muncul di Chat. Penyebabnya: perangkat WhaCenter 0822 mengirim webhook ke Mkhsistem, bukan ke villa. Klaim di #126/#127 bahwa 0822 terpasang di perangkat villa keliru; klaim itu hanya berdasar konfirmasi lisan, tanpa pesan uji. Juga ditemukan: `vercel_bridge.base_url` masih `mkh.haluoleo.id`, jadi notifikasi villa sebenarnya juga keluar dari 0822.
+- **Keputusan owner:** tetap memakai 0822. Endpoint baru `POST /api/wa/mirror` hanya mencatat payload yang diteruskan Mkhsistem (perintah LUNAS/PROMO tetap diproses Mkhsistem, tidak dobel). Balasan resepsionis kini keluar dari 0822 lewat `/api/wa/send` Mkhsistem (`src/lib/mkhsistemWa.ts`). Nomor disimpan dalam bentuk `62…` (`nomorKanonik`, +4 tes). Sisi Mkhsistem ada di PR terpisah pada repo `mkhsistem`.
+- Tanpa perubahan skema, tanpa env var baru, tanpa sentuhan ke uang.
+
+### 2026-09-27 — Chat WhatsApp dua arah untuk Front Desk
 - Owner minta modul chat resepsionis yang menarik dari "webhook mkhsistem" -- premisnya diperiksa langsung dengan membawa repo `Mkhsistem` dan `loonars` masuk, dan ternyata tidak ada widget chat di loonars.id (cuma tautan `wa.me`) maupun modul inbox di Mkhsistem (CRM-nya cuma follow-up, bukan percakapan). Villa sendiri sudah punya WhatsApp sendiri (WhaCenter, migrasi 12-13 Sep) tapi membuang semua pesan bebas yang bukan perintah baku.
 - Tabel baru `wa_conversations`/`wa_conversation_messages` (owner-approved sebelum migrasi diterapkan), pencocokan tamu/booking lintas format nomor `0`/`62` (`src/lib/phone.ts`), `/api/wa/webhook` sekarang mencatat semua pesan masuk (perintah baku tetap otomatis seperti sebelumnya), tiga rute `/api/chat/*` bergerbang staf, halaman `/front-desk/chat`, lencana belum-dibaca di kedua shell.
 - 130 tes hijau (+15 baru: phone.ts 9, waChat.ts 6), tsc bersih, build berhasil. RPC `wa_conversation_increment_unread` dibuktikan dengan simulasi nyata (insert-verifikasi-hapus), bukan dinalar saja.

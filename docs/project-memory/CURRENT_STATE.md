@@ -78,10 +78,45 @@ Excellent Living, Beauty, Direktur, Kontak, tombol navigasi (`Nav.tsx`,
 `WhatsAppButton.tsx`, `BookingForm.tsx`, `OrderForm.tsx`). Tidak ada kode
 yang diubah karena tidak ada yang perlu diubah.
 
-**Dikonfirmasi owner (2026-09-27): nomor ini memang yang dipasangkan ke
-WhaCenter.** Jadi rantainya utuh: pesan dari loonars.id -> nomor
-`082228885223` -> perangkat WhaCenter villa -> `/api/wa/webhook` ->
-`wa_conversations` -> `/front-desk/chat`.
+### KOREKSI (2026-09-27 malam): 0822 BUKAN perangkat villa -- rantainya lewat Mkhsistem
+
+Paragraf yang dulu ada di sini ("rantainya utuh: 0822 -> perangkat
+WhaCenter villa -> `/api/wa/webhook`") **salah**. Itu ditulis dari
+konfirmasi lisan owner tanpa pesan uji sungguhan. Pesan uji pertama (istri
+owner lewat loonars.id, 21:30 WIB) tidak muncul di Chat. Dibuktikan dari data:
+
+- Perangkat WhaCenter nomor `6282228885223` mengirim webhook ke
+  **Mkhsistem** (`mkh.haluoleo.id/api/integrations/whatsapp/webhook`), setiap
+  hari tanpa putus sejak minimal 8 Sep (`ai_integration_logs`,
+  `payload->>'source' = 'webhook_entry'`, field `to` = 0822). Nomor itu juga
+  menerima chat bisnis non-villa (supplier, kontraktor, dll.).
+- `/api/wa/webhook` villa: 0 request dalam 24 jam (log Vercel per `requestPath`).
+- `integration_settings.vercel_bridge.base_url` = `https://mkh.haluoleo.id`,
+  BUKAN `living.haluoleo.id` seperti catatan 13 Sep -- jadi notifikasi tamu
+  villa-api juga keluar dari 0822 lewat Mkhsistem. Perangkat WhaCenter villa
+  sendiri (`WHACENTER_DEVICE_ID` villa) hampir pasti nomor lain dan saat ini
+  praktis menganggur.
+
+**Keputusan owner:** chat resepsionis tetap memakai 0822 lewat Mkhsistem
+(dengan sadar bahwa chat bisnis lain di 0822 ikut tampil di layar resepsionis).
+Rantainya sekarang:
+
+pesan ke 0822 -> WhaCenter -> webhook Mkhsistem (perintah LUNAS/PROMO dll.
+tetap diproses di sana) -> Mkhsistem meneruskan payload mentah ke
+`POST /api/wa/mirror` villa (header `x-internal-secret` = `VILLA_BRIDGE_SECRET`,
+HANYA mencatat, tidak menjalankan perintah) -> `wa_conversations` ->
+`/front-desk/chat`. Balasan resepsionis -> `POST mkh.haluoleo.id/api/wa/send`
+(`src/lib/mkhsistemWa.ts`) -> keluar dari 0822.
+
+`VILLA_BRIDGE_SECRET` sama di villa, Mkhsistem, dan
+`integration_settings.vercel_bridge.secret`. Buktinya: villa-api mengirim
+notifikasi lewat Mkhsistem dengan secret database dan tercatat `sent` di
+`wa_messages_log`, dan villa sudah diuji dengan secret yang sama pada 13 Sep.
+
+**Belum tampil di Chat:** balasan otomatis AI Mkhsistem ke lead dan balasan
+perintah (LUNAS dll.). Keduanya dikirim Mkhsistem dan tidak diteruskan. Nomor
+disimpan dalam bentuk `62...` (`nomorKanonik`), karena WhaCenter mengirim
+`from` berawalan `0`.
 
 ## 2026-09-27 — akun resepsionis SENGAJA dikecualikan dari "wajib ganti password"
 
