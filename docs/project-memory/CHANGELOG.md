@@ -4,6 +4,13 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-09-27 — Chat WhatsApp dua arah untuk Front Desk (belum di-merge)
+- Owner minta modul chat resepsionis yang menarik dari "webhook mkhsistem" -- premisnya diperiksa langsung dengan membawa repo `Mkhsistem` dan `loonars` masuk, dan ternyata tidak ada widget chat di loonars.id (cuma tautan `wa.me`) maupun modul inbox di Mkhsistem (CRM-nya cuma follow-up, bukan percakapan). Villa sendiri sudah punya WhatsApp sendiri (WhaCenter, migrasi 12-13 Sep) tapi membuang semua pesan bebas yang bukan perintah baku.
+- Tabel baru `wa_conversations`/`wa_conversation_messages` (owner-approved sebelum migrasi diterapkan), pencocokan tamu/booking lintas format nomor `0`/`62` (`src/lib/phone.ts`), `/api/wa/webhook` sekarang mencatat semua pesan masuk (perintah baku tetap otomatis seperti sebelumnya), tiga rute `/api/chat/*` bergerbang staf, halaman `/front-desk/chat`, lencana belum-dibaca di kedua shell.
+- 130 tes hijau (+15 baru: phone.ts 9, waChat.ts 6), tsc bersih, build berhasil. RPC `wa_conversation_increment_unread` dibuktikan dengan simulasi nyata (insert-verifikasi-hapus), bukan dinalar saja.
+- Loonars.id BELUM disatukan ke nomor WA villa -- perlu nomor telepon sebenarnya dari owner, langkah terpisah di repo `loonars`.
+
+
 ### 2026-09-24 — Sinyal pencarian website dan harga tetangga malam puncak
 - Migrasi `20260924000001`: tabel `villa_availability_searches`, kolom `villa_competitor_rates.stay_date`. villa-api mencatat pencarian ketersediaan; loonars mengirim `sid` acak. Mesin harga: SINYAL 5 (naik saja, butuh 30 pencari/30 hari) dan cap/ruang naik dari harga tetangga malam puncak (≥3 villa, ≥10% di atas malam biasa, maks +10%). Mkhsistem PR #66. 115 tes. Simulasi: 0 perubahan harga saat merge. Detail di CURRENT_STATE.md.
 

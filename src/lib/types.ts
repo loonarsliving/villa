@@ -609,3 +609,29 @@ export interface FinanceScenarioResponse {
   custom: FinanceScenarioResult;
   targets: FinanceScenarioResult[];
 }
+
+export type WaStatusTamu = "prospek" | "menginap" | "selesai";
+
+export interface WaConversationRow {
+  id: string;
+  phone: string;
+  nama_tampilan: string | null;
+  guest_id: string | null;
+  booking_id: string | null;
+  status_tamu: WaStatusTamu;
+  last_message_at: string;
+  last_message_preview: string | null;
+  unread_count: number;
+  guests: { nama: string } | null;
+  bookings: { unit_nomor: string; status: string; tgl_checkin: string; tgl_checkout: string | null } | null;
+}
+
+export interface WaConversationMessageRow {
+  id: string;
+  arah: "masuk" | "keluar";
+  isi: string;
+  media_url: string | null;
+  is_perintah_otomatis: boolean;
+  dibalas_oleh: string | null;
+  created_at: string;
+}

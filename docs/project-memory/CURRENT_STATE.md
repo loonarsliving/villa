@@ -2,6 +2,83 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-09-27 — Chat WhatsApp dua arah dibangun untuk Front Desk
+
+Owner minta modul chat di halaman resepsionis yang "menarik dari webhook
+mkhsistem" untuk pertanyaan sewa dari loonars.id dan chat tamu yang sudah
+menginap. Sebelum membangun apa pun, kedua repo yang disebut (`Mkhsistem`
+dan `loonars`) dibawa masuk dan dipelajari langsung -- premis awalnya
+ternyata tidak cocok dengan yang sebenarnya ada di kode.
+
+### Yang ditemukan (dibaca langsung dari kode, bukan tebakan)
+
+- **Tidak ada widget chat di loonars.id.** Tombol 💬 cuma tautan
+  `wa.me/6282228885223` -- membuka WhatsApp pribadi siapa pun yang
+  memegang nomor itu, tanpa server/webhook sama sekali.
+- **Form kontak loonars.id juga bukan chat.** Insert satu baris ke tabel
+  `contact_messages` di project Supabase **yang sama sekali berbeda**
+  (`gluoioiimapyhchdasfl`) -- terpisah total dari project villa
+  (`svcmybsziaelwwdrnzcv`) maupun Mkhsistem. Bukan khusus villa (mencakup
+  semua lini Loonars), tidak ada mekanisme balas, tidak ada nomor
+  percakapan.
+- **Mkhsistem punya WhatsApp sendiri**, tapi nomor bisnis resmi Meta Cloud
+  API untuk urusan lain (leads iklan, laporan konstruksi, approval
+  finance) -- tidak tersambung ke villa, dan CRM-nya cuma pencatat
+  follow-up, bukan inbox percakapan. Tidak ada satu pun contoh "modul chat
+  yang bagus" untuk disalin di kedua repo itu -- ini yang pertama di
+  seluruh ekosistem Loonars/Mkhsistem.
+- **Villa sendiri sudah punya WhatsApp sendiri** (WhaCenter, migrasi
+  12-13 Sep, lihat CHANGELOG), tapi `/api/wa/webhook` MEMBUANG setiap pesan
+  bebas yang bukan perintah baku (`LUNAS`/`PROMO`/dll.) -- tidak pernah
+  disimpan di mana pun.
+- Konsisten dengan rencana owner sendiri 12 Sep (dicatat di ROADMAP.md):
+  *"whatsapp api mengganti semua proses yg menggunakan wa di repo villa dan
+  loonars"* -- Mkhsistem sengaja tidak ikut.
+
+### Yang dibangun
+
+Fondasinya WhatsApp villa sendiri yang sudah ada, dijadikan inbox
+sungguhan:
+- Tabel `wa_conversations`/`wa_conversation_messages` (owner-approved
+  sebelum diterapkan) -- lihat DATABASE.md untuk skema lengkap.
+- `/api/wa/webhook` sekarang mencatat SEMUA pesan masuk, bukan cuma yang
+  dikenali sebagai perintah. Perintah baku tetap berjalan otomatis persis
+  seperti sebelumnya (logikanya tidak diubah) DAN balasannya ikut
+  tersimpan di riwayat.
+- Pencocokan tamu/booking lewat nomor HP, lintas format `0`/`62`
+  (`src/lib/phone.ts`, 9 tes) -- perlu karena `guests.hp` di database
+  tersimpan tidak konsisten.
+- `src/lib/waChat.ts` -- inti penyimpanan, dipakai bersama webhook dan API
+  chat supaya keduanya tidak diam-diam berbeda perilaku. Gagal mencatat
+  TIDAK PERNAH menggagalkan pengiriman WA atau perintah baku yang sudah
+  bekerja (pola yang sama dengan `sendWa()`).
+- `GET /api/chat/conversations`, `GET .../[id]/messages` (efek samping:
+  menandai terbaca), `POST .../[id]/reply` (memakai `sendWhatsAppText` yang
+  sudah ada -- balasan hanya dicatat kalau BENAR-BENAR terkirim, supaya
+  layar tidak bilang "terkirim" untuk pesan yang gagal). Ketiganya
+  bergerbang staf dengan pola tri-state 401/503 yang sama seperti jalur
+  check-in (lihat catatan 2026-09-20).
+- Halaman `/front-desk/chat` (juga bisa diakses admin lewat `AdminShell`,
+  pola yang sama dengan Kalender Booking/Payment Gateway) -- daftar
+  percakapan + balas, poll 8 detik. Lencana belum-dibaca di navigasi
+  kedua shell (`useChatUnreadPoll`, poll 30 detik).
+
+**Cakupan status "Prospek"/"Menginap"/"Selesai" sesuai jawaban owner**:
+mencakup pertanyaan sewa dari siapa pun yang chat ke nomor ini (belum
+tentu punya booking) DAN tamu yang sudah/sedang menginap -- karena
+nomornya didedikasikan untuk villa, tidak perlu penyaringan topik
+tambahan di server.
+
+### Belum selesai -- perlu tindak lanjut terpisah
+
+**Loonars.id belum disatukan ke nomor WA villa.** Tombol 💬 dan nomor di
+halaman Kontak (repo `loonars`) masih menunjuk ke nomor lain. Ini
+perubahan kecil tapi terpisah, di repo lain, dan perlu NOMOR TELEPON VILLA
+YANG SEBENARNYA (bukan `WHACENTER_DEVICE_ID`, itu ID perangkat bukan nomor)
+-- tidak tersedia di dokumen mana pun dan tidak bisa dibaca dari sandbox
+ini (WhaCenter tidak terjangkau). Owner perlu memberikan nomornya, atau
+mengubahnya sendiri di repo `loonars`.
+
 ## 2026-09-27 — akun resepsionis SENGAJA dikecualikan dari "wajib ganti password"
 
 Keputusan owner, jangan "diperbaiki" balik oleh sesi berikutnya.
