@@ -33,6 +33,17 @@ export function nationalSignificantNumber(phone: string): string {
 }
 
 /**
+ * Satu bentuk simpan untuk nomor Indonesia: awalan "0" diganti "62".
+ * WhaCenter mengirim `from` berawalan "0" (mis. "0811400441") sedangkan
+ * nomor lain di sistem memakai "62" -- tanpa ini satu tamu bisa punya dua
+ * percakapan terpisah. Nomor luar negeri (tanpa awalan "0") dibiarkan.
+ */
+export function nomorKanonik(phone: string): string {
+  const digits = onlyDigits(phone);
+  return digits.startsWith("0") ? `62${digits.slice(1)}` : digits;
+}
+
+/**
  * Dua nomor dianggap sama kalau nomor signifikan nasionalnya sama DAN
  * cukup panjang untuk berarti (mencegah dua nomor kosong/rusak "match"
  * satu sama lain -- minimal 8 digit, di bawah itu bukan nomor HP Indonesia
