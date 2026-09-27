@@ -127,7 +127,7 @@ export function DashboardShell({
         </div>
       )}
 
-      <div className="flex-1 flex flex-col md:ml-[220px]">
+      <div className="flex-1 min-w-0 flex flex-col md:ml-[220px]">
         <header className="h-14 bg-base-900 border-b border-ink/[0.08] flex items-center justify-between px-4 sm:px-7 sticky top-0 z-30">
           <div className="flex items-center gap-3 min-w-0">
             <button
@@ -155,21 +155,21 @@ export function DashboardShell({
             <Link
               key={item.href}
               href={item.href}
-              className={`relative flex-1 flex flex-col items-center justify-center gap-1 py-1.5 rounded-xl text-[9.5px] font-medium transition-colors ${
+              className={`relative flex-1 min-w-0 flex flex-col items-center justify-center gap-1 py-1.5 rounded-xl text-[9.5px] font-medium transition-colors ${
                 active ? "text-gold-600" : "text-ink/40"
               }`}
             >
               <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm ${active ? "bg-gold-500/15" : ""}`}>
                 {item.icon}
               </span>
-              <span className="truncate max-w-[64px]">{item.label}</span>
+              <span className="block w-full truncate text-center px-0.5">{item.label}</span>
               {!!item.badge && <span className="absolute top-0.5 right-3 w-1.5 h-1.5 rounded-full bg-ruby-500" />}
             </Link>
           );
         })}
         <button
           onClick={() => setDrawerOpen(true)}
-          className="relative flex-1 flex flex-col items-center justify-center gap-1 py-1.5 rounded-xl text-[9.5px] font-medium text-ink/40"
+          className="relative flex-1 min-w-0 flex flex-col items-center justify-center gap-1 py-1.5 rounded-xl text-[9.5px] font-medium text-ink/40"
         >
           <span className="w-8 h-8 rounded-full flex items-center justify-center text-sm">☰</span>
           <span>Lainnya</span>
