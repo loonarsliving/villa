@@ -8,6 +8,11 @@ describe("menyebutSewaVilla", () => {
     expect(menyebutSewaVilla("Halo, saya ingin booking Loonars Private Living Yogyakarta")).toBe(true);
     expect(menyebutSewaVilla("Halo Loonars Private Living! Saya baru saja booking:\nUnit: A2")).toBe(true);
   });
+  it("dua pilihan tombol WhatsApp loonars.id (WaPilihan): hanya 'Tanya menginap' yang lolos", () => {
+    expect(menyebutSewaVilla("Halo, saya ingin tanya soal menginap di Loonars Private Living Yogyakarta")).toBe(true);
+    expect(menyebutSewaVilla("Halo, saya tertarik membeli villa Loonars")).toBe(false);
+    expect(menyebutSewaVilla("Halo, saya ingin tanya produk Loonars Beauty")).toBe(false);
+  });
   it("pertanyaan menginap yang diketik sendiri lolos", () => {
     expect(menyebutSewaVilla("kak mau nginep tgl 5-7 bisa?")).toBe(true);
     expect(menyebutSewaVilla("harga per malam berapa ya")).toBe(true);

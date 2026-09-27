@@ -122,8 +122,13 @@ punya percakapan, atau (3) nomor cocok dengan `guests.hp`. Kata "villa" dan
 "booking" sengaja tidak dipakai, karena di Mkhsistem "villa" juga tipe rumah
 yang dijual dan ada "booking fee". Kalau database gagal dibaca, pesan tidak
 diloloskan. Kelemahannya: calon tamu yang cuma menulis "Halo" tanpa lewat tombol
-ber-teks tidak masuk. Tombol 💬 melayang di halaman Private Living belum punya
-teks otomatis (perubahan di repo `loonars`).
+ber-teks tidak masuk. Untuk menutup celah itu, loonarsliving/loonars#10 (menunggu
+owner, belum di-merge) membuat tombol WhatsApp umum di loonars.id menanyakan
+keperluan dulu. "Beli villa" membuka WA dengan teks "Halo, saya tertarik membeli
+villa Loonars" (tidak lolos), sedangkan "Tanya menginap" membuka WA dengan teks
+"Halo, saya ingin tanya soal menginap di Loonars Private Living Yogyakarta"
+(lolos). Kedua teks dikunci tes di `waChat.test.ts`; kalau teks di loonars
+diubah, penyaring di sini harus ikut disesuaikan.
 
 **Belum tampil di Chat:** balasan otomatis AI Mkhsistem ke lead dan balasan
 perintah (LUNAS dll.). Keduanya dikirim Mkhsistem dan tidak diteruskan. Nomor
