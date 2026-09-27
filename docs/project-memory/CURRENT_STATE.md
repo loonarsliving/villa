@@ -113,6 +113,18 @@ HANYA mencatat, tidak menjalankan perintah) -> `wa_conversations` ->
 notifikasi lewat Mkhsistem dengan secret database dan tercatat `sent` di
 `wa_messages_log`, dan villa sudah diuji dengan secret yang sama pada 13 Sep.
 
+**Saringan resepsionis (keputusan owner, malam yang sama):** hanya tamu dan
+penanya soal menginap yang boleh masuk Chat. `/api/wa/mirror` memanggil
+`bolehMasukResepsionis()` (`src/lib/waChat.ts`). Pesan lolos kalau: (1) teks
+menyebut sewa villa (`menyebutSewaVilla`: teks tombol Private Living di loonars.id,
+"menginap/nginep", "staycation", "per malam", "sewa villa"), (2) nomor sudah
+punya percakapan, atau (3) nomor cocok dengan `guests.hp`. Kata "villa" dan
+"booking" sengaja tidak dipakai, karena di Mkhsistem "villa" juga tipe rumah
+yang dijual dan ada "booking fee". Kalau database gagal dibaca, pesan tidak
+diloloskan. Kelemahannya: calon tamu yang cuma menulis "Halo" tanpa lewat tombol
+ber-teks tidak masuk. Tombol 💬 melayang di halaman Private Living belum punya
+teks otomatis (perubahan di repo `loonars`).
+
 **Belum tampil di Chat:** balasan otomatis AI Mkhsistem ke lead dan balasan
 perintah (LUNAS dll.). Keduanya dikirim Mkhsistem dan tidak diteruskan. Nomor
 disimpan dalam bentuk `62...` (`nomorKanonik`), karena WhaCenter mengirim

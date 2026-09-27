@@ -63,6 +63,48 @@ export function pilihBookingTerbaik(rows: BookingRingkas[]): { bookingId: string
   return { bookingId: null, statusTamu: "prospek" };
 }
 
+/**
+ * Penanda pesan tentang MENGINAP di villa. Sebagian diambil dari teks otomatis
+ * tombol WhatsApp halaman Private Living di loonars.id. Kata "villa" saja
+ * sengaja tidak dipakai: nomor 0822 juga melayani penjualan properti, dan di
+ * Mkhsistem "villa" adalah tipe rumah yang DIJUAL. "booking" juga tidak dipakai,
+ * karena "booking fee" rumah memakai kata yang sama.
+ */
+const PENANDA_SEWA_VILLA: RegExp[] = [
+  /\bloonars\s+(private\s+)?living\b/i,
+  /\bprivate\s+living\b/i,
+  /\b(menginap|nginap|nginep)\b/i,
+  /\bstay\s?cation\b/i,
+  /\bper\s?malam\b/i,
+  /\bsewa\s+villa\b/i,
+];
+
+export function menyebutSewaVilla(teks: string): boolean {
+  return PENANDA_SEWA_VILLA.some((re) => re.test(teks));
+}
+
+/**
+ * Nomor 0822 dipakai bersama bisnis lain (supplier, kontraktor, calon pembeli
+ * properti), tapi resepsionis hanya boleh melihat tamu villa dan orang yang
+ * bertanya soal menginap (keputusan owner 2026-09-27). Lolos kalau: pesannya
+ * menyebut sewa villa, nomornya sudah punya percakapan (supaya pesan lanjutan
+ * seperti "oke" tidak terputus), atau nomornya cocok dengan data tamu villa.
+ * Kalau database gagal dibaca, pesan TIDAK diloloskan: chat bisnis lain lebih
+ * tidak boleh bocor ke resepsionis, dan aslinya tetap tersimpan di Mkhsistem.
+ */
+export async function bolehMasukResepsionis(supabase: SupabaseClient, phoneMentah: string, teks: string): Promise<boolean> {
+  if (menyebutSewaVilla(teks)) return true;
+
+  const phone = nomorKanonik(phoneMentah);
+  const { data: existing, error: convError } = await supabase.from("wa_conversations").select("id").eq("phone", phone).maybeSingle();
+  if (convError) console.error("[waChat] gagal memeriksa percakapan lama", convError.message);
+  if (existing) return true;
+
+  const { data: guests, error: guestError } = await supabase.from("guests").select("hp").not("hp", "is", null).neq("hp", "");
+  if (guestError) console.error("[waChat] gagal memeriksa data tamu", guestError.message);
+  return (guests ?? []).some((g) => samePhoneNumber(g.hp, phone));
+}
+
 async function cariGuestDanBooking(
   supabase: SupabaseClient,
   phone: string,
