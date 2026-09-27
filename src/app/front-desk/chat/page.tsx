@@ -18,18 +18,25 @@ import type { WaConversationMessageRow, WaConversationRow, WaStatusTamu } from "
  * baku (LUNAS/PROMO/dll.) dibuang begitu saja oleh /api/wa/webhook -- tidak
  * pernah tersimpan di mana pun. Halaman ini yang pertama menampilkannya.
  *
- * Sumbernya nomor WA villa sendiri (WhaCenter, lihat src/lib/whacenter.ts) --
- * mencakup calon tamu yang bertanya soal sewa (belum tercocokkan ke booking
- * mana pun, ditandai "Prospek") dan tamu yang sudah/sedang menginap
- * (ditandai "Menginap"/"Selesai" begitu nomornya cocok dengan booking).
- * Bukan integrasi baru -- pengiriman baru masih lewat sendWhatsAppText yang
- * sudah ada, cuma sekarang dua arahnya tersimpan dan bisa dibalas dari sini.
+ * Sumbernya nomor utama 082228885223 (diteruskan Mkhsistem ke /api/wa/mirror,
+ * disaring hanya tamu dan penanya soal menginap) -- calon tamu ditandai
+ * "Prospek", tamu yang sudah/sedang menginap "Menginap"/"Selesai" begitu
+ * nomornya cocok dengan booking. Balasan keluar dari nomor yang sama lewat
+ * Mkhsistem (src/lib/mkhsistemWa.ts), yang makan beberapa detik -- karena itu
+ * balasan langsung tampil sebagai "Mengirim…" dan dikirim di belakang.
  */
 
 const statusLabel: Record<WaStatusTamu, string> = { prospek: "Prospek", menginap: "Menginap", selesai: "Selesai" };
 const statusTone: Record<WaStatusTamu, "ok" | "pending" | "danger"> = { prospek: "pending", menginap: "ok", selesai: "danger" };
 
 const POLL_MS = 8000;
+
+interface PesanTertunda {
+  tempId: string;
+  conversationId: string;
+  isi: string;
+  status: "mengirim" | "terkirim" | "gagal";
+}
 
 function formatPhoneDisplay(phone: string): string {
   return phone.startsWith("62") ? `+${phone}` : phone;
@@ -44,9 +51,11 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<WaConversationMessageRow[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [draft, setDraft] = useState("");
-  const [sending, setSending] = useState(false);
+  const [pending, setPending] = useState<PesanTertunda[]>([]);
   const threadRef = useRef<HTMLDivElement | null>(null);
   const activeIdRef = useRef<string | null>(null);
+  // Pengiriman dirantai satu per satu: urutan ke tamu tetap sama dengan urutan diketik.
+  const antreanKirim = useRef<Promise<void>>(Promise.resolve());
 
   const loadConversations = useCallback(() => {
     localApi<WaConversationRow[]>("/api/chat/conversations")
@@ -80,6 +89,15 @@ export default function ChatPage() {
         setMessages((prev) =>
           prev.length === baru.length && prev[prev.length - 1]?.id === baru[baru.length - 1]?.id ? prev : baru,
         );
+        // Gelembung sementara dilepas hanya setelah pesannya benar-benar ada di riwayat server,
+        // di render yang sama -- jadi tidak ada kedipan hilang-muncul, termasuk saat jawaban
+        // polling lama (dimulai sebelum pesan tersimpan) datang belakangan.
+        setPending((prev) => {
+          const sisa = prev.filter(
+            (p) => !(p.conversationId === id && p.status === "terkirim" && baru.some((m) => m.arah === "keluar" && m.isi === p.isi)),
+          );
+          return sisa.length === prev.length ? prev : sisa;
+        });
         setConversations((prev) =>
           prev.some((c) => c.id === id && c.unread_count > 0) ? prev.map((c) => (c.id === id ? { ...c, unread_count: 0 } : c)) : prev,
         );
@@ -103,28 +121,45 @@ export default function ChatPage() {
 
   // Gulir hanya kotak percakapan (bukan seluruh halaman), dan hanya saat ada pesan baru.
   const lastMessageId = messages[messages.length - 1]?.id;
+  const pendingAktif = pending.filter((p) => p.conversationId === activeId);
   useEffect(() => {
     const el = threadRef.current;
-    if (el && lastMessageId) el.scrollTop = el.scrollHeight;
-  }, [lastMessageId]);
+    if (el && (lastMessageId || pendingAktif.length)) el.scrollTop = el.scrollHeight;
+  }, [lastMessageId, pendingAktif.length]);
 
-  async function kirimBalasan() {
-    if (!activeId || !draft.trim() || sending) return;
-    setSending(true);
+  // Pesan langsung tampil sebagai "Mengirim…"; pengirimannya (villa -> Mkhsistem -> WhatsApp)
+  // berjalan di belakang supaya resepsionis tidak menunggu beberapa detik setiap kali mengirim.
+  function kirim(p: PesanTertunda) {
+    const ubah = (status: PesanTertunda["status"]) =>
+      setPending((prev) => prev.map((x) => (x.tempId === p.tempId ? { ...x, status } : x)));
+    antreanKirim.current = antreanKirim.current.then(async () => {
+      try {
+        await localApi(`/api/chat/conversations/${p.conversationId}/reply`, {
+          method: "POST",
+          body: JSON.stringify({ message: p.isi, staffName: user?.nama }),
+        });
+        ubah("terkirim");
+        if (activeIdRef.current === p.conversationId) loadMessages(p.conversationId, true);
+        loadConversations();
+      } catch (e) {
+        ubah("gagal");
+        toast("⚠", "Gagal Mengirim", e instanceof ApiError ? e.message : "Pesan tidak terkirim ke WhatsApp.", "ruby");
+      }
+    });
+  }
+
+  function kirimBalasan() {
     const isi = draft.trim();
-    try {
-      await localApi(`/api/chat/conversations/${activeId}/reply`, {
-        method: "POST",
-        body: JSON.stringify({ message: isi, staffName: user?.nama }),
-      });
-      setDraft("");
-      loadMessages(activeId, true);
-      loadConversations();
-    } catch (e) {
-      toast("⚠", "Gagal Mengirim", e instanceof ApiError ? e.message : "Pesan tidak terkirim ke WhatsApp.", "ruby");
-    } finally {
-      setSending(false);
-    }
+    if (!activeId || !isi) return;
+    const p: PesanTertunda = { tempId: `tmp-${Date.now()}-${Math.random()}`, conversationId: activeId, isi, status: "mengirim" };
+    setPending((prev) => [...prev, p]);
+    setDraft("");
+    kirim(p);
+  }
+
+  function kirimUlang(p: PesanTertunda) {
+    setPending((prev) => prev.map((x) => (x.tempId === p.tempId ? { ...x, status: "mengirim" } : x)));
+    kirim({ ...p, status: "mengirim" });
   }
 
   const Shell = user?.role === "admin" ? AdminShell : FrontDeskShell;
@@ -214,7 +249,7 @@ export default function ChatPage() {
                 <div ref={threadRef} className="flex-1 overflow-y-auto px-4 sm:px-5 py-4 space-y-2.5" style={{ maxHeight: 440 }}>
                   {loadingMessages ? (
                     <Loading />
-                  ) : messages.length === 0 ? (
+                  ) : messages.length === 0 && pendingAktif.length === 0 ? (
                     <Loading label="Belum ada pesan" />
                   ) : (
                     messages.map((m) => (
@@ -239,6 +274,30 @@ export default function ChatPage() {
                       </div>
                     ))
                   )}
+                  {!loadingMessages &&
+                    pendingAktif.map((p) => (
+                      <div key={p.tempId} className="flex justify-end">
+                        <div
+                          className={`max-w-[80%] rounded-lg px-3 py-2 text-[11.5px] leading-relaxed whitespace-pre-wrap break-words bg-gold-500/15 text-ink ${
+                            p.status === "gagal" ? "ring-1 ring-ruby-500/60" : ""
+                          }`}
+                        >
+                          {p.isi}
+                          <div className="text-[9px] mt-1 flex items-center gap-1.5">
+                            {p.status === "gagal" ? (
+                              <>
+                                <span className="text-ruby-500">Gagal terkirim</span>
+                                <button type="button" onClick={() => kirimUlang(p)} className="text-gold-500 font-semibold underline">
+                                  Kirim ulang
+                                </button>
+                              </>
+                            ) : (
+                              <span className="text-ink/30">{p.status === "terkirim" ? "Terkirim" : "Mengirim…"}</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                 </div>
                 <div className="px-4 sm:px-5 py-3 border-t border-ink/[0.05] flex gap-2">
                   <input
@@ -255,10 +314,10 @@ export default function ChatPage() {
                   />
                   <button
                     onClick={kirimBalasan}
-                    disabled={sending || !draft.trim()}
+                    disabled={!draft.trim()}
                     className="px-4 py-2.5 rounded-lg bg-gold-500 text-base-950 text-[11.5px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {sending ? "Mengirim…" : "Kirim"}
+                    Kirim
                   </button>
                 </div>
               </>
