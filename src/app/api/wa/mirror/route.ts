@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { secretsMatch } from "@/lib/internalSecret";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { catatPesanMasukAman } from "@/lib/waChat";
+import { bolehMasukResepsionis, catatPesanMasukAman } from "@/lib/waChat";
 import { normalizeInbound } from "@/lib/whacenter";
 
 export const runtime = "nodejs";
@@ -15,6 +15,9 @@ export const dynamic = "force-dynamic";
  * villa (dibuktikan dari ai_integration_logs 2026-09-27), dan owner memilih
  * nomor itu tetap jadi nomor chat resepsionis. Mkhsistem meneruskan payload
  * mentah WhaCenter ke sini.
+ *
+ * Hanya tamu villa dan penanya soal menginap yang dicatat (bolehMasukResepsionis);
+ * chat bisnis lain di 0822 dilewati.
  *
  * HANYA mencatat -- tidak menjalankan LUNAS/PROMO/dll. Perintah-perintah itu
  * sudah diproses Mkhsistem untuk nomor ini; memprosesnya lagi di sini berarti
@@ -35,7 +38,12 @@ export async function POST(request: Request) {
   const inbound = normalizeInbound(payload);
   if (!inbound) return NextResponse.json({ ok: true, skipped: "bukan pesan perorangan" });
 
-  const hasil = await catatPesanMasukAman(supabaseAdmin(), inbound.sender, inbound.text, {
+  const supabase = supabaseAdmin();
+  if (!(await bolehMasukResepsionis(supabase, inbound.sender, inbound.text))) {
+    return NextResponse.json({ ok: true, skipped: "bukan tamu atau penanya villa" });
+  }
+
+  const hasil = await catatPesanMasukAman(supabase, inbound.sender, inbound.text, {
     namaTampilan: inbound.senderName,
     mediaUrl: inbound.mediaUrl,
   });

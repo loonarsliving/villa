@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-09-27 (malam, lanjutan) — Chat resepsionis hanya untuk tamu dan penanya villa
+- `/api/wa/mirror` kini menyaring pesan lewat `bolehMasukResepsionis()`. Pesan masuk kalau menyebut sewa villa, nomornya sudah punya percakapan, atau nomornya cocok dengan data tamu. Chat supplier, kontraktor, dan calon pembeli properti di 0822 tidak lagi tampil di layar resepsionis. +5 tes berisi teks asli (tombol loonars.id dan chat bisnis nyata).
+
 ### 2026-09-27 (malam) — Chat tersambung ke nomor 0822 lewat Mkhsistem
 - **Bug:** pesan nyata pertama ke 0822 tidak muncul di Chat. Penyebabnya: perangkat WhaCenter 0822 mengirim webhook ke Mkhsistem, bukan ke villa. Klaim di #126/#127 bahwa 0822 terpasang di perangkat villa keliru; klaim itu hanya berdasar konfirmasi lisan, tanpa pesan uji. Juga ditemukan: `vercel_bridge.base_url` masih `mkh.haluoleo.id`, jadi notifikasi villa sebenarnya juga keluar dari 0822.
 - **Keputusan owner:** tetap memakai 0822. Endpoint baru `POST /api/wa/mirror` hanya mencatat payload yang diteruskan Mkhsistem (perintah LUNAS/PROMO tetap diproses Mkhsistem, tidak dobel). Balasan resepsionis kini keluar dari 0822 lewat `/api/wa/send` Mkhsistem (`src/lib/mkhsistemWa.ts`). Nomor disimpan dalam bentuk `62…` (`nomorKanonik`, +4 tes). Sisi Mkhsistem ada di PR terpisah pada repo `mkhsistem`.

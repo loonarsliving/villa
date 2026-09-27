@@ -1,5 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { pilihBookingTerbaik } from "./waChat";
+import { menyebutSewaVilla, pilihBookingTerbaik } from "./waChat";
+
+describe("menyebutSewaVilla", () => {
+  it("teks otomatis tombol Private Living di loonars.id lolos", () => {
+    expect(menyebutSewaVilla("Halo, saya ingin tanya soal booking Loonars Private Living Yogyakarta")).toBe(true);
+    expect(menyebutSewaVilla("Halo, saya ada pertanyaan soal menginap di Loonars Living Yogyakarta")).toBe(true);
+    expect(menyebutSewaVilla("Halo, saya ingin booking Loonars Private Living Yogyakarta")).toBe(true);
+    expect(menyebutSewaVilla("Halo Loonars Private Living! Saya baru saja booking:\nUnit: A2")).toBe(true);
+  });
+  it("pertanyaan menginap yang diketik sendiri lolos", () => {
+    expect(menyebutSewaVilla("kak mau nginep tgl 5-7 bisa?")).toBe(true);
+    expect(menyebutSewaVilla("harga per malam berapa ya")).toBe(true);
+    expect(menyebutSewaVilla("Mau sewa villa buat staycation")).toBe(true);
+  });
+  it("produk properti yang dijual TIDAK lolos walau menyebut villa/living/booking", () => {
+    expect(menyebutSewaVilla("Halo, saya tertarik Loonars Excellent Living")).toBe(false);
+    expect(menyebutSewaVilla("Halo, saya ingin info Loonars Excellent Living")).toBe(false);
+    expect(menyebutSewaVilla("Rumah tipe villa masih ada? booking fee berapa?")).toBe(false);
+    expect(menyebutSewaVilla("Halo, saya ingin tahu lebih lanjut tentang produk Loonars")).toBe(false);
+  });
+  it("chat bisnis nyata ke 0822 (27 Sep) TIDAK lolos", () => {
+    expect(menyebutSewaVilla("HT 35 Y, 35 kva yanmar engine")).toBe(false);
+    expect(menyebutSewaVilla("Nanti kabarin aja yah pak")).toBe(false);
+    expect(menyebutSewaVilla("Semalam saya sudah transfer ke kontraktor")).toBe(false);
+  });
+  it("sapaan kosong seperti 'Halo' tidak cukup", () => {
+    expect(menyebutSewaVilla("Halooo")).toBe(false);
+  });
+});
 
 describe("pilihBookingTerbaik", () => {
   it("check-in aktif menang atas segalanya -> Menginap", () => {
