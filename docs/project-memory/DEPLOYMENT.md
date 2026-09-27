@@ -8,6 +8,8 @@ No credentials are recorded anywhere in this file.
 ## Hosting
 **Vercel.** Evidence: `vercel.json` at repo root (`{"framework": "nextjs"}`), and commit `d203c7f` "chore: trigger redeploy after fixing Vercel project framework setting" — proves an actual Vercel project exists and has been actively configured/operated.
 
+**Region fungsi: `sin1` (Singapura), sejak 2026-09-27** (`"regions": ["sin1"]` di `vercel.json`, persetujuan owner). Sebelumnya `iad1` (Washington). Itu bukan pilihan sengaja, hanya bawaan Vercel karena region tidak pernah diatur. Dipindah karena database Supabase (`ap-southeast-1`) dan Mkhsistem (`sin1`) ada di Singapura: dari `iad1`, setiap balasan Chat menyeberang Pasifik 6–10 kali, dan log produksi mencatat 3 detik dari villa sampai ke Mkhsistem. `api.cloudbeds.com` sedikit lebih jauh dari `sin1`, tapi panggilannya sedikit dan sudah dikelompokkan (putRate per 90 tanggal), sedangkan panggilan ke database jauh lebih banyak. Kembali ke AS cukup dengan menghapus baris itu.
+
 ## Vercel project
 Name/ID: UNKNOWN — NEEDS CONFIRMATION (not stored in-repo; Vercel project linkage lives in Vercel's own dashboard / the `.vercel/` directory, which is git-ignored per `.gitignore`).
 
