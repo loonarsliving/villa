@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { DashboardShell, type NavSection } from "@/components/DashboardShell";
 import { useAuth } from "@/lib/auth";
-import { useNotifPoll } from "@/lib/hooks";
+import { useChatUnreadPoll, useNotifPoll } from "@/lib/hooks";
 
 export function FrontDeskShell({
   pageTitle,
@@ -19,6 +19,7 @@ export function FrontDeskShell({
 }) {
   const { user } = useAuth();
   const { unreadCount } = useNotifPoll("role=all", "is_read_staff");
+  const { unreadCount: chatUnread } = useChatUnreadPoll();
 
   const sections: NavSection[] = [
     {
@@ -30,6 +31,7 @@ export function FrontDeskShell({
         { href: "/front-desk/housekeeping", label: "Housekeeping", icon: "◉" },
         { href: "/front-desk/amenities", label: "Amenities", icon: "▧" },
         { href: "/front-desk/payment-gateway", label: "Payment Gateway", icon: "◍" },
+        { href: "/front-desk/chat", label: "Chat", icon: "◉", badge: chatUnread },
       ],
     },
     {

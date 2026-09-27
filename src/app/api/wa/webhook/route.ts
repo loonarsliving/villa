@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { normalizeInbound, sendWhatsAppText, whacenterDeviceId } from "@/lib/whacenter";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { catatBalasanOtomatisAman, catatPesanMasukAman } from "@/lib/waChat";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -79,6 +80,19 @@ export async function POST(request: Request) {
   const inbound = normalizeInbound(payload);
   if (!inbound) return NextResponse.json({ ok: true, skipped: "bukan pesan teks perorangan" });
 
+  // Dicatat DULU, sebelum tahu apakah ini perintah baku atau bukan --
+  // sebelumnya (sampai 2026-09-27) setiap pesan bebas dari tamu yang
+  // bukan LUNAS/PROMO/dll. dibuang di baris "bukan perintah yang
+  // dikenali" di bawah, tidak pernah tersimpan di mana pun. Modul Chat
+  // Front Desk butuh SEMUA pesan, bukan cuma yang dikenali sebagai
+  // perintah. Gagal mencatat tidak boleh menggagalkan perintah baku di
+  // bawah ini (lihat komentar di src/lib/waChat.ts), makanya pakai versi
+  // "Aman" yang menelan errornya sendiri.
+  const percakapan = await catatPesanMasukAman(supabaseAdmin(), inbound.sender, inbound.text, {
+    namaTampilan: inbound.senderName,
+    mediaUrl: inbound.mediaUrl,
+  });
+
   const text = inbound.text;
   const lunas = text.match(LUNAS_RE);
   const promo = text.match(PROMO_RE);
@@ -89,7 +103,8 @@ export async function POST(request: Request) {
 
   // Pesan biasa tidak dibalas apa pun. Villa bukan asisten percakapan;
   // membalas setiap pesan tamu dengan sesuatu akan lebih membingungkan
-  // daripada diam.
+  // daripada diam. (Tapi sudah TERSIMPAN di atas -- resepsionis tetap
+  // bisa melihat dan membalasnya sendiri lewat halaman Chat.)
   if (!lunas && !promo && !tolak && !berhenti && !unitCode) {
     return NextResponse.json({ ok: true, skipped: "bukan perintah yang dikenali" });
   }
@@ -173,6 +188,9 @@ export async function POST(request: Request) {
   if (reply) {
     const sent = await sendWhatsAppText(inbound.sender, reply);
     if (!sent.success) console.error("[wa/webhook] balasan gagal dikirim", sent.error);
+    // Dicatat terlepas dari berhasil/tidaknya pengiriman -- resepsionis perlu
+    // tahu APA yang seharusnya terkirim, termasuk saat pengirimannya gagal.
+    if (percakapan) await catatBalasanOtomatisAman(supabaseAdmin(), percakapan.conversationId, reply);
   }
 
   // Selalu 200. WhaCenter tidak perlu tahu urusan internal kita, dan

@@ -162,3 +162,37 @@ Fix written as `supabase/migrations/20260908000001_enable_rls_on_exposed_villa_t
 **STATUS: APPLIED 2026-09-08** (owner-approved). Verified after applying: all 14 tables report `relrowsecurity = true` with 0 policies, and service-role reads still return their data intact (`villa_rates` 72, `villa_daily_inventory_snapshot` 52, `villa_pricing_recommendations` 33, `villa_room_types` 2). Reversible with `disable row level security` if anything unexpected breaks.
 
 **Separately, still open and NOT villa's to fix** (belong to Mkhsistem/other business lines in this shared project, flagged only): `istri_daily_tips`, `contractor_fund_request_pending`, `pending_expense_approval_notifications`, `pengajuan_verification_reminders` also have RLS disabled.
+
+
+## `wa_conversations` / `wa_conversation_messages` (2026-09-27, chat WhatsApp Front Desk)
+Dua tabel baru, owner-approved sebelum diterapkan (migrasi
+`wa_conversations_chat_inbox` + `wa_conversation_increment_unread_fn`),
+RLS aktif dengan pola yang sama seperti `bookings`/`walkin_payments`:
+service_role saja, tidak ada policy untuk `anon`/`authenticated`.
+
+- `wa_conversations`: satu baris per nomor HP (tersanitasi -- digit saja,
+  awalan apa adanya dari WhaCenter, TIDAK dinormalisasi ke satu format saat
+  disimpan). `guest_id`/`booking_id` diisi otomatis lewat pencocokan nomor
+  lintas format (`src/lib/phone.ts` -- `guests.hp` di database tersimpan
+  TIDAK konsisten, ada yang berawalan "0", ada "62", jadi dicocokkan sebagai
+  "nomor signifikan nasional", bukan string persis). `status_tamu` salah
+  satu dari `prospek`/`menginap`/`selesai`, dipilih oleh
+  `pilihBookingTerbaik()` di `src/lib/waChat.ts`: booking berstatus
+  `checkin` menang atas segalanya, lalu `terjadwal`, baru `checkout`.
+  **Catatan penyederhanaan yang disadari, bukan bug**: booking `terjadwal`
+  (sudah confirmed, belum check-in) diberi label yang SAMA dengan prospek
+  murni (belum pernah booking) -- tiga status disetujui owner, bukan empat.
+- `wa_conversation_messages`: isi percakapan, `arah` `masuk`/`keluar`.
+  `is_perintah_otomatis=true` untuk balasan sistem atas LUNAS/PROMO/TOLAK/
+  BERHENTI/kode-unit-bukti-transfer (logika itu sendiri TIDAK diubah,
+  hanya ikut dicatat). `dibalas_oleh` nama staf untuk balasan manual, null
+  untuk balasan otomatis.
+- `wa_conversation_increment_unread(p_conversation_id, p_preview)`: RPC
+  `security definer` yang menaikkan `unread_count` secara atomik dari sisi
+  Postgres -- dipakai, BUKAN baca-lalu-tulis dari Next.js, supaya dua pesan
+  masuk yang tiba nyaris bersamaan tidak saling menimpa angka satu sama
+  lain.
+- Dibuktikan dengan simulasi nyata sebelum dipakai (insert percakapan uji,
+  panggil RPC dua kali, verifikasi `unread_count=2` dan pratinjau ikut
+  ter-update, verifikasi cascade delete membersihkan pesannya) -- data
+  ujinya dihapus setelah terbukti, tidak ada sisa di produksi.

@@ -3,9 +3,11 @@
 import type { ReactNode } from "react";
 import { DashboardShell, type NavSection } from "@/components/DashboardShell";
 import { useAuth } from "@/lib/auth";
+import { useChatUnreadPoll } from "@/lib/hooks";
 
 export function AdminShell({ pageTitle, pageSub, children }: { pageTitle: string; pageSub?: string; children: ReactNode }) {
   const { user } = useAuth();
+  const { unreadCount: chatUnread } = useChatUnreadPoll();
 
   const sections: NavSection[] = [
     {
@@ -21,7 +23,10 @@ export function AdminShell({ pageTitle, pageSub, children }: { pageTitle: string
     },
     {
       title: "Operasional",
-      items: [{ href: "/front-desk/booking", label: "Kalender Booking", icon: "◎" }],
+      items: [
+        { href: "/front-desk/booking", label: "Kalender Booking", icon: "◎" },
+        { href: "/front-desk/chat", label: "Chat", icon: "◉", badge: chatUnread },
+      ],
     },
     {
       title: "Pemasaran",
