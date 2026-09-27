@@ -348,6 +348,11 @@ const EXPIRED_HOLD_MARK = '[Kedaluwarsa otomatis]';
 const WIB_TZ = 'Asia/Jakarta';
 function todayWIB(d = new Date()){ return d.toLocaleDateString('en-CA', {timeZone: WIB_TZ}); }
 function monthWIB(d = new Date()){ return todayWIB(d).slice(0,7); }
+/** Tanggal terakhir bulan berjalan, mis. "2026-09-30" -- dipakai sebagai batas atas default halaman Finance (lihat financeDateRange), supaya booking yang checkin belakangan di bulan yang sama (sudah pasti, belum checkin) tetap terhitung, bukan cuma yang sudah lewat hari ini. */
+function monthEndWIB(d = new Date()){
+  const [y, mo] = monthWIB(d).split('-').map(Number);
+  return new Date(Date.UTC(y, mo, 0)).toISOString().slice(0,10);
+}
 const NAMA_BULAN_ID = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
 /** "2026-09" -> "September 2026". */
 function namaBulanID(periodeYYYYMM){
@@ -3269,8 +3274,14 @@ Deno.serve(async (req)=>{
     return json({ ok:true, role: session.role });
   }
 
+  // Default sampai AKHIR bulan berjalan, bukan hari ini (owner, 27 Sep
+  // 2026): "keuangan terhitung sampai tutup bulan, jd yg sdh booking
+  // skalipun dia booking tgl 30 ttp harusnya sdh terhitung di finance" --
+  // booking yang checkin belakangan di bulan yang sama sudah pasti (belum
+  // batal), jadi ikut dihitung meski belum checkin. Query eksplisit
+  // ?to=... tetap dihormati.
   function financeDateRange(){
-    const to = url.searchParams.get('to') || todayWIB();
+    const to = url.searchParams.get('to') || monthEndWIB();
     const from = url.searchParams.get('from') || `${monthWIB()}-01`;
     return { from, to };
   }
