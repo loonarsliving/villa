@@ -69,15 +69,22 @@ tentu punya booking) DAN tamu yang sudah/sedang menginap -- karena
 nomornya didedikasikan untuk villa, tidak perlu penyaringan topik
 tambahan di server.
 
-### Belum selesai -- perlu tindak lanjut terpisah
+### Loonars.id -- SUDAH memakai nomor yang sama (diperiksa 2026-09-27, tidak perlu perubahan kode)
 
-**Loonars.id belum disatukan ke nomor WA villa.** Tombol 💬 dan nomor di
-halaman Kontak (repo `loonars`) masih menunjuk ke nomor lain. Ini
-perubahan kecil tapi terpisah, di repo lain, dan perlu NOMOR TELEPON VILLA
-YANG SEBENARNYA (bukan `WHACENTER_DEVICE_ID`, itu ID perangkat bukan nomor)
--- tidak tersedia di dokumen mana pun dan tidak bisa dibaca dari sandbox
-ini (WhaCenter tidak terjangkau). Owner perlu memberikan nomornya, atau
-mengubahnya sendiri di repo `loonars`.
+Owner mengonfirmasi nomor WA villa: `082228885223`. Diperiksa langsung di
+repo `loonars`: nomor ini (dalam bentuk `6282228885223`) SUDAH dipakai di
+**semua** titik kontak WhatsApp di loonars.id -- beranda, Private Living,
+Excellent Living, Beauty, Direktur, Kontak, tombol navigasi (`Nav.tsx`,
+`WhatsAppButton.tsx`, `BookingForm.tsx`, `OrderForm.tsx`). Tidak ada kode
+yang diubah karena tidak ada yang perlu diubah.
+
+**Satu hal yang BELUM diverifikasi, dan tidak bisa dari sandbox ini**:
+apakah `082228885223` juga nomor yang secara fisik terpasang di perangkat
+WhaCenter villa (`WHACENTER_DEVICE_ID` di Vercel). Kalau beda, pesan dari
+loonars.id tetap masuk ke nomor itu seperti biasa TAPI tidak akan pernah
+muncul di `/front-desk/chat`, karena Chat membaca dari webhook perangkat
+WhaCenter, bukan dari nomor semata. Owner diminta memastikan lewat HP yang
+memegang nomor tsb sama dengan yang dipasangkan (scan QR) ke WhaCenter.
 
 ## 2026-09-27 — akun resepsionis SENGAJA dikecualikan dari "wajib ganti password"
 
