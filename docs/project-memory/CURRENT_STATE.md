@@ -78,13 +78,10 @@ Excellent Living, Beauty, Direktur, Kontak, tombol navigasi (`Nav.tsx`,
 `WhatsAppButton.tsx`, `BookingForm.tsx`, `OrderForm.tsx`). Tidak ada kode
 yang diubah karena tidak ada yang perlu diubah.
 
-**Satu hal yang BELUM diverifikasi, dan tidak bisa dari sandbox ini**:
-apakah `082228885223` juga nomor yang secara fisik terpasang di perangkat
-WhaCenter villa (`WHACENTER_DEVICE_ID` di Vercel). Kalau beda, pesan dari
-loonars.id tetap masuk ke nomor itu seperti biasa TAPI tidak akan pernah
-muncul di `/front-desk/chat`, karena Chat membaca dari webhook perangkat
-WhaCenter, bukan dari nomor semata. Owner diminta memastikan lewat HP yang
-memegang nomor tsb sama dengan yang dipasangkan (scan QR) ke WhaCenter.
+**Dikonfirmasi owner (2026-09-27): nomor ini memang yang dipasangkan ke
+WhaCenter.** Jadi rantainya utuh: pesan dari loonars.id -> nomor
+`082228885223` -> perangkat WhaCenter villa -> `/api/wa/webhook` ->
+`wa_conversations` -> `/front-desk/chat`.
 
 ## 2026-09-27 — akun resepsionis SENGAJA dikecualikan dari "wajib ganti password"
 
