@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { kirimDariNomorUtama } from "./mkhsistemWa";
 import { nomorKanonik, samePhoneNumber } from "./phone";
 
 /**
@@ -25,6 +26,8 @@ export interface ConversationMatch {
   guestId: string | null;
   bookingId: string | null;
   statusTamu: "prospek" | "menginap" | "selesai";
+  /** true hanya untuk pesan yang membuat percakapan ini -- dasar sapaan pertama. */
+  baru: boolean;
 }
 
 /**
@@ -84,15 +87,70 @@ export function menyebutSewaVilla(teks: string): boolean {
 }
 
 /**
+ * Pesan yang dibuka dari tombol WhatsApp Private Living di loonars.id: semua
+ * teks tombol itu diawali "Halo" lalu segera menyebut "Loonars (Private) Living".
+ * Dipakai untuk karyawan/kontraktor: mereka hanya masuk Chat resepsionis kalau
+ * jelas sedang bertanya sebagai tamu lewat website, bukan untuk obrolan kerja
+ * yang kebetulan menyebut "menginap" atau "Private Living".
+ */
+export function dariTombolWebsite(teks: string): boolean {
+  return /^\s*halo\b[\s\S]{0,60}\bloonars\s+(private\s+)?living\b/i.test(teks);
+}
+
+/**
+ * Satu-satunya balasan otomatis ke tamu, hanya untuk nomor yang baru pertama
+ * kali chat (keputusan owner 2026-09-27). Sengaja tidak bertanya apa pun dan
+ * tidak menawarkan apa pun: setelah ini resepsionis yang membalas.
+ */
+export function teksSapaanPertama(namaTampilan?: string | null): string {
+  const nama = (namaTampilan ?? "").trim();
+  const sapa = nama && nama.length <= 40 ? `Halo Kak ${nama},` : "Halo Kak,";
+  return (
+    `${sapa} terima kasih sudah menghubungi Loonars Private Living Yogyakarta. ` +
+    "Pesan Kakak sudah kami terima dan selanjutnya akan ditangani langsung oleh tim Hospitality Management kami."
+  );
+}
+
+/** Kirim sapaan pertama dari 0822 dan catat di riwayat Chat. Tidak pernah melempar. */
+export async function kirimSapaanPertamaAman(
+  supabase: SupabaseClient,
+  conversationId: string,
+  phone: string,
+  namaTampilan?: string | null,
+): Promise<void> {
+  const isi = teksSapaanPertama(namaTampilan);
+  const sent = await kirimDariNomorUtama(phone, isi);
+  if (!sent.success) {
+    console.error("[waChat] sapaan pertama gagal dikirim", sent.error);
+    return;
+  }
+  try {
+    await catatPesan(supabase, { conversationId, arah: "keluar", isi, isPerintahOtomatis: true });
+  } catch (e) {
+    console.error("[waChat] sapaan terkirim tapi gagal dicatat", e instanceof Error ? e.message : String(e));
+  }
+}
+
+/**
  * Nomor 0822 dipakai bersama bisnis lain (supplier, kontraktor, calon pembeli
  * properti), tapi resepsionis hanya boleh melihat tamu villa dan orang yang
  * bertanya soal menginap (keputusan owner 2026-09-27). Lolos kalau: pesannya
  * menyebut sewa villa, nomornya sudah punya percakapan (supaya pesan lanjutan
  * seperti "oke" tidak terputus), atau nomornya cocok dengan data tamu villa.
- * Kalau database gagal dibaca, pesan TIDAK diloloskan: chat bisnis lain lebih
- * tidak boleh bocor ke resepsionis, dan aslinya tetap tersimpan di Mkhsistem.
+ *
+ * Karyawan dan kontraktor Mkhsistem (orang dalam) memakai 0822 untuk urusan
+ * kerja, jadi mereka hanya lolos kalau pesannya dibuka dari tombol website
+ * Private Living (dariTombolWebsite) -- misalnya keluarga owner yang menguji
+ * sebagai tamu. Tanpa ini, "tamu yang menginap di A2 komplain" dari owner akan
+ * masuk ke layar resepsionis dan owner dikirimi sapaan tamu.
+ *
+ * Keputusan ini juga dipakai Mkhsistem: kalau lolos, Mkhsistem tidak membalas
+ * dengan AI. Kalau database gagal dibaca, pesan TIDAK diloloskan: chat bisnis
+ * lain lebih tidak boleh bocor ke resepsionis, dan aslinya tetap tersimpan di
+ * Mkhsistem.
  */
 export async function bolehMasukResepsionis(supabase: SupabaseClient, phoneMentah: string, teks: string): Promise<boolean> {
+  if (await orangDalamMkhsistem(supabase, phoneMentah)) return dariTombolWebsite(teks);
   if (menyebutSewaVilla(teks)) return true;
 
   const phone = nomorKanonik(phoneMentah);
@@ -103,6 +161,32 @@ export async function bolehMasukResepsionis(supabase: SupabaseClient, phoneMenta
   const { data: guests, error: guestError } = await supabase.from("guests").select("hp").not("hp", "is", null).neq("hp", "");
   if (guestError) console.error("[waChat] gagal memeriksa data tamu", guestError.message);
   return (guests ?? []).some((g) => samePhoneNumber(g.hp, phone));
+}
+
+/** 9 digit terakhir, sama persis dengan findEmployeeByPhone/findContractorByPhone di Mkhsistem. */
+export function akhiranNomor(phone: string): string {
+  return phone.replace(/\D/g, "").slice(-9);
+}
+
+/**
+ * Karyawan aktif (`employees`) atau kontraktor (`contractor_wa_senders`) Mkhsistem
+ * -- tabel milik Mkhsistem di project Supabase yang sama. Kalau salah satu gagal
+ * dibaca, dianggap orang dalam (lihat bolehMasukResepsionis: gagal = tertutup).
+ */
+async function orangDalamMkhsistem(supabase: SupabaseClient, phoneMentah: string): Promise<boolean> {
+  const akhiran = akhiranNomor(phoneMentah);
+  if (akhiran.length < 9) return false;
+  const cocok = (p: string | null) => !!p && akhiranNomor(p) === akhiran;
+
+  const [karyawan, kontraktor] = await Promise.all([
+    supabase.from("employees").select("phone").not("phone", "is", null).is("deleted_at", null).eq("employment_status", "active"),
+    supabase.from("contractor_wa_senders").select("phone"),
+  ]);
+  if (karyawan.error || kontraktor.error) {
+    console.error("[waChat] gagal memeriksa karyawan/kontraktor", karyawan.error?.message ?? kontraktor.error?.message);
+    return true;
+  }
+  return (karyawan.data ?? []).some((e) => cocok(e.phone)) || (kontraktor.data ?? []).some((c) => cocok(c.phone));
 }
 
 async function cariGuestDanBooking(
@@ -150,7 +234,7 @@ export async function cariAtauBuatPercakapan(
         ...(namaTampilan ? { nama_tampilan: namaTampilan } : {}),
       })
       .eq("id", existing.id);
-    return { conversationId: existing.id, ...cocok };
+    return { conversationId: existing.id, ...cocok, baru: false };
   }
 
   const { data: created, error } = await supabase
@@ -165,8 +249,14 @@ export async function cariAtauBuatPercakapan(
     .select("id")
     .single();
 
+  // Dua pesan beruntun dari nomor baru: hanya satu yang menang (phone unik).
+  // Yang kalah tetap dicatat ke percakapan yang sama, tanpa sapaan kedua.
+  if (error?.code === "23505") {
+    const { data: pemenang } = await supabase.from("wa_conversations").select("id").eq("phone", phone).maybeSingle();
+    if (pemenang) return { conversationId: pemenang.id, ...cocok, baru: false };
+  }
   if (error || !created) throw new Error(error?.message ?? "Gagal membuat percakapan baru");
-  return { conversationId: created.id, ...cocok };
+  return { conversationId: created.id, ...cocok, baru: true };
 }
 
 export interface CatatPesanInput {

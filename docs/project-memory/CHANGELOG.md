@@ -4,6 +4,12 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-09-27 (malam, lanjutan 2) — Tamu villa dijawab resepsionis, bukan AI Mkhsistem
+- Owner melihat balasan AI Mkhsistem ("LEON, COO") ke pertanyaan menginap: ada placeholder, meminta nomor, dan menawarkan skincare. Pengirimnya ternyata karyawan super_admin, jadi yang menjawab asisten AI internal. Tamu biasa pun mendapat "pilih proyek" dan bot nurture.
+- `/api/wa/mirror` kini menjawab `{villa: boolean}`. Kalau `true`, Mkhsistem tidak membalas apa pun. Villa mengirim **satu** sapaan hanya untuk nomor baru (`teksSapaanPertama`, lewat `after()`): tanpa pertanyaan, tanpa tawaran, menyerahkan ke tim Hospitality Management. Sapaan tercatat di Chat sebagai "otomatis sistem".
+- `bolehMasukResepsionis` mengecualikan karyawan aktif dan kontraktor Mkhsistem (9 digit terakhir, aturan yang sama dengan Mkhsistem), kecuali pesannya dibuka dari tombol Private Living di loonars.id (`dariTombolWebsite`).
+- Balapan dua pesan pertama dari nomor baru: yang kalah (23505) kini tetap tercatat, tanpa sapaan kedua. Sebelumnya pesan itu hilang.
+
 ### 2026-09-27 (malam, lanjutan) — Chat resepsionis hanya untuk tamu dan penanya villa
 - `/api/wa/mirror` kini menyaring pesan lewat `bolehMasukResepsionis()`. Pesan masuk kalau menyebut sewa villa, nomornya sudah punya percakapan, atau nomornya cocok dengan data tamu. Chat supplier, kontraktor, dan calon pembeli properti di 0822 tidak lagi tampil di layar resepsionis. +5 tes berisi teks asli (tombol loonars.id dan chat bisnis nyata).
 

@@ -1,8 +1,8 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 
 import { secretsMatch } from "@/lib/internalSecret";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { bolehMasukResepsionis, catatPesanMasukAman } from "@/lib/waChat";
+import { bolehMasukResepsionis, catatPesanMasukAman, kirimSapaanPertamaAman } from "@/lib/waChat";
 import { normalizeInbound } from "@/lib/whacenter";
 
 export const runtime = "nodejs";
@@ -18,6 +18,15 @@ export const dynamic = "force-dynamic";
  *
  * Hanya tamu villa dan penanya soal menginap yang dicatat (bolehMasukResepsionis);
  * chat bisnis lain di 0822 dilewati.
+ *
+ * Jawabannya dibaca Mkhsistem (lib/ai/domains/villa-chat-mirror.ts):
+ * `villa: true` berarti percakapan ini milik resepsionis, jadi Mkhsistem tidak
+ * membalas dengan AI atau "pilih proyek". Karyawan/kontraktor Mkhsistem sudah
+ * disaring di bolehMasukResepsionis, jadi Mkhsistem cukup mengikuti nilai ini.
+ *
+ * Satu-satunya balasan otomatis ke tamu adalah sapaan pertama, hanya untuk nomor
+ * yang baru pertama kali chat. Sapaan dikirim lewat after(), setelah Mkhsistem
+ * menerima jawaban ini, supaya jalurnya tidak ikut tertahan.
  *
  * HANYA mencatat -- tidak menjalankan LUNAS/PROMO/dll. Perintah-perintah itu
  * sudah diproses Mkhsistem untuk nomor ini; memprosesnya lagi di sini berarti
@@ -36,16 +45,21 @@ export async function POST(request: Request) {
 
   const payload: unknown = await request.json().catch(() => null);
   const inbound = normalizeInbound(payload);
-  if (!inbound) return NextResponse.json({ ok: true, skipped: "bukan pesan perorangan" });
+  if (!inbound) return NextResponse.json({ ok: true, villa: false, skipped: "bukan pesan perorangan" });
 
   const supabase = supabaseAdmin();
   if (!(await bolehMasukResepsionis(supabase, inbound.sender, inbound.text))) {
-    return NextResponse.json({ ok: true, skipped: "bukan tamu atau penanya villa" });
+    return NextResponse.json({ ok: true, villa: false, skipped: "bukan tamu atau penanya villa" });
   }
 
   const hasil = await catatPesanMasukAman(supabase, inbound.sender, inbound.text, {
     namaTampilan: inbound.senderName,
     mediaUrl: inbound.mediaUrl,
   });
-  return NextResponse.json({ ok: true, tercatat: hasil !== null });
+
+  if (hasil?.baru) {
+    after(() => kirimSapaanPertamaAman(supabase, hasil.conversationId, inbound.sender, inbound.senderName));
+  }
+
+  return NextResponse.json({ ok: true, villa: true, tercatat: hasil !== null });
 }

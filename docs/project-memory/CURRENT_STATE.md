@@ -130,6 +130,15 @@ villa Loonars" (tidak lolos), sedangkan "Tanya menginap" membuka WA dengan teks
 (lolos). Kedua teks dikunci tes di `waChat.test.ts`; kalau teks di loonars
 diubah, penyaring di sini harus ikut disesuaikan.
 
+**Siapa yang membalas tamu (keputusan owner):** hanya resepsionis. Jawaban
+`/api/wa/mirror` berisi `{villa: boolean}`. Kalau `true`, Mkhsistem tidak
+menjalankan AI, "pilih proyek", atau bot nurture (`villaChat` di
+`lib/ai/webhook-handler.ts` Mkhsistem, setelah perintah LUNAS/PROMO). Satu-satunya
+balasan otomatis adalah sapaan pertama dari villa untuk nomor baru, yang
+menyerahkan percakapan ke tim Hospitality Management. Karyawan dan kontraktor
+Mkhsistem tidak masuk Chat, kecuali pesannya dibuka dari tombol Private Living
+di website.
+
 **Belum tampil di Chat:** balasan otomatis AI Mkhsistem ke lead dan balasan
 perintah (LUNAS dll.). Keduanya dikirim Mkhsistem dan tidak diteruskan. Nomor
 disimpan dalam bentuk `62...` (`nomorKanonik`), karena WhaCenter mengirim

@@ -1,5 +1,47 @@
 import { describe, expect, it } from "vitest";
-import { menyebutSewaVilla, pilihBookingTerbaik } from "./waChat";
+import { akhiranNomor, dariTombolWebsite, menyebutSewaVilla, pilihBookingTerbaik, teksSapaanPertama } from "./waChat";
+
+describe("teksSapaanPertama", () => {
+  it("menyapa dengan nama WhatsApp dan menyerahkan ke Hospitality Management", () => {
+    const t = teksSapaanPertama("Avi Perdana");
+    expect(t.startsWith("Halo Kak Avi Perdana,")).toBe(true);
+    expect(t).toContain("Loonars Private Living Yogyakarta");
+    expect(t).toContain("tim Hospitality Management");
+  });
+  it("tidak bertanya dan tidak menawarkan apa pun (permintaan owner)", () => {
+    const t = teksSapaanPertama("Avi");
+    expect(t).not.toContain("?");
+    expect(t.toLowerCase()).not.toMatch(/nomor|skincare|beauty|pilih|\[/);
+  });
+  it("tanpa nama, atau nama aneh yang terlalu panjang, cukup 'Halo Kak,'", () => {
+    expect(teksSapaanPertama(undefined).startsWith("Halo Kak,")).toBe(true);
+    expect(teksSapaanPertama("   ").startsWith("Halo Kak,")).toBe(true);
+    expect(teksSapaanPertama("x".repeat(41)).startsWith("Halo Kak,")).toBe(true);
+  });
+});
+
+describe("dariTombolWebsite", () => {
+  it("teks tombol Private Living di loonars.id dikenali", () => {
+    expect(dariTombolWebsite("Halo, saya ingin tanya soal menginap di Loonars Private Living Yogyakarta")).toBe(true);
+    expect(dariTombolWebsite("Halo, saya ada pertanyaan soal menginap di Loonars Living Yogyakarta")).toBe(true);
+  });
+  it("teks tombol booking dan 'sudah terlanjur membayar' di formulir booking dikenali", () => {
+    expect(dariTombolWebsite("Halo Loonars Private Living! Saya baru saja booking:\nUnit: A2")).toBe(true);
+    expect(dariTombolWebsite("Halo Loonars Private Living, saya sudah terlanjur membayar booking yang waktunya habis.")).toBe(true);
+  });
+  it("obrolan kerja karyawan yang menyebut 'menginap' atau 'Private Living' TIDAK dianggap dari website", () => {
+    expect(dariTombolWebsite("Tamu yang menginap di A2 komplain AC")).toBe(false);
+    expect(dariTombolWebsite("Harga Loonars Private Living akhir pekan dinaikkan ya")).toBe(false);
+    expect(dariTombolWebsite("Halo, saya tertarik Loonars Excellent Living")).toBe(false);
+  });
+});
+
+describe("akhiranNomor", () => {
+  it("9 digit terakhir, sama untuk format 0 dan 62 (aturan Mkhsistem)", () => {
+    expect(akhiranNomor("081400441872")).toBe(akhiranNomor("6281400441872"));
+    expect(akhiranNomor("+62 814-0044-1872")).toBe("400441872");
+  });
+});
 
 describe("menyebutSewaVilla", () => {
   it("teks otomatis tombol Private Living di loonars.id lolos", () => {
