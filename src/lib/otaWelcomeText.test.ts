@@ -48,4 +48,15 @@ describe("teksSambutan", () => {
       expect(t).not.toMatch(/https?:|www\.|rekening|transfer|diskon|promo|discount/i);
     }
   });
+  it("nama platform benar untuk OTA yang diperluas 2026-09-28 (banyak koneksi Cloudbeds owner)", () => {
+    expect(teksSambutan({ nama: "A", sumber: "booking.com", checkin: "2026-10-01", checkout: "2026-10-02", bahasa: "id" })).toContain(
+      "melalui Booking.com untuk",
+    );
+    expect(teksSambutan({ nama: "A", sumber: "traveloka", checkin: "2026-10-01", checkout: "2026-10-02", bahasa: "id" })).toContain(
+      "melalui Traveloka untuk",
+    );
+    expect(teksSambutan({ nama: "A", sumber: "tiket", checkin: "2026-10-01", checkout: "2026-10-02", bahasa: "id" })).toContain(
+      "melalui Tiket.com untuk",
+    );
+  });
 });
