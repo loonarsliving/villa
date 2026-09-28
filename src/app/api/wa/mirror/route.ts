@@ -25,8 +25,12 @@ export const dynamic = "force-dynamic";
  * disaring di bolehMasukResepsionis, jadi Mkhsistem cukup mengikuti nilai ini.
  *
  * Satu-satunya balasan otomatis ke tamu adalah sapaan pertama, hanya untuk nomor
- * yang baru pertama kali chat. Sapaan dikirim lewat after(), setelah Mkhsistem
- * menerima jawaban ini, supaya jalurnya tidak ikut tertahan.
+ * yang baru pertama kali chat DAN belum dikenal sebagai tamu (`!hasil.guestId`).
+ * Tanpa syarat kedua ini, tamu yang sudah punya data/booking -- misalnya yang
+ * baru saja kita kirimi pengingat check-in -- tetap disapa seolah orang asing
+ * begitu dia membalas (kasus nyata 2026-09-28, lihat teksSapaanPertama).
+ * Sapaan dikirim lewat after(), setelah Mkhsistem menerima jawaban ini, supaya
+ * jalurnya tidak ikut tertahan.
  *
  * HANYA mencatat -- tidak menjalankan LUNAS/PROMO/dll. Perintah-perintah itu
  * sudah diproses Mkhsistem untuk nomor ini; memprosesnya lagi di sini berarti
@@ -60,7 +64,7 @@ export async function POST(request: Request) {
   if (hasil) {
     after(() => terjemahkanPesanMasukAman(supabase, hasil.conversationId, hasil.messageId, inbound.text));
   }
-  if (hasil?.baru) {
+  if (hasil?.baru && !hasil.guestId) {
     after(() => kirimSapaanPertamaAman(supabase, hasil.conversationId, inbound.sender, inbound.senderName));
   }
 

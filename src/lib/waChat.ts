@@ -100,8 +100,14 @@ export function dariTombolWebsite(teks: string): boolean {
 
 /**
  * Satu-satunya balasan otomatis ke tamu, hanya untuk nomor yang baru pertama
- * kali chat (keputusan owner 2026-09-27). Sengaja tidak bertanya apa pun dan
- * tidak menawarkan apa pun: setelah ini resepsionis yang membalas.
+ * kali chat DAN belum dikenal sebagai tamu (keputusan owner 2026-09-27,
+ * diperjelas 2026-09-28: kasus nyata "Kak Yassinta" -- nomornya sudah cocok
+ * dengan data tamu/booking sejak pesan pertamanya, karena sistem sudah
+ * mengirim pengingat check-in ke dia duluan, tapi tetap dapat sapaan
+ * "pesan Kakak sudah kami terima" seolah dia orang asing. Sapaan ini untuk
+ * nomor benar-benar tidak dikenal saja -- lihat pengecekan `!guestId` di
+ * pemanggil (mirror/route.ts). Sengaja tidak bertanya apa pun dan tidak
+ * menawarkan apa pun: setelah ini resepsionis yang membalas.
  */
 export function teksSapaanPertama(namaTampilan?: string | null): string {
   const nama = (namaTampilan ?? "").trim();
