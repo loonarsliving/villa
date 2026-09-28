@@ -622,6 +622,8 @@ export interface WaConversationRow {
   last_message_at: string;
   last_message_preview: string | null;
   unread_count: number;
+  /** Bahasa tamu (ISO 639-1); null = belum diketahui, "id" = tanpa terjemahan. */
+  bahasa: string | null;
   guests: { nama: string } | null;
   bookings: { unit_nomor: string; status: string; tgl_checkin: string; tgl_checkout: string | null } | null;
 }
@@ -633,5 +635,7 @@ export interface WaConversationMessageRow {
   media_url: string | null;
   is_perintah_otomatis: boolean;
   dibalas_oleh: string | null;
+  /** Masuk: terjemahan Indonesia dari `isi`. Keluar: teks Indonesia asli resepsionis (`isi` = yang diterima tamu). */
+  terjemahan: string | null;
   created_at: string;
 }

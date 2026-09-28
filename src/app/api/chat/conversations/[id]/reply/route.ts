@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { periksaTokenStaf } from "@/lib/villaApiAuth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { terjemahkanChat } from "@/lib/aiBridge";
 import { kirimDariNomorUtama } from "@/lib/mkhsistemWa";
 import { catatPesan } from "@/lib/waChat";
 
@@ -42,13 +43,32 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const supabase = supabaseAdmin();
   const { data: percakapan, error: findError } = await supabase
     .from("wa_conversations")
-    .select("id,phone")
+    .select("id,phone,bahasa")
     .eq("id", id)
     .maybeSingle();
   if (findError) return NextResponse.json({ error: findError.message }, { status: 500 });
   if (!percakapan) return NextResponse.json({ error: "Percakapan tidak ditemukan" }, { status: 404 });
 
-  const sent = await kirimDariNomorUtama(percakapan.phone, isi);
+  // Tamu berbahasa asing menerima balasan dalam bahasanya; resepsionis tetap
+  // menulis dan membaca bahasa Indonesia. Kalau terjemahan gagal, pesan TIDAK
+  // dikirim -- lebih baik resepsionis mengulang daripada tamu asing menerima
+  // bahasa Indonesia tanpa tahu apa artinya.
+  let kirim = isi;
+  let terjemahan: string | null = null;
+  if (percakapan.bahasa && percakapan.bahasa !== "id") {
+    try {
+      const hasil = await terjemahkanChat(isi, percakapan.bahasa);
+      if (hasil.terjemahan.trim() && hasil.terjemahan.trim() !== isi) {
+        kirim = hasil.terjemahan.trim();
+        terjemahan = isi;
+      }
+    } catch (e) {
+      console.error("[chat/reply] terjemahan balasan gagal", e instanceof Error ? e.message : String(e));
+      return NextResponse.json({ error: "Terjemahan gagal, pesan belum dikirim. Coba kirim ulang." }, { status: 502 });
+    }
+  }
+
+  const sent = await kirimDariNomorUtama(percakapan.phone, kirim);
   if (!sent.success) {
     return NextResponse.json({ error: sent.error ?? "Pesan gagal terkirim ke WhatsApp" }, { status: 502 });
   }
@@ -57,7 +77,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     await catatPesan(supabase, {
       conversationId: percakapan.id,
       arah: "keluar",
-      isi,
+      isi: kirim,
+      terjemahan,
       dibalasOleh: staffName,
     });
   } catch (e) {
@@ -67,5 +88,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     console.error("[chat/reply] pesan terkirim tapi gagal dicatat", e instanceof Error ? e.message : String(e));
   }
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, diterjemahkan: terjemahan !== null });
 }

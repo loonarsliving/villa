@@ -36,6 +36,31 @@ const statusChip: Record<WaStatusTamu, string> = {
 
 const POLL_MS = 8000;
 
+// Pilihan bahasa tamu di header. "id" = tanpa terjemahan.
+const BAHASA: { kode: string; nama: string }[] = [
+  { kode: "id", nama: "Indonesia (tanpa terjemahan)" },
+  { kode: "en", nama: "Inggris" },
+  { kode: "zh", nama: "Mandarin" },
+  { kode: "ja", nama: "Jepang" },
+  { kode: "ko", nama: "Korea" },
+  { kode: "ms", nama: "Melayu" },
+  { kode: "ar", nama: "Arab" },
+  { kode: "fr", nama: "Prancis" },
+  { kode: "de", nama: "Jerman" },
+  { kode: "nl", nama: "Belanda" },
+  { kode: "es", nama: "Spanyol" },
+  { kode: "ru", nama: "Rusia" },
+];
+
+function namaBahasa(kode: string | null | undefined): string {
+  if (!kode) return "";
+  return BAHASA.find((b) => b.kode === kode)?.nama.replace(" (tanpa terjemahan)", "") ?? kode.toUpperCase();
+}
+
+function diterjemahkan(kode: string | null | undefined): boolean {
+  return !!kode && kode !== "id";
+}
+
 type Filter = "semua" | "belum" | "menginap" | "prospek" | "selesai";
 
 interface PesanTertunda {
@@ -46,7 +71,8 @@ interface PesanTertunda {
 }
 
 function formatPhoneDisplay(phone: string): string {
-  return phone.startsWith("62") ? `+${phone}` : phone;
+  // Nomor disimpan tanpa "+" dalam format internasional (62..., 61..., 1...).
+  return phone.startsWith("0") ? phone : `+${phone}`;
 }
 
 function namaPercakapan(c: WaConversationRow): string {
@@ -134,7 +160,12 @@ export default function ChatPage() {
         // polling lama (dimulai sebelum pesan tersimpan) datang belakangan.
         setPending((prev) => {
           const sisa = prev.filter(
-            (p) => !(p.conversationId === id && p.status === "terkirim" && baru.some((m) => m.arah === "keluar" && m.isi === p.isi)),
+            (p) =>
+              !(
+                p.conversationId === id &&
+                p.status === "terkirim" &&
+                baru.some((m) => m.arah === "keluar" && (m.terjemahan ?? m.isi) === p.isi)
+              ),
           );
           return sisa.length === prev.length ? prev : sisa;
         });
@@ -182,7 +213,8 @@ export default function ChatPage() {
     const el = inputRef.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 132)}px`;
+    // Kolom kosong selalu satu baris -- petunjuk (placeholder) yang terlipat tidak ikut membesarkannya.
+    el.style.height = draft ? `${Math.min(el.scrollHeight, 132)}px` : "";
   }, [draft, activeId]);
 
   function bukaPercakapan(id: string) {
@@ -231,6 +263,15 @@ export default function ChatPage() {
     setDraft("");
     inputRef.current?.focus();
     kirim(p);
+  }
+
+  function gantiBahasa(conversationId: string, bahasa: string) {
+    const semula = conversations.find((c) => c.id === conversationId)?.bahasa ?? null;
+    setConversations((prev) => prev.map((c) => (c.id === conversationId ? { ...c, bahasa } : c)));
+    localApi(`/api/chat/conversations/${conversationId}`, { method: "PATCH", body: JSON.stringify({ bahasa }) }).catch((e) => {
+      setConversations((prev) => prev.map((c) => (c.id === conversationId ? { ...c, bahasa: semula } : c)));
+      toast("⚠", "Bahasa tidak tersimpan", e instanceof ApiError ? e.message : "Coba lagi.", "ruby");
+    });
   }
 
   function kirimUlang(p: PesanTertunda) {
@@ -416,6 +457,30 @@ export default function ChatPage() {
                 </span>
               </header>
 
+              <div className="shrink-0 flex items-center gap-2 px-4 lg:px-5 py-1.5 bg-base-900 border-b border-ink/[0.06] text-xs text-ink/55">
+                <span aria-hidden>🌐</span>
+                <label htmlFor="bahasa-tamu" className="shrink-0">
+                  Bahasa tamu
+                </label>
+                <select
+                  id="bahasa-tamu"
+                  value={active.bahasa ?? ""}
+                  onChange={(e) => gantiBahasa(active.id, e.target.value)}
+                  className="min-w-0 flex-1 sm:flex-none h-8 px-2 rounded-lg border border-ink/10 bg-base-800/60 text-base sm:text-xs text-ink outline-none focus:border-gold-500"
+                >
+                  {!active.bahasa && <option value="">Belum terdeteksi (tanpa terjemahan)</option>}
+                  {active.bahasa && !BAHASA.some((b) => b.kode === active.bahasa) && (
+                    <option value={active.bahasa}>{active.bahasa.toUpperCase()}</option>
+                  )}
+                  {BAHASA.map((b) => (
+                    <option key={b.kode} value={b.kode}>
+                      {b.nama}
+                    </option>
+                  ))}
+                </select>
+                {diterjemahkan(active.bahasa) && <span className="hidden sm:inline text-ink/40">Balasan Anda diterjemahkan otomatis.</span>}
+              </div>
+
               <div ref={threadRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 md:px-6 py-4 space-y-2">
                 {loadingMessages ? (
                   <Loading />
@@ -451,7 +516,15 @@ export default function ChatPage() {
                                   📎 Buka lampiran
                                 </a>
                               )}
-                              {m.isi || (m.media_url ? "" : "—")}
+                              {m.terjemahan || m.isi || (m.media_url ? "" : "—")}
+                              {m.terjemahan && (
+                                <details className="mt-1.5 group">
+                                  <summary className="cursor-pointer list-none text-[11px] font-medium text-azure-600 select-none">
+                                    🌐 {keluar ? "Terkirim ke tamu dalam bahasa lain · lihat" : "Diterjemahkan · lihat asli"}
+                                  </summary>
+                                  <div className="mt-1 pl-2 border-l-2 border-azure-500/30 text-[13px] text-ink/60">{m.isi}</div>
+                                </details>
+                              )}
                               <div className="mt-1 flex items-center justify-end gap-1.5 text-[11px] text-ink/45" title={fmtDateTime(m.created_at)}>
                                 {m.is_perintah_otomatis && <span>otomatis ·</span>}
                                 {m.dibalas_oleh && <span className="truncate max-w-[120px]">{m.dibalas_oleh} ·</span>}
@@ -483,7 +556,9 @@ export default function ChatPage() {
                                 </button>
                               </>
                             ) : (
-                              <span className="text-ink/45">{p.status === "terkirim" ? "Terkirim" : "Mengirim…"}</span>
+                              <span className="text-ink/45">
+                                {p.status === "terkirim" ? "Terkirim" : diterjemahkan(active.bahasa) ? `Menerjemahkan ke ${namaBahasa(active.bahasa)} & mengirim…` : "Mengirim…"}
+                              </span>
                             )}
                           </div>
                         </div>
@@ -505,7 +580,7 @@ export default function ChatPage() {
                       kirimBalasan();
                     }
                   }}
-                  placeholder="Tulis balasan…"
+                  placeholder={diterjemahkan(active.bahasa) ? `Bahasa Indonesia → ${namaBahasa(active.bahasa)}` : "Tulis balasan…"}
                   aria-label="Tulis balasan"
                   className="flex-1 resize-none min-h-[44px] max-h-[132px] py-2.5 px-4 rounded-3xl border border-ink/10 bg-base-800/60 text-base md:text-sm leading-6 text-ink placeholder:text-ink/35 outline-none focus:border-gold-500 transition-colors"
                 />

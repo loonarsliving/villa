@@ -27,7 +27,7 @@ export async function GET(request: Request) {
   const { data, error } = await supabase
     .from("wa_conversations")
     .select(
-      "id,phone,nama_tampilan,guest_id,booking_id,status_tamu,last_message_at,last_message_preview,unread_count," +
+      "id,phone,nama_tampilan,guest_id,booking_id,status_tamu,last_message_at,last_message_preview,unread_count,bahasa," +
         "guests(nama),bookings(unit_nomor,status,tgl_checkin,tgl_checkout)",
     )
     .order("last_message_at", { ascending: false })

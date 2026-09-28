@@ -192,6 +192,17 @@ service_role saja, tidak ada policy untuk `anon`/`authenticated`.
   Postgres -- dipakai, BUKAN baca-lalu-tulis dari Next.js, supaya dua pesan
   masuk yang tiba nyaris bersamaan tidak saling menimpa angka satu sama
   lain.
+- **Kolom terjemahan (2026-09-28, owner-approved, migrasi `wa_chat_terjemahan`,
+  berkas `supabase/migrations/20260928000001_wa_chat_terjemahan.sql`)**:
+  `wa_conversations.bahasa` (ISO 639-1; null = belum diketahui, `id` = tanpa
+  terjemahan) dan `wa_conversation_messages.terjemahan` (masuk: terjemahan
+  Indonesia dari `isi`; keluar: teks Indonesia asli resepsionis, sedangkan
+  `isi` = yang benar-benar diterima tamu). Hanya kolom nullable baru, tidak ada
+  data yang diubah.
+- **Sambutan booking OTA** memakai `wa_messages_log` yang sudah ada
+  (`template_type = 'ota_welcome'`, `booking_id`) sebagai penanda "sudah
+  disambut", dengan klaim sisipkan-lalu-cek (yang paling awal menang) karena
+  tabel itu tidak punya indeks unik per booking. Tanpa perubahan skema.
 - Dibuktikan dengan simulasi nyata sebelum dipakai (insert percakapan uji,
   panggil RPC dua kali, verifikasi `unread_count=2` dan pratinjau ikut
   ter-update, verifikasi cascade delete membersihkan pesannya) -- data
