@@ -1,5 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { akhiranNomor, dariTombolWebsite, menyebutSewaVilla, pilihBookingTerbaik, teksSapaanPertama } from "./waChat";
+import { akhiranNomor, cukupUntukMenebakBahasa, dariTombolWebsite, menyebutSewaVilla, pilihBookingTerbaik, teksSapaanPertama } from "./waChat";
+
+describe("cukupUntukMenebakBahasa", () => {
+  it("jawaban pendek tidak dipakai menebak bahasa (tamu Indonesia yang menjawab 'ok')", () => {
+    expect(cukupUntukMenebakBahasa("ok")).toBe(false);
+    expect(cukupUntukMenebakBahasa("oke kak")).toBe(false);
+    expect(cukupUntukMenebakBahasa("👍🙏")).toBe(false);
+    expect(cukupUntukMenebakBahasa("thanks!")).toBe(false);
+  });
+  it("kalimat biasa cukup", () => {
+    expect(cukupUntukMenebakBahasa("Is the pool heated?")).toBe(true);
+    expect(cukupUntukMenebakBahasa("Apakah kolamnya air hangat?")).toBe(true);
+  });
+  it("huruf non-Latin jelas bahasanya walau pendek", () => {
+    expect(cukupUntukMenebakBahasa("你好")).toBe(true);
+    expect(cukupUntukMenebakBahasa("こんにちは")).toBe(true);
+    expect(cukupUntukMenebakBahasa("안녕하세요")).toBe(true);
+    expect(cukupUntukMenebakBahasa("مرحبا")).toBe(true);
+  });
+});
 
 describe("teksSapaanPertama", () => {
   it("menyapa dengan nama WhatsApp dan menyerahkan ke Hospitality Management", () => {

@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { terjemahkanChat } from "./aiBridge";
 import { kirimDariNomorUtama } from "./mkhsistemWa";
 import { nomorKanonik, samePhoneNumber } from "./phone";
 
@@ -266,21 +267,29 @@ export interface CatatPesanInput {
   mediaUrl?: string | null;
   isPerintahOtomatis?: boolean;
   dibalasOleh?: string | null;
+  /** Keluar: teks Indonesia asli resepsionis kalau `isi` adalah terjemahannya. */
+  terjemahan?: string | null;
 }
 
-/** Simpan satu pesan dan segarkan ringkasan percakapannya (pratinjau, waktu, unread). */
-export async function catatPesan(supabase: SupabaseClient, input: CatatPesanInput): Promise<void> {
-  const { error: insertError } = await supabase.from("wa_conversation_messages").insert({
-    conversation_id: input.conversationId,
-    arah: input.arah,
-    isi: input.isi,
-    media_url: input.mediaUrl ?? null,
-    is_perintah_otomatis: input.isPerintahOtomatis ?? false,
-    dibalas_oleh: input.dibalasOleh ?? null,
-  });
-  if (insertError) throw new Error(insertError.message);
+/** Simpan satu pesan dan segarkan ringkasan percakapannya (pratinjau, waktu, unread). Mengembalikan id pesan. */
+export async function catatPesan(supabase: SupabaseClient, input: CatatPesanInput): Promise<string> {
+  const { data: inserted, error: insertError } = await supabase
+    .from("wa_conversation_messages")
+    .insert({
+      conversation_id: input.conversationId,
+      arah: input.arah,
+      isi: input.isi,
+      media_url: input.mediaUrl ?? null,
+      is_perintah_otomatis: input.isPerintahOtomatis ?? false,
+      dibalas_oleh: input.dibalasOleh ?? null,
+      terjemahan: input.terjemahan ?? null,
+    })
+    .select("id")
+    .single();
+  if (insertError || !inserted) throw new Error(insertError?.message ?? "Gagal mencatat pesan");
 
-  const preview = input.isi.trim() || (input.mediaUrl ? "📎 Lampiran" : "");
+  // Pratinjau di daftar memakai teks yang dibaca resepsionis (Indonesia).
+  const preview = (input.terjemahan ?? input.isi).trim() || (input.mediaUrl ? "📎 Lampiran" : "");
   if (input.arah === "masuk") {
     // unread_count += 1 -- RPC kecil supaya tidak ada race dua pesan masuk
     // beruntun saling menimpa angka satu sama lain (read-then-write biasa).
@@ -296,6 +305,7 @@ export async function catatPesan(supabase: SupabaseClient, input: CatatPesanInpu
       .eq("id", input.conversationId);
     if (updateError) throw new Error(updateError.message);
   }
+  return inserted.id;
 }
 
 /** Dipakai webhook: mencatat pesan masuk tanpa melempar kalau gagal -- lihat catatan di atas berkas ini. */
@@ -304,16 +314,16 @@ export async function catatPesanMasukAman(
   phoneMentah: string,
   isi: string,
   opts: { namaTampilan?: string; mediaUrl?: string } = {},
-): Promise<ConversationMatch | null> {
+): Promise<(ConversationMatch & { messageId: string }) | null> {
   try {
     const match = await cariAtauBuatPercakapan(supabase, phoneMentah, opts.namaTampilan);
-    await catatPesan(supabase, {
+    const messageId = await catatPesan(supabase, {
       conversationId: match.conversationId,
       arah: "masuk",
       isi,
       mediaUrl: opts.mediaUrl,
     });
-    return match;
+    return { ...match, messageId };
   } catch (e) {
     console.error("[waChat] gagal mencatat pesan masuk", e instanceof Error ? e.message : String(e));
     return null;
@@ -326,5 +336,40 @@ export async function catatBalasanOtomatisAman(supabase: SupabaseClient, convers
     await catatPesan(supabase, { conversationId, arah: "keluar", isi, isPerintahOtomatis: true });
   } catch (e) {
     console.error("[waChat] gagal mencatat balasan otomatis", e instanceof Error ? e.message : String(e));
+  }
+}
+
+/**
+ * Cukup panjang untuk menebak bahasa tamu? "ok", "👍", "oke kak" terlalu
+ * pendek -- kalau dipakai, tamu Indonesia yang menjawab "ok" bisa tercatat
+ * berbahasa Inggris dan balasan resepsionis ikut diterjemahkan. Huruf
+ * non-Latin (Mandarin, Jepang, Korea, Arab, Thai, Kiril) sudah jelas
+ * bahasanya dari dua huruf saja.
+ */
+export function cukupUntukMenebakBahasa(teks: string): boolean {
+  const hurufLatin = (teks.match(/[A-Za-zÀ-ɏ]/g) ?? []).length;
+  const hurufNonLatin = (teks.match(/[Ѐ-ӿ؀-ۿ฀-๿぀-ヿ㐀-鿿가-힯]/g) ?? []).length;
+  return hurufLatin >= 10 || hurufNonLatin >= 2;
+}
+
+/**
+ * Terjemahkan pesan masuk ke bahasa Indonesia untuk resepsionis, dan ingat
+ * bahasa tamu untuk balasan berikutnya. Dijalankan setelah Mkhsistem
+ * menerima jawaban (after()), jadi tidak menahan apa pun. Tidak pernah
+ * melempar: kalau gagal, resepsionis tetap melihat pesan aslinya.
+ */
+export async function terjemahkanPesanMasukAman(supabase: SupabaseClient, conversationId: string, messageId: string, isi: string): Promise<void> {
+  if (!isi.trim()) return;
+  try {
+    const { bahasaAsal, terjemahan } = await terjemahkanChat(isi, "id");
+    if (bahasaAsal !== "id" && terjemahan.trim() && terjemahan.trim() !== isi.trim()) {
+      await supabase.from("wa_conversation_messages").update({ terjemahan }).eq("id", messageId);
+      await supabase.from("wa_conversations").update({ last_message_preview: terjemahan.trim() }).eq("id", conversationId);
+    }
+    if (cukupUntukMenebakBahasa(isi)) {
+      await supabase.from("wa_conversations").update({ bahasa: bahasaAsal }).eq("id", conversationId);
+    }
+  } catch (e) {
+    console.error("[waChat] terjemahan pesan masuk gagal", e instanceof Error ? e.message : String(e));
   }
 }

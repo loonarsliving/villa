@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { syncCloudbedsReservations } from "@/lib/cloudbedsReservationSync";
 import { isAuthorizedCronRequest } from "@/lib/cronAuth";
+import { kirimSambutanOta } from "@/lib/otaWelcome";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -24,7 +25,8 @@ export const maxDuration = 60;
  * Safe to run as often as we like: the sync upserts on
  * cloudbeds_reservation_id, so a reservation seen twenty times still
  * produces exactly one booking row, and it deliberately sends no WhatsApp
- * or housekeeping alerts.
+ * or housekeeping alerts. The only WhatsApp that follows it is the OTA
+ * welcome (src/lib/otaWelcome.ts), run as a separate step, once per booking.
  */
 export async function GET(request: Request) {
   if (!(await isAuthorizedCronRequest(request))) {
@@ -37,8 +39,19 @@ export async function GET(request: Request) {
   }
 
   try {
-    const summary = await syncCloudbedsReservations(supabaseAdmin(), apiKey);
-    return NextResponse.json(summary);
+    const supabase = supabaseAdmin();
+    const summary = await syncCloudbedsReservations(supabase, apiKey);
+    // Sambutan WA untuk booking Agoda/Airbnb baru (src/lib/otaWelcome.ts) --
+    // langkah terpisah: sinkronnya sendiri tetap tidak mengirim WhatsApp apa
+    // pun, dan gagal menyambut tidak boleh membuat sinkron terlihat gagal.
+    let sambutan: unknown;
+    try {
+      sambutan = await kirimSambutanOta(supabase);
+    } catch (e) {
+      sambutan = { error: e instanceof Error ? e.message : String(e) };
+      console.error("[cron/sync-cloudbeds-reservations] sambutan OTA gagal", sambutan);
+    }
+    return NextResponse.json({ ...summary, sambutan });
   } catch (e) {
     // Logged loudly rather than swallowed: a silently failing pull looks
     // exactly like a quiet week of no bookings.

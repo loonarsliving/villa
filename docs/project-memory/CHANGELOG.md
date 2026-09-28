@@ -4,6 +4,12 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-09-28 — Sambutan otomatis booking Agoda/Airbnb + terjemahan dua arah di Chat
+- **Sambutan booking OTA** (`src/lib/otaWelcome.ts`, teks disetujui owner di `otaWelcomeText.ts`, +10 tes): setelah sinkron Cloudbeds 10 menit (pg_cron job 105), setiap booking **Agoda/Airbnb** baru (masuk ke villa setelah `SAMBUTAN_MULAI` = 28 Sep 00.00 WIB, dalam 3 hari terakhir, `terjadwal`, check-in belum lewat) menerima satu WhatsApp dari 0822. Nomor Indonesia menerima bahasa Indonesia, lainnya bahasa Inggris. Hanya dikirim 08.00–21.00 WIB. Sekali per booking lewat `wa_messages_log` (`ota_welcome`). Sambutan tercatat di Chat sehingga balasan tamu langsung masuk ke resepsionis. Teksnya tanpa tautan, rekening, atau tawaran (aturan Airbnb).
+- **Terjemahan dua arah**: kolom `wa_conversations.bahasa` dan `wa_conversation_messages.terjemahan` (owner-approved). Terjemahan lewat Mkhsistem `/api/villa/ai/translate` (Gemini, hanya menerjemahkan; Mkhsistem PR #72) melalui `terjemahkanChat` di `aiBridge.ts`. Pesan masuk diterjemahkan ke Indonesia setelah Mkhsistem dijawab (`after()`). Bahasa tamu hanya ditetapkan dari pesan yang cukup panjang (`cukupUntukMenebakBahasa`), supaya "ok" tidak menjadikan tamu Indonesia "Inggris". Balasan resepsionis diterjemahkan ke bahasa tamu; kalau terjemahan gagal, pesan **tidak** dikirim (502, tombol Kirim ulang). Resepsionis bisa mengganti bahasa tamu dari header (`PATCH /api/chat/conversations/[id]`).
+- UI: terjemahan tampil sebagai teks utama dengan "lihat asli" / "terkirim ke tamu dalam bahasa lain". Pratinjau di daftar memakai teks Indonesia. Kolom ketik tetap satu baris walau petunjuknya panjang. Nomor luar negeri tampil dengan "+".
+- Diuji di Chromium (HP dan laptop, data tiruan): terjemahan menjadi teks utama, teks asli muncul saat diketuk, label "Menerjemahkan ke Inggris & mengirim…", balasan tidak dobel, dan ganti bahasa mengirim PATCH. **Belum diuji dengan Gemini sungguhan**, karena Mkhsistem tidak bisa dijangkau dari sesi pengembangan.
+
 ### 2026-09-28 — Chat dirombak untuk HP, tablet, dan laptop
 - Pola WhatsApp: di HP dan tablet, daftar dan isi percakapan tampil bergantian. Di HP isi percakapan menutupi layar (menu bawah tertutup) dan tombol kembali HP ikut menutupnya (`history.pushState`). Mulai 1024px keduanya berdampingan setinggi layar.
 - Empat kartu statistik diganti kolom cari (nama/nomor) dan chip filter berjumlah: Semua, Belum dibaca, Menginap, Prospek, Selesai.

@@ -2,7 +2,7 @@ import { after, NextResponse } from "next/server";
 
 import { secretsMatch } from "@/lib/internalSecret";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { bolehMasukResepsionis, catatPesanMasukAman, kirimSapaanPertamaAman } from "@/lib/waChat";
+import { bolehMasukResepsionis, catatPesanMasukAman, kirimSapaanPertamaAman, terjemahkanPesanMasukAman } from "@/lib/waChat";
 import { normalizeInbound } from "@/lib/whacenter";
 
 export const runtime = "nodejs";
@@ -57,6 +57,9 @@ export async function POST(request: Request) {
     mediaUrl: inbound.mediaUrl,
   });
 
+  if (hasil) {
+    after(() => terjemahkanPesanMasukAman(supabase, hasil.conversationId, hasil.messageId, inbound.text));
+  }
   if (hasil?.baru) {
     after(() => kirimSapaanPertamaAman(supabase, hasil.conversationId, inbound.sender, inbound.senderName));
   }

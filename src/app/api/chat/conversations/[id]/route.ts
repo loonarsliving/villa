@@ -6,16 +6,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const BAHASA_RE = /^[a-z]{2,3}$/;
 
 /**
- * Riwayat satu percakapan, tertua dulu (urutan baca alami).
- *
- * Efek samping yang disengaja: membuka percakapan ini SEKALIGUS
- * menandainya terbaca (unread_count -> 0) -- pola inbox yang wajar
- * (staf membukanya artinya sudah dilihat), dan menghindari perlu
- * endpoint PATCH terpisah cuma untuk itu.
+ * Resepsionis membetulkan bahasa tamu kalau tebakan otomatis keliru.
+ * `bahasa: "id"` = tanpa terjemahan; kode lain = balasan diterjemahkan ke sana.
  */
-export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const token = request.headers.get("x-villa-token") ?? "";
   const sesi = token ? await periksaTokenStaf(token) : "ditolak";
   if (sesi === "gagal-periksa") {
@@ -31,16 +28,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const { id } = await params;
   if (!UUID_RE.test(id)) return NextResponse.json({ error: "id percakapan tidak valid" }, { status: 400 });
 
-  const supabase = supabaseAdmin();
-  const { data, error } = await supabase
-    .from("wa_conversation_messages")
-    .select("id,arah,isi,media_url,is_perintah_otomatis,dibalas_oleh,terjemahan,created_at")
-    .eq("conversation_id", id)
-    .order("created_at", { ascending: true })
-    .limit(500);
+  const body = await request.json().catch(() => null);
+  const bahasa = typeof body?.bahasa === "string" ? body.bahasa.trim().toLowerCase() : "";
+  if (!BAHASA_RE.test(bahasa)) return NextResponse.json({ error: "Kode bahasa tidak valid" }, { status: 400 });
+
+  const { error } = await supabaseAdmin().from("wa_conversations").update({ bahasa }).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  await supabase.from("wa_conversations").update({ unread_count: 0 }).eq("id", id);
-
-  return NextResponse.json(data ?? []);
+  return NextResponse.json({ success: true, bahasa });
 }

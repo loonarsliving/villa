@@ -267,3 +267,31 @@ export async function researchMarketDemand(locationLabel: string): Promise<Marke
     search_index_by_month: searchIndex,
   };
 }
+
+export interface TerjemahanChat {
+  /** Kode ISO 639-1 bahasa teks asal, huruf kecil (mis. "en", "zh", "id"). */
+  bahasaAsal: string;
+  terjemahan: string;
+}
+
+/**
+ * Terjemahan Chat resepsionis lewat Mkhsistem (/api/villa/ai/translate,
+ * Gemini). Hanya menerjemahkan -- tidak pernah menjawab tamu. Melempar kalau
+ * gagal; pemanggil yang memutuskan (pesan masuk: tampilkan aslinya saja;
+ * balasan: jangan kirim diam-diam dalam bahasa yang salah).
+ */
+export async function terjemahkanChat(teks: string, bahasaTujuan: string): Promise<TerjemahanChat> {
+  const { baseUrl, secret } = await loadAiBridgeConfig();
+  const res = await fetch(`${baseUrl}/api/villa/ai/translate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-internal-secret": secret },
+    body: JSON.stringify({ text: teks, target: bahasaTujuan }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(20_000),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data || data.success !== true || typeof data.translation !== "string" || typeof data.detected_language !== "string") {
+    throw new Error(`Terjemahan gagal: ${data?.error || `HTTP ${res.status}`}`);
+  }
+  return { bahasaAsal: data.detected_language.toLowerCase(), terjemahan: data.translation };
+}
