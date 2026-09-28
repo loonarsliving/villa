@@ -4601,8 +4601,15 @@ Deno.serve(async (req)=>{
       const {data:g} = await supabase.from('guests').select('hp').eq('id',data.guest_id).single();
       guestPhone = g?.hp ?? null;
     }
+    // Nomor unit SENGAJA tidak disebut di pesan ke tamu (owner 2026-09-28):
+    // untuk booking Airbnb, unit_nomor tercatat di sini kadang sudah tidak
+    // sama dengan unit fisik yang benar-benar diberikan ke tamu saat
+    // check-in, dan pesan yang menyebut unit salah malah membingungkan tamu
+    // ("ini kamarnya A1 apa C1?"). notif() di atas (ke staf, bukan ke tamu)
+    // tetap menyebut unit_nomor apa adanya -- itu untuk resepsionis, yang
+    // tahu unit fisik mana yang sebenarnya dipakai.
     await sendWa(guestPhone,
-      `Halo ${data.guest_nama}, selamat datang di Loonars Private Living Unit ${data.unit_nomor}!\nKode PIN pintu Anda: *${data.pin_kode}*\nMohon jaga kerahasiaan kode ini selama menginap. Terima kasih.`,
+      `Halo ${data.guest_nama}, selamat datang di Loonars Private Living!\nKode PIN pintu Anda: *${data.pin_kode}*\nMohon jaga kerahasiaan kode ini selama menginap. Terima kasih.`,
       {booking_id:b.booking_id, unit_id:data.unit_id, template_type:'pin_checkin'});
 
     return json({success:true, pin_kode:data.pin_kode});
