@@ -327,6 +327,54 @@ const PENDING_PAYMENT_HOLD_MINUTES = 60;
 const EXPIRED_HOLD_MARK = '[Kedaluwarsa otomatis]';
 
 /**
+ * Pengingat pembayaran WA untuk booking website yang QRIS-nya belum
+ * diselesaikan (owner 2026-09-28: "buat ai wa mereka untuk menyelesaikan
+ * pembayaran dan dapatkan fasilitas2 menarik lainya" -- teks TETAP,
+ * disetujui owner persis kata per kata, bukan dikarang AI setiap kali;
+ * lihat percakapan session untuk alasannya: villa tidak punya data
+ * fasilitas terstruktur, dan AI bebas pernah salah menawarkan hal yang
+ * tidak ada).
+ *
+ * Dikirim SEKALI, separuh jalan menuju PENDING_PAYMENT_HOLD_MINUTES, supaya
+ * tamu masih sempat menyelesaikan sebelum unit dilepas otomatis.
+ */
+const PAYMENT_REMINDER_AT_MINUTES = 30;
+
+/** Nomor Indonesia (62.../08...) -> id, lainnya -> en. Sama seperti logika di villa (src/lib/otaWelcomeText.ts). */
+function bahasaDariNomorHp(hp){
+  const d = String(hp ?? '').replace(/\D/g,'');
+  return (d.startsWith('62') || d.startsWith('0')) ? 'id' : 'en';
+}
+
+/** "YYYY-MM-DD" (tanggal kalender, bukan jam) -> "5 Okt" / "5 Oct", tahun opsional. */
+function tanggalSingkat(iso, bahasa, denganTahun){
+  const d = new Date(`${iso}T00:00:00Z`);
+  return d.toLocaleDateString(bahasa==='id' ? 'id-ID' : 'en-GB', {
+    timeZone:'UTC', day:'numeric', month:'short', ...(denganTahun ? {year:'numeric'} : {}),
+  });
+}
+
+/** Jam WIB dari sebuah Date sungguhan (bukan tanggal kalender), mis. "21.45". */
+function jamWIB(d){
+  return d.toLocaleTimeString('id-ID', {timeZone: WIB_TZ, hour:'2-digit', minute:'2-digit'});
+}
+
+function teksPengingatPembayaran({nama, unit, checkin, checkout, batasWaktu, bahasa}){
+  const rentang = `${tanggalSingkat(checkin, bahasa, false)} – ${tanggalSingkat(checkout, bahasa, true)}`;
+  const batas = `${jamWIB(batasWaktu)} WIB`;
+  if(bahasa === 'en'){
+    return `Hi ${nama || 'there'} 👋\n\n`+
+      `We noticed your booking for Unit ${unit} (${rentang}) at Loonars Private Living Yogyakarta is still waiting for QRIS payment.\n\n`+
+      `Your private pool and garden are ready for you 🏊🌿 If we don't receive it by ${batas}, this unit will be automatically released for other guests.\n\n`+
+      `Already paid? No need to send proof -- our system detects it automatically within a few minutes. Any trouble? Just reply to this message, our team is happy to help.`;
+  }
+  return `Halo Kak${nama ? ' ' + nama : ''} 👋\n\n`+
+    `Kami lihat booking Kakak untuk Unit ${unit} (${rentang}) di Loonars Private Living Yogyakarta masih menunggu pembayaran QRIS.\n\n`+
+    `Kolam renang privat dan taman di unit ini sudah menunggu Kakak 🏊🌿 Kalau belum kami terima sampai pukul ${batas}, unit ini akan otomatis dilepas untuk tamu lain.\n\n`+
+    `Kalau sudah transfer, tidak perlu kirim bukti apa pun -- sistem kami otomatis mendeteksinya dalam beberapa menit. Ada kendala? Balas pesan ini, tim kami siap bantu.`;
+}
+
+/**
  * Tanggal dan bulan BISNIS villa selalu mengikuti kalender WIB
  * (Asia/Jakarta), bukan UTC.
  *
@@ -2977,6 +3025,42 @@ Deno.serve(async (req)=>{
     if(!cron.secret) return err('Cron belum dikonfigurasi (integration_settings.cron.secret)',503);
     if(!await secretsMatch(provided, cron.secret)) return err('Unauthorized',401);
 
+    // Pengingat pembayaran (owner 2026-09-28), ditumpangkan di jadwal 5 menit
+    // yang sama karena kandidatnya sama persis: booking website yang masih
+    // 'menunggu_pembayaran'. Dijalankan SEBELUM langkah pembatalan di bawah,
+    // supaya booking yang baru lewat separuh waktu masih sempat diingatkan
+    // sebelum akhirnya (kalau tetap tidak dibayar) dibatalkan di langkah itu.
+    // Sekali per booking: wa_messages_log dicek dulu, bukan diklaim-insert --
+    // pg_cron di sini hanya satu jadwal berurutan (tidak paralel), jadi
+    // risiko dua proses berebut baris yang sama praktis nol, sama seperti
+    // langkah pembatalan di bawah yang juga tidak memakainya.
+    const reminderCutoff = new Date(Date.now() - PAYMENT_REMINDER_AT_MINUTES*60*1000).toISOString();
+    const {data:pendingUntukDiingatkan} = await supabase.from('bookings')
+      .select('id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,created_at')
+      .eq('sumber','website').eq('status','menunggu_pembayaran').lte('created_at', reminderCutoff);
+
+    let diingatkan = 0;
+    for(const bk of pendingUntukDiingatkan ?? []){
+      const {data:sudahDiingatkan} = await supabase.from('wa_messages_log')
+        .select('id').eq('booking_id', bk.id).eq('template_type','payment_reminder').limit(1);
+      if(sudahDiingatkan && sudahDiingatkan.length) continue;
+
+      let hp = null;
+      if(bk.guest_id){
+        const {data:g} = await supabase.from('guests').select('hp').eq('id', bk.guest_id).maybeSingle();
+        hp = g?.hp ?? null;
+      }
+      if(!hp) continue; // Tanpa nomor tidak ada yang bisa dikirimi dan tidak ada booking_id yang berarti untuk dicatat 'skipped_no_phone'.
+
+      const batasWaktu = new Date(new Date(bk.created_at).getTime() + PENDING_PAYMENT_HOLD_MINUTES*60*1000);
+      const isi = teksPengingatPembayaran({
+        nama: bk.guest_nama, unit: bk.unit_nomor, checkin: bk.tgl_checkin, checkout: bk.tgl_checkout,
+        batasWaktu, bahasa: bahasaDariNomorHp(hp),
+      });
+      const terkirim = await sendWa(hp, isi, {booking_id: bk.id, template_type:'payment_reminder'});
+      if(terkirim) diingatkan++;
+    }
+
     const cutoff = new Date(Date.now() - PENDING_PAYMENT_HOLD_MINUTES*60*1000).toISOString();
     const {data:stale} = await supabase.from('bookings')
       .select('id,unit_nomor,guest_nama,tgl_checkin,tgl_checkout,catatan,created_at')
@@ -2999,7 +3083,7 @@ Deno.serve(async (req)=>{
         `${bk.guest_nama} (${bk.tgl_checkin} s/d ${bk.tgl_checkout}) tidak menyelesaikan pembayaran dalam ${PENDING_PAYMENT_HOLD_MINUTES} menit, booking dibatalkan otomatis.`, bk.id);
     }
 
-    return json({expired: expired.length, bookings: expired});
+    return json({diingatkan, expired: expired.length, bookings: expired});
   }
 
   if(path==='/cron/cleaning-calls' && m==='POST'){
