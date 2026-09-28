@@ -18,7 +18,17 @@ export function rapikanNama(nama: string): string {
   return n.toLowerCase().replace(/(^|[\s'-])(\p{L})/gu, (_, sep: string, ch: string) => sep + ch.toUpperCase());
 }
 
-const PLATFORM: Record<string, string> = { agoda: "Agoda", airbnb: "Airbnb" };
+/**
+ * Nama tampilan platform, satu-satu untuk setiap nilai bookings.sumber yang
+ * dianggap OTA sungguhan (lihat daftar SUMBER dan alasannya di otaWelcome.ts).
+ */
+const PLATFORM: Record<string, string> = {
+  agoda: "Agoda",
+  airbnb: "Airbnb",
+  "booking.com": "Booking.com",
+  traveloka: "Traveloka",
+  tiket: "Tiket.com",
+};
 
 /** Tanggal "YYYY-MM-DD" (kalender, bukan waktu) -> "5 Okt" / "5 Oct", dengan tahun opsional. */
 function tanggal(iso: string, bahasa: BahasaSambutan, denganTahun: boolean): string {

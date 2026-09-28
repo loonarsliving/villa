@@ -8,11 +8,27 @@ import { cariAtauBuatPercakapan, catatPesan } from "./waChat";
 import { bahasaDariNomor, rapikanNama, teksSambutan, type BahasaSambutan } from "./otaWelcomeText";
 
 /**
- * Sambutan WhatsApp otomatis untuk tamu yang booking lewat Agoda/Airbnb
- * (owner 2026-09-28, teks disetujui owner). Dijalankan setelah setiap sinkron
- * reservasi Cloudbeds (tiap 10 menit, pg_cron job 105).
+ * Sambutan WhatsApp otomatis untuk tamu yang booking lewat OTA yang benar-benar
+ * tersambung ke Cloudbeds villa (owner 2026-09-28, diperluas 2026-09-28 malam:
+ * "biarkan lebih banyak ota... cloudbedsku banyak koneksinya"). Dijalankan
+ * setelah setiap sinkron reservasi Cloudbeds (tiap 10 menit, pg_cron job 105).
  *
- * Aturan:
+ * SUMBER sengaja TIDAK memakai semua nilai yang diizinkan bookings.sumber:
+ * - 'google' dikeluarkan -- itu klik metasearch, tamunya tetap membayar lewat
+ *   kanal lain (lihat mapSourceNameToSumber), jadi "booking Kakak melalui
+ *   Google" tidak masuk akal dan bisa dobel dengan sambutan dari kanal
+ *   pembayaran aslinya.
+ * - 'cloudbeds' dikeluarkan -- itu keranjang bawaan untuk sourceName yang TIDAK
+ *   dikenali (lihat cloudbedsSourceMapping.ts), bukan satu platform tertentu.
+ *   Mengirim sambutan OTA ke situ berisiko salah nama platform.
+ * - 'website'/'walk-in'/'whatsapp'/'other' dikeluarkan -- bukan OTA; tamu jalur
+ *   itu sudah punya kontak langsung dengan villa.
+ * Kalau owner menyambungkan OTA baru di Cloudbeds yang sourceName-nya belum
+ * dikenali mapSourceNameToSumber, tambahkan dulu di sana (sumber sungguhan,
+ * bukan 'cloudbeds'), baru daftarkan namanya di PLATFORM (otaWelcomeText.ts)
+ * dan tambahkan ke SUMBER di sini.
+ *
+ * Aturan lain (tidak berubah):
  * - hanya booking yang MASUK ke villa setelah fitur ini aktif (SAMBUTAN_MULAI)
  *   dan dalam 3 hari terakhir -- tamu lama tidak tiba-tiba dikirimi pesan;
  * - hanya booking terjadwal yang tanggal check-in-nya belum lewat;
@@ -25,7 +41,9 @@ import { bahasaDariNomor, rapikanNama, teksSambutan, type BahasaSambutan } from 
 
 export const SAMBUTAN_MULAI = "2026-09-28T00:00:00+07:00";
 const TEMPLATE = "ota_welcome";
-const SUMBER = ["agoda", "airbnb"] as const;
+/** Diuji langsung di otaWelcome.test.ts -- termasuk memastikan 'google' dan 'cloudbeds' TIDAK ikut. */
+export const SUMBER_OTA_DISAMBUT = ["agoda", "airbnb", "booking.com", "traveloka", "tiket"] as const;
+const SUMBER = SUMBER_OTA_DISAMBUT;
 const MAKS_PER_JALAN = 5;
 
 export function dalamJamKirim(now: Date = new Date()): boolean {
