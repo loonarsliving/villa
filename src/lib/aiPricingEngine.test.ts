@@ -61,13 +61,18 @@ describe("anchor and weekend", () => {
     expect(second.decided_rate).toBe(first.decided_rate);
   });
 
-  it("uses Standard's larger weekend surcharge so the weekend price holds when the weekday base is cut (owner 2026-09-16)", () => {
-    const d = decide({ targetDate: FRIDAY, anchorRate: 550000, minRate: 550000, roomTypeCode: "standard" });
+  it("uses Standard's larger weekend surcharge so the weekend price holds when the weekday base is cut (owner 2026-09-16, cut again 2026-09-29)", () => {
+    const d = decide({ targetDate: FRIDAY, anchorRate: 500000, minRate: 500000, roomTypeCode: "standard" });
     expect(d.decided_rate).toBe(750000);
   });
 
+  it("uses Sawah View's own weekend surcharge so its weekend price also holds after its weekday cut (owner 2026-09-29)", () => {
+    const d = decide({ targetDate: FRIDAY, anchorRate: 630000, minRate: 600000, roomTypeCode: "sawah_view" });
+    expect(d.decided_rate).toBe(850000);
+  });
+
   it("falls back to the Rp100.000 surcharge for a room type with no override", () => {
-    const d = decide({ targetDate: FRIDAY, roomTypeCode: "sawah_view" });
+    const d = decide({ targetDate: FRIDAY, roomTypeCode: "some_future_room_type" });
     expect(d.decided_rate).toBe(750000);
   });
 });

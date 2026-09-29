@@ -33,9 +33,20 @@ const DEFAULT_WEEKEND_SURCHARGE = 100000;
  * longer a fixed delta over the anchor for every room type, so it must be
  * looked up per room type code instead of read as one global constant.
  * Anything not listed here keeps the original Rp100.000 delta.
+ *
+ * Owner instruction (2026-09-29): weekday promo across every OTA channel
+ * (Loonars only has one shared Cloudbeds rate plan feeding Agoda/Airbnb/
+ * Booking.com/Traveloka/Tiket -- there is no way to price one channel
+ * differently). Standard's weekday base cut again, Rp550.000 -> Rp500.000;
+ * Sawah View's Rp750.000 -> Rp630.000. Both surcharges raised by the same
+ * amount the base dropped, so the WEEKEND price (which is working, per
+ * owner's own occupancy check the same week) is unchanged: Standard stays
+ * Rp750.000, Sawah View stays Rp850.000 (its old base 750.000 + the
+ * Rp100.000 default it was quietly relying on until now).
  */
 const WEEKEND_SURCHARGE_BY_ROOM_TYPE_CODE: Record<string, number> = {
-  standard: 200000,
+  standard: 250000,
+  sawah_view: 220000,
 };
 const MARKET_DEMAND_CREATED_BY = "ai_jogja_events_research";
 /** Declared here because AI_PERIOD_CREATED_BY below needs it; see SIGNAL 1. */
