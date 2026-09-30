@@ -94,10 +94,17 @@ describe("market position vs same-class villas (SIGNAL 6, owner 2026-09-30)", ()
     expect(d.reason_codes).not.toContain("below_peer_market");
   });
 
-  it("lets the empty-close-in discount still win over the market pull", () => {
-    const d = decide({ competitorMedian: 800000, daysToArrival: 5, occupancyPct: 0 });
-    expect(d.decided_rate).toBe(623000);
+  it("keeps the full low-occupancy discount -- the market pull stays out (owner 2026-09-30)", () => {
+    const d = decide({ competitorMedian: 800000, daysToArrival: 5, occupancyPct: 0, minRate: 500000 });
+    expect(d.decided_rate).toBe(585000);
     expect(d.reason_codes).toContain("low_occupancy");
+    expect(d.reason_codes).not.toContain("below_peer_market");
+  });
+
+  it("still never discounts below min_rate", () => {
+    const d = decide({ competitorMedian: 800000, daysToArrival: 5, occupancyPct: 0, minRate: 600000 });
+    expect(d.decided_rate).toBe(600000);
+    expect(d.guardrail_status).toBe("clamped_min");
   });
 
   it("is held during cold start like every other upward signal", () => {

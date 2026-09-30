@@ -1218,9 +1218,14 @@ export function decideRateForDate(input: DateDecisionInput): DatePriceDecision {
   }
 
   // S6 · posisi pasar: villa sekelas dijual lebih mahal dari rate plan kita.
-  // Tidak dipakai kalau ada periode puncak/sepi -- lihat SINYAL 6.
+  // Tidak dipakai kalau ada periode puncak/sepi -- lihat SINYAL 6 -- dan
+  // tidak dipakai saat diskon okupansi rendah sedang berjalan. Owner
+  // 2026-09-30: "ketika okupansi rendah kamu harus menurunkan harga, tapi
+  // jangan sampai melewati batas bawah" -- diskon itu harus utuh, tidak
+  // boleh dikurangi oleh harga tetangga; min_rate (langkah 9) tetap lantai.
   const periodCovers = period !== null && (Number(period.suggested_adjustment_pct) || 0) !== 0;
-  if (competitorMedian !== null && competitorMedian > structuralRate && !periodCovers) {
+  const lowOccupancyDiscounting = occupancySignalPct < 0;
+  if (competitorMedian !== null && competitorMedian > structuralRate && !periodCovers && !lowOccupancyDiscounting) {
     if (coldStart) {
       reasonCodes.push("market_position_held_cold_start");
     } else {
