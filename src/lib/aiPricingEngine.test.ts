@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { acceptedPeakMedian, buildSearchDemand, decideRateForDate, fixedCalendarPeriodFor, learnDiscountWindow, searchDemandRelativeFor, type DateDecisionInput, type PricingSettings } from "./aiPricingEngine";
+import { acceptedPeakMedian, buildSearchDemand, decideRateForDate, fixedCalendarPeriodFor, learnDiscountWindow, OWNER_SELECTED_COMPETITOR, pickPeerPrices, searchDemandRelativeFor, type DateDecisionInput, type PricingSettings } from "./aiPricingEngine";
 
 /**
  * Tests for the pricing REASONING, not for Supabase plumbing.
@@ -74,6 +74,61 @@ describe("anchor and weekend", () => {
   it("falls back to the Rp100.000 surcharge for a room type with no override", () => {
     const d = decide({ targetDate: FRIDAY, roomTypeCode: "some_future_room_type" });
     expect(d.decided_rate).toBe(750000);
+  });
+});
+
+describe("market position vs same-class villas (SIGNAL 6, owner 2026-09-30)", () => {
+  it("nudges an ordinary weekday UP when same-class villas sell higher", () => {
+    const d = decide({ competitorMedian: 800000 });
+    expect(d.decided_rate).toBe(669000);
+    expect(d.reason_codes).toContain("below_peer_market");
+  });
+
+  it("is bounded: a very expensive median cannot pull harder than a mid-market one", () => {
+    expect(decide({ competitorMedian: 2000000 }).decided_rate).toBe(669000);
+  });
+
+  it("never pulls a weekend down when we are already above the peer median", () => {
+    const d = decide({ targetDate: FRIDAY, competitorMedian: 700000 });
+    expect(d.decided_rate).toBe(750000);
+    expect(d.reason_codes).not.toContain("below_peer_market");
+  });
+
+  it("keeps the full low-occupancy discount -- the market pull stays out (owner 2026-09-30)", () => {
+    const d = decide({ competitorMedian: 800000, daysToArrival: 5, occupancyPct: 0, minRate: 500000 });
+    expect(d.decided_rate).toBe(585000);
+    expect(d.reason_codes).toContain("low_occupancy");
+    expect(d.reason_codes).not.toContain("below_peer_market");
+  });
+
+  it("still never discounts below min_rate", () => {
+    const d = decide({ competitorMedian: 800000, daysToArrival: 5, occupancyPct: 0, minRate: 600000 });
+    expect(d.decided_rate).toBe(600000);
+    expect(d.guardrail_status).toBe("clamped_min");
+  });
+
+  it("is held during cold start like every other upward signal", () => {
+    const d = decide({ competitorMedian: 800000, coldStart: true });
+    expect(d.decided_rate).toBe(650000);
+    expect(d.reason_codes).toContain("market_position_held_cold_start");
+  });
+
+  it("does not apply inside a season period (ordinary-night median is not evidence there)", () => {
+    const d = decide({ competitorMedian: 800000, period: { suggested_adjustment_pct: -0.1, created_by: "ai_low_season" } });
+    expect(d.reason_codes).not.toContain("below_peer_market");
+  });
+});
+
+describe("pickPeerPrices", () => {
+  const research = (price: number) => ({ price, created_by: "ai_dynamic_pricing_cron" });
+  const owner = (price: number) => ({ price, created_by: OWNER_SELECTED_COMPETITOR });
+
+  it("uses only the owner's chosen same-class villas when there are enough of them", () => {
+    expect(pickPeerPrices([owner(600000), owner(650000), owner(700000), research(2800000)]).sort()).toEqual([600000, 650000, 700000]);
+  });
+
+  it("falls back to every researched villa when the owner list is too thin", () => {
+    expect(pickPeerPrices([owner(600000), research(900000), research(1000000)]).length).toBe(3);
   });
 });
 

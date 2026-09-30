@@ -282,7 +282,40 @@ const MARKET_SEARCH_STALE_DAYS = 45;
  * "biasa saja" adalah cara paling halus untuk membuat sistem percaya diri
  * pada data yang tidak ada.
  */
-const SIGNAL_WEIGHTS = { occupancy: 0.6, pace: 0.28, market_search: 0.12, search_demand: 0.15 } as const;
+const SIGNAL_WEIGHTS = { occupancy: 0.6, pace: 0.28, market_search: 0.12, search_demand: 0.15, market_position: 0.25 } as const;
+
+/**
+ * SINYAL 6 (owner 2026-09-30): posisi harga terhadap villa SEKELAS.
+ *
+ * "Kita menggunakan AI dynamic pricing masa kalah dengan yang lain yang
+ * jelas-jelas manual." Sampai hari ini harga tetangga hanya bisa MENAHAN
+ * harga kita dari atas (langkah 6, cap) -- mesin tidak pernah bisa sadar
+ * bahwa kita dijual jauh di bawah villa sekelas lalu mendekat ke sana.
+ *
+ * Sengaja hanya ke ATAS dan sengaja kecil:
+ *  - ke bawah sudah diurus cap, dan riset saja tidak boleh memotong rate
+ *    plan pemilik (pelajaran 2026-09-11, Sabtu yang terpotong);
+ *  - ia masuk sebagai satu sinyal berbobot, bukan angka mutlak, jadi
+ *    okupansi yang kosong mendekati hari-H tetap lebih kuat (diskonnya
+ *    tetap jalan) -- beda dengan insiden 2026-09-12, saat harga tetangga
+ *    dipakai sebagai LANTAI dan melompatkan harga ke plafon;
+ *  - tidak ada umpan balik: anchor tetap base_rate dan median berasal dari
+ *    luar, jadi hasilnya sama berapa kali pun mesin jalan (tidak menumpuk
+ *    naik seperti bug 2026-09-11);
+ *  - tidak dipakai pada periode puncak/sepi: median ini harga MALAM BIASA.
+ * Tetap kena rem harian, aturan hari-H kosong, dan min/max_rate.
+ */
+const MARKET_POSITION_GAP_SHARE = 0.5;
+const MARKET_POSITION_MAX_UP_PCT = 0.1;
+
+/**
+ * Kompetitor yang dipilih owner sendiri sebagai pembanding sekelas
+ * (Marina Villa, Marvilla, Amora, Canggu -- 2026-09-30). Kalau cukup
+ * banyak, HANYA mereka yang dipakai: riset AI mingguan mencari "villa di
+ * sekitar" secara umum dan terus membawa villa mewah/hotel yang bukan
+ * kelas kita (Kharma, Hyatt), yang membuat median tidak berarti.
+ */
+export const OWNER_SELECTED_COMPETITOR = "owner_selected_competitor";
 
 /**
  * SINYAL 5 (owner 2026-09-24): pencarian tanggal di website loonars.id.
@@ -1184,6 +1217,24 @@ export function decideRateForDate(input: DateDecisionInput): DatePriceDecision {
     }
   }
 
+  // S6 · posisi pasar: villa sekelas dijual lebih mahal dari rate plan kita.
+  // Tidak dipakai kalau ada periode puncak/sepi -- lihat SINYAL 6 -- dan
+  // tidak dipakai saat diskon okupansi rendah sedang berjalan. Owner
+  // 2026-09-30: "ketika okupansi rendah kamu harus menurunkan harga, tapi
+  // jangan sampai melewati batas bawah" -- diskon itu harus utuh, tidak
+  // boleh dikurangi oleh harga tetangga; min_rate (langkah 9) tetap lantai.
+  const periodCovers = period !== null && (Number(period.suggested_adjustment_pct) || 0) !== 0;
+  const lowOccupancyDiscounting = occupancySignalPct < 0;
+  if (competitorMedian !== null && competitorMedian > structuralRate && !periodCovers && !lowOccupancyDiscounting) {
+    if (coldStart) {
+      reasonCodes.push("market_position_held_cold_start");
+    } else {
+      const gap = (competitorMedian - structuralRate) / structuralRate;
+      const positionPct = Math.min(MARKET_POSITION_MAX_UP_PCT, gap * MARKET_POSITION_GAP_SHARE);
+      signals.push({ code: "below_peer_market", pct: positionPct, weight: SIGNAL_WEIGHTS.market_position });
+    }
+  }
+
   const combined = combineDemandSignals(signals);
   for (const code of combined.codes) if (!reasonCodes.includes(code)) reasonCodes.push(code);
   decidedRate = Math.round(decidedRate * (1 + combined.pct));
@@ -1382,6 +1433,7 @@ function narrateDecision(codes: string[], guardrail: DatePriceDecision["guardrai
   else if (has("market_interest_down")) parts.push("sedikit diturunkan karena minat pencarian villa sedang turun");
 
   if (has("search_demand_high")) parts.push("sedikit dinaikkan karena tanggal ini banyak dicari di website");
+  if (has("below_peer_market")) parts.push("sedikit dinaikkan karena villa sekelas di sekitar dijual lebih mahal");
   if (has("competitor_market_cap")) parts.push("lalu dibatasi agar tidak melewati harga tengah villa sekitar");
   if (has("peak_competitor_cap")) parts.push("lalu dibatasi agar tidak melewati harga tengah villa sekitar untuk malam itu");
   if (has("peak_competitor_headroom")) parts.push("lalu dinaikkan mendekati harga villa sekitar untuk malam itu");
@@ -1405,6 +1457,13 @@ function narrateDecision(codes: string[], guardrail: DatePriceDecision["guardrai
 function pickPeriodForDate(periods: SeasonPeriod[]): SeasonPeriod | null {
   if (periods.length === 0) return null;
   return periods.reduce((best, p) => (Number(p.suggested_adjustment_pct) > Number(best.suggested_adjustment_pct) ? p : best));
+}
+
+/** Harga pembanding: kompetitor pilihan owner kalau cukup, selain itu semua villa hasil riset. Fungsi murni. */
+export function pickPeerPrices(rows: { price: number | string; created_by: string | null }[]): number[] {
+  const valid = rows.map((r) => ({ price: Number(r.price), owner: r.created_by === OWNER_SELECTED_COMPETITOR })).filter((r) => Number.isFinite(r.price) && r.price > 0);
+  const owner = valid.filter((r) => r.owner).map((r) => r.price);
+  return owner.length >= COMPETITOR_MIN_SAMPLES ? owner : valid.map((r) => r.price);
 }
 
 /**
@@ -1452,7 +1511,7 @@ export async function decideRatesForRoomType(
   const competitorSince = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
   const { data: competitorRates } = await supabase
     .from("villa_competitor_rates")
-    .select("price, observed_at")
+    .select("price, observed_at, created_by")
     .eq("room_type_id", roomType.id)
     .eq("competitor_type", "villa")
     .is("stay_date", null)
@@ -1482,7 +1541,7 @@ export async function decideRatesForRoomType(
     .gte("searched_at", searchSince)
     .gte("checkout", today);
   const searchDemand = buildSearchDemand((searchRows ?? []) as AvailabilitySearchRow[], today, roomType.code);
-  const competitorPrices = (competitorRates ?? []).map((r) => Number(r.price)).filter((n) => Number.isFinite(n) && n > 0);
+  const competitorPrices = pickPeerPrices((competitorRates ?? []) as { price: number | string; created_by: string | null }[]);
   const competitorMedian = competitorPrices.length >= COMPETITOR_MIN_SAMPLES ? median(competitorPrices) : null;
   const peakMedianByDate = new Map<string, number>();
   for (const [d, prices] of peakPricesByDate) {
