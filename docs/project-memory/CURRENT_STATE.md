@@ -2,6 +2,58 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-10-02 — Role manager + Kesiapan Kamar (buka-tutup kamar di Cloudbeds) — BELUM LIVE
+
+Owner: role login baru **manager** (Rebecca) yang hanya melihat satu modul,
+checklist kesiapan kamar (kebersihan, bathroom, linen, gorden, AC, TV,
+kebersihan kolam, air bersih, pembuangan air, lampu), dengan dua tombol
+**Kamar Siap** dan **Kamar Maintenance**.
+
+**Keputusan owner yang membentuk desainnya** (dua kali dikoreksi dalam
+percakapan; jangan diulangi): *"saat ini kamar otomatis terbuka kan,
+biarkan seperti itu, jika manager melihat ada kerusakan maka dia bisa
+menutup kamar, tp jika dia rasa kamar siap maka itu memicu kamar ttp ready
+dijual"*. Jadi **bawaannya TERBUKA**; tidak ada yang menutup kamar otomatis
+(tidak saat checkout, tidak saat belum dicek).
+
+**Cara kerja:**
+- Kamar Maintenance → Cloudbeds `postRoomBlock` (`out_of_service`, satu
+  roomID) → kamar itu hilang dari ketersediaan OTA. Juga ditolak di
+  loonars.id (`/public/availability`, `/public/bookings`) dan walk-in
+  (`POST /bookings`), karena jalur itu tidak lewat Cloudbeds. Catatan
+  kerusakan wajib (ikut jadi `roomBlockReason`). Maks 30 malam sekali
+  tutup; menekan lagi = perpanjang lewat `putRoomBlock` (blok yang sama,
+  bukan hapus-buat, supaya tidak ada celah kamar terjual).
+- Kamar Siap → wajib 10 poin dicentang → `deleteRoomBlock` kalau sedang
+  ditutup; kalau memang terbuka, hanya dicatat.
+- Setiap tulis ke Cloudbeds DIBACA BALIK (`getRoomBlocks?roomBlockID=`)
+  sebelum dianggap berhasil; kalau gagal, keadaan di sistem tidak diubah
+  dan manager melihat pesan Cloudbeds-nya. Semua tercatat di
+  `cloudbeds_events_log` (`outbound.room_block.*`) dan `villa_room_checks`.
+- Tidak bisa menutup tanggal yang bentrok dengan booking `terjadwal`/
+  `checkin` (memindahkan tamu = keputusan resepsionis).
+- `units.status` SENGAJA tidak disentuh (ditimpa alur checkin/checkout).
+
+**Akses:** villa-api mengunci role `manager` hanya ke `/manager/*`
+(+ `/me/password`). Ini penting: banyak rute (`/bookings`, `/transactions`,
+`/report`, `/units`, `/summary`) hanya menolak `owner`, sehingga role baru
+apa pun -- termasuk `finance` saat ini -- bisa membacanya. Admin juga bisa
+membuka `/manager` (menu "Kesiapan Kamar" di panel admin).
+
+**BELUM DIVERIFIKASI ke Cloudbeds sungguhan** (proxy lingkungan ini memblokir
+`api.cloudbeds.com`):
+1. apakah API key punya scope `write:roomblock` / `delete:roomblock`;
+2. apakah `endDate` room block INKLUSIF (malam terakhir ikut ditutup) --
+   kode menganggap inklusif. Ingat: `getRate` eksklusif, `putRate` inklusif;
+   jangan menebak. Uji pada satu kamar di tanggal jauh lalu lihat kalender
+   Cloudbeds. Pesan sukses menampilkan tanggal yang dibaca balik dari
+   Cloudbeds untuk membantu ini.
+
+**Belum diterapkan:** migrasi `20261002000002_manager_kesiapan_kamar.sql`
+belum di-apply, villa-api belum di-deploy, PR belum di-merge (menyentuh
+ketersediaan jual di OTA = uang → persetujuan owner). Akun Rebecca belum
+dibuat (Admin → Pengguna → role "Manager", setelah migrasi).
+
 ## 2026-10-02 — Finance: pemasukan diakui per tanggal check-in, hanya tamu yang sudah check-in
 
 Owner: "yang dicatat pemasukan itu adalah per tanggal check-in, jika masih
