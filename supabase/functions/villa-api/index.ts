@@ -975,14 +975,12 @@ async function hitungHargaPromo(promo, roomTypeId, tgl_checkin, tgl_checkout, ni
 }
 
 /**
- * Kode referral karyawan (owner 2026-10-02). Berbeda dari promo dalam dua
- * hal yang SENGAJA, keduanya keputusan owner:
- *
- *  - Diskonnya persen dari harga normal (10%) dan BOLEH menembus
- *    villa_room_types.min_rate. Promo tetap dijepit lantai harga; hanya
- *    referral yang dikecualikan. Jangan "rapikan" keduanya jadi satu jalur.
- *  - Karyawan pemilik kode mendapat fee sebesar potongan itu, sah setelah
- *    tamu lunas (diturunkan dari bookings.status, lihat statusFeeReferral).
+ * Kode referral karyawan (owner 2026-10-02). BUKAN diskon: tamu tetap
+ * membayar harga normal ("10% itu masuk ke fee, tp harga yg ditrima tamu ttp
+ * normal"). Kodenya hanya menandai karyawan yang membawa tamu, dan karyawan
+ * itu mendapat fee 10% dari nilai booking, sah setelah tamu lunas
+ * (diturunkan dari bookings.status, lihat statusFeeReferral). Referral
+ * tidak pernah mengubah harga tamu.
  *
  * Hanya dipakai jalur pemesanan loonars.id (/public/bookings).
  */
@@ -997,16 +995,10 @@ async function periksaReferral(kode){
   return {ok:true, ref};
 }
 
-function hitungDiskonReferral(ref, hargaNormal){
-  const persen = Number(ref.diskon_persen ?? 10);
-  const diskon = Math.round(Number(hargaNormal) * persen / 100);
-  return {
-    diskon_persen: persen,
-    diskon,
-    total: Math.max(0, Number(hargaNormal) - diskon),
-    // Keputusan owner: fee = sebesar potongan tamu.
-    fee: diskon,
-  };
+/** Fee karyawan dari nilai booking (yang ditagih ke tamu, tanpa kode unik). */
+function hitungFeeReferral(ref, nilaiBooking){
+  const persen = Number(ref.fee_persen ?? 10);
+  return {fee_persen: persen, fee: Math.round(Number(nilaiBooking) * persen / 100)};
 }
 
 /** 'menunggu_lunas' | 'sah' | 'gugur', dari status booking saat ini. */
@@ -1987,34 +1979,15 @@ Deno.serve(async (req)=>{
     });
   }
 
-  // Pratinjau kode referral karyawan. Sama seperti voucher investor, nama
-  // karyawan pemilik kode TIDAK dibocorkan ke halaman publik.
+  // Cek kode referral karyawan untuk form loonars.id. Tidak ada harga yang
+  // dihitung (referral tidak mengubah harga tamu), dan sama seperti voucher
+  // investor, nama karyawan pemilik kode TIDAK dibocorkan ke halaman publik.
   if(path==='/public/referral' && m==='GET'){
     const kode = String(url.searchParams.get('code') ?? '').trim().toUpperCase();
-    const checkin = url.searchParams.get('checkin') ?? '';
-    const checkout = url.searchParams.get('checkout') ?? '';
-    const roomTypeCode = String(url.searchParams.get('room_type') ?? '').trim();
     if(!kode) return err('Kode wajib diisi');
-    if(!isValidDateStr(checkin) || !isValidDateStr(checkout)) return err('Tanggal tidak valid');
-    if(new Date(checkout) <= new Date(checkin)) return err('Tanggal checkout harus setelah checkin');
     const cek = await periksaReferral(kode);
     if(!cek.ok) return json({berlaku:false, alasan:cek.alasan});
-
-    const persen = Number(cek.ref.diskon_persen ?? 10);
-    if(!roomTypeCode) return json({berlaku:true, kode:cek.ref.kode, diskon_persen:persen, harga_normal:null, hemat:null, total:null});
-    const nights = Math.max(1, Math.round((new Date(checkout).getTime() - new Date(checkin).getTime())/86400000));
-    const {data:rt} = await supabase.from('villa_room_types').select('id').eq('code', roomTypeCode).maybeSingle();
-    if(!rt) return json({berlaku:false, alasan:'Tipe unit tidak dikenali'});
-    const {data:unitContoh} = await supabase.from('units')
-      .select('id,tarif_harian,room_type_id').eq('room_type_id', rt.id).order('nomor').limit(1).maybeSingle();
-    if(!unitContoh) return json({berlaku:false, alasan:'Tipe unit tidak tersedia'});
-    const hargaNormal = await computeStayTarif(unitContoh, checkin, nights);
-    if(!(hargaNormal > 0)) return json({berlaku:false, alasan:'Harga normal belum bisa dihitung'});
-    const hasil = hitungDiskonReferral(cek.ref, hargaNormal);
-    return json({
-      berlaku:true, kode:cek.ref.kode, diskon_persen:hasil.diskon_persen, malam:nights,
-      harga_normal:hargaNormal, hemat:hasil.diskon, total:hasil.total,
-    });
+    return json({berlaku:true, kode:cek.ref.kode});
   }
 
   if(path==='/public/bookings' && m==='POST'){
@@ -2132,14 +2105,11 @@ Deno.serve(async (req)=>{
       }
     }
 
-    // Referral: 10% dari harga normal, SENGAJA tidak dijepit min_rate
-    // (keputusan owner 2026-10-02 -- lihat hitungDiskonReferral). Dihitung
-    // ulang di sini, tidak pernah dipercaya dari browser.
+    // Referral: harga tamu TIDAK diubah. Fee karyawan dihitung dari yang
+    // ditagih ke tamu (lihat hitungFeeReferral), di server.
     let referralTerpakai = null;
     if(referralCek){
-      const hasil = hitungDiskonReferral(referralCek.ref, hargaNormal);
-      computedTarif = hasil.total;
-      referralTerpakai = {ref: referralCek.ref, hasil};
+      referralTerpakai = {ref: referralCek.ref, hasil: hitungFeeReferral(referralCek.ref, computedTarif)};
     }
 
     const {data:g} = await supabase.from('guests').insert({nama, hp, email}).select('id').single();
@@ -2197,7 +2167,7 @@ Deno.serve(async (req)=>{
         voucher_id: voucherTerpakai ? voucherTerpakai.voucher.id : null,
         is_free_stay: false,
         catatan: referralTerpakai
-          ? `[Website] Referral ${referralTerpakai.ref.kode} (${referralTerpakai.ref.employee_nama}) -- diskon ${referralTerpakai.hasil.diskon_persen}% Rp ${Math.round(referralTerpakai.hasil.diskon).toLocaleString('id-ID')} dari harga normal Rp ${Math.round(hargaNormal).toLocaleString('id-ID')}.${catatan ? ` -- ${catatan}` : ''}`
+          ? `[Website] Referral ${referralTerpakai.ref.kode} (${referralTerpakai.ref.employee_nama}) -- fee karyawan ${referralTerpakai.hasil.fee_persen}% Rp ${Math.round(referralTerpakai.hasil.fee).toLocaleString('id-ID')} setelah lunas. Harga tamu normal.${catatan ? ` -- ${catatan}` : ''}`
           : voucherTerpakai
           ? `[Menginap investor] Kode ${voucherTerpakai.voucher.kode} atas nama ${voucherTerpakai.pemilik.nama} -- malam pertama gratis (Rp ${Math.round(nilaiMalamGratis).toLocaleString('id-ID')}), sisanya dibayar.${catatan ? ` -- ${catatan}` : ''}`
           : (catatan ? `[Website] ${catatan}` : '[Website] Booking mandiri dari loonars.id -- menunggu bukti pembayaran QRIS.'),
@@ -2243,10 +2213,8 @@ Deno.serve(async (req)=>{
         booking_id: booking.id,
         guest_nama: nama,
         tgl_checkin, tgl_checkout, malam: nights,
-        harga_normal: hargaNormal,
-        diskon_persen: referralTerpakai.hasil.diskon_persen,
-        diskon: referralTerpakai.hasil.diskon,
-        harga_setelah_diskon: referralTerpakai.hasil.total,
+        nilai_booking: computedTarif,
+        fee_persen: referralTerpakai.hasil.fee_persen,
         fee: referralTerpakai.hasil.fee,
       });
       if(refErr){
@@ -2291,7 +2259,7 @@ Deno.serve(async (req)=>{
     // ditampilkan ke tamu, supaya keduanya melihat angka yang sama persis.
     const notifySetting = await getSetting('villa_notify');
     await sendWa(notifySetting?.owner_hp ?? null,
-      `Booking baru dari website\n\n${nama} (${hp})\nUnit ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\nTotal (dengan kode unik): Rp ${Math.round(totalDitagih).toLocaleString('id-ID')}${promoTerpakai ? `\nPromo ${promoTerpakai.promo.kode} (normal Rp ${Math.round(promoTerpakai.hasil.harga_normal).toLocaleString('id-ID')})` : ''}${referralTerpakai ? `\nReferral ${referralTerpakai.ref.kode} (${referralTerpakai.ref.employee_nama}) -- diskon ${referralTerpakai.hasil.diskon_persen}%, normal Rp ${Math.round(hargaNormal).toLocaleString('id-ID')}` : ''}${voucherTerpakai ? `\nKode investor ${voucherTerpakai.voucher.kode} (${voucherTerpakai.pemilik.nama}) -- malam pertama gratis Rp ${Math.round(nilaiMalamGratis).toLocaleString('id-ID')}` : ''}\n\nKalau dana sudah masuk, sistem akan mengonfirmasi otomatis lewat email. Kalau belum juga terkonfirmasi, balas:\nLUNAS ${kode}`,
+      `Booking baru dari website\n\n${nama} (${hp})\nUnit ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\nTotal (dengan kode unik): Rp ${Math.round(totalDitagih).toLocaleString('id-ID')}${promoTerpakai ? `\nPromo ${promoTerpakai.promo.kode} (normal Rp ${Math.round(promoTerpakai.hasil.harga_normal).toLocaleString('id-ID')})` : ''}${referralTerpakai ? `\nReferral ${referralTerpakai.ref.kode} (${referralTerpakai.ref.employee_nama}) -- fee karyawan ${referralTerpakai.hasil.fee_persen}% Rp ${Math.round(referralTerpakai.hasil.fee).toLocaleString('id-ID')} setelah lunas` : ''}${voucherTerpakai ? `\nKode investor ${voucherTerpakai.voucher.kode} (${voucherTerpakai.pemilik.nama}) -- malam pertama gratis Rp ${Math.round(nilaiMalamGratis).toLocaleString('id-ID')}` : ''}\n\nKalau dana sudah masuk, sistem akan mengonfirmasi otomatis lewat email. Kalau belum juga terkonfirmasi, balas:\nLUNAS ${kode}`,
       {booking_id: booking.id, unit_id: freeUnit.id, template_type:'website_booking_awaiting_payment'});
 
     return json({
@@ -2300,7 +2268,7 @@ Deno.serve(async (req)=>{
       tarif: computedTarif, total_bayar: totalDitagih, kode_unik: kodeUnik, status: booking.status,
       promo: promoTerpakai ? {kode: promoTerpakai.promo.kode, nama: promoTerpakai.promo.nama, harga_normal: promoTerpakai.hasil.harga_normal, hemat: promoTerpakai.hasil.hemat} : null,
       menginap_gratis: voucherTerpakai ? {kode: voucherTerpakai.voucher.kode, malam_gratis: 1, hemat: nilaiMalamGratis} : null,
-      referral: referralTerpakai ? {kode: referralTerpakai.ref.kode, diskon_persen: referralTerpakai.hasil.diskon_persen, harga_normal: hargaNormal, hemat: referralTerpakai.hasil.diskon} : null,
+      referral: referralTerpakai ? {kode: referralTerpakai.ref.kode} : null,
     }, 201);
   }
 

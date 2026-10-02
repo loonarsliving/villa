@@ -9,13 +9,14 @@
 --
 -- Keputusan owner yang membentuk skema ini (dijawab 2026-10-02):
 --
--- 1. Diskon 10% PENUH, boleh menembus villa_room_types.min_rate. Ini
---    pengecualian yang disengaja dari prinsip promo (villa_promos selalu
---    dijepit ke lantai harga) -- HANYA untuk referral, bukan untuk promo.
--- 2. Fee karyawan = sebesar potongan yang diterima tamu (10% dari harga
---    normal). Disimpan sebagai angka rupiah per pemakaian, bukan dihitung
---    ulang belakangan, supaya perubahan persen di kemudian hari tidak
---    diam-diam mengubah fee yang sudah dijanjikan.
+-- 1. "10%" itu FEE, BUKAN diskon: "diskon 10% itu fungsinya agar 10% itu
+--    masuk ke fee, tp harga yg ditrima tamu ttp normal". Tamu membayar harga
+--    normal; kode hanya menandai karyawan mana yang membawa tamu itu.
+--    Karena itu harga tamu TIDAK disentuh sama sekali oleh referral.
+-- 2. Fee karyawan = 10% dari nilai booking (harga normal, tanpa kode unik
+--    pembayaran). Disimpan sebagai angka rupiah per pemakaian, bukan
+--    dihitung ulang belakangan, supaya perubahan persen di kemudian hari
+--    tidak diam-diam mengubah fee yang sudah dijanjikan.
 -- 3. Fee baru SAH setelah tamu lunas. Status itu TIDAK disimpan di sini:
 --    diturunkan dari bookings.status saat dibaca (terjadwal/checkin/
 --    checkout = lunas, batal = gugur), supaya tidak ada dua sumber
@@ -39,7 +40,7 @@ create table if not exists villa_referral_codes (
   kode text not null unique,
   employee_id uuid references employees(id) on delete set null,
   employee_nama text not null,
-  diskon_persen numeric not null default 10,
+  fee_persen numeric not null default 10,
   aktif boolean not null default true,
   catatan text,
   dibuat_oleh text,
@@ -47,7 +48,7 @@ create table if not exists villa_referral_codes (
   updated_at timestamptz not null default now(),
 
   constraint villa_referral_codes_kode_format check (kode ~ '^REF-[A-Z0-9]{2,20}$'),
-  constraint villa_referral_codes_persen_wajar check (diskon_persen > 0 and diskon_persen <= 50)
+  constraint villa_referral_codes_persen_wajar check (fee_persen > 0 and fee_persen <= 50)
 );
 
 create index if not exists villa_referral_codes_employee_idx on villa_referral_codes (employee_id);
@@ -66,11 +67,9 @@ create table if not exists villa_referral_redemptions (
   tgl_checkin date,
   tgl_checkout date,
   malam integer,
-  harga_normal numeric not null,
-  diskon_persen numeric not null,
-  diskon numeric not null,
-  -- Yang ditagih ke tamu, tanpa kode unik pembayaran.
-  harga_setelah_diskon numeric not null,
+  -- Nilai booking = yang ditagih ke tamu (harga normal), tanpa kode unik.
+  nilai_booking numeric not null,
+  fee_persen numeric not null,
   fee numeric not null,
   -- Pencairan fee ke karyawan, diisi Finance.
   fee_dibayar_at timestamptz,
@@ -78,7 +77,7 @@ create table if not exists villa_referral_redemptions (
   created_at timestamptz not null default now(),
 
   constraint villa_referral_redemptions_angka_wajar check (
-    harga_normal >= 0 and diskon >= 0 and fee >= 0 and harga_setelah_diskon >= 0
+    nilai_booking >= 0 and fee >= 0
   )
 );
 

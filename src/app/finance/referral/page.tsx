@@ -20,9 +20,9 @@ const STATUS_TONE: Record<ReferralFeeStatus, "ok" | "pending" | "danger"> = {
 
 /**
  * Fee referral karyawan (owner 2026-10-02). Kodenya dibuat Vando dari
- * Mkhsistem dan dipakai tamu di loonars.id; tamu dapat diskon 10% dan
- * karyawan pemilik kode dapat fee sebesar diskon itu, SAH setelah tamu
- * lunas. Status sah/gugur dihitung villa-api dari status booking, tidak
+ * Mkhsistem dan dipakai tamu di loonars.id. Tamu tetap membayar harga
+ * normal; karyawan pemilik kode dapat fee 10% dari nilai booking, SAH
+ * setelah tamu lunas. Status sah/gugur dihitung villa-api dari status booking, tidak
  * disimpan, jadi halaman ini tidak pernah bisa berbeda dari kalender.
  */
 export default function ReferralFeesPage() {
@@ -76,11 +76,10 @@ export default function ReferralFeesPage() {
   }, [data]);
 
   const totals = useMemo(() => {
-    const t = { feeSah: 0, feeMenunggu: 0, feeDibayar: 0, diskon: 0, booking: 0 };
+    const t = { feeSah: 0, feeMenunggu: 0, feeDibayar: 0, booking: 0 };
     for (const p of data?.pemakaian ?? []) {
       if (p.status_fee === "gugur") continue;
       t.booking += 1;
-      t.diskon += Number(p.diskon);
       if (p.status_fee === "sah") {
         t.feeSah += Number(p.fee);
         if (p.fee_dibayar_at) t.feeDibayar += Number(p.fee);
@@ -94,7 +93,7 @@ export default function ReferralFeesPage() {
   const pemakaian = (data?.pemakaian ?? []).filter((p) => !filterKaryawan || p.employee_nama === filterKaryawan);
 
   return (
-    <FinanceShell pageTitle="Fee Referral" pageSub="Kode referral karyawan: diskon tamu 10%, fee karyawan sebesar diskon, sah setelah tamu lunas">
+    <FinanceShell pageTitle="Fee Referral" pageSub="Kode referral karyawan: tamu bayar harga normal, karyawan dapat fee 10% dari nilai booking setelah tamu lunas">
       {loading && !data && <Loading />}
       {error && <div className="text-ruby-500 text-xs mb-3">{error}</div>}
       {data && (
@@ -170,8 +169,7 @@ export default function ReferralFeesPage() {
                       <th className="px-3 py-2">Kode</th>
                       <th className="px-3 py-2">Tamu</th>
                       <th className="px-3 py-2">Menginap</th>
-                      <th className="px-3 py-2 text-right">Harga normal</th>
-                      <th className="px-3 py-2 text-right">Diskon</th>
+                      <th className="px-3 py-2 text-right">Nilai booking</th>
                       <th className="px-3 py-2 text-right">Fee</th>
                       <th className="px-3 py-2">Status</th>
                       <th className="px-3 py-2">Pencairan</th>
@@ -188,11 +186,10 @@ export default function ReferralFeesPage() {
                           {p.tgl_checkin ? `${fmtDate(p.tgl_checkin)} · ${p.malam ?? "?"} mlm` : "—"}
                           {p.unit_nomor && <span className="text-ink/40"> · Unit {p.unit_nomor}</span>}
                         </td>
-                        <td className="px-3 py-2.5 text-right">{fmtCurrencyFull(p.harga_normal)}</td>
-                        <td className="px-3 py-2.5 text-right">
-                          {fmtCurrencyFull(p.diskon)} <span className="text-ink/40">({Number(p.diskon_persen)}%)</span>
+                        <td className="px-3 py-2.5 text-right">{fmtCurrencyFull(p.nilai_booking)}</td>
+                        <td className="px-3 py-2.5 text-right font-semibold">
+                          {fmtCurrencyFull(p.fee)} <span className="text-ink/40 font-normal">({Number(p.fee_persen)}%)</span>
                         </td>
-                        <td className="px-3 py-2.5 text-right font-semibold">{fmtCurrencyFull(p.fee)}</td>
                         <td className="px-3 py-2.5">
                           <Badge tone={STATUS_TONE[p.status_fee]}>{STATUS_LABEL[p.status_fee]}</Badge>
                         </td>

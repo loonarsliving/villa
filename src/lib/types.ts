@@ -646,7 +646,7 @@ export interface ReferralCodeRow {
   kode: string;
   employee_id: string | null;
   employee_nama: string;
-  diskon_persen: number;
+  fee_persen: number;
   aktif: boolean;
   catatan: string | null;
   dibuat_oleh: string | null;
@@ -672,10 +672,9 @@ export interface ReferralRedemptionRow {
   tgl_checkin: string | null;
   tgl_checkout: string | null;
   malam: number | null;
-  harga_normal: number;
-  diskon_persen: number;
-  diskon: number;
-  harga_setelah_diskon: number;
+  /** Yang ditagih ke tamu (harga normal, tanpa kode unik). */
+  nilai_booking: number;
+  fee_persen: number;
   fee: number;
   fee_dibayar_at: string | null;
   fee_dibayar_oleh: string | null;

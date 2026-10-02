@@ -7,9 +7,8 @@ _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 Lihat CHANGELOG 2026-10-02. Kode di branch `claude/referral-karyawan-r7k2pd`
 di tiga repo (villa, loonars, Mkhsistem). Belum ada yang live: migrasi villa
 `20261002000001` dan Mkhsistem `0283` belum di-apply, villa-api belum
-di-deploy, PR belum di-merge, karena fitur ini mengubah harga tamu (diskon
-10% yang menembus `min_rate` atas keputusan owner) dan menciptakan kewajiban
-bayar fee ke karyawan. Urutan rilis yang aman: apply kedua migrasi -> deploy
+di-deploy, PR belum di-merge, karena fitur ini menciptakan kewajiban bayar
+fee 10% ke karyawan (harga tamu TIDAK berubah -- keputusan owner). Urutan rilis yang aman: apply kedua migrasi -> deploy
 villa-api -> merge villa & Mkhsistem -> merge loonars (form baru mengirim
 `referral_code`, yang diabaikan villa-api lama).
 
