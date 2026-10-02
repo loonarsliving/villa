@@ -2,6 +2,49 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-10-02 — Finance: pemasukan diakui per tanggal check-in, hanya tamu yang sudah check-in
+
+Owner: "yang dicatat pemasukan itu adalah per tanggal check-in, jika masih
+bookingan biarkan itu ada di Cloudbeds, tapi di sistem per tanggal check-in,
+agar kita tidak kaget ketika ada yang membatalkan bookingan, dan hitungan
+finance lebih stabil".
+
+**Sebelumnya:** endpoint `/finance/*` sudah memfilter per `tgl_checkin`,
+tapi menghitung SEMUA booking yang tidak batal, termasuk yang masih
+`terjadwal` (tamu belum datang). Data Oktober per 2 Okt:
+- sudah check-in: 9 booking, Rp9,15 jt;
+- masih terjadwal: 28 booking, Rp19,28 jt;
+- sudah batal: 8 booking, Rp17,97 jt, semuanya batal sebelum tamunya datang.
+
+Dashboard lama menampilkan Rp28,4 jt sebagai pendapatan Oktober, dan angka
+itu bisa turun setiap kali ada pembatalan.
+
+**Sekarang** (villa-api, satu aturan `isPemasukanDiakui` /
+`STATUS_PEMASUKAN_DIAKUI = ['checkin','checkout']`):
+- `/finance/summary`: gross/net/payment/outstanding/OTA receivable hanya
+  dari booking yang sudah check-in. Ada field baru `pipeline`
+  (booking mendatang: jumlah, nilai, yang lewat tanggal) dan
+  `recognition_rule`. Alert baru `belum_checkin` muncul untuk booking yang
+  sudah lewat tanggal check-in tapi belum di-check-in.
+- `/finance/channel-breakdown` dan `computeNetRevenueForRange` (Survival
+  Control Center, investor entitlement, guarantee gap) memakai aturan yang
+  sama.
+- `ensureFinanceSettlements` hanya membuat baris settlement untuk booking
+  yang sudah check-in.
+- `/finance/bookings` tetap menampilkan semua booking, dengan
+  `pemasukan_diakui`. Halaman menandai yang belum dihitung.
+- UI `/finance`: kartu "Gross Revenue (sudah check-in)" dan kartu baru
+  "Booking Mendatang (belum dihitung)".
+
+**Tidak disentuh:** tabel `transactions`, bagi hasil, dan rumus dividen
+investor (`PHASE0-BASELINE.md` §2). Bagi hasil sudah dicatat saat check-in
+lewat alur front desk. Tidak ada perubahan skema.
+
+Konsekuensi yang perlu diingat: di awal bulan, pendapatan dan investor
+entitlement di Survival Control Center terlihat lebih kecil dari sebelumnya,
+lalu naik seiring tamu datang. Itu memang tujuannya. Angka booking mendatang
+ada di kartu tersendiri.
+
 ## 2026-10-02 — KEPUTUSAN OWNER: harga OTA di bawah batas minimal DIBIARKAN (fase ramp-up 3 bulan)
 
 Owner membandingkan harga Agoda, Booking.com, dan website untuk 6 Okt. Saya

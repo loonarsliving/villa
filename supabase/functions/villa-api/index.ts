@@ -1386,9 +1386,33 @@ function calculateExpectedSettlement({ sumber, tgl_checkin, tgl_checkout, config
   };
 }
 
+/**
+ * PENGAKUAN PEMASUKAN (owner 2026-10-02): pemasukan baru dicatat pada
+ * tanggal check-in, dan hanya untuk tamu yang BENAR-BENAR sudah check-in
+ * (status checkin/checkout). Booking yang masih 'terjadwal' tetap ada di
+ * Cloudbeds sebagai booking mendatang, tapi tidak dihitung sebagai
+ * pemasukan.
+ *
+ * Alasan owner: "agar kita tidak kaget ketika ada yang membatalkan
+ * bookingan, dan hitungan finance lebih stabil". Data 2 Okt 2026 jadi
+ * buktinya: 8 booking Oktober senilai Rp17,97 jt batal sebelum tamunya
+ * datang, padahal sebelumnya sempat ikut terhitung sebagai pendapatan
+ * bulan itu. Dengan aturan ini angka pemasukan hanya bisa NAIK seiring
+ * tamu datang, tidak bisa turun karena pembatalan.
+ *
+ * Satu tempat aturan ini didefinisikan; summary, channel breakdown,
+ * survival KPI, dan settlement semuanya memakainya.
+ */
+const STATUS_PEMASUKAN_DIAKUI = ['checkin', 'checkout'];
+function isPemasukanDiakui(b){
+  return STATUS_PEMASUKAN_DIAKUI.includes(b.status);
+}
+
 /** Lazily creates a finance_settlements row for any booking that doesn't have one yet. Idempotent (unique booking_id, upsert ignoreDuplicates). */
 async function ensureFinanceSettlements(bookings, configMap){
-  const candidates = bookings.filter(b => b.status !== 'batal');
+  // Settlement hanya untuk pemasukan yang sudah diakui: membuatnya untuk
+  // booking yang belum datang berarti menagih uang yang bisa batal.
+  const candidates = bookings.filter(isPemasukanDiakui);
   if(!candidates.length) return;
   const rows = candidates.map(b => {
     const calc = calculateExpectedSettlement({ sumber: b.sumber, tgl_checkin: b.tgl_checkin, tgl_checkout: b.tgl_checkout, configMap });
@@ -1467,7 +1491,7 @@ async function computeNetRevenueForRange(from, to){
   const { data: bookings } = await supabase.from('bookings')
     .select('sumber,total_bayar,tarif,durasi_malam,status')
     .gte('tgl_checkin', from).lte('tgl_checkin', to)
-    .neq('status', 'batal');
+    .in('status', STATUS_PEMASUKAN_DIAKUI);
   const rows = bookings ?? [];
   const { commissionPctBySumber, commission_source } = await getOtaCommissionPctMap();
   let gross = 0, commission = 0, room_nights = 0;
@@ -3591,9 +3615,14 @@ Deno.serve(async (req)=>{
     const configMap = await getSettlementConfigMap();
     await ensureFinanceSettlements(bookings, configMap);
 
-    const active = bookings.filter(b=>b.status!=='batal');
-    const cancelled = bookings.length - active.length;
+    const active = bookings.filter(isPemasukanDiakui);
+    const cancelled = bookings.filter(b=>b.status==='batal').length;
     const amountOf = b => Number(b.total_bayar ?? b.tarif ?? 0);
+    // Booking mendatang: masih di Cloudbeds, belum pemasukan.
+    const todayForPipeline = todayWIB();
+    const pipelineRows = bookings.filter(b=>b.status==='terjadwal');
+    const pipelineAmount = pipelineRows.reduce((s,b)=>s+amountOf(b),0);
+    const pipelineOverdue = pipelineRows.filter(b=>b.tgl_checkin < todayForPipeline);
     const gross_revenue = active.reduce((s,b)=>s+amountOf(b),0);
     const payment_received = active.filter(b=>paymentStatusForBooking(b)==='PAID').reduce((s,b)=>s+amountOf(b),0);
     const outstanding = active.reduce((s,b)=>s+outstandingForBooking(b, amountOf(b)),0);
@@ -3629,9 +3658,17 @@ Deno.serve(async (req)=>{
     if(alertsDueToday>0) alerts.push({ type:'settlement_due', level:'info', message:`${alertsDueToday} settlement diperkirakan cair hari ini.` });
     if(alertsOverdue>0) alerts.push({ type:'overdue', level:'danger', message:`${alertsOverdue} settlement sudah lewat tanggal perkiraan cair dan belum diterima.` });
     if(alertsUnknown>0) alerts.push({ type:'unknown_settlement_rule', level:'warning', message:`${alertsUnknown} transaksi punya aturan settlement yang belum dikonfigurasi (UNKNOWN).` });
+    if(pipelineOverdue.length>0) alerts.push({ type:'belum_checkin', level:'warning', message:`${pipelineOverdue.length} booking sudah lewat tanggal check-in tapi belum di-check-in di sistem -- tidak dihitung sebagai pemasukan sampai resepsionis meng-check-in (atau tandai batal/no-show).` });
 
     return json({
       period: { from, to },
+      recognition_rule: 'Pemasukan diakui per tanggal check-in, hanya untuk tamu yang sudah check-in (status checkin/checkout). Booking yang belum datang ditampilkan terpisah sebagai booking mendatang dan tidak dihitung.',
+      pipeline: {
+        amount: pipelineAmount,
+        count: pipelineRows.length,
+        overdue_count: pipelineOverdue.length,
+        note: 'Booking dengan tanggal check-in di periode ini yang tamunya belum datang. Masih tercatat di Cloudbeds, belum dihitung sebagai pemasukan -- bisa berubah kalau dibatalkan.',
+      },
       gross_revenue, net_revenue: gross_revenue,
       net_revenue_note: 'Sama dengan Gross Revenue -- integrasi Cloudbeds ini hanya membawa total reservasi (grandTotal), tidak ada feed diskon/refund terpisah untuk dikurangkan.',
       payment_received,
@@ -3667,7 +3704,7 @@ Deno.serve(async (req)=>{
     const { from, to } = financeDateRange();
     const { data: rows, error } = await supabase.from('bookings')
       .select('id,sumber,status,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_balance')
-      .gte('tgl_checkin', from).lte('tgl_checkin', to).neq('status','batal');
+      .gte('tgl_checkin', from).lte('tgl_checkin', to).in('status', STATUS_PEMASUKAN_DIAKUI);
     if(error) return err(error.message);
     const bookings = rows ?? [];
     const configMap = await getSettlementConfigMap();
@@ -3736,7 +3773,7 @@ Deno.serve(async (req)=>{
     let bookings = rows ?? [];
 
     const configMap = await getSettlementConfigMap();
-    await ensureFinanceSettlements(bookings.filter(b=>b.status!=='batal'), configMap);
+    await ensureFinanceSettlements(bookings, configMap);
     const ids = bookings.map(b=>b.id);
     const settlementByBooking = new Map();
     if(ids.length){
@@ -3753,6 +3790,7 @@ Deno.serve(async (req)=>{
         normalized_channel: normalizedChannel(b.sumber), status: b.status,
         tgl_checkin: b.tgl_checkin, tgl_checkout: b.tgl_checkout, durasi_malam: b.durasi_malam,
         revenue: amount, payment_status: pay, outstanding: outstandingForBooking(b, amount),
+        pemasukan_diakui: isPemasukanDiakui(b),
         payment_status_source: b.cloudbeds_balance != null ? 'cloudbeds_balance' : 'booking_status_estimate',
         cloudbeds_reservation_id: b.cloudbeds_reservation_id,
         settlement_status: s?.settlement_status ?? null,

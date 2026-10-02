@@ -248,7 +248,7 @@ export default function FinancePage() {
 
           {/* 6 summary cards */}
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
-            <StatCard label="Gross Revenue" value={fmtCurrency(summary.gross_revenue)} accent="azure" />
+            <StatCard label="Gross Revenue (sudah check-in)" value={fmtCurrency(summary.gross_revenue)} accent="azure" sub={summary.recognition_rule} />
             <StatCard label="Net Revenue" value={fmtCurrency(summary.net_revenue)} accent="azure" sub={summary.net_revenue_note} />
             <StatCard
               label="Payment Received"
@@ -264,6 +264,14 @@ export default function FinancePage() {
               accent={summary.cash_received.verified ? "sage" : "neutral"}
               sub={summary.cash_received.note}
             />
+            {summary.pipeline && (
+              <StatCard
+                label="Booking Mendatang (belum dihitung)"
+                value={fmtCurrency(summary.pipeline.amount)}
+                accent="neutral"
+                sub={`${summary.pipeline.count} booking belum check-in${summary.pipeline.overdue_count > 0 ? ` · ${summary.pipeline.overdue_count} sudah lewat tanggalnya` : ""}. ${summary.pipeline.note}`}
+              />
+            )}
           </div>
 
           <Card className="mb-4">
@@ -395,7 +403,12 @@ export default function FinancePage() {
                       <td className="px-3 py-2.5">{b.unit_nomor}</td>
                       <td className="px-3 py-2.5">{b.guest_nama}</td>
                       <td className="px-3 py-2.5">{b.normalized_channel}</td>
-                      <td className="px-3 py-2.5">{fmtCurrencyFull(b.revenue)}</td>
+                      <td className="px-3 py-2.5">
+                        {fmtCurrencyFull(b.revenue)}
+                        {b.pemasukan_diakui === false && b.status !== "batal" && (
+                          <div className="text-ink/30 text-[9.5px] mt-0.5">belum check-in · belum dihitung</div>
+                        )}
+                      </td>
                       <td className="px-3 py-2.5">
                         <Badge tone={b.payment_status === "PAID" ? "ok" : b.payment_status === "CANCELLED" ? "pending" : "danger"}>
                           {b.payment_status}
