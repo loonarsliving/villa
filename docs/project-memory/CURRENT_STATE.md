@@ -37,11 +37,16 @@ dijual"*. Jadi **bawaannya TERBUKA**; tidak ada yang menutup kamar otomatis
 **Akses:** villa-api mengunci role `manager` hanya ke `/manager/*`
 (+ `/me/password`). Ini penting: banyak rute (`/bookings`, `/transactions`,
 `/report`, `/units`, `/summary`) hanya menolak `owner`, sehingga role baru
-apa pun -- termasuk `finance` saat ini -- bisa membacanya. Admin juga bisa
+apa pun bisa membacanya. Untuk `finance` itu MEMANG DISENGAJA (owner
+2026-10-02: finance harus bisa mengecek data booking dan transaksi) --
+jangan dikunci. Admin juga bisa
 membuka `/manager` (menu "Kesiapan Kamar" di panel admin).
 
-**BELUM DIVERIFIKASI ke Cloudbeds sungguhan** (proxy lingkungan ini memblokir
-`api.cloudbeds.com`):
+**Owner minta API diuji dulu sebelum ke production (2026-10-02).** Sesi ini
+BELUM berhasil mengujinya: sandbox diblokir ke `api.cloudbeds.com` dan ke
+`*.supabase.co`; fungsi uji sementara `uji-roomblock` sempat dipasang di
+Supabase tapi tidak pernah dijalankan, dan sudah diganti stub 410. Yang
+masih harus dibuktikan:
 1. apakah API key punya scope `write:roomblock` / `delete:roomblock`;
 2. apakah `endDate` room block INKLUSIF (malam terakhir ikut ditutup) --
    kode menganggap inklusif. Ingat: `getRate` eksklusif, `putRate` inklusif;
