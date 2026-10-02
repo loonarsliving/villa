@@ -1,4 +1,4 @@
-export type Role = "owner" | "receptionist" | "admin" | "finance";
+export type Role = "owner" | "receptionist" | "admin" | "finance" | "manager";
 
 export interface SessionUser {
   id: string;
@@ -693,4 +693,57 @@ export interface ReferralRedemptionRow {
 export interface ReferralFeesResponse {
   kode: ReferralCodeRow[];
   pemakaian: ReferralRedemptionRow[];
+}
+
+/** Satu kamar di modul Kesiapan Kamar (villa-api GET /manager/kamar). */
+export interface KamarKesiapan {
+  unit_id: string;
+  nomor: string;
+  blok: string;
+  status_unit: Unit["status"];
+  tipe: string | null;
+  cloudbeds_terpetakan: boolean;
+  /** null = kamar terbuka dan dijual seperti biasa (keadaan bawaan). */
+  maintenance: {
+    tutup_mulai: string;
+    tutup_sampai: string;
+    alasan: string;
+    cloudbeds_room_block_id: string;
+    ditutup_oleh_nama: string | null;
+    updated_at: string;
+    /** Tanggal tutupnya sudah lewat -- Cloudbeds sudah menjualnya lagi. */
+    berakhir: boolean;
+  } | null;
+  cek_terakhir: {
+    hasil: "siap" | "maintenance";
+    checklist: Record<string, boolean>;
+    catatan: string | null;
+    cloudbeds_aksi: string;
+    cloudbeds_pesan: string | null;
+    dicek_oleh_nama: string | null;
+    created_at: string;
+  } | null;
+  booking_mendatang: { tgl_checkin: string; tgl_checkout: string | null; sedang_menginap: boolean }[];
+}
+
+export interface KesiapanKamarResponse {
+  hari_ini: string;
+  checklist: string[];
+  maks_malam: number;
+  kamar: KamarKesiapan[];
+}
+
+export interface RiwayatCekKamar {
+  id: string;
+  unit_id: string;
+  unit_nomor: string | null;
+  hasil: "siap" | "maintenance";
+  checklist: Record<string, boolean>;
+  catatan: string | null;
+  tutup_mulai: string | null;
+  tutup_sampai: string | null;
+  cloudbeds_aksi: "ditutup" | "diperpanjang" | "dibuka" | "tidak_perlu" | "gagal";
+  cloudbeds_pesan: string | null;
+  dicek_oleh_nama: string | null;
+  created_at: string;
 }

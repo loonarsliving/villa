@@ -25,6 +25,7 @@ export function AdminShell({ pageTitle, pageSub, children }: { pageTitle: string
       title: "Operasional",
       items: [
         { href: "/front-desk/booking", label: "Kalender Booking", icon: "◎" },
+        { href: "/manager", label: "Kesiapan Kamar", icon: "✓" },
         { href: "/front-desk/chat", label: "Chat", icon: "◉", badge: chatUnread },
       ],
     },
