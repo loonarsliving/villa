@@ -2,7 +2,7 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
-## 2026-10-02 — Role manager + Kesiapan Kamar (buka-tutup kamar di Cloudbeds) — BELUM LIVE
+## 2026-10-02 — Role manager + Kesiapan Kamar (buka-tutup kamar di Cloudbeds) — LIVE, API room block BELUM TERUJI
 
 Owner: role login baru **manager** (Rebecca) yang hanya melihat satu modul,
 checklist kesiapan kamar (kebersihan, bathroom, linen, gorden, AC, TV,
@@ -54,10 +54,29 @@ masih harus dibuktikan:
    Cloudbeds. Pesan sukses menampilkan tanggal yang dibaca balik dari
    Cloudbeds untuk membantu ini.
 
-**Belum diterapkan:** migrasi `20261002000002_manager_kesiapan_kamar.sql`
-belum di-apply, villa-api belum di-deploy, PR belum di-merge (menyentuh
-ketersediaan jual di OTA = uang → persetujuan owner). Akun Rebecca belum
-dibuat (Admin → Pengguna → role "Manager", setelah migrasi).
+**Diterapkan 2026-10-02 atas persetujuan owner** (*"Bawa saja ke
+production"*), walau API room block belum teruji: migrasi
+`20261002000002` sudah di-apply (lewat `execute_sql` per bagian, karena
+`apply_migration` berulang kali timeout 60 dtk tanpa error di log
+Postgres; hanya bagian role yang tercatat di `schema_migrations` sebagai
+`manager_kesiapan_kamar_role`), PR #146 di-merge → villa-api & Vercel
+ter-deploy. Akun Rebecca belum dibuat (Admin → Pengguna → role "Manager").
+**Penekanan "Kamar Maintenance" pertama kali = uji sungguhan**: lakukan pada
+kamar kosong, tanggal jauh, lalu langsung "Kamar Siap"; lihat
+`cloudbeds_events_log` (`outbound.room_block.*`) dan kalender Cloudbeds.
+
+**Sinkronisasi (owner menegaskan loonars.id & Front Desk sinkron realtime
+dengan Cloudbeds):** sinkronnya lewat RESERVASI (webhook + cron 10 menit
+masuk, `postReservation` keluar). Room block BUKAN reservasi, jadi tidak
+pernah masuk tabel `bookings` -- karena itu pengecekan
+`unitMaintenanceBentrok()` di `/public/availability`, `/public/bookings`,
+dan `POST /bookings` tetap diperlukan. Jangan dihapus dengan alasan
+"sudah sinkron".
+
+**Sisa uji coba:** Edge Function `uji-roomblock` (bukan villa-api) masih ada
+di proyek Supabase sebagai stub yang selalu menjawab 410 dan
+`verify_jwt=true`. Tidak pernah menjalankan panggilan Cloudbeds. Boleh
+dihapus dari dashboard Supabase (MCP tidak punya alat hapus fungsi).
 
 ## 2026-10-02 — Finance: pemasukan diakui per tanggal check-in, hanya tamu yang sudah check-in
 

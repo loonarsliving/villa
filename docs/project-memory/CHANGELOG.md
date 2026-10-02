@@ -4,11 +4,11 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
-### 2026-10-02 — Role manager + Kesiapan Kamar (buka-tutup kamar di Cloudbeds) — BELUM LIVE
+### 2026-10-02 — Role manager + Kesiapan Kamar (buka-tutup kamar di Cloudbeds) — LIVE (PR #146)
 - Role login `manager` (Rebecca): hanya modul `/manager` (checklist 10 poin + Kamar Siap / Kamar Maintenance) dan `/manager/riwayat`. villa-api menolak role ini di luar `/manager/*`.
 - Kamar Maintenance = Cloudbeds room block `out_of_service` (post/put, dibaca balik); Kamar Siap = `deleteRoomBlock`. Bawaan tetap TERBUKA (keputusan owner). Unit maintenance juga ditolak di loonars.id dan walk-in.
 - Migrasi `20261002000002_manager_kesiapan_kamar.sql`: role `manager` di `villa_users_role_check`, tabel `villa_room_maintenance` (keadaan sekarang) dan `villa_room_checks` (riwayat), RLS service_role.
-- **Belum diterapkan:** migrasi, deploy villa-api, merge -- menunggu persetujuan owner (ketersediaan jual OTA = uang). Scope room block API key dan semantik `endDate` belum diuji ke Cloudbeds sungguhan.
+- Diterapkan atas persetujuan owner ("bawa saja ke production"): migrasi di-apply, PR di-merge. Scope room block API key dan semantik `endDate` BELUM diuji ke Cloudbeds sungguhan -- penekanan pertama tombol Maintenance adalah ujinya.
 
 ### 2026-10-02 — Kode referral karyawan (fee karyawan 10%, harga tamu normal) — BELUM LIVE
 - Owner: kode referral yang dibuat Vando di Mkhsistem, dikirim ke karyawan lewat WA, dipakai tamu di loonars.id; karyawan yang menjual dapat fee; tabel fee di Finance villa.

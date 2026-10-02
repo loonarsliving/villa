@@ -215,7 +215,7 @@ service_role saja, tidak ada policy untuk `anon`/`authenticated`.
 - Status fee (menunggu lunas / sah / gugur) **tidak disimpan**, diturunkan villa-api dari `bookings.status`.
 - RLS ON, satu policy service_role. Semua akses lewat villa-api.
 
-## `villa_room_maintenance` / `villa_room_checks` + role `manager` (2026-10-02, Kesiapan Kamar) — migrasi ditulis, BELUM di-apply
+## `villa_room_maintenance` / `villa_room_checks` + role `manager` (2026-10-02, Kesiapan Kamar) — SUDAH di-apply 2026-10-02
 Migrasi `20261002000002_manager_kesiapan_kamar.sql`:
 - `villa_users_role_check` diperluas dengan `'manager'` (daftar lama dibaca langsung dari DB: owner, receptionist, admin, security, cleaning_service, finance).
 - `villa_room_maintenance` — satu baris per unit yang SEDANG ditutup (PK `unit_id`): `tutup_mulai`/`tutup_sampai` (malam pertama & terakhir, inklusif), `alasan`, `cloudbeds_room_block_id`, siapa yang menutup. Tidak ada baris = kamar dijual (bawaan). Baris yang `tutup_sampai`-nya lewat dianggap sudah terbuka.
