@@ -207,3 +207,10 @@ service_role saja, tidak ada policy untuk `anon`/`authenticated`.
   panggil RPC dua kali, verifikasi `unread_count=2` dan pratinjau ikut
   ter-update, verifikasi cascade delete membersihkan pesannya) -- data
   ujinya dihapus setelah terbukti, tidak ada sisa di produksi.
+
+## `villa_referral_codes` / `villa_referral_redemptions` (2026-10-02, kode referral karyawan) — migrasi ditulis, BELUM di-apply
+
+- `villa_referral_codes`: `kode` unik berformat `REF-[A-Z0-9]{2,20}` (tanda hubung = tidak bisa tertukar dengan kode investor 8 karakter), `employee_id` → `employees(id)` Mkhsistem (`on delete set null`), `employee_nama` (salinan), `diskon_persen` (default 10), `aktif`, `dibuat_oleh`.
+- `villa_referral_redemptions`: satu baris per booking yang memakai kode (unik per `booking_id`), menyimpan `harga_normal`, `diskon`, `harga_setelah_diskon`, `fee` dalam rupiah saat booking dibuat, plus `fee_dibayar_at/oleh` untuk pencairan. `booking_id` `on delete set null` supaya catatan fee tidak hilang.
+- Status fee (menunggu lunas / sah / gugur) **tidak disimpan**, diturunkan villa-api dari `bookings.status`.
+- RLS ON, satu policy service_role. Semua akses lewat villa-api.

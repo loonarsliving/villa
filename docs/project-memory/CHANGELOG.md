@@ -4,6 +4,15 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-02 — Kode referral karyawan (diskon tamu 10%, fee karyawan) — BELUM LIVE
+- Owner: kode referral yang dibuat Vando di Mkhsistem, dikirim ke karyawan lewat WA, dipakai tamu di loonars.id; karyawan yang menjual dapat fee; tabel fee di Finance villa.
+- **Keputusan owner (2026-10-02):** diskon 10% **penuh, boleh menembus `min_rate`** (pengecualian khusus referral; promo tetap dijepit lantai harga); **fee = sebesar diskon tamu**; fee **sah setelah tamu lunas**; **hanya booking loonars.id**.
+- Migrasi `20261002000001_referral_karyawan.sql`: `villa_referral_codes`, `villa_referral_redemptions` (RLS service_role). Status fee tidak disimpan -- diturunkan dari `bookings.status` (`terjadwal/checkin/checkout` = sah, `menunggu_pembayaran` = menunggu lunas, lainnya = gugur).
+- villa-api: `GET /public/referral` (pratinjau, tanpa nama karyawan), `referral_code` di `POST /public/bookings` (tidak bisa digabung promo/kode investor, dihitung ulang di server, pemakaian dicatat setelah booking jadi), `POST /bridge/referral/{list,create,issue,set-active}` (secret jembatan, dipanggil Mkhsistem), `GET /finance/referral-fees` + `POST /finance/referral-fees/paid` (finance/admin, hanya fee sah, tercatat di `finance_audit_log`).
+- UI: `/finance/referral` (rekap per karyawan + daftar pemakaian + tandai fee dicairkan).
+- Pasangan: loonars (kolom kode di BookingForm menerima `REF-...`) dan Mkhsistem (`/villa-referral`, perintah WA `REFERAL <nama>`, permission `villa_referral.manage`, migrasi 0283).
+- **Belum diterapkan:** migrasi belum di-apply, villa-api belum di-deploy, PR belum di-merge -- menyentuh harga tamu dan uang, menunggu persetujuan owner (aturan MERGE AUTHORITY).
+
 ### 2026-09-28 (lanjutan) — Sambutan OTA diperluas: bukan cuma Agoda/Airbnb
 - Owner: *"biarkan lebih banyak ota, jangan hanya agoda dan airbnb, karna cloudbedsku banyak koneksinya"*. `SUMBER_OTA_DISAMBUT` di `src/lib/otaWelcome.ts` sekarang: agoda, airbnb, **booking.com, traveloka, tiket** (+3 tes memastikan daftar ini, +3 tes nama platform di teks).
 - **Sengaja TIDAK** menambah `google` (metasearch -- tamu tetap bayar lewat kanal lain, lihat `mapSourceNameToSumber`) atau `cloudbeds` (keranjang bawaan untuk `sourceName` yang tidak dikenali, bukan satu platform tertentu -- lihat `cloudbedsSourceMapping.ts`). Kalau owner menyambungkan OTA baru yang belum dikenali pemetaan itu, harus didaftarkan sumbernya dulu di sana sebelum ditambahkan ke daftar sambutan.
