@@ -639,3 +639,52 @@ export interface WaConversationMessageRow {
   terjemahan: string | null;
   created_at: string;
 }
+
+/** Kode referral karyawan (villa_referral_codes) + rekap dari villa-api /finance/referral-fees. */
+export interface ReferralCodeRow {
+  id: string;
+  kode: string;
+  employee_id: string | null;
+  employee_nama: string;
+  fee_persen: number;
+  aktif: boolean;
+  catatan: string | null;
+  dibuat_oleh: string | null;
+  created_at: string;
+  jumlah_dipakai: number;
+  jumlah_sah: number;
+  fee_sah: number;
+  fee_menunggu: number;
+  fee_sudah_dibayar: number;
+}
+
+/** 'sah' = tamu sudah lunas; diturunkan villa-api dari bookings.status. */
+export type ReferralFeeStatus = "menunggu_lunas" | "sah" | "gugur";
+
+export interface ReferralRedemptionRow {
+  id: string;
+  referral_code_id: string;
+  kode: string;
+  employee_id: string | null;
+  employee_nama: string;
+  booking_id: string | null;
+  guest_nama: string | null;
+  tgl_checkin: string | null;
+  tgl_checkout: string | null;
+  malam: number | null;
+  /** Yang ditagih ke tamu (harga normal, tanpa kode unik). */
+  nilai_booking: number;
+  fee_persen: number;
+  fee: number;
+  fee_dibayar_at: string | null;
+  fee_dibayar_oleh: string | null;
+  created_at: string;
+  booking_status: string | null;
+  unit_nomor: string | null;
+  status_fee: ReferralFeeStatus;
+}
+
+export interface ReferralFeesResponse {
+  kode: ReferralCodeRow[];
+  pemakaian: ReferralRedemptionRow[];
+}

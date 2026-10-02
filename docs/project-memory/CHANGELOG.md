@@ -4,6 +4,15 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-02 — Kode referral karyawan (fee karyawan 10%, harga tamu normal) — BELUM LIVE
+- Owner: kode referral yang dibuat Vando di Mkhsistem, dikirim ke karyawan lewat WA, dipakai tamu di loonars.id; karyawan yang menjual dapat fee; tabel fee di Finance villa.
+- **Keputusan owner (2026-10-02):** "10%" itu **fee, bukan diskon** -- *"diskon 10% itu fungsinya agar 10% itu masuk ke fee, tp harga yg ditrima tamu ttp normal"*. Tamu bayar harga normal; karyawan pemilik kode dapat **fee 10% dari nilai booking** (tanpa kode unik), **sah setelah tamu lunas**; **hanya booking loonars.id**. (Versi pertama sempat salah membangunnya sebagai diskon tamu yang menembus `min_rate`; dikoreksi sebelum apa pun live.)
+- Migrasi `20261002000001_referral_karyawan.sql`: `villa_referral_codes`, `villa_referral_redemptions` (RLS service_role). Status fee tidak disimpan -- diturunkan dari `bookings.status` (`terjadwal/checkin/checkout` = sah, `menunggu_pembayaran` = menunggu lunas, lainnya = gugur).
+- villa-api: `GET /public/referral` (cek kode saja, tanpa nama karyawan, tanpa harga), `referral_code` di `POST /public/bookings` (harga tamu tidak diubah, tidak bisa digabung promo/kode investor, fee dihitung di server, pemakaian dicatat setelah booking jadi), `POST /bridge/referral/{list,create,issue,set-active}` (secret jembatan, dipanggil Mkhsistem), `GET /finance/referral-fees` + `POST /finance/referral-fees/paid` (finance/admin, hanya fee sah, tercatat di `finance_audit_log`).
+- UI: `/finance/referral` (rekap per karyawan + daftar pemakaian + tandai fee dicairkan).
+- Pasangan: loonars (kolom kode di BookingForm menerima `REF-...`) dan Mkhsistem (`/villa-referral`, perintah WA `REFERAL <nama>`, permission `villa_referral.manage`, migrasi 0283).
+- **Belum diterapkan:** migrasi belum di-apply, villa-api belum di-deploy, PR belum di-merge -- menciptakan kewajiban bayar fee (uang), menunggu persetujuan owner (aturan MERGE AUTHORITY).
+
 ### 2026-09-28 (lanjutan) — Sambutan OTA diperluas: bukan cuma Agoda/Airbnb
 - Owner: *"biarkan lebih banyak ota, jangan hanya agoda dan airbnb, karna cloudbedsku banyak koneksinya"*. `SUMBER_OTA_DISAMBUT` di `src/lib/otaWelcome.ts` sekarang: agoda, airbnb, **booking.com, traveloka, tiket** (+3 tes memastikan daftar ini, +3 tes nama platform di teks).
 - **Sengaja TIDAK** menambah `google` (metasearch -- tamu tetap bayar lewat kanal lain, lihat `mapSourceNameToSumber`) atau `cloudbeds` (keranjang bawaan untuk `sourceName` yang tidak dikenali, bukan satu platform tertentu -- lihat `cloudbedsSourceMapping.ts`). Kalau owner menyambungkan OTA baru yang belum dikenali pemetaan itu, harus didaftarkan sumbernya dulu di sana sebelum ditambahkan ke daftar sambutan.

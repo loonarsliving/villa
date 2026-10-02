@@ -974,6 +974,97 @@ async function hitungHargaPromo(promo, roomTypeId, tgl_checkin, tgl_checkout, ni
   };
 }
 
+/**
+ * Kode referral karyawan (owner 2026-10-02). BUKAN diskon: tamu tetap
+ * membayar harga normal ("10% itu masuk ke fee, tp harga yg ditrima tamu ttp
+ * normal"). Kodenya hanya menandai karyawan yang membawa tamu, dan karyawan
+ * itu mendapat fee 10% dari nilai booking, sah setelah tamu lunas
+ * (diturunkan dari bookings.status, lihat statusFeeReferral). Referral
+ * tidak pernah mengubah harga tamu.
+ *
+ * Hanya dipakai jalur pemesanan loonars.id (/public/bookings).
+ */
+const REFERRAL_KODE_RE = /^REF-[A-Z0-9]{2,20}$/;
+
+async function periksaReferral(kode){
+  const bersih = String(kode ?? '').trim().toUpperCase();
+  if(!REFERRAL_KODE_RE.test(bersih)) return {ok:false, alasan:'Kode referral tidak ditemukan'};
+  const {data:ref} = await supabase.from('villa_referral_codes').select('*').eq('kode', bersih).maybeSingle();
+  if(!ref) return {ok:false, alasan:'Kode referral tidak ditemukan'};
+  if(ref.aktif !== true) return {ok:false, alasan:'Kode referral sudah tidak aktif'};
+  return {ok:true, ref};
+}
+
+/** Fee karyawan dari nilai booking (yang ditagih ke tamu, tanpa kode unik). */
+function hitungFeeReferral(ref, nilaiBooking){
+  const persen = Number(ref.fee_persen ?? 10);
+  return {fee_persen: persen, fee: Math.round(Number(nilaiBooking) * persen / 100)};
+}
+
+/** 'menunggu_lunas' | 'sah' | 'gugur', dari status booking saat ini. */
+function statusFeeReferral(bookingStatus){
+  if(['terjadwal','checkin','checkout'].includes(bookingStatus)) return 'sah';
+  if(bookingStatus === 'menunggu_pembayaran') return 'menunggu_lunas';
+  return 'gugur';
+}
+
+/** Kode baru dari nama karyawan: "REF-" + nama depan (maks 8 huruf) + 2 angka. */
+async function buatKodeReferralUnik(nama, kodeDiminta){
+  if(kodeDiminta){
+    let k = String(kodeDiminta).trim().toUpperCase().replace(/\s+/g,'');
+    if(!k.startsWith('REF-')) k = `REF-${k.replace(/^REF/,'')}`;
+    if(!REFERRAL_KODE_RE.test(k)) return {ok:false, alasan:'Kode hanya boleh huruf/angka (2-20 karakter) setelah REF-'};
+    const {data:ada} = await supabase.from('villa_referral_codes').select('id').eq('kode', k).maybeSingle();
+    if(ada) return {ok:false, alasan:`Kode ${k} sudah dipakai`};
+    const {data:promo} = await supabase.from('villa_promos').select('id').eq('kode', k).maybeSingle();
+    if(promo) return {ok:false, alasan:`Kode ${k} sudah dipakai sebagai kode promo`};
+    return {ok:true, kode:k};
+  }
+  const dasar = (String(nama ?? '').toUpperCase().split(/\s+/)[0] ?? '').replace(/[^A-Z0-9]/g,'').slice(0,8) || 'LOONARS';
+  for(let i=0;i<20;i++){
+    const k = `REF-${dasar}${String(Math.floor(Math.random()*90)+10)}`;
+    const {data:ada} = await supabase.from('villa_referral_codes').select('id').eq('kode', k).maybeSingle();
+    const {data:promo} = await supabase.from('villa_promos').select('id').eq('kode', k).maybeSingle();
+    if(!ada && !promo) return {ok:true, kode:k};
+  }
+  return {ok:false, alasan:'Gagal membuat kode unik, coba lagi'};
+}
+
+/** Kode + rekap pemakaian, dipakai dashboard Mkhsistem dan Finance villa. */
+async function daftarReferral(){
+  const {data:codes, error} = await supabase.from('villa_referral_codes').select('*').order('created_at', {ascending:false});
+  if(error) return {error:error.message};
+  const {data:reds, error:redErr} = await supabase.from('villa_referral_redemptions').select('*').order('created_at', {ascending:false});
+  if(redErr) return {error:redErr.message};
+  const bookingIds = [...new Set((reds ?? []).map(r=>r.booking_id).filter(Boolean))];
+  const {data:bks} = bookingIds.length
+    ? await supabase.from('bookings').select('id,status,unit_nomor').in('id', bookingIds)
+    : {data:[]};
+  const bkById = new Map((bks ?? []).map(b=>[b.id, b]));
+  const pemakaian = (reds ?? []).map(r => {
+    const bk = r.booking_id ? bkById.get(r.booking_id) : null;
+    return {
+      ...r,
+      booking_status: bk?.status ?? null,
+      unit_nomor: bk?.unit_nomor ?? null,
+      status_fee: statusFeeReferral(bk?.status ?? null),
+    };
+  });
+  const kode = (codes ?? []).map(c => {
+    const milik = pemakaian.filter(p => p.referral_code_id === c.id);
+    const sah = milik.filter(p => p.status_fee === 'sah');
+    return {
+      ...c,
+      jumlah_dipakai: milik.filter(p => p.status_fee !== 'gugur').length,
+      jumlah_sah: sah.length,
+      fee_sah: sah.reduce((s,p)=>s+Number(p.fee||0), 0),
+      fee_menunggu: milik.filter(p=>p.status_fee==='menunggu_lunas').reduce((s,p)=>s+Number(p.fee||0), 0),
+      fee_sudah_dibayar: sah.filter(p=>p.fee_dibayar_at).reduce((s,p)=>s+Number(p.fee||0), 0),
+    };
+  });
+  return {kode, pemakaian};
+}
+
 async function computeWalkinIncome(periode){
   const [y,mo] = periode.split('-').map(Number);
   const start = new Date(Date.UTC(y, mo-1, 1)).toISOString();
@@ -1888,6 +1979,17 @@ Deno.serve(async (req)=>{
     });
   }
 
+  // Cek kode referral karyawan untuk form loonars.id. Tidak ada harga yang
+  // dihitung (referral tidak mengubah harga tamu), dan sama seperti voucher
+  // investor, nama karyawan pemilik kode TIDAK dibocorkan ke halaman publik.
+  if(path==='/public/referral' && m==='GET'){
+    const kode = String(url.searchParams.get('code') ?? '').trim().toUpperCase();
+    if(!kode) return err('Kode wajib diisi');
+    const cek = await periksaReferral(kode);
+    if(!cek.ok) return json({berlaku:false, alasan:cek.alasan});
+    return json({berlaku:true, kode:cek.ref.kode});
+  }
+
   if(path==='/public/bookings' && m==='POST'){
     const b = await req.json().catch(()=>null);
     if(!b) return err('Body tidak valid');
@@ -1900,6 +2002,7 @@ Deno.serve(async (req)=>{
     const email = String(b.email??'').trim();
     const promo_code = String(b.promo_code??'').trim().toUpperCase() || null;
     const voucher_code = String(b.voucher_code??'').trim().toUpperCase() || null;
+    const referral_code = String(b.referral_code??'').trim().toUpperCase() || null;
 
     // Jumlah tamu. Cloudbeds minta adults[] dan children[] per tipe kamar,
     // dan sebelum ini villa-api mengirim angka tetap 1 dewasa 0 anak untuk
@@ -1934,6 +2037,17 @@ Deno.serve(async (req)=>{
       const cek = await periksaVoucherInvestor(voucher_code, tgl_checkin, tgl_checkout);
       if(!cek.ok) return err(cek.alasan, 409);
       voucherTerpakai = cek;
+    }
+
+    // Kode referral karyawan: tidak bisa digabung dengan promo atau kode
+    // investor (formnya pun hanya punya satu kolom kode). Diperiksa sebelum
+    // unit dicari, alasan yang sama dengan voucher di atas.
+    let referralCek = null;
+    if(referral_code){
+      if(promo_code || voucher_code) return err('Kode referral tidak bisa digabung dengan kode promo atau kode investor', 409);
+      const cek = await periksaReferral(referral_code);
+      if(!cek.ok) return err(cek.alasan, 409);
+      referralCek = cek;
     }
 
     let unitsQ = supabase.from('units').select('id,nomor,tarif_harian,room_type_id');
@@ -1991,6 +2105,13 @@ Deno.serve(async (req)=>{
       }
     }
 
+    // Referral: harga tamu TIDAK diubah. Fee karyawan dihitung dari yang
+    // ditagih ke tamu (lihat hitungFeeReferral), di server.
+    let referralTerpakai = null;
+    if(referralCek){
+      referralTerpakai = {ref: referralCek.ref, hasil: hitungFeeReferral(referralCek.ref, computedTarif)};
+    }
+
     const {data:g} = await supabase.from('guests').insert({nama, hp, email}).select('id').single();
 
     // Kode unik pembayaran (owner 2026-09-20): ditambahkan ke total_bayar
@@ -2045,7 +2166,9 @@ Deno.serve(async (req)=>{
         // dipakai dua kali.
         voucher_id: voucherTerpakai ? voucherTerpakai.voucher.id : null,
         is_free_stay: false,
-        catatan: voucherTerpakai
+        catatan: referralTerpakai
+          ? `[Website] Referral ${referralTerpakai.ref.kode} (${referralTerpakai.ref.employee_nama}) -- fee karyawan ${referralTerpakai.hasil.fee_persen}% Rp ${Math.round(referralTerpakai.hasil.fee).toLocaleString('id-ID')} setelah lunas. Harga tamu normal.${catatan ? ` -- ${catatan}` : ''}`
+          : voucherTerpakai
           ? `[Menginap investor] Kode ${voucherTerpakai.voucher.kode} atas nama ${voucherTerpakai.pemilik.nama} -- malam pertama gratis (Rp ${Math.round(nilaiMalamGratis).toLocaleString('id-ID')}), sisanya dibayar.${catatan ? ` -- ${catatan}` : ''}`
           : (catatan ? `[Website] ${catatan}` : '[Website] Booking mandiri dari loonars.id -- menunggu bukti pembayaran QRIS.'),
       }
@@ -2076,6 +2199,29 @@ Deno.serve(async (req)=>{
       await supabase.from('villa_promos')
         .update({terpakai: Number(promoTerpakai.promo.terpakai ?? 0) + 1, updated_at: new Date().toISOString()})
         .eq('id', promoTerpakai.promo.id);
+    }
+
+    // Pemakaian referral = calon fee karyawan. Dicatat setelah booking jadi
+    // (sama seperti promo). Gagal mencatat TIDAK menggagalkan pemesanan
+    // tamu, tapi dilaporkan ke owner supaya fee karyawan tidak hilang.
+    if(referralTerpakai){
+      const {error:refErr} = await supabase.from('villa_referral_redemptions').insert({
+        referral_code_id: referralTerpakai.ref.id,
+        kode: referralTerpakai.ref.kode,
+        employee_id: referralTerpakai.ref.employee_id ?? null,
+        employee_nama: referralTerpakai.ref.employee_nama,
+        booking_id: booking.id,
+        guest_nama: nama,
+        tgl_checkin, tgl_checkout, malam: nights,
+        nilai_booking: computedTarif,
+        fee_persen: referralTerpakai.hasil.fee_persen,
+        fee: referralTerpakai.hasil.fee,
+      });
+      if(refErr){
+        console.error('referral: gagal mencatat pemakaian', refErr.message);
+        await notif(freeUnit.id, 'all', 'booking', 'Fee referral GAGAL dicatat',
+          `Booking ${String(booking.id).slice(0,8)} memakai kode ${referralTerpakai.ref.kode} (${referralTerpakai.ref.employee_nama}) tapi pemakaiannya gagal dicatat: ${refErr.message}. Catat fee Rp ${Math.round(referralTerpakai.hasil.fee).toLocaleString('id-ID')} secara manual.`, booking.id);
+      }
     }
 
     // Menginap gratis berhenti di sini: tidak ada kode pembayaran, tidak ada
@@ -2113,7 +2259,7 @@ Deno.serve(async (req)=>{
     // ditampilkan ke tamu, supaya keduanya melihat angka yang sama persis.
     const notifySetting = await getSetting('villa_notify');
     await sendWa(notifySetting?.owner_hp ?? null,
-      `Booking baru dari website\n\n${nama} (${hp})\nUnit ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\nTotal (dengan kode unik): Rp ${Math.round(totalDitagih).toLocaleString('id-ID')}${promoTerpakai ? `\nPromo ${promoTerpakai.promo.kode} (normal Rp ${Math.round(promoTerpakai.hasil.harga_normal).toLocaleString('id-ID')})` : ''}${voucherTerpakai ? `\nKode investor ${voucherTerpakai.voucher.kode} (${voucherTerpakai.pemilik.nama}) -- malam pertama gratis Rp ${Math.round(nilaiMalamGratis).toLocaleString('id-ID')}` : ''}\n\nKalau dana sudah masuk, sistem akan mengonfirmasi otomatis lewat email. Kalau belum juga terkonfirmasi, balas:\nLUNAS ${kode}`,
+      `Booking baru dari website\n\n${nama} (${hp})\nUnit ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\nTotal (dengan kode unik): Rp ${Math.round(totalDitagih).toLocaleString('id-ID')}${promoTerpakai ? `\nPromo ${promoTerpakai.promo.kode} (normal Rp ${Math.round(promoTerpakai.hasil.harga_normal).toLocaleString('id-ID')})` : ''}${referralTerpakai ? `\nReferral ${referralTerpakai.ref.kode} (${referralTerpakai.ref.employee_nama}) -- fee karyawan ${referralTerpakai.hasil.fee_persen}% Rp ${Math.round(referralTerpakai.hasil.fee).toLocaleString('id-ID')} setelah lunas` : ''}${voucherTerpakai ? `\nKode investor ${voucherTerpakai.voucher.kode} (${voucherTerpakai.pemilik.nama}) -- malam pertama gratis Rp ${Math.round(nilaiMalamGratis).toLocaleString('id-ID')}` : ''}\n\nKalau dana sudah masuk, sistem akan mengonfirmasi otomatis lewat email. Kalau belum juga terkonfirmasi, balas:\nLUNAS ${kode}`,
       {booking_id: booking.id, unit_id: freeUnit.id, template_type:'website_booking_awaiting_payment'});
 
     return json({
@@ -2122,6 +2268,7 @@ Deno.serve(async (req)=>{
       tarif: computedTarif, total_bayar: totalDitagih, kode_unik: kodeUnik, status: booking.status,
       promo: promoTerpakai ? {kode: promoTerpakai.promo.kode, nama: promoTerpakai.promo.nama, harga_normal: promoTerpakai.hasil.harga_normal, hemat: promoTerpakai.hasil.hemat} : null,
       menginap_gratis: voucherTerpakai ? {kode: voucherTerpakai.voucher.kode, malam_gratis: 1, hemat: nilaiMalamGratis} : null,
+      referral: referralTerpakai ? {kode: referralTerpakai.ref.kode} : null,
     }, 201);
   }
 
@@ -2434,6 +2581,69 @@ Deno.serve(async (req)=>{
 
     const terkirim = await sendWa(investor.hp, pesan, {template_type:'dividend_proof_forward', file:mediaUrl});
     return json({success:terkirim, unit_code:unitCode, investor_nama:investor.nama, terkirim});
+  }
+
+  // ── Jembatan kode referral karyawan (Mkhsistem) ────────────────────────
+  // Dashboard Vando dan perintah WA "REFERAL <nama>" di Mkhsistem membuat
+  // dan membaca kode lewat sini. Siapa yang boleh (Vando / super admin)
+  // dijaga di Mkhsistem; di sini cukup secret jembatan. Pengiriman WA ke
+  // karyawan juga dilakukan Mkhsistem (karyawan ada di sana, bukan di sini).
+  if(path.startsWith('/bridge/referral/') && m==='POST'){
+    const bridge = await getVercelBridge();
+    if(!bridge.secret) return err('Jembatan belum dikonfigurasi',503);
+    if(!await secretsMatch(req.headers.get('x-internal-secret') ?? '', bridge.secret)) return err('Unauthorized',401);
+    const b = await req.json().catch(()=>({}));
+
+    if(path==='/bridge/referral/list'){
+      const hasil = await daftarReferral();
+      if(hasil.error) return err(hasil.error);
+      return json(hasil);
+    }
+
+    // create = selalu kode baru; issue = kode aktif terakhir milik karyawan
+    // itu, atau buat kalau belum punya (dipakai perintah WA, supaya
+    // meminta berulang kali tidak menimbun kode).
+    if(path==='/bridge/referral/create' || path==='/bridge/referral/issue'){
+      const employee_id = String(b?.employee_id ?? '').trim() || null;
+      const employee_nama = String(b?.employee_nama ?? '').trim();
+      if(!employee_nama) return err('employee_nama wajib diisi');
+      if(employee_id && !/^[0-9a-f-]{36}$/i.test(employee_id)) return err('employee_id tidak valid');
+
+      if(path==='/bridge/referral/issue' && employee_id){
+        const {data:ada} = await supabase.from('villa_referral_codes').select('*')
+          .eq('employee_id', employee_id).eq('aktif', true)
+          .order('created_at', {ascending:false}).limit(1).maybeSingle();
+        if(ada) return json({success:true, baru:false, kode:ada});
+      }
+
+      const kodeBaru = await buatKodeReferralUnik(employee_nama, path==='/bridge/referral/create' ? (b?.kode || null) : null);
+      if(!kodeBaru.ok) return json({success:false, alasan:kodeBaru.alasan}, 409);
+      const {data:row, error} = await supabase.from('villa_referral_codes').insert({
+        kode: kodeBaru.kode,
+        employee_id,
+        employee_nama,
+        catatan: String(b?.catatan ?? '').trim() || null,
+        dibuat_oleh: String(b?.dibuat_oleh ?? '').trim() || 'mkhsistem',
+      }).select('*').single();
+      if(error){
+        if(error.code === '23505') return json({success:false, alasan:'Kode sudah dipakai, coba lagi'}, 409);
+        return err(error.message);
+      }
+      return json({success:true, baru:true, kode:row}, 201);
+    }
+
+    if(path==='/bridge/referral/set-active'){
+      const id = String(b?.id ?? '');
+      if(!/^[0-9a-f-]{36}$/i.test(id)) return err('id tidak valid');
+      if(typeof b?.aktif !== 'boolean') return err('aktif wajib boolean');
+      const {data:row, error} = await supabase.from('villa_referral_codes')
+        .update({aktif:b.aktif, updated_at:new Date().toISOString()}).eq('id', id).select('*').maybeSingle();
+      if(error) return err(error.message);
+      if(!row) return err('Kode tidak ditemukan', 404);
+      return json({success:true, kode:row});
+    }
+
+    return err('Not found', 404);
   }
 
   // ── Jembatan promo untuk AI (Mkhsistem) ────────────────────────────────
@@ -3652,6 +3862,40 @@ Deno.serve(async (req)=>{
     if(error) return err(error.message);
     await writeFinanceAudit({ entity_type:'finance_ota_settlement_config', entity_id: existing.id, session, action:'delete_settlement_config', old_value: existing, new_value: null });
     return json({ success:true });
+  }
+
+  // Fee referral karyawan (owner 2026-10-02): siapa memakai kode siapa,
+  // berapa fee-nya, dan apakah sudah sah (tamu lunas) / sudah dicairkan.
+  if(path==='/finance/referral-fees' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const hasil = await daftarReferral();
+    if(hasil.error) return err(hasil.error);
+    return json(hasil);
+  }
+
+  // Tandai fee sudah / belum dicairkan ke karyawan. Hanya fee yang SAH
+  // (tamu lunas) yang boleh ditandai dibayar.
+  if(path==='/finance/referral-fees/paid' && m==='POST'){
+    if(!isFinance) return forbidden();
+    const body = await req.json().catch(()=>({}));
+    const id = String(body?.id ?? '');
+    if(!/^[0-9a-f-]{36}$/i.test(id)) return err('id tidak valid');
+    const dibayar = body?.dibayar !== false;
+    const {data:existing} = await supabase.from('villa_referral_redemptions').select('*').eq('id', id).maybeSingle();
+    if(!existing) return err('Data fee tidak ditemukan', 404);
+    if(dibayar){
+      const {data:bk} = existing.booking_id
+        ? await supabase.from('bookings').select('status').eq('id', existing.booking_id).maybeSingle()
+        : {data:null};
+      if(statusFeeReferral(bk?.status ?? null) !== 'sah') return err('Fee belum sah: tamu belum lunas atau booking batal', 409);
+    }
+    const patch = dibayar
+      ? {fee_dibayar_at: new Date().toISOString(), fee_dibayar_oleh: session.email ?? session.uid}
+      : {fee_dibayar_at: null, fee_dibayar_oleh: null};
+    const {data:saved, error} = await supabase.from('villa_referral_redemptions').update(patch).eq('id', id).select('*').single();
+    if(error) return err(error.message);
+    await writeFinanceAudit({ entity_type:'villa_referral_redemptions', entity_id: id, session, action: dibayar ? 'referral_fee_paid' : 'referral_fee_unpaid', old_value: existing, new_value: saved, reason: body?.reason ?? null });
+    return json(saved);
   }
 
   if(path==='/finance/settlements/process' && m==='POST'){

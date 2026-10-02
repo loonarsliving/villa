@@ -2,6 +2,16 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-10-02 — Kode referral karyawan dibangun, MENUNGGU persetujuan owner
+
+Lihat CHANGELOG 2026-10-02. Kode di branch `claude/referral-karyawan-r7k2pd`
+di tiga repo (villa, loonars, Mkhsistem). Belum ada yang live: migrasi villa
+`20261002000001` dan Mkhsistem `0283` belum di-apply, villa-api belum
+di-deploy, PR belum di-merge, karena fitur ini menciptakan kewajiban bayar
+fee 10% ke karyawan (harga tamu TIDAK berubah -- keputusan owner). Urutan rilis yang aman: apply kedua migrasi -> deploy
+villa-api -> merge villa & Mkhsistem -> merge loonars (form baru mengirim
+`referral_code`, yang diabaikan villa-api lama).
+
 ## 2026-09-27 — Chat WhatsApp dua arah dibangun untuk Front Desk
 
 Owner minta modul chat di halaman resepsionis yang "menarik dari webhook
