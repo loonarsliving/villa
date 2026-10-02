@@ -2,6 +2,30 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-10-02 — KEPUTUSAN OWNER: harga OTA di bawah batas minimal DIBIARKAN (fase ramp-up 3 bulan)
+
+Owner membandingkan harga Agoda, Booking.com, dan website untuk 6 Okt. Saya
+cek lewat Cloudbeds langsung (`/api/admin/cloudbeds/health`):
+- Cloudbeds hanya punya satu rate plan per tipe, tidak ada rate plan turunan.
+  Standard 468.000, Sawah View 643.000. Website persis sama (949rb dan
+  1.243rb untuk 6–8 Okt).
+- Booking.com: 468.000 − "Late Escape Deal" 15% = 397.800. Promo ini diatur
+  di extranet Booking.com dan ditanggung villa.
+- Agoda Standard: 361.637 = 468.000 × 0,85 ÷ 1,1 (promo 15% di YCS, harga
+  tampil sebelum pajak). Lalu potongan AGODASPONSORED yang ditanggung Agoda.
+  Pool Villa (Sawah View) tampil sekitar 30% di bawah Cloudbeds; kemungkinan
+  promo bertumpuk, belum terverifikasi karena tidak ada akses YCS.
+- Akibatnya: `min_rate` hanya menjaga harga Cloudbeds. Promo OTA memotong
+  setelahnya, jadi harga jual OTA (dan pendapatan bersih setelah komisi) bisa
+  jauh di bawah `min_rate`.
+
+**Keputusan owner:** "biarkan saja seperti ini dulu agar loonars sangat ramai
+dulu untuk fase ramp up, setelah 3 bulan baru kita naikkan harga". Jangan
+matikan promo OTA, dan jangan buat mesin harga mengompensasinya, sebelum
+sekitar **awal Januari 2027** atau owner sendiri memintanya. Opsi yang sudah
+ditawarkan untuk nanti: mesin harga memperhitungkan persen promo per OTA
+supaya harga jual OTA tidak tembus `min_rate`.
+
 ## 2026-10-02 — Kode referral karyawan dibangun, MENUNGGU persetujuan owner
 
 Lihat CHANGELOG 2026-10-02. Kode di branch `claude/referral-karyawan-r7k2pd`
