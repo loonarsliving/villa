@@ -343,6 +343,10 @@ export interface FinanceSummary {
   bookings_counted: number;
   cloudbeds_balance_verified_count: number;
   cancelled_excluded: number;
+  /** Aturan pengakuan pemasukan (per tanggal check-in, hanya tamu yang sudah check-in). */
+  recognition_rule?: string;
+  /** Booking di periode ini yang tamunya belum datang: masih di Cloudbeds, belum pemasukan. */
+  pipeline?: { amount: number; count: number; overdue_count: number; note: string };
   alerts: FinanceAlert[];
   last_cloudbeds_activity: string | null;
   data_caveats: string[];
@@ -392,6 +396,8 @@ export interface FinanceBookingRow {
   settlement_status: SettlementStatus | null;
   settlement_confidence: SettlementConfidence | null;
   expected_settlement_date: string | null;
+  /** false = tamu belum check-in, tidak dihitung sebagai pemasukan. */
+  pemasukan_diakui?: boolean;
 }
 
 export interface FinanceBookingList {
