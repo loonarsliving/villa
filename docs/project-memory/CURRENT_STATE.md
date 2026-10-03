@@ -2,7 +2,15 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
-## 2026-10-03 — Late night booking (loonars.id/late) — DIBANGUN, MENUNGGU PERSETUJUAN OWNER
+## 2026-10-03 — Late night booking (loonars.id/late) — LIVE
+
+**Dirilis 2026-10-03 atas persetujuan owner ("Gas rilis")**: migrasi
+`late_night_booking` di-apply (constraint dibaca balik), villa PR #151
+di-merge -> villa-api v100 (isi live identik dengan `main`) + Vercel villa
+READY, loonars PR #12 di-merge. Akun Laila belum dibuat (Admin -> Pengguna
+-> role Late Night). Rute `/late-night/*` belum pernah dijalankan sungguhan
+saat rilis (sandbox tidak bisa menghubungi Supabase): booking pertama
+Laila adalah ujinya -- periksa log Edge Function kalau ada keluhan.
 
 Owner: halaman di loonars.id untuk late night booking, hanya bisa diakses
 Laila (marketing late night) lewat login. Tamu menginap 01.00-09.00 WIB,
