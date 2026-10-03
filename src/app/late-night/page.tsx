@@ -74,7 +74,7 @@ export default function LateNightPage() {
           >
             {data.jendela_buka
               ? `Booking dibuka sekarang. Malam ${fmtDate(data.malam)}, tamu keluar ${fmtDate(data.checkout)} pukul ${jam(data.jam_selesai)} WIB.`
-              : `Booking late night hanya bisa dibuat pukul ${jam(data.jam_mulai)}–${jam(data.jam_selesai)} WIB.`}
+              : `Booking late night hanya bisa dibuat pukul ${jam(data.jam_mulai)}–${jam(data.jam_selesai)} WIB. Status unit di bawah untuk malam ${fmtDate(data.malam)} (keluar ${fmtDate(data.checkout)}).`}
           </div>
 
           {menunggu.length > 0 && (
