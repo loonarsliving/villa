@@ -17,7 +17,8 @@ import type { LateNightBooking, LateNightHariIni, LateNightUnit } from "@/lib/ty
  *
  * Alurnya (keputusan owner 2026-10-03):
  *   1. pilih unit Standard yang kosong & bersih malam ini, isi nama + WA tamu;
- *   2. tamu memindai QRIS statis villa dan mengetik sendiri Rp260.000;
+ *   2. tamu memindai QRIS statis villa dan mengetik sendiri tarifnya
+ *      (Rp300.000 sejak 2026-10-03, dibaca dari villa-api);
  *   3. Laila mengecek uangnya masuk, lalu menekan Lunas -- itu sekaligus
  *      check-in: PIN pintu dikirim ke WA tamu dan pemasukan tercatat.
  * Booking hanya bisa dibuat pukul 01.00-09.00 WIB; yang tidak ditandai

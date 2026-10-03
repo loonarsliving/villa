@@ -2,6 +2,23 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-10-03 (malam) — Tarif late night naik ke Rp300.000
+
+Owner: *"naikkan harga di latenight di 300 ribu"*. Hanya konstanta
+`LATE_NIGHT_TARIF` di villa-api (260000 -> 300000); halaman loonars.id/late
+dan /late-night membaca tarif dari `/late-night/hari-ini`. Saat diubah belum
+ada satu pun booking `sumber='late-night'`, jadi tidak ada booking lama
+bertarif 260rb. Booking yang sudah dibuat menyimpan `total_bayar`-nya
+sendiri; perubahan tarif hanya berlaku untuk booking baru.
+
+Catatan dari sesi yang sama: owner memastikan yang dibuka 9 kamar (6
+Standard: A1 A2 A3 A4 B1 B2 + Sawah View A5 B4 C4; ditutup B3 C1 C2 C3).
+Rencana memindah tamu A3->B3 dan B1->C1 dibatalkan karena booking ke depan
+sudah banyak. Yang masih harus dijaga: maintenance B2 (5-31 Okt, Beca)
+membuat Standard tinggal 5 mulai 5 Okt, dan blok Cloudbeds "Kamar belum
+ready" (B3 C1 C2 C3) habis 16 Okt -- tanpa perpanjangan, 17 Okt kamar yang
+dijual jadi 12-13.
+
 ## 2026-10-03 — Late night booking (loonars.id/late) — LIVE
 
 **Dirilis 2026-10-03 atas persetujuan owner ("Gas rilis")**: migrasi
