@@ -760,6 +760,8 @@ export interface LateNightUnit {
   nomor: string;
   tersedia: boolean;
   alasan: string | null;
+  /** Ditutup di Cloudbeds / maintenance -- tidak ditampilkan. */
+  ditutup?: boolean;
 }
 
 export interface LateNightBooking {
