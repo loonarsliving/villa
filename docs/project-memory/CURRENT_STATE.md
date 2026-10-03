@@ -2,6 +2,60 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-10-03 — Late night booking (loonars.id/late) — DIBANGUN, MENUNGGU PERSETUJUAN OWNER
+
+Owner: halaman di loonars.id untuk late night booking, hanya bisa diakses
+Laila (marketing late night) lewat login. Tamu menginap 01.00-09.00 WIB,
+pembayaran QRIS statis. Jawaban owner atas pertanyaan desain:
+- tarif **Rp260.000** ("260 yg benar") -- itu yang ditagih dan dicatat
+  (angka 250rb di permintaan awal TIDAK dipakai);
+- **Laila sendiri** yang menekan Lunas (= check-in + PIN WA);
+- **hanya unit Standard**;
+- pemasukan **ikut bagi hasil** seperti booking biasa.
+
+Desain (branch `claude/late-night-booking-l4n7tx`):
+- **Alamat: `loonars.id/late`** (repo `loonars`, `app/late/`). Rencana awal
+  subdomain `latenight.loonars.id` DIBATALKAN atas pilihan owner ("loonars.id/late
+  ... jd tidak perlu mnyntuh hostinger") -- DNS loonars.id ada di Hostinger
+  (nameserver dns-parking.com) dan tidak perlu diubah. Halaman itu hanya
+  tampilan: login dan semua aturan lewat villa-api (`/login`, `/me/password`,
+  `/late-night/*`), sesi disimpan di localStorage `loonars_late_sesi`,
+  `noindex` + `disallow: /late` di robots. Aplikasi villa juga punya
+  `/late-night` (cadangan, dan tujuan `roleHome` kalau Laila login di
+  living.haluoleo.id).
+- Role baru `late_night`; villa-api menolaknya di luar `/late-night/*`, dan
+  `/late-night/*` hanya untuk `late_night` + admin.
+- Booking = baris `bookings` biasa: `sumber='late-night'`, malam KEMARIN
+  (WIB) s/d hari ini, `tarif=total_bayar=260000` (konstanta
+  `LATE_NIGHT_TARIF`, tidak lewat `computeStayTarif`/`villa_rates`). Hanya
+  bisa dibuat 01.00-08.59 WIB. Unit harus Standard, tidak bentrok, tidak
+  ditutup (`unitMaintenanceBentrok`), dan `units.status='available'`.
+- Lunas -> `villa_commit_checkin` (PIN, unit occupied, `transactions` income
+  -> bagi hasil) -> WA PIN. Belum lunas 30 menit -> dibatalkan (lazy, saat
+  halaman dimuat/booking dibuat; tidak ada cron). Checkout bisa dari halaman
+  Laila atau front desk seperti biasa.
+- **TIDAK didorong ke Cloudbeds** -- ditegaskan owner: *"Jgan sambungkan
+  dgan cloudbeds khusus late night"* (`pushBookingToCloudbeds` keluar untuk
+  `sumber='late-night'`): postReservation tanpa harga + webhook yang
+  meng-upsert balik akan menimpa Rp260.000 dengan harga Cloudbeds.
+  Konsekuensi: malam itu kamar tetap tampil kosong di Cloudbeds/OTA. Yang
+  masih BACA dari Cloudbeds: daftar unit menolak unit yang ditutup di
+  Cloudbeds (`unitMaintenanceBentrok`), sesuai aturan owner "kamar yang
+  ditutup di Cloudbeds tidak dijual di mana pun".
+- Migrasi `20261003000001_late_night_booking.sql`: `late_night` di
+  `villa_users_role_check`, `late-night` di `bookings_sumber_check`.
+
+Urutan rilis setelah owner setuju: apply migrasi -> merge villa (villa-api +
+Vercel villa) -> merge loonars (halaman `/late`; harus SETELAH villa-api
+punya `/late-night/*`) -> admin membuat akun Laila (Admin -> Pengguna ->
+role Late Night). Tidak ada perubahan DNS/domain.
+
+Temuan sampingan (belum diperbaiki, di luar lingkup): webhook Cloudbeds
+(`src/app/api/webhooks/cloudbeds/route.ts`) meng-upsert booking per
+`cloudbeds_reservation_id` TANPA memeriksa `dibuatDiSini()`, berbeda dengan
+sync 10 menit. Booking website yang sudah didorong ke Cloudbeds bisa
+tertimpa tarif/sumber Cloudbeds oleh event webhook.
+
 ## 2026-10-03 — Manager boleh membuka blok yang dibuat langsung di Cloudbeds
 
 Owner: *"saya ingin semua bisa dikendalikan di dashboard itu, karena unit

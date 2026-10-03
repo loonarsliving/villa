@@ -18,6 +18,7 @@ const SUMBER_LABEL: Record<string, string> = {
   "walk-in": "Walk-in / Langsung",
   "website": "Website Loonars",
   "whatsapp": "WhatsApp",
+  "late-night": "Late Night",
   "other": "Lainnya",
 };
 

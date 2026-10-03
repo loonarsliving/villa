@@ -51,6 +51,7 @@ const SUMBER_LABEL: Record<string, string> = {
   website: "Web resmi",
   cloudbeds: "OTA / Cloudbeds",
   "walk-in": "Walk-in",
+  "late-night": "Late Night",
 };
 
 export default function GuestDatabasePage() {
