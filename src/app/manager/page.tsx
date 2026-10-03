@@ -40,6 +40,7 @@ export default function KesiapanKamarPage() {
   }, [muat]);
 
   const tertutup = data?.kamar.filter((k) => k.maintenance && !k.maintenance.berakhir) ?? [];
+  const tutupCb = data?.kamar.filter((k) => !tertutup.includes(k) && blokHariIni(k, data.hari_ini)) ?? [];
 
   return (
     <ManagerShell pageTitle="Kesiapan Kamar" pageSub="Checklist kamar & buka-tutup penjualan di Cloudbeds">
@@ -48,21 +49,28 @@ export default function KesiapanKamarPage() {
         <Loading />
       ) : data ? (
         <>
-          <div className="grid grid-cols-2 gap-3 mb-4">
+          <div className="grid grid-cols-3 gap-3 mb-4">
             <Card className="px-4 py-3">
               <div className="text-[10px] uppercase tracking-wide text-ink/40">Dijual</div>
-              <div className="font-serif text-2xl text-sage-500">{data.kamar.length - tertutup.length}</div>
+              <div className="font-serif text-2xl text-sage-500">{data.kamar.length - tertutup.length - tutupCb.length}</div>
             </Card>
             <Card className="px-4 py-3">
               <div className="text-[10px] uppercase tracking-wide text-ink/40">Maintenance</div>
               <div className="font-serif text-2xl text-ruby-400">{tertutup.length}</div>
             </Card>
+            <Card className="px-4 py-3">
+              <div className="text-[10px] uppercase tracking-wide text-ink/40">Ditutup di Cloudbeds</div>
+              <div className="font-serif text-2xl text-gold-500">{tutupCb.length}</div>
+            </Card>
           </div>
+          {!data.cloudbeds_terbaca && (
+            <div className="mb-4 text-[11px] text-ink/40">Blokir di Cloudbeds tidak terbaca saat ini — kamar yang ditutup langsung di Cloudbeds mungkin tidak tertandai.</div>
+          )}
 
           <Card>
             <CardHeader title="Semua Kamar" subtitle="Ketuk kamar untuk mengecek" />
             {data.kamar.map((k) => (
-              <BarisKamar key={k.unit_id} kamar={k} onClick={() => setPilih(k)} />
+              <BarisKamar key={k.unit_id} kamar={k} hariIni={data.hari_ini} onClick={() => setPilih(k)} />
             ))}
           </Card>
         </>
@@ -86,9 +94,15 @@ export default function KesiapanKamarPage() {
   );
 }
 
-function BarisKamar({ kamar, onClick }: { kamar: KamarKesiapan; onClick: () => void }) {
+/** Blok Cloudbeds (di luar modul ini) yang menutup kamar pada hari ini. */
+function blokHariIni(kamar: KamarKesiapan, hariIni: string) {
+  return kamar.blok_cloudbeds_lain.find((b) => (b.startDate ?? "") <= hariIni && hariIni <= (b.endDate ?? ""));
+}
+
+function BarisKamar({ kamar, hariIni, onClick }: { kamar: KamarKesiapan; hariIni: string; onClick: () => void }) {
   const mt = kamar.maintenance;
   const aktif = mt && !mt.berakhir;
+  const blokCb = !aktif ? blokHariIni(kamar, hariIni) : undefined;
   const cek = kamar.cek_terakhir;
   const menginap = kamar.booking_mendatang.find((b) => b.sedang_menginap);
   return (
@@ -105,6 +119,10 @@ function BarisKamar({ kamar, onClick }: { kamar: KamarKesiapan; onClick: () => v
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-ruby-500/15 text-ruby-400">
               MAINTENANCE s/d {fmtDate(mt.tutup_sampai)}
             </span>
+          ) : blokCb ? (
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-gold-500/15 text-gold-500">
+              DITUTUP DI CLOUDBEDS{blokCb.endDate ? ` s/d ${fmtDate(blokCb.endDate)}` : ""}
+            </span>
           ) : (
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-sage-500/15 text-sage-500">DIJUAL</span>
           )}
@@ -114,6 +132,7 @@ function BarisKamar({ kamar, onClick }: { kamar: KamarKesiapan; onClick: () => v
         <div className="text-[11px] text-ink/40 mt-1 truncate">
           {kamar.tipe ?? "—"}
           {aktif && ` · ${mt.alasan}`}
+          {blokCb && ` · ditutup langsung di Cloudbeds${blokCb.alasan ? ` (${blokCb.alasan})` : ""}`}
           {!aktif && cek && ` · cek terakhir ${fmtDateTime(cek.created_at)}${cek.dicek_oleh_nama ? ` oleh ${cek.dicek_oleh_nama}` : ""}`}
           {!aktif && !cek && " · belum pernah dicek"}
         </div>
@@ -188,6 +207,16 @@ function ModalCek({
         </>
       }
     >
+      {!mt && kamar.blok_cloudbeds_lain.length > 0 && (
+        <div className="mb-4 rounded-lg border border-gold-500/30 bg-gold-500/10 px-3 py-2.5 text-[11.5px] text-gold-500">
+          Kamar ini ditutup langsung di Cloudbeds (bukan dari halaman ini):{" "}
+          {kamar.blok_cloudbeds_lain
+            .map((b) => `${b.startDate ? fmtDate(b.startDate) : "?"} – ${b.endDate ? fmtDate(b.endDate) : "?"}${b.alasan ? ` (${b.alasan})` : ""}`)
+            .join("; ")}
+          . Pada tanggal itu kamar tidak dijual dan tidak bisa ditutup lagi dari sini; Kamar Siap tidak membukanya.
+        </div>
+      )}
+
       {mt && (
         <div className="mb-4 rounded-lg border border-ruby-500/30 bg-ruby-500/10 px-3 py-2.5 text-[11.5px] text-ruby-400">
           Sedang maintenance {fmtDate(mt.tutup_mulai)} s/d {fmtDate(mt.tutup_sampai)} — {mt.alasan}

@@ -867,6 +867,45 @@ async function cloudbedsRoomTypeIdUntuk(roomID){
   return null;
 }
 
+/**
+ * Blok yang SUDAH ada di Cloudbeds untuk rentang tanggal ini (dibuat di luar
+ * modul ini, mis. owner menutup unit langsung di Cloudbeds). Mengembalikan
+ * array blok dengan daftar roomID-nya, atau null kalau tidak bisa dibaca.
+ * Rentang dibatasi 35 hari oleh Cloudbeds.
+ */
+async function cloudbedsBlokDalamRentang(mulai, sampai){
+  const apiKey = cloudbedsApiKey();
+  if(!apiKey) return null;
+  const url = new URL(`${CLOUDBEDS_API_BASE}/getRoomBlocks`);
+  const propertyId = (Deno.env.get('CLOUDBEDS_PROPERTY_ID') ?? '').trim();
+  if(propertyId) url.searchParams.set('propertyID', propertyId);
+  url.searchParams.set('startDate', mulai);
+  url.searchParams.set('endDate', sampai);
+  url.searchParams.set('pageSize', '100');
+  try{
+    const res = await fetch(url, {headers:{'x-api-key':apiKey}, signal: AbortSignal.timeout(15000)});
+    const body = await res.json().catch(()=>null);
+    if(!res.ok || body?.success === false) return null;
+    const wadah = Array.isArray(body?.data) ? body.data : [body?.data];
+    const hasil = [];
+    for(const w of wadah){
+      for(const blk of (w?.roomBlocks ?? [])){
+        hasil.push({
+          roomBlockID: String(blk.roomBlockID ?? ''),
+          tipe: blk.roomBlockType ?? null,
+          alasan: blk.roomBlockReason ?? null,
+          startDate: blk.startDate ?? null,
+          endDate: blk.endDate ?? null,
+          roomIDs: (blk.rooms ?? []).map(r=>String(r.roomID)),
+        });
+      }
+    }
+    return hasil;
+  }catch{ return null; }
+}
+
+const LABEL_TIPE_BLOK = {out_of_service:'out of service', blocked_dates:'blokir tanggal', courtesy_hold:'courtesy hold'};
+
 async function catatRoomBlockLog(event_type, matched, payload){
   await supabase.from('cloudbeds_events_log').insert({
     reservation_id: null, event_type, payload, matched, error: payload?.error ?? null,
@@ -3722,11 +3761,18 @@ Deno.serve(async (req)=>{
     if(mErr || cErr) return err('Tabel kesiapan kamar belum tersedia -- migrasi 20261002000002 belum dijalankan', 503);
     const rtNama = new Map((rt??[]).map(r=>[r.id, r.name]));
     const terpetakan = new Set((map??[]).filter(r=>r.cloudbeds_room_id).map(r=>r.unit_id));
+    // Kamar yang ditutup langsung di Cloudbeds (bukan lewat modul ini) dalam
+    // 30 hari ke depan -- supaya manager tidak mengira kamar itu dijual.
+    // Gagal baca = tidak ditampilkan, halaman tetap jalan.
+    const blokCb = await cloudbedsBlokDalamRentang(hariIni, addDaysStr(hariIni, 29));
+    const roomIdUnit = new Map((map??[]).map(r=>[r.unit_id, String(r.cloudbeds_room_id)]));
+    const milikModul = new Set((mnt??[]).map(r=>String(r.cloudbeds_room_block_id)));
     const mntBy = new Map((mnt??[]).map(r=>[r.unit_id, r]));
     const cekBy = new Map();
     for(const c of cek??[]) if(!cekBy.has(c.unit_id)) cekBy.set(c.unit_id, c);
     return json({
       hari_ini: hariIni,
+      cloudbeds_terbaca: blokCb !== null,
       checklist: CHECKLIST_KAMAR,
       maks_malam: MAKS_MALAM_MAINTENANCE,
       kamar: (units??[]).map(u=>{
@@ -3743,6 +3789,9 @@ Deno.serve(async (req)=>{
           // Hanya tanggal, tanpa nama tamu: cukup untuk memilih kapan kamar
           // bisa ditutup tanpa bentrok.
           booking_mendatang: booking.slice(0,3).map(b=>({tgl_checkin:b.tgl_checkin, tgl_checkout:b.tgl_checkout, sedang_menginap:b.status==='checkin'})),
+          blok_cloudbeds_lain: (blokCb ?? [])
+            .filter(k=>!milikModul.has(k.roomBlockID) && k.roomIDs.includes(roomIdUnit.get(u.id) ?? '-'))
+            .map(k=>({tipe: LABEL_TIPE_BLOK[k.tipe] ?? k.tipe, alasan: k.alasan, startDate: k.startDate, endDate: k.endDate})),
         };
       }),
     });
@@ -3878,11 +3927,29 @@ Deno.serve(async (req)=>{
       jawaban: hasilCb.body, terbaca: terbaca ?? null, error: berhasil ? null : (hasilCb.pesan ?? 'blok tidak terbaca kembali'),
     });
     if(!berhasil){
-      const pesan = aksi==='ditutup'
-        ? `Cloudbeds menolak menutup unit ${unit.nomor}: ${hasilCb.pesan ?? 'blok tidak terbaca kembali setelah dibuat'}. Kamar MASIH DIJUAL.`
-        : `Cloudbeds menolak memperpanjang maintenance unit ${unit.nomor}: ${hasilCb.pesan ?? 'blok tidak terbaca kembali'}. Tanggal tutup lama (s/d ${mt.tutup_sampai}) tetap berlaku.`;
+      let pesan;
+      if(aksi==='ditutup'){
+        // "Some date has another event assigned in this period" = kamar ini
+        // sudah punya blok atau reservasi di Cloudbeds pada rentang itu.
+        // Sebutkan yang mana, jangan bilang "masih dijual" -- kalau itu blok,
+        // kamarnya justru sedang TIDAK dijual. Blok itu sengaja tidak diambil
+        // alih: Kamar Siap tidak boleh membuka kamar yang ditutup orang lain.
+        const lain = (await cloudbedsBlokDalamRentang(hasilCb.mulai, tutup_sampai) ?? [])
+          .filter(k=>k.roomIDs.includes(String(mapping.cloudbeds_room_id)));
+        if(lain.length){
+          const k = lain[0];
+          pesan = `Unit ${unit.nomor} SUDAH DITUTUP langsung di Cloudbeds (${LABEL_TIPE_BLOK[k.tipe] ?? k.tipe ?? 'blok'}, ${k.startDate ?? '?'} s/d ${k.endDate ?? '?'}${k.alasan ? `, "${k.alasan}"` : ''}), jadi saat ini memang tidak dijual di OTA. Tidak perlu ditutup lagi; untuk membukanya hubungi admin/owner.`;
+        } else if(/another event/i.test(hasilCb.pesan ?? '')){
+          pesan = `Unit ${unit.nomor} sudah punya reservasi di Cloudbeds antara ${hasilCb.mulai} dan ${tutup_sampai} yang belum tercatat di sistem villa. Kamar tidak ditutup -- cek kalender Cloudbeds, atau pilih tanggal lain.`;
+        } else {
+          pesan = `Cloudbeds menolak menutup unit ${unit.nomor}: ${hasilCb.pesan ?? 'blok tidak terbaca kembali setelah dibuat'}. Kamar MASIH DIJUAL.`;
+        }
+      } else {
+        pesan = `Cloudbeds menolak memperpanjang maintenance unit ${unit.nomor}: ${hasilCb.pesan ?? 'blok tidak terbaca kembali'}. Tanggal tutup lama (s/d ${mt.tutup_sampai}) tetap berlaku.`;
+      }
       await catatCek({cloudbeds_aksi:'gagal', tutup_mulai, tutup_sampai, cloudbeds_room_block_id: hasilCb.roomBlockID, cloudbeds_pesan: pesan});
-      return err(pesan, 502);
+      // Bentrok kalender = keadaan kamar, bukan gangguan Cloudbeds.
+      return err(pesan, /another event/i.test(hasilCb.pesan ?? '') ? 409 : 502);
     }
 
     const {error:upErr} = await supabase.from('villa_room_maintenance').upsert({

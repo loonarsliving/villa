@@ -2,6 +2,29 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-10-03 — Uji pertama Kesiapan Kamar: API key BOLEH menulis room block; C2 bentrok dengan "event" lain di Cloudbeds
+
+Owner menekan Kamar Maintenance pada C2 (3–17 Okt 2026). Cloudbeds menjawab
+`success:false` "Failed to add event to the calendar: Some date has another
+event assigned in this period." Artinya:
+- **API key punya izin room block** (penolakannya soal kalender, bukan
+  scope) -- satu dari dua hal yang belum teruji kini terjawab. Semantik
+  `endDate` (inklusif atau tidak) MASIH belum teruji.
+- C2 tidak punya booking di sistem villa pada rentang itu, jadi yang
+  bentrok ada di Cloudbeds saja: blok yang sudah ada (owner sengaja hanya
+  membuka 8 dari 13 unit, 14 Sep) atau reservasi Cloudbeds yang belum
+  tersinkron. Sesi ini tidak bisa membaca Cloudbeds langsung untuk
+  memastikan yang mana.
+- Pesan lama "Kamar MASIH DIJUAL" menyesatkan untuk kasus ini.
+
+Perbaikan: saat bentrok, villa-api membaca `getRoomBlocks` dan menyebut
+blok yang sudah ada (tipe, tanggal, alasan), atau -- kalau tidak ada blok --
+menyebut kemungkinan reservasi Cloudbeds yang belum tercatat (HTTP 409).
+`GET /manager/kamar` kini juga menandai kamar yang ditutup langsung di
+Cloudbeds 30 hari ke depan (`blok_cloudbeds_lain`, gagal-terbuka). Blok
+milik pihak lain SENGAJA tidak diambil alih: Kamar Siap tidak boleh
+membuka kamar yang ditutup owner langsung di Cloudbeds.
+
 ## 2026-10-02 — Role manager + Kesiapan Kamar (buka-tutup kamar di Cloudbeds) — LIVE, API room block BELUM TERUJI
 
 Owner: role login baru **manager** (Rebecca) yang hanya melihat satu modul,
