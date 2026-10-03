@@ -445,7 +445,7 @@ async function pushBookingToCloudbeds(booking){
   // Booking late night (loonars.id/late) SENGAJA tidak didorong ke
   // Cloudbeds. postReservation tidak membawa harga, jadi Cloudbeds memberi
   // harga sendiri (Rp468rb ke atas), dan webhook Cloudbeds meng-upsert
-  // reservasi itu kembali ke baris ini -- tarif Rp260.000 yang benar-benar
+  // reservasi itu kembali ke baris ini -- tarif late night yang benar-benar
   // dibayar tamu akan tertimpa angka Cloudbeds. Malam yang dijual juga
   // malam yang sudah lewat tengah malam (tamu masuk 01.00, keluar 09.00).
   // Konsekuensinya diterima: kamar itu tetap tampil kosong di Cloudbeds
@@ -781,14 +781,17 @@ function findConflicts(bookings, checkin, checkout){
 // Owner 2026-10-03: halaman loonars.id/late (repo loonars, app/late),
 // hanya untuk Laila (marketing late night). Tamu masuk lewat tengah malam dan keluar 09.00
 // WIB. Jawaban owner atas desainnya:
-//   - tarif tetap Rp260.000 ("260 yg benar"), itu yang ditagih DAN dicatat;
+//   - tarif tetap (awalnya Rp260.000, sekarang LATE_NIGHT_TARIF), itu yang
+//     ditagih DAN dicatat;
 //   - Laila sendiri yang menekan Lunas, yang sekaligus check-in + kirim PIN;
 //   - hanya unit tipe Standard;
 //   - pemasukan ikut bagi hasil investor seperti booking biasa (lewat
 //     villa_commit_checkin, jalur yang sama dengan check-in resepsionis).
 // Tarif ini SENGAJA tidak lewat computeStayTarif / villa_rates: ini harga
 // tetap yang ditentukan owner, bukan harga dinamis per malam.
-const LATE_NIGHT_TARIF = 260000;
+// Dinaikkan dari Rp260.000 ke Rp300.000 atas perintah owner 2026-10-03
+// ("naikkan harga di latenight di 300 ribu").
+const LATE_NIGHT_TARIF = 300000;
 // Booking hanya bisa DIBUAT pukul 01.00 s/d sebelum 09.00 WIB.
 const LATE_NIGHT_JAM_MULAI = 1;
 const LATE_NIGHT_JAM_SELESAI = 9;
@@ -3990,7 +3993,7 @@ Deno.serve(async (req)=>{
 
   // Lunas = pembayaran QRIS sudah dicek Laila sendiri (keputusan owner).
   // Langsung check-in lewat villa_commit_checkin: PIN dibuat, unit jadi
-  // occupied, pemasukan Rp260.000 tercatat di transactions (bagi hasil).
+  // occupied, pemasukan sebesar LATE_NIGHT_TARIF tercatat di transactions (bagi hasil).
   if(path==='/late-night/lunas' && m==='POST'){
     const b = await req.json().catch(()=>null);
     if(!b?.booking_id) return err('booking_id wajib diisi');
