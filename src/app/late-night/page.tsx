@@ -12,7 +12,8 @@ import type { LateNightBooking, LateNightHariIni, LateNightUnit } from "@/lib/ty
 
 /**
  * Late night booking -- satu-satunya modul role late_night (Laila),
- * dibuka lewat latenight.loonars.id.
+ * cadangan di aplikasi villa. Halaman utama Laila ada di loonars.id/late
+ * (repo loonars), yang memanggil rute villa-api yang sama.
  *
  * Alurnya (keputusan owner 2026-10-03):
  *   1. pilih unit Standard yang kosong & bersih malam ini, isi nama + WA tamu;

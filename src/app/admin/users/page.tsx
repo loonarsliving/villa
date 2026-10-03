@@ -168,7 +168,7 @@ export default function AdminUsersPage() {
             <option value="admin">Admin</option>
             <option value="finance">Finance</option>
             <option value="manager">Manager (Kesiapan Kamar)</option>
-            <option value="late_night">Late Night (latenight.loonars.id)</option>
+            <option value="late_night">Late Night (loonars.id/late)</option>
           </select>
         </Field>
         {form.role === "owner" && (

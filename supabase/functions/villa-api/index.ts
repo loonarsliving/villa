@@ -442,14 +442,15 @@ async function pushBookingToCloudbeds(booking){
   // ten minutes.
   if(booking.cloudbeds_reservation_id) return;
 
-  // Booking late night (latenight.loonars.id) SENGAJA tidak didorong ke
+  // Booking late night (loonars.id/late) SENGAJA tidak didorong ke
   // Cloudbeds. postReservation tidak membawa harga, jadi Cloudbeds memberi
   // harga sendiri (Rp468rb ke atas), dan webhook Cloudbeds meng-upsert
   // reservasi itu kembali ke baris ini -- tarif Rp260.000 yang benar-benar
   // dibayar tamu akan tertimpa angka Cloudbeds. Malam yang dijual juga
   // malam yang sudah lewat tengah malam (tamu masuk 01.00, keluar 09.00).
   // Konsekuensinya diterima: kamar itu tetap tampil kosong di Cloudbeds
-  // untuk malam tersebut. Lihat CURRENT_STATE.md 2026-10-03 (late night).
+  // untuk malam tersebut. Owner menegaskan 2026-10-03: "jgan sambungkan
+  // dgan cloudbeds khusus late night". Lihat CURRENT_STATE.md 2026-10-03.
   if(booking.sumber === 'late-night') return;
 
   const logOutbound = async (matched, extra) => {
@@ -777,8 +778,8 @@ function findConflicts(bookings, checkin, checkout){
 }
 
 // ── LATE NIGHT BOOKING (role late_night) ────────────────────────────────
-// Owner 2026-10-03: subdomain latenight.loonars.id, hanya untuk Laila
-// (marketing late night). Tamu masuk lewat tengah malam dan keluar 09.00
+// Owner 2026-10-03: halaman loonars.id/late (repo loonars, app/late),
+// hanya untuk Laila (marketing late night). Tamu masuk lewat tengah malam dan keluar 09.00
 // WIB. Jawaban owner atas desainnya:
 //   - tarif tetap Rp260.000 ("260 yg benar"), itu yang ditagih DAN dicatat;
 //   - Laila sendiri yang menekan Lunas, yang sekaligus check-in + kirim PIN;

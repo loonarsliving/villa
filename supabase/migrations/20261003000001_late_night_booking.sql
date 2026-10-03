@@ -1,6 +1,6 @@
--- Late night booking (latenight.loonars.id), diminta owner 2026-10-03.
+-- Late night booking (loonars.id/late), diminta owner 2026-10-03.
 --
--- Permintaan owner: subdomain loonars.id khusus late night booking yang
+-- Permintaan owner: halaman loonars.id khusus late night booking yang
 -- hanya bisa diakses Laila (marketing late night) lewat login. Tamu menginap
 -- jam 01.00 sampai 09.00 WIB, tarif tetap Rp260.000, dibayar lewat QRIS
 -- statis villa. Jawaban owner atas pertanyaan desain (2026-10-03):

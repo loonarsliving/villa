@@ -4,10 +4,10 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
-### 2026-10-03 — Late night booking (latenight.loonars.id) — branch `claude/late-night-booking-l4n7tx`, BELUM LIVE
+### 2026-10-03 — Late night booking (loonars.id/late) — branch `claude/late-night-booking-l4n7tx` (villa + loonars), BELUM LIVE
 - Role `late_night` (Laila) + halaman `/late-night`: unit Standard yang kosong & bersih, buat booking 01.00-09.00 WIB, QRIS statis Rp260.000, Tandai Lunas = check-in + PIN WA, batal, checkout.
 - villa-api: `/late-night/hari-ini`, `/late-night/qris`, `/late-night/bookings`, `/late-night/lunas`, `/late-night/batal`, `/late-night/checkout`; role dikunci ke `/late-night/*`; `sumber='late-night'` tidak didorong ke Cloudbeds; kanal finance DIRECT.
-- `src/middleware.ts`: host `latenight.*` hanya membuka `/login` dan `/late-night`.
+- Halaman utama Laila: `loonars.id/late` di repo loonars (`app/late/`), memanggil villa-api langsung. Tidak ada subdomain/DNS.
 - Migrasi `20261003000001_late_night_booking.sql` (role + sumber). Menyentuh uang & skema: menunggu persetujuan owner sebelum apply/merge.
 
 ### 2026-10-02 — Role manager + Kesiapan Kamar (buka-tutup kamar di Cloudbeds) — LIVE (PR #146)
