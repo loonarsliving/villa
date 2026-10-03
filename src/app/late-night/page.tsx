@@ -46,7 +46,9 @@ export default function LateNightPage() {
     return () => clearInterval(t);
   }, [muat]);
 
-  const tersedia = data?.unit.filter((u) => u.tersedia) ?? [];
+  // Unit yang ditutup (Cloudbeds/maintenance) tidak ditampilkan sama sekali.
+  const dibuka = data?.unit.filter((u) => !u.ditutup) ?? [];
+  const tersedia = dibuka.filter((u) => u.tersedia);
   const menunggu = data?.booking.filter((b) => b.status === "terjadwal") ?? [];
   const jam = (n: number) => `${String(n).padStart(2, "0")}.00`;
 
@@ -93,11 +95,11 @@ export default function LateNightPage() {
           )}
 
           <Card className="mb-4">
-            <CardHeader title="Unit Standard" subtitle={`${tersedia.length} dari ${data.unit.length} bisa dijual`} />
-            {data.unit.length === 0 ? (
-              <Empty label="Tidak ada unit Standard" />
+            <CardHeader title="Unit Standard" subtitle={`${tersedia.length} dari ${dibuka.length} kamar dibuka bisa dijual`} />
+            {dibuka.length === 0 ? (
+              <Empty label="Tidak ada unit Standard yang dibuka" />
             ) : (
-              data.unit.map((u) => (
+              dibuka.map((u) => (
                 <div key={u.id} className="px-4 sm:px-5 py-3 border-b border-ink/[0.05] last:border-0 flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <div className="text-[13px] text-ink">Unit {u.nomor}</div>

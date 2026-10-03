@@ -863,7 +863,11 @@ async function unitLateNight(j){
     else if(ditutup.has(u.id)) alasan = ditutup.get(u.id).sumber === 'cloudbeds' ? 'Ditutup di Cloudbeds' : 'Ditutup maintenance';
     // Tamu datang tengah malam: kamar yang belum dibersihkan tidak dijual.
     else if(u.status !== 'available') alasan = u.status === 'dirty' ? 'Belum dibersihkan' : `Status kamar: ${u.status}`;
-    return {id:u.id, nomor:u.nomor, tersedia: !alasan, alasan};
+    // `ditutup`: ditutup di Cloudbeds / maintenance -- halaman Laila tidak
+    // menampilkannya sama sekali, supaya daftarnya sama dengan kamar yang
+    // dibuka di akun manager (owner 2026-10-03: "kamar yg di buka itu hanya 9
+    // knapa jadi 10").
+    return {id:u.id, nomor:u.nomor, tersedia: !alasan, alasan, ditutup: ditutup.has(u.id)};
   });
 }
 
