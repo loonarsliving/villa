@@ -213,7 +213,7 @@ function ModalCek({
           {kamar.blok_cloudbeds_lain
             .map((b) => `${b.startDate ? fmtDate(b.startDate) : "?"} – ${b.endDate ? fmtDate(b.endDate) : "?"}${b.alasan ? ` (${b.alasan})` : ""}`)
             .join("; ")}
-          . Pada tanggal itu kamar tidak dijual dan tidak bisa ditutup lagi dari sini; Kamar Siap tidak membukanya.
+          . Pada tanggal itu kamar tidak dijual. Tekan Kamar Siap (10 poin dicentang) untuk membukanya — hanya kamar ini yang dibuka, kamar lain di blokir yang sama tetap tertutup.
         </div>
       )}
 
