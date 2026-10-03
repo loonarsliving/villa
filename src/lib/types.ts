@@ -1,4 +1,4 @@
-export type Role = "owner" | "receptionist" | "admin" | "finance" | "manager";
+export type Role = "owner" | "receptionist" | "admin" | "finance" | "manager" | "late_night";
 
 export interface SessionUser {
   id: string;
@@ -752,4 +752,40 @@ export interface RiwayatCekKamar {
   cloudbeds_pesan: string | null;
   dicek_oleh_nama: string | null;
   created_at: string;
+}
+
+/** GET /late-night/hari-ini -- modul late night (role late_night). */
+export interface LateNightUnit {
+  id: string;
+  nomor: string;
+  tersedia: boolean;
+  alasan: string | null;
+}
+
+export interface LateNightBooking {
+  id: string;
+  unit_id: string;
+  unit_nomor: string;
+  guest_nama: string;
+  status: "terjadwal" | "checkin" | "checkout" | "batal";
+  total_bayar: number;
+  checkin_time: string | null;
+  tgl_checkin: string;
+  tgl_checkout: string;
+  created_at: string;
+  checkin_at: string | null;
+  checkout_at: string | null;
+}
+
+export interface LateNightHariIni {
+  jendela_buka: boolean;
+  jam_mulai: number;
+  jam_selesai: number;
+  /** Malam yang dijual (tanggal WIB kemarin); tamu keluar `checkout`. */
+  malam: string;
+  checkout: string;
+  tarif: number;
+  hold_menit: number;
+  unit: LateNightUnit[];
+  booking: LateNightBooking[];
 }

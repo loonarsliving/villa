@@ -442,6 +442,16 @@ async function pushBookingToCloudbeds(booking){
   // ten minutes.
   if(booking.cloudbeds_reservation_id) return;
 
+  // Booking late night (latenight.loonars.id) SENGAJA tidak didorong ke
+  // Cloudbeds. postReservation tidak membawa harga, jadi Cloudbeds memberi
+  // harga sendiri (Rp468rb ke atas), dan webhook Cloudbeds meng-upsert
+  // reservasi itu kembali ke baris ini -- tarif Rp260.000 yang benar-benar
+  // dibayar tamu akan tertimpa angka Cloudbeds. Malam yang dijual juga
+  // malam yang sudah lewat tengah malam (tamu masuk 01.00, keluar 09.00).
+  // Konsekuensinya diterima: kamar itu tetap tampil kosong di Cloudbeds
+  // untuk malam tersebut. Lihat CURRENT_STATE.md 2026-10-03 (late night).
+  if(booking.sumber === 'late-night') return;
+
   const logOutbound = async (matched, extra) => {
     await supabase.from('cloudbeds_events_log').insert({
       reservation_id: booking.cloudbeds_reservation_id ?? null,
@@ -764,6 +774,86 @@ function findConflicts(bookings, checkin, checkout){
     }
   }
   return map;
+}
+
+// ── LATE NIGHT BOOKING (role late_night) ────────────────────────────────
+// Owner 2026-10-03: subdomain latenight.loonars.id, hanya untuk Laila
+// (marketing late night). Tamu masuk lewat tengah malam dan keluar 09.00
+// WIB. Jawaban owner atas desainnya:
+//   - tarif tetap Rp260.000 ("260 yg benar"), itu yang ditagih DAN dicatat;
+//   - Laila sendiri yang menekan Lunas, yang sekaligus check-in + kirim PIN;
+//   - hanya unit tipe Standard;
+//   - pemasukan ikut bagi hasil investor seperti booking biasa (lewat
+//     villa_commit_checkin, jalur yang sama dengan check-in resepsionis).
+// Tarif ini SENGAJA tidak lewat computeStayTarif / villa_rates: ini harga
+// tetap yang ditentukan owner, bukan harga dinamis per malam.
+const LATE_NIGHT_TARIF = 260000;
+// Booking hanya bisa DIBUAT pukul 01.00 s/d sebelum 09.00 WIB.
+const LATE_NIGHT_JAM_MULAI = 1;
+const LATE_NIGHT_JAM_SELESAI = 9;
+const LATE_NIGHT_ROOM_TYPE = 'standard';
+// Booking yang belum ditandai Lunas setelah sekian menit dibatalkan supaya
+// kamarnya tidak tertahan. Tidak ada cron: pembatalan dijalankan setiap kali
+// halaman late night dimuat atau booking baru dibuat.
+const LATE_NIGHT_HOLD_MINUTES = 30;
+const LATE_NIGHT_MARK = '[Late Night]';
+
+function jamMenitWIB(d = new Date()){
+  const f = new Intl.DateTimeFormat('en-GB', {timeZone: WIB_TZ, hour:'2-digit', minute:'2-digit', hourCycle:'h23'});
+  const [jam, menit] = f.format(d).split(':').map(Number);
+  return {jam, menit};
+}
+
+/**
+ * Malam yang dijual late night = malam KEMARIN (tanggal WIB), keluar hari
+ * ini. Dengan begitu booking ini bentrok dengan tamu yang memang masih
+ * menginap malam itu (dan dengan exclusion constraint bookings), tapi tidak
+ * dengan tamu yang check-in hari ini pukul 14.00.
+ */
+function jendelaLateNight(d = new Date()){
+  const {jam} = jamMenitWIB(d);
+  const hariIni = todayWIB(d);
+  const k = new Date(`${hariIni}T00:00:00Z`);
+  k.setUTCDate(k.getUTCDate() - 1);
+  return {
+    buka: jam >= LATE_NIGHT_JAM_MULAI && jam < LATE_NIGHT_JAM_SELESAI,
+    malam: k.toISOString().slice(0,10),
+    checkout: hariIni,
+  };
+}
+
+async function batalkanLateNightBasi(){
+  const batas = Date.now() - LATE_NIGHT_HOLD_MINUTES*60*1000;
+  const hariIni = todayWIB();
+  const {data} = await supabase.from('bookings')
+    .select('id,catatan,created_at,tgl_checkout')
+    .eq('sumber','late-night').eq('status','terjadwal');
+  for(const bk of data ?? []){
+    if(new Date(bk.created_at).getTime() >= batas && bk.tgl_checkout >= hariIni) continue;
+    await supabase.from('bookings')
+      .update({status:'batal', catatan:`${bk.catatan ?? ''} ${EXPIRED_HOLD_MARK} ${new Date().toISOString()}`.trim()})
+      .eq('id', bk.id).eq('status','terjadwal');
+  }
+}
+
+/** Unit Standard beserta apakah bisa dijual untuk malam late night ini. */
+async function unitLateNight(j){
+  const {data:rt} = await supabase.from('villa_room_types').select('id').eq('code', LATE_NIGHT_ROOM_TYPE);
+  const rtIds = (rt ?? []).map(r=>r.id);
+  if(!rtIds.length) return [];
+  const {data:units} = await supabase.from('units').select('id,nomor,status').in('room_type_id', rtIds).order('nomor');
+  const {data:bookings} = await supabase.from('bookings')
+    .select('unit_id,tgl_checkin,tgl_checkout,guest_nama').in('status',['terjadwal','checkin']);
+  const bentrok = findConflicts(bookings ?? [], j.malam, j.checkout);
+  const ditutup = await unitMaintenanceBentrok(j.malam, j.checkout);
+  return (units ?? []).map(u=>{
+    let alasan = null;
+    if(bentrok.has(u.id)) alasan = 'Sedang ditempati / sudah dibooking';
+    else if(ditutup.has(u.id)) alasan = ditutup.get(u.id).sumber === 'cloudbeds' ? 'Ditutup di Cloudbeds' : 'Ditutup maintenance';
+    // Tamu datang tengah malam: kamar yang belum dibersihkan tidak dijual.
+    else if(u.status !== 'available') alasan = u.status === 'dirty' ? 'Belum dibersihkan' : `Status kamar: ${u.status}`;
+    return {id:u.id, nomor:u.nomor, tersedia: !alasan, alasan};
+  });
 }
 
 // ── KESIAPAN KAMAR (role manager) ───────────────────────────────────────
@@ -1440,6 +1530,8 @@ function normalizedChannel(sumber){
   // via whichever booking engine the click-through lands on, so this is
   // DIRECT for settlement purposes even though it's a distinct traffic source.
   if(s==='walk-in' || s==='website' || s==='whatsapp' || s==='google') return 'DIRECT';
+  // Late night: dibayar langsung ke QRIS villa, tidak ada OTA di tengah.
+  if(s==='late-night') return 'DIRECT';
   if(s==='booking.com') return 'BOOKING_COM';
   if(s==='agoda') return 'AGODA';
   if(s==='airbnb') return 'AIRBNB';
@@ -3797,6 +3889,163 @@ Deno.serve(async (req)=>{
   // baru apa pun yang tidak disebut namanya. /me/password ada di atas
   // requireAuth ini, jadi ganti password tetap jalan.
   if(session.role==='manager' && !path.startsWith('/manager/')) return forbidden();
+
+  // Role late_night (Laila) HANYA boleh memakai modul late night -- dikunci
+  // di sini dengan alasan yang sama seperti manager di atas. Admin boleh
+  // membuka modul ini juga.
+  if(session.role==='late_night' && !path.startsWith('/late-night/')) return forbidden();
+  if(path.startsWith('/late-night/') && session.role!=='late_night' && !isAdmin) return forbidden();
+
+  if(path==='/late-night/hari-ini' && m==='GET'){
+    await batalkanLateNightBasi();
+    const j = jendelaLateNight();
+    const unit = await unitLateNight(j);
+    const seminggu = new Date(`${j.checkout}T00:00:00Z`);
+    seminggu.setUTCDate(seminggu.getUTCDate() - 7);
+    const {data:booking, error} = await supabase.from('bookings')
+      .select('id,unit_id,unit_nomor,guest_nama,status,total_bayar,checkin_time,tgl_checkin,tgl_checkout,created_at,checkin_at,checkout_at')
+      .eq('sumber','late-night').gte('tgl_checkout', seminggu.toISOString().slice(0,10))
+      .order('created_at',{ascending:false}).limit(50);
+    if(error) return err(error.message);
+    return json({
+      jendela_buka: j.buka,
+      jam_mulai: LATE_NIGHT_JAM_MULAI,
+      jam_selesai: LATE_NIGHT_JAM_SELESAI,
+      malam: j.malam,
+      checkout: j.checkout,
+      tarif: LATE_NIGHT_TARIF,
+      hold_menit: LATE_NIGHT_HOLD_MINUTES,
+      unit,
+      booking: booking ?? [],
+    });
+  }
+
+  if(path==='/late-night/qris' && m==='GET'){
+    const setting = await getSetting('walkin_qris');
+    return json({data_url: setting?.data_url ?? null});
+  }
+
+  if(path==='/late-night/bookings' && m==='POST'){
+    const b = await req.json().catch(()=>null);
+    if(!b) return err('Body tidak valid');
+    const nama = String(b.nama ?? '').trim();
+    const hp = String(b.hp ?? '').trim();
+    const adults = Number.isFinite(Number(b.adults)) ? Math.trunc(Number(b.adults)) : 1;
+    if(nama.length < 2) return err('Nama tamu wajib diisi');
+    if(!/^[0-9+][0-9+\-\s]{7,}$/.test(hp)) return err('Nomor WhatsApp tamu tidak valid');
+    if(adults < 1 || adults > 20) return err('Jumlah tamu tidak valid');
+    if(!b.unit_id) return err('Pilih unit dulu');
+
+    const j = jendelaLateNight();
+    if(!j.buka){
+      return err(`Late night booking hanya bisa dibuat pukul ${String(LATE_NIGHT_JAM_MULAI).padStart(2,'0')}.00-${String(LATE_NIGHT_JAM_SELESAI).padStart(2,'0')}.00 WIB`, 409);
+    }
+    await batalkanLateNightBasi();
+    const u = (await unitLateNight(j)).find(x=>x.id === b.unit_id);
+    if(!u) return err('Unit tidak ditemukan atau bukan tipe Standard', 404);
+    if(!u.tersedia) return err(`Unit ${u.nomor} tidak bisa dijual: ${u.alasan}`, 409);
+
+    // Tamu yang sama (nomor sama) dipakai ulang, seperti webhook Cloudbeds.
+    let guest_id = null;
+    const {data:g0} = await supabase.from('guests').select('id').eq('hp', hp).limit(1).maybeSingle();
+    guest_id = g0?.id ?? null;
+    if(!guest_id){
+      const {data:g} = await supabase.from('guests').insert({nama, hp}).select('id').single();
+      guest_id = g?.id ?? null;
+    }
+
+    const {jam, menit} = jamMenitWIB();
+    const jamMasuk = `${String(jam).padStart(2,'0')}:${String(menit).padStart(2,'0')}`;
+    const {data, error} = await supabase.from('bookings').insert({
+      unit_id: u.id, unit_nomor: u.nomor, guest_id, guest_nama: nama,
+      tipe: 'harian', sumber: 'late-night',
+      tgl_checkin: j.malam, tgl_checkout: j.checkout, durasi_malam: 1,
+      checkin_time: `${jamMasuk}:00`,
+      tarif: LATE_NIGHT_TARIF, total_bayar: LATE_NIGHT_TARIF,
+      status: 'terjadwal', adults, children: 0,
+      catatan: `${LATE_NIGHT_MARK} Dibuat ${session.email} pukul ${jamMasuk} WIB, keluar ${String(LATE_NIGHT_JAM_SELESAI).padStart(2,'0')}.00 WIB. QRIS statis Rp${LATE_NIGHT_TARIF.toLocaleString('id-ID')}.`,
+    }).select('id,unit_id,unit_nomor,guest_nama,status,total_bayar,checkin_time,tgl_checkin,tgl_checkout,created_at').single();
+    if(error){
+      if(error.code === '23P01') return err(`Unit ${u.nomor} baru saja terisi -- pilih unit lain`, 409);
+      return err(error.message);
+    }
+    await notif(u.id,'all','booking',`Late night — Unit ${u.nomor}`,`${nama} · menunggu pembayaran QRIS Rp${LATE_NIGHT_TARIF.toLocaleString('id-ID')} (dibuat ${session.email})`,data.id);
+    return json(data, 201);
+  }
+
+  // Lunas = pembayaran QRIS sudah dicek Laila sendiri (keputusan owner).
+  // Langsung check-in lewat villa_commit_checkin: PIN dibuat, unit jadi
+  // occupied, pemasukan Rp260.000 tercatat di transactions (bagi hasil).
+  if(path==='/late-night/lunas' && m==='POST'){
+    const b = await req.json().catch(()=>null);
+    if(!b?.booking_id) return err('booking_id wajib diisi');
+    const {data:bk} = await supabase.from('bookings')
+      .select('id,sumber,status,tgl_checkout,guest_id').eq('id', b.booking_id).maybeSingle();
+    if(!bk || bk.sumber !== 'late-night') return err('Booking late night tidak ditemukan', 404);
+    if(bk.status === 'batal') return err('Booking ini sudah batal (lewat batas waktu bayar) -- buat booking baru', 409);
+    if(bk.status !== 'terjadwal') return err('Booking ini sudah ditandai lunas', 409);
+    if(bk.tgl_checkout < todayWIB()) return err('Booking ini sudah lewat waktunya', 409);
+
+    const {data, error} = await supabase.rpc('villa_commit_checkin', {
+      p_booking_id: bk.id,
+      p_checkin_by: session.email ?? session.uid,
+      p_ktp_photo_path: null,
+      p_signature_data_url: null,
+    });
+    if(error){
+      const msg = error.message ?? '';
+      if(msg.includes('already_checked_in')) return err('Booking ini sudah ditandai lunas', 409);
+      if(msg.includes('invalid_booking_status')) return err('Booking tidak dalam status yang bisa ditandai lunas', 409);
+      return err(msg, 500);
+    }
+    await notif(data.unit_id,'all','checkin',`Late night check-in — Unit ${data.unit_nomor}`,`${data.guest_nama} · lunas QRIS Rp${LATE_NIGHT_TARIF.toLocaleString('id-ID')} (dikonfirmasi ${session.email})`,bk.id);
+
+    let hp = null;
+    if(data.guest_id){
+      const {data:g} = await supabase.from('guests').select('hp').eq('id', data.guest_id).maybeSingle();
+      hp = g?.hp ?? null;
+    }
+    const wa_terkirim = await sendWa(hp,
+      `Halo ${data.guest_nama}, selamat datang di Loonars Private Living!\nKode PIN pintu Anda: *${data.pin_kode}*\nCheck-out paling lambat pukul ${String(LATE_NIGHT_JAM_SELESAI).padStart(2,'0')}.00 WIB. Mohon jaga kerahasiaan kode ini. Terima kasih.`,
+      {booking_id: bk.id, unit_id: data.unit_id, template_type:'pin_checkin'});
+    return json({success:true, pin_kode: data.pin_kode, unit_nomor: data.unit_nomor, wa_terkirim: !!wa_terkirim});
+  }
+
+  if(path==='/late-night/batal' && m==='POST'){
+    const b = await req.json().catch(()=>null);
+    if(!b?.booking_id) return err('booking_id wajib diisi');
+    const {data:bk} = await supabase.from('bookings')
+      .select('id,catatan').eq('id', b.booking_id).eq('sumber','late-night').maybeSingle();
+    if(!bk) return err('Booking late night tidak ditemukan', 404);
+    const {data:upd, error} = await supabase.from('bookings')
+      .update({status:'batal', catatan:`${bk.catatan ?? ''} [Dibatalkan ${session.email} ${new Date().toISOString()}]`.trim()})
+      .eq('id', bk.id).eq('status','terjadwal').select('id');
+    if(error) return err(error.message);
+    if(!(upd ?? []).length) return err('Hanya booking yang belum lunas yang bisa dibatalkan', 409);
+    return json({success:true});
+  }
+
+  if(path==='/late-night/checkout' && m==='POST'){
+    const b = await req.json().catch(()=>null);
+    if(!b?.booking_id) return err('booking_id wajib diisi');
+    const {data:bk} = await supabase.from('bookings')
+      .select('id').eq('id', b.booking_id).eq('sumber','late-night').maybeSingle();
+    if(!bk) return err('Booking late night tidak ditemukan', 404);
+    const {data, error} = await supabase.rpc('villa_commit_checkout', {
+      p_booking_id: bk.id,
+      p_checkout_by: session.email ?? session.uid,
+      p_kondisi: null,
+    });
+    if(error){
+      const msg = error.message ?? '';
+      if(msg.includes('already_checked_out')) return err('Tamu ini sudah checkout', 409);
+      if(msg.includes('invalid_booking_status')) return err('Booking belum lunas, tidak bisa checkout', 409);
+      return err(msg, 500);
+    }
+    await notif(data.unit_id,'all','checkout',`Late night checkout — Unit ${data.unit_nomor}`,`${data.guest_nama} sudah keluar. Housekeeping dijadwalkan.`,bk.id);
+    return json({success:true});
+  }
+
 
   // ── KESIAPAN KAMAR ──────────────────────────────────────────────────────
   // Lihat komentar di atas CHECKLIST_KAMAR.
