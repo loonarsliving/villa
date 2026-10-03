@@ -814,12 +814,22 @@ function jamMenitWIB(d = new Date()){
 function jendelaLateNight(d = new Date()){
   const {jam} = jamMenitWIB(d);
   const hariIni = todayWIB(d);
-  const k = new Date(`${hariIni}T00:00:00Z`);
-  k.setUTCDate(k.getUTCDate() - 1);
+  const geser = (n) => {
+    const t = new Date(`${hariIni}T00:00:00Z`);
+    t.setUTCDate(t.getUTCDate() + n);
+    return t.toISOString().slice(0,10);
+  };
+  // Sejak 09.00 WIB late night berikutnya adalah MALAM INI (masuk lewat
+  // tengah malam nanti, keluar besok). Sebelumnya halaman tetap menghitung
+  // malam kemarin yang sudah lewat, sehingga sepanjang siang unit yang sudah
+  // dibooking untuk malam ini tampil "Kosong & bersih" (B1, 3 Okt 2026).
+  // Booking tetap hanya bisa dibuat saat `buka`, dan saat itu malamnya
+  // selalu kemarin -- aturan pembuatan booking tidak berubah.
+  const sesudahJendela = jam >= LATE_NIGHT_JAM_SELESAI;
   return {
     buka: jam >= LATE_NIGHT_JAM_MULAI && jam < LATE_NIGHT_JAM_SELESAI,
-    malam: k.toISOString().slice(0,10),
-    checkout: hariIni,
+    malam: sesudahJendela ? hariIni : geser(-1),
+    checkout: sesudahJendela ? geser(1) : hariIni,
   };
 }
 
