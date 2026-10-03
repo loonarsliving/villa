@@ -30,6 +30,8 @@ export interface UnitAvailability {
   status: Unit["status"];
   tersedia_untuk_tanggal: boolean;
   dibooking_oleh: string | null;
+  /** Ditutup manager (Kamar Maintenance) atau langsung di Cloudbeds -- tidak dijual. */
+  ditutup?: { sumber: "manager" | "cloudbeds"; tutup_mulai: string; tutup_sampai: string } | null;
 }
 
 export interface Booking {

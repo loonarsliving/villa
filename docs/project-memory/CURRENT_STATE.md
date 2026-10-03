@@ -2,6 +2,30 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-10-03 — loonars.id & Front Desk kini mengikuti SEMUA blok Cloudbeds
+
+Owner menjawab pertanyaan terbuka di bawah: *"ya harus ditutup juga ...
+jika manager menutup dan membuka, front dan loonars.id menyesuaikan, begitu
+juga dengan Cloudbeds"*. Aturannya sekarang satu: **kamar yang tertutup di
+Cloudbeds tidak dijual di mana pun**, siapa pun yang menutupnya.
+
+`unitMaintenanceBentrok()` (villa-api) kini menggabungkan
+`villa_room_maintenance` DAN room block Cloudbeds hidup
+(`getRoomBlocks`, dipecah per 35 hari, cache 60 dtk per isolate, batas 8
+dtk, gagal-terbuka). Dipakai oleh `/public/availability`,
+`/public/bookings`, `POST /bookings` (walk-in), dan sekarang juga
+`GET /availability` (daftar unit kasir Front Desk, field baru `ditutup`).
+Malam blok dianggap inklusif sampai `endDate` (konservatif).
+
+Konsekuensi langsung: C2, C3, B1, A2, A3 tidak lagi bisa dipesan lewat
+loonars.id maupun walk-in selama bloknya ada di Cloudbeds. Booking yang
+SUDAH ada di unit itu tidak disentuh. Penugasan/pindah unit
+(`/bridge/...putReservation`, webhook) tidak memakai pemeriksaan ini.
+
+Belum diputuskan: apakah manager boleh MEMBUKA blok yang dibuat owner
+langsung di Cloudbeds lewat Kamar Siap. Saat ini tidak (lihat entri di
+bawah); tanyakan owner sebelum mengubahnya.
+
 ## 2026-10-03 — FAKTA dari owner: 5 unit yang sengaja ditutup di Cloudbeds
 
 Owner (3 Okt 2026): *"C2, C3, B1, A2, A3 adalah unit yang kami tutup
