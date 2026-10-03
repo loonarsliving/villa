@@ -724,10 +724,14 @@ export interface KamarKesiapan {
     created_at: string;
   } | null;
   booking_mendatang: { tgl_checkin: string; tgl_checkout: string | null; sedang_menginap: boolean }[];
+  /** Blok yang dibuat langsung di Cloudbeds (bukan dari modul ini), 30 hari ke depan. */
+  blok_cloudbeds_lain: { tipe: string | null; alasan: string | null; startDate: string | null; endDate: string | null }[];
 }
 
 export interface KesiapanKamarResponse {
   hari_ini: string;
+  /** false = blok Cloudbeds tidak bisa dibaca saat ini; tanda "ditutup di Cloudbeds" mungkin tidak lengkap. */
+  cloudbeds_terbaca: boolean;
   checklist: string[];
   maks_malam: number;
   kamar: KamarKesiapan[];
