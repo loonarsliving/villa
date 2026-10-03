@@ -2,6 +2,25 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-10-03 — FAKTA dari owner: 5 unit yang sengaja ditutup di Cloudbeds
+
+Owner (3 Okt 2026): *"C2, C3, B1, A2, A3 adalah unit yang kami tutup
+sementara di Cloudbeds."* Kelimanya tipe Regular (RER), cocok dengan
+keputusan 14 Sep "buka 8 unit dulu" (3 Sawah View + 5 dari 10 Regular).
+Penutupannya berupa blok yang dibuat langsung di Cloudbeds, bukan lewat
+modul Kesiapan Kamar.
+
+Konsekuensi yang sudah terbukti: Kamar Maintenance pada salah satu unit
+ini ditolak Cloudbeds ("another event assigned in this period") -- itu
+BENAR, bukan bug. Halaman manager kini menandainya "DITUTUP DI CLOUDBEDS"
+(PR #147). Jangan buka atau ambil alih blok ini dari kode tanpa owner.
+
+PERTANYAAN TERBUKA (belum ditanyakan jawabannya): loonars.id
+(`/public/availability`, `/public/bookings`) dan walk-in tidak membaca
+blok Cloudbeds, jadi kelima unit ini tetap bisa terjual lewat jalur itu.
+Di DB, A2 dan A3 berstatus `occupied` pada 2 Okt. Belum diketahui apakah
+penjualan langsung di unit-unit ini disengaja.
+
 ## 2026-10-03 — Uji pertama Kesiapan Kamar: API key BOLEH menulis room block; C2 bentrok dengan "event" lain di Cloudbeds
 
 Owner menekan Kamar Maintenance pada C2 (3–17 Okt 2026). Cloudbeds menjawab
