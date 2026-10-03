@@ -2,6 +2,28 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-10-03 — Manager boleh membuka blok yang dibuat langsung di Cloudbeds
+
+Owner: *"saya ingin semua bisa dikendalikan di dashboard itu, karena unit
+A2 dan A3 sedikit lagi siap dibuka, jadi dia bisa membukanya"*. Ini
+MENGGANTIKAN keputusan sebelumnya ("blok milik pihak lain tidak diambil
+alih").
+
+Kamar Siap (villa-api `/manager/kamar/cek`, hasil `siap`) kini juga
+mencari blok Cloudbeds yang memuat roomID unit itu dalam 35 hari ke depan:
+- blok berisi kamar ini saja → `deleteRoomBlock`;
+- blok berisi beberapa kamar → `putRoomBlock` dengan SISA kamar (tanggal &
+  alasan blok dipertahankan) -- kamar lain tetap tertutup;
+- `courtesy_hold` tidak disentuh (tahanan tamu).
+Dibaca balik; gagal = HTTP 502, keadaan dicatat `gagal`. Detail blok asal
+disimpan di `cloudbeds_events_log` (`outbound.room_block.deleted` /
+`.room_removed`, payload `blok_asal`) supaya bisa dibuat ulang. Cache blok
+availability dikosongkan setelah buka/tutup.
+
+Batas yang diketahui: blok yang MULAI lebih dari 35 hari ke depan tidak
+terlihat dan tidak dibuka. `putRoomBlock` dengan daftar kamar berkurang
+belum pernah diuji sungguhan.
+
 ## 2026-10-03 — loonars.id & Front Desk kini mengikuti SEMUA blok Cloudbeds
 
 Owner menjawab pertanyaan terbuka di bawah: *"ya harus ditutup juga ...
