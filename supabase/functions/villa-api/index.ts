@@ -778,20 +778,80 @@ const CHECKLIST_KAMAR = ['kebersihan','bathroom','linen','gorden','ac','tv','kol
 const MAKS_MALAM_MAINTENANCE = 30;
 
 /**
- * Unit yang sedang ditutup maintenance untuk salah satu malam [checkin, checkout).
- * Malam yang ditutup = tutup_mulai s/d tutup_sampai, keduanya ikut.
+ * Unit yang TIDAK BOLEH dijual untuk salah satu malam [checkin, checkout):
+ *  1. ditutup manager lewat Kamar Maintenance (villa_room_maintenance), dan
+ *  2. ditutup langsung di Cloudbeds (room block apa pun, mis. 5 unit yang
+ *     owner tutup sementara -- keputusan owner 3 Okt 2026: "harus ditutup
+ *     juga" di loonars.id dan Front Desk, mengikuti Cloudbeds).
+ * Malam yang ditutup = startDate s/d endDate, keduanya ikut (anggapan
+ * konservatif: lebih baik tidak menjual satu malam daripada menjual kamar
+ * yang ditutup).
  *
- * GAGAL TERBUKA: kalau tabelnya belum ada (villa-api ter-deploy sebelum
- * migrasinya dijalankan) atau database sedang bermasalah, pemesanan tetap
+ * GAGAL TERBUKA: kalau tabel atau Cloudbeds tidak terbaca, pemesanan tetap
  * berjalan seperti sebelum fitur ini ada. Tidak boleh ada tamu yang ditolak
- * karena fitur maintenance rusak.
+ * karena pemeriksaan ini rusak.
  */
 async function unitMaintenanceBentrok(checkin, checkout){
+  const hasil = new Map();
   let q = supabase.from('villa_room_maintenance').select('unit_id,tutup_mulai,tutup_sampai').gte('tutup_sampai', checkin);
   if(checkout) q = q.lt('tutup_mulai', checkout);
   const {data, error} = await q;
-  if(error){ console.error('villa_room_maintenance tidak terbaca:', error.message); return new Map(); }
-  return new Map((data ?? []).map(r=>[r.unit_id, r]));
+  if(error) console.error('villa_room_maintenance tidak terbaca:', error.message);
+  for(const r of data ?? []) hasil.set(r.unit_id, {...r, sumber:'manager'});
+
+  for(const [unit_id, r] of await unitDiblokCloudbeds(checkin, checkout)){
+    if(!hasil.has(unit_id)) hasil.set(unit_id, r);
+  }
+  return hasil;
+}
+
+// Cache singkat per isolate: halaman pencarian loonars.id bisa memanggil
+// ketersediaan beberapa kali berturut-turut; tidak perlu ke Cloudbeds tiap
+// kali. 60 detik tetap "realtime" untuk keperluan buka-tutup kamar.
+const CACHE_BLOK_MS = 60_000;
+const cacheBlokCloudbeds = new Map();
+
+/** Room block Cloudbeds yang menutup malam di [checkin, checkout), dipetakan ke unit villa. */
+async function unitDiblokCloudbeds(checkin, checkout){
+  const hasil = new Map();
+  // Malam terakhir yang dipakai; booking bulanan tanpa checkout cukup diperiksa 35 malam pertama.
+  const malamTerakhir = checkout ? addDaysStr(checkout, -1) : addDaysStr(checkin, 34);
+  if(malamTerakhir < checkin) return hasil;
+
+  const blok = [];
+  // getRoomBlocks menerima rentang maksimal 35 hari: pecah per 35 hari.
+  for(let mulai = checkin; mulai <= malamTerakhir; mulai = addDaysStr(mulai, 35)){
+    const sampai = addDaysStr(mulai, 34) < malamTerakhir ? addDaysStr(mulai, 34) : malamTerakhir;
+    const kunci = `${mulai}|${sampai}`;
+    const tersimpan = cacheBlokCloudbeds.get(kunci);
+    let isi;
+    if(tersimpan && Date.now() - tersimpan.at < CACHE_BLOK_MS){
+      isi = tersimpan.data;
+    } else {
+      // Batas 8 detik: pemesanan tamu tidak boleh ikut menggantung.
+      isi = await cloudbedsBlokDalamRentang(mulai, sampai, 8000);
+      if(isi === null){ console.error('getRoomBlocks tidak terbaca untuk', kunci); continue; }
+      if(cacheBlokCloudbeds.size > 200) cacheBlokCloudbeds.clear();
+      cacheBlokCloudbeds.set(kunci, {at: Date.now(), data: isi});
+    }
+    blok.push(...isi);
+  }
+  if(!blok.length) return hasil;
+
+  const {data:map} = await supabase.from('cloudbeds_room_mapping').select('unit_id,cloudbeds_room_id');
+  const unitByRoom = new Map((map ?? []).map(r=>[String(r.cloudbeds_room_id), r.unit_id]));
+  for(const k of blok){
+    if(!k.startDate || !k.endDate) continue;
+    // Pastikan benar-benar beririsan dengan malam menginap.
+    if(k.startDate > malamTerakhir || k.endDate < checkin) continue;
+    for(const roomID of k.roomIDs){
+      const unit_id = unitByRoom.get(roomID);
+      if(unit_id && !hasil.has(unit_id)){
+        hasil.set(unit_id, {unit_id, tutup_mulai: k.startDate, tutup_sampai: k.endDate, sumber:'cloudbeds', alasan: k.alasan});
+      }
+    }
+  }
+  return hasil;
 }
 
 /**
@@ -873,7 +933,7 @@ async function cloudbedsRoomTypeIdUntuk(roomID){
  * array blok dengan daftar roomID-nya, atau null kalau tidak bisa dibaca.
  * Rentang dibatasi 35 hari oleh Cloudbeds.
  */
-async function cloudbedsBlokDalamRentang(mulai, sampai){
+async function cloudbedsBlokDalamRentang(mulai, sampai, batasMs = 15000){
   const apiKey = cloudbedsApiKey();
   if(!apiKey) return null;
   const url = new URL(`${CLOUDBEDS_API_BASE}/getRoomBlocks`);
@@ -883,7 +943,7 @@ async function cloudbedsBlokDalamRentang(mulai, sampai){
   url.searchParams.set('endDate', sampai);
   url.searchParams.set('pageSize', '100');
   try{
-    const res = await fetch(url, {headers:{'x-api-key':apiKey}, signal: AbortSignal.timeout(15000)});
+    const res = await fetch(url, {headers:{'x-api-key':apiKey}, signal: AbortSignal.timeout(batasMs)});
     const body = await res.json().catch(()=>null);
     if(!res.ok || body?.success === false) return null;
     const wadah = Array.isArray(body?.data) ? body.data : [body?.data];
@@ -5141,11 +5201,17 @@ Deno.serve(async (req)=>{
     const {data:units} = await supabase.from('units').select('id,nomor,blok,status');
     const {data:bookings} = await supabase.from('bookings').select('unit_id,tgl_checkin,tgl_checkout,guest_nama').in('status',['terjadwal','checkin']);
     const conflicts = findConflicts(bookings??[], checkin, checkout||null);
-    return json((units??[]).map(u=>({
-      ...u,
-      tersedia_untuk_tanggal: !conflicts.has(u.id),
-      dibooking_oleh: conflicts.get(u.id)??null,
-    })));
+    // Unit yang ditutup (manager atau langsung di Cloudbeds) tidak dijual walk-in.
+    const ditutup = await unitMaintenanceBentrok(checkin, checkout||null);
+    return json((units??[]).map(u=>{
+      const t = ditutup.get(u.id);
+      return {
+        ...u,
+        tersedia_untuk_tanggal: !conflicts.has(u.id) && !t,
+        dibooking_oleh: conflicts.get(u.id)??null,
+        ditutup: t ? {sumber: t.sumber, tutup_mulai: t.tutup_mulai, tutup_sampai: t.tutup_sampai} : null,
+      };
+    }));
   }
 
   // Perkiraan harga untuk layar kasir/walk-in SEBELUM booking dibuat --
@@ -5200,7 +5266,9 @@ Deno.serve(async (req)=>{
     }
     const tutup = (await unitMaintenanceBentrok(b.tgl_checkin, b.tgl_checkout ?? null)).get(b.unit_id);
     if(tutup){
-      return err(`Unit ${b.unit_nomor??''} sedang ditutup maintenance (${tutup.tutup_mulai} s/d ${tutup.tutup_sampai}) -- pilih unit lain, atau minta manager menandai Kamar Siap dulu`, 409);
+      return err(tutup.sumber==='cloudbeds'
+        ? `Unit ${b.unit_nomor??''} sedang ditutup di Cloudbeds (${tutup.tutup_mulai} s/d ${tutup.tutup_sampai}${tutup.alasan ? `, ${tutup.alasan}` : ''}) -- pilih unit lain`
+        : `Unit ${b.unit_nomor??''} sedang ditutup maintenance (${tutup.tutup_mulai} s/d ${tutup.tutup_sampai}) -- pilih unit lain, atau minta manager menandai Kamar Siap dulu`, 409);
     }
 
     const {data:unit, error:unitErr} = await supabase.from('units')

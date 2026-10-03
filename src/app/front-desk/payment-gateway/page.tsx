@@ -403,7 +403,14 @@ export default function PaymentGatewayPage() {
     }
     const avail = availUnits?.find((u) => u.id === form.unit_id);
     if (avail && !avail.tersedia_untuk_tanggal) {
-      toast("⚠", "Unit Tidak Tersedia", `Unit ${unit.nomor} sudah dibooking ${avail.dibooking_oleh} untuk tanggal ini.`, "ruby");
+      toast(
+        "⚠",
+        "Unit Tidak Tersedia",
+        avail.ditutup
+          ? `Unit ${unit.nomor} sedang ditutup ${avail.ditutup.sumber === "cloudbeds" ? "di Cloudbeds" : "untuk maintenance"} (${avail.ditutup.tutup_mulai} s/d ${avail.ditutup.tutup_sampai}).`
+          : `Unit ${unit.nomor} sudah dibooking ${avail.dibooking_oleh} untuk tanggal ini.`,
+        "ruby",
+      );
       return;
     }
     if (!villaTarif) {
@@ -639,7 +646,12 @@ export default function PaymentGatewayPage() {
                         <option value="">Pilih unit</option>
                         {availOptions.map((u) => (
                           <option key={u.id} value={u.id} disabled={!u.tersedia_untuk_tanggal}>
-                            Unit {u.nomor}{!u.tersedia_untuk_tanggal ? ` — dibooking (${u.dibooking_oleh ?? u.status})` : ""}
+                            Unit {u.nomor}
+                            {!u.tersedia_untuk_tanggal
+                              ? "ditutup" in u && u.ditutup
+                                ? ` — ditutup${u.ditutup.sumber === "cloudbeds" ? " di Cloudbeds" : " (maintenance)"}`
+                                : ` — dibooking (${u.dibooking_oleh ?? u.status})`
+                              : ""}
                           </option>
                         ))}
                       </select>
