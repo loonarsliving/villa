@@ -471,3 +471,36 @@ export async function getCloudbedsReservationTotals(params: {
   }
 }
 
+
+/**
+ * Sisa kamar yang BENAR-BENAR dibuka untuk dijual, per tipe kamar Cloudbeds
+ * per tanggal: Map<roomTypeID, Map<YYYY-MM-DD, roomsAvailable>>.
+ *
+ * Dipakai mesin harga untuk menghitung okupansi dari inventori yang dijual,
+ * bukan dari jumlah unit yang dimiliki (owner sengaja membuka sebagian unit
+ * saja -- 5 dari 10 Standard sampai 15 Okt 2026, 9 setelahnya). Diambil dari
+ * getRatePlans detailedRates, endpoint yang sama dengan alat diagnosis
+ * /api/admin/cloudbeds/health. Kalau satu tipe punya beberapa rate plan,
+ * diambil roomsAvailable terbesar (rate plan turunan tidak menambah kamar).
+ */
+export function parseRoomsAvailableByRoomType(plans: unknown[]): Map<string, Map<string, number>> {
+  const out = new Map<string, Map<string, number>>();
+  for (const raw of plans) {
+    const p = raw as { roomTypeID?: unknown; roomRateDetailed?: unknown };
+    const rtId = p.roomTypeID != null ? String(p.roomTypeID) : "";
+    if (!rtId || !Array.isArray(p.roomRateDetailed)) continue;
+    if (!out.has(rtId)) out.set(rtId, new Map());
+    const byDate = out.get(rtId)!;
+    for (const d of p.roomRateDetailed as { date?: unknown; roomsAvailable?: unknown }[]) {
+      const date = typeof d.date === "string" ? d.date.slice(0, 10) : "";
+      const n = Number(d.roomsAvailable);
+      if (!date || !Number.isFinite(n) || n < 0) continue;
+      byDate.set(date, Math.max(byDate.get(date) ?? 0, n));
+    }
+  }
+  return out;
+}
+
+export async function getCloudbedsRoomsAvailableByRoomType(startDate: string, endDate: string): Promise<Map<string, Map<string, number>>> {
+  return parseRoomsAvailableByRoomType(await getCloudbedsRatePlans(startDate, endDate));
+}

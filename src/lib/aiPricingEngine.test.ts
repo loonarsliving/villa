@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 
+import { advanceFloorRamp, occupancyFromAvailability, rampedFloor, type FloorRampState } from "./aiPricingEngine";
 import { acceptedPeakMedian, buildSearchDemand, decideRateForDate, fixedCalendarPeriodFor, learnDiscountWindow, OWNER_SELECTED_COMPETITOR, pickPeerPrices, searchDemandRelativeFor, type DateDecisionInput, type PricingSettings } from "./aiPricingEngine";
 
 /**
@@ -538,5 +539,57 @@ describe("hasil riset puncak harus benar-benar harga puncak", () => {
   it("needs three villas and an ordinary-night comparison", () => {
     expect(acceptedPeakMedian([1500000, 1800000], 1000000)).toBeNull();
     expect(acceptedPeakMedian([1500000, 1800000, 1400000], null)).toBeNull();
+  });
+});
+
+describe("okupansi dari inventori yang dijual di Cloudbeds (owner 2026-10-04)", () => {
+  it("counts against the rooms actually open, not every unit owned", () => {
+    // 5 Okt 2026: 4 Standard terjual, sisa 1 di Cloudbeds -> 80%, bukan 40%.
+    expect(occupancyFromAvailability(4, 0, 1)).toBe(80);
+  });
+  it("keeps free investor nights out of demand but inside the room count", () => {
+    expect(occupancyFromAvailability(2, 1, 2)).toBe(40);
+  });
+  it("falls back (null) when Cloudbeds has no data or the date is not on sale", () => {
+    expect(occupancyFromAvailability(3, 0, undefined)).toBeNull();
+    expect(occupancyFromAvailability(0, 0, 0)).toBeNull();
+  });
+  it("is enough to trigger the high-occupancy increase that the old count missed", () => {
+    expect(decide({ occupancyPct: occupancyFromAvailability(4, 0, 1)! }).reason_codes).toContain("high_occupancy");
+  });
+});
+
+describe("batas bawah naik bertahap 450rb -> 550rb dalam 3-6 bulan", () => {
+  const start: FloorRampState = { start_date: "2026-10-05", progress: 0, last_advanced: null, room_types: { standard: { from: 450000, to: 550000 } } };
+  const addDays = (d: string, n: number) => new Date(Date.parse(d + "T00:00:00Z") + n * 86400000).toISOString().slice(0, 10);
+  const runDays = (days: number, occ: number | null) => {
+    let st = start;
+    for (let i = 1; i <= days; i++) st = advanceFloorRamp(st, addDays(start.start_date, i), occ);
+    return st;
+  };
+
+  it("starts at the current floor and only touches configured room types", () => {
+    expect(rampedFloor(start, "standard")).toBe(450000);
+    expect(rampedFloor(start, "sawah_view")).toBeNull();
+    expect(rampedFloor(null, "standard")).toBeNull();
+  });
+  it("reaches 550rb in about 6 months when demand is weak", () => {
+    expect(rampedFloor(runDays(91, 20), "standard")).toBe(500000);
+    expect(rampedFloor(runDays(183, 20), "standard")).toBe(550000);
+  });
+  it("reaches 550rb in about 3 months when the villa is selling well", () => {
+    expect(rampedFloor(runDays(91, 85), "standard")).toBe(550000);
+  });
+  it("never goes past the target or backwards", () => {
+    const done = runDays(400, 90);
+    expect(rampedFloor(done, "standard")).toBe(550000);
+    const later = advanceFloorRamp({ ...done, progress: 0.6, last_advanced: "2027-01-01" }, "2027-01-02", 0);
+    expect(later.progress).toBeGreaterThanOrEqual(0.6);
+  });
+  it("advances only once per day and catches up after missed runs", () => {
+    const d1 = advanceFloorRamp(start, "2026-10-06", 50);
+    expect(advanceFloorRamp(d1, "2026-10-06", 90)).toBe(d1);
+    const afterGap = advanceFloorRamp(d1, "2026-11-05", 0);
+    expect(afterGap.progress).toBeCloseTo(31 / 183, 3);
   });
 });

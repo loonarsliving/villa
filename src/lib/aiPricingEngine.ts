@@ -512,6 +512,78 @@ export function fixedCalendarPeriodFor(date: string): SeasonPeriod | null {
 const OCCUPANCY_LADDER_START_PCT = 50;
 
 /**
+ * Okupansi dari INVENTORI YANG DIJUAL, bukan dari unit yang dimiliki
+ * (owner 2026-10-04: "jika kamar penuh apakah hargaku tetap main serendah
+ * itu? harusnya algoritmanya main").
+ *
+ * Sampai hari ini penyebutnya count(units) = 10 Standard, padahal owner
+ * sengaja hanya membuka 5 di Cloudbeds. 5 Okt: 4 terjual, sisa 1 -- terbaca
+ * 40%, sebenarnya 80%. Harga tidak naik justru saat hampir penuh, dan
+ * tanggal yang cukup laku malah didiskon sebagai "sepi".
+ *
+ * Penyebut baru = sisa kamar di Cloudbeds + semua yang sudah terjual
+ * (termasuk malam gratis investor, karena itu juga memakai kamar).
+ * Pembilangnya tetap hanya malam berbayar (lihat is_free_stay). null =
+ * tidak ada data Cloudbeds untuk tanggal itu, atau tanggal itu tidak dijual
+ * sama sekali -- pemanggil kembali ke cara lama.
+ */
+export function occupancyFromAvailability(paidSold: number, freeSold: number, roomsAvailable: number | undefined | null): number | null {
+  if (roomsAvailable == null || !Number.isFinite(roomsAvailable) || roomsAvailable < 0) return null;
+  const sellable = roomsAvailable + paidSold + freeSold;
+  if (sellable <= 0) return null;
+  return Math.round((paidSold / sellable) * 1000) / 10;
+}
+
+/**
+ * Batas bawah yang naik bertahap (owner 2026-10-04: "batas bawah 450 ini
+ * terlalu rendah untuk villa, naikkan pelan-pelan sampai ketemu lagi di 550,
+ * entah dalam 3 atau 6 bulan").
+ *
+ * Kemajuan 0..1 disimpan di integration_settings.villa_floor_ramp dan maju
+ * sekali per hari. Kecepatannya mengikuti permintaan nyata:
+ *   okupansi 14 hari ke depan <= 50%  -> laju 6 bulan
+ *   okupansi >= 80%                   -> laju 3 bulan
+ *   di antaranya                      -> diinterpolasi
+ * Dan selalu dijepit antara laju 6 bulan dan laju 3 bulan sejak tanggal
+ * mulai, jadi hari yang terlewat (cron gagal) tidak membuatnya tertinggal,
+ * dan lonjakan sesaat tidak membuatnya melampaui 3 bulan. Tidak pernah
+ * turun.
+ */
+export const FLOOR_RAMP_SETTINGS_KEY = "villa_floor_ramp";
+const FLOOR_RAMP_SLOW_DAYS = 183;
+const FLOOR_RAMP_FAST_DAYS = 91;
+const FLOOR_RAMP_SLOW_OCC_PCT = 50;
+const FLOOR_RAMP_FAST_OCC_PCT = 80;
+
+export interface FloorRampState {
+  start_date: string;
+  progress: number;
+  last_advanced: string | null;
+  room_types: Record<string, { from: number; to: number }>;
+  last_demand_occupancy_pct?: number | null;
+}
+
+export function advanceFloorRamp(state: FloorRampState, today: string, demandOccupancyPct: number | null): FloorRampState {
+  if (state.last_advanced === today || today < state.start_date) return state;
+  const elapsed = daysBetween(state.start_date, today);
+  const occ = demandOccupancyPct ?? FLOOR_RAMP_SLOW_OCC_PCT;
+  const share = Math.max(0, Math.min(1, (occ - FLOOR_RAMP_SLOW_OCC_PCT) / (FLOOR_RAMP_FAST_OCC_PCT - FLOOR_RAMP_SLOW_OCC_PCT)));
+  const step = 1 / FLOOR_RAMP_SLOW_DAYS + (1 / FLOOR_RAMP_FAST_DAYS - 1 / FLOOR_RAMP_SLOW_DAYS) * share;
+  const lo = Math.min(1, elapsed / FLOOR_RAMP_SLOW_DAYS);
+  const hi = Math.min(1, elapsed / FLOOR_RAMP_FAST_DAYS);
+  const progress = Math.max(lo, Math.min(hi, Math.max(state.progress, state.progress + step)));
+  return { ...state, progress: Math.round(progress * 10000) / 10000, last_advanced: today, last_demand_occupancy_pct: demandOccupancyPct };
+}
+
+/** Batas bawah hari ini untuk satu tipe unit, dibulatkan ke Rp1.000, atau null kalau tipe itu tidak ikut ramp. */
+export function rampedFloor(state: FloorRampState | null, roomTypeCode: string): number | null {
+  const cfg = state?.room_types?.[roomTypeCode];
+  if (!state || !cfg) return null;
+  const p = Math.max(0, Math.min(1, state.progress));
+  return Math.round((cfg.from + (cfg.to - cfg.from) * p) / 1000) * 1000;
+}
+
+/**
  * Jendela diskon lead time dipelajari dari booking villa sendiri, bukan
  * ditebak. Revenue system besar menurunkan "kapan tamu biasanya memesan"
  * dari data booking window pasarnya sendiri; angka 14/45 hari di
@@ -1477,6 +1549,8 @@ export async function decideRatesForRoomType(
   anchorRate: number,
   targetDates: string[],
   settings: PricingSettings,
+  /** Sisa kamar per tanggal dari Cloudbeds untuk tipe ini; null = pakai jumlah unit (cara lama). */
+  roomsAvailableByDate: Map<string, number> | null = null,
 ): Promise<DatePriceDecision[]> {
   // PENGECUALIAN MALAM GRATIS INVESTOR (cari: is_free_stay).
   // Malam gratis mengunci unit dan tetap masuk Cloudbeds, tapi tidak membawa
@@ -1488,6 +1562,11 @@ export async function decideRatesForRoomType(
     .neq("status", "batal")
     .eq("is_free_stay", false);
   const { data: units } = await supabase.from("units").select("id").eq("room_type_id", roomType.id);
+  // Malam gratis investor tidak dihitung sebagai permintaan, tapi tetap
+  // memakai kamar -- ikut penyebut okupansi dari inventori Cloudbeds.
+  const { data: freeStayBookings } = roomsAvailableByDate
+    ? await supabase.from("bookings").select("unit_id, tgl_checkin, tgl_checkout, status").neq("status", "batal").eq("is_free_stay", true)
+    : { data: [] as { unit_id: string; tgl_checkin: string; tgl_checkout: string | null; status: string }[] };
   const unitIds = new Set((units ?? []).map((u) => u.id));
 
   const today = targetDates[0] ?? new Date().toISOString().slice(0, 10);
@@ -1585,7 +1664,12 @@ export async function decideRatesForRoomType(
         b.tgl_checkin <= targetDate &&
         (!b.tgl_checkout || b.tgl_checkout > targetDate),
     );
-    const occupancyPct = unitIds.size > 0 ? Math.round((activeForDate.length / unitIds.size) * 1000) / 10 : 0;
+    const freeSold = (freeStayBookings ?? []).filter(
+      (b) => unitIds.has(b.unit_id) && (b.status === "terjadwal" || b.status === "checkin") && b.tgl_checkin <= targetDate && (!b.tgl_checkout || b.tgl_checkout > targetDate),
+    ).length;
+    const occupancyPct =
+      occupancyFromAvailability(activeForDate.length, freeSold, roomsAvailableByDate?.get(targetDate)) ??
+      (unitIds.size > 0 ? Math.round((activeForDate.length / unitIds.size) * 1000) / 10 : 0);
     const covering: SeasonPeriod[] = (seasonPeriods ?? []).filter((p) => p.start_date <= targetDate && p.end_date >= targetDate);
     const fixedPeak = fixedCalendarPeriodFor(targetDate);
     if (fixedPeak) covering.push(fixedPeak);
