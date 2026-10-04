@@ -2,7 +2,7 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
-## 2026-10-04 — okupansi dari inventori Cloudbeds + batas bawah naik bertahap (BRANCH, menunggu persetujuan owner)
+## 2026-10-04 — okupansi dari inventori Cloudbeds + batas bawah naik bertahap (DI-MERGE, owner-approved)
 
 Owner: "jika kamar penuh apakah hargaku tetap main serendah itu? harusnya
 algoritmanya main" dan "batas bawah 450 ini terlalu rendah untuk villa,
@@ -34,9 +34,13 @@ sejak 14 Sep, tapi belum pernah diperbaiki.
 - tanggal Jan–Feb di 450rb → 451rb di malam pertama ramp;
 - Sawah View: 0 perubahan.
 
-**Untuk aktif** perlu baris `integration_settings.villa_floor_ramp` =
-`{"start_date":"2026-10-05","progress":0,"last_advanced":null,"room_types":{"standard":{"from":450000,"to":550000}}}`.
-Tanpa baris itu ramp tidak berjalan; okupansi Cloudbeds tetap berjalan.
+**Aktif sejak 2026-10-04** (owner: "ya naikkan"). Baris
+`integration_settings.villa_floor_ramp` dibuat dengan dua tipe:
+**Standard 450rb → 550rb** dan **Sawah View 600rb → 700rb** (Sawah View
+ditambahkan atas persetujuan owner), mulai `2026-10-05`. Untuk menghentikan
+ramp, hapus tipe dari `room_types` atau hapus barisnya. Batas bawah sudah
+naik tetap terlindungi oleh `progress` yang tersimpan, dan
+`villa_room_types.min_rate` tidak pernah ditulis otomatis.
 
 ## 2026-10-03 (malam) — Tarif late night naik ke Rp300.000
 
