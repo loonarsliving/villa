@@ -237,9 +237,13 @@ export function AppHome({
           <div className="px-4 py-3 bg-slate-50 text-[13px] font-semibold text-slate-700 flex items-center gap-2">
             <span aria-hidden>🛎</span> Aktivitas Reservasi
           </div>
-          <BarisAngka label="Kedatangan" nilai={data?.kedatangan} memuat={memuat} />
-          <BarisAngka label="Keberangkatan" nilai={data?.keberangkatan} memuat={memuat} />
-          <BarisAngka label="Unit terisi" nilai={data?.terisi} memuat={memuat} akhir />
+          {/* Label diganti dari Kedatangan/Keberangkatan/Unit terisi atas
+              permintaan owner (2026-10-04) karena istilah lamanya membingungkan.
+              "Terisi" dihitung per MALAM: tamu yang check-out di tanggal ini
+              tidak ikut, tamu yang check-in ikut. */}
+          <BarisAngka label={hariIni ? "Check-in hari ini" : "Check-in tanggal ini"} nilai={data?.kedatangan} memuat={memuat} />
+          <BarisAngka label={hariIni ? "Check-out hari ini" : "Check-out tanggal ini"} nilai={data?.keberangkatan} memuat={memuat} />
+          <BarisAngka label={hariIni ? "Unit terisi malam ini" : "Unit terisi malam itu"} nilai={data?.terisi} memuat={memuat} akhir />
         </section>
 
         <div className="flex justify-center mb-5">
