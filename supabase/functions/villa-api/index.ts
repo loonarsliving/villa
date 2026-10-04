@@ -148,7 +148,7 @@ function paymentCode(bookingId){
  */
 async function generateKodeUnikPembayaran(){
   const {data:pending} = await supabase.from('bookings')
-    .select('total_bayar').eq('sumber','website').eq('status','menunggu_pembayaran');
+    .select('total_bayar').in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran');
   const dipakai = new Set((pending??[]).map(b=>Number(b.total_bayar)%1000));
   for(let coba=0; coba<20; coba++){
     const kandidat = 100 + Math.floor(Math.random()*900);
@@ -174,7 +174,7 @@ async function tryConfirmBookingByNominal(nominal, onlyBookingId){
     // bawah tahu booking ini sudah pernah didorong (kalau ada) dan tidak
     // membuat reservasi Cloudbeds kedua untuk booking yang sama.
     .select('id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,total_bayar,created_at,invoice_no,cloudbeds_reservation_id,adults,children')
-    .eq('sumber','website').eq('status','menunggu_pembayaran').eq('total_bayar', nominal);
+    .in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran').eq('total_bayar', nominal);
   if(onlyBookingId) q = q.eq('id', onlyBookingId);
   const {data:pendingSama} = await q;
   if(!pendingSama?.length) return {matched:false};
@@ -316,6 +316,18 @@ async function scanPaymentInbox(cfg, {onlyBookingId} = {}){
  * QRIS seolah unitnya masih ditahan. Sekarang pembatalannya nyata.
  */
 const PENDING_PAYMENT_HOLD_MINUTES = 60;
+
+/**
+ * Sumber booking yang dibuat tamu sendiri lewat loonars.id dan dibayar lewat
+ * QRIS villa. Selain 'website', ada 'investor': booking dengan kode menginap
+ * gratis investor. Yang lebih dari semalam tetap menunggu pembayaran untuk
+ * malam-malam sisanya, jadi ia harus ikut jalur yang sama: kode unik
+ * nominal, konfirmasi email BTN / balasan LUNAS, pengingat, pembatalan
+ * otomatis, dan halaman status tamu. Sebelum ini semua jalur itu hanya
+ * mencari 'website', sehingga booking investor yang belum lunas tidak
+ * pernah terkonfirmasi otomatis dan tidak pernah kedaluwarsa (2026-10-04).
+ */
+const SUMBER_BOOKING_WEBSITE = ['website', 'investor'];
 
 /**
  * Penanda di kolom catatan untuk booking yang dibatalkan oleh mesin, bukan
@@ -1550,6 +1562,8 @@ function normalizedChannel(sumber){
   if(s==='walk-in' || s==='website' || s==='whatsapp' || s==='google') return 'DIRECT';
   // Late night: dibayar langsung ke QRIS villa, tidak ada OTA di tengah.
   if(s==='late-night') return 'DIRECT';
+  // Menginap investor lewat loonars.id: sisa malamnya dibayar langsung ke QRIS villa.
+  if(s==='investor') return 'DIRECT';
   if(s==='booking.com') return 'BOOKING_COM';
   if(s==='agoda') return 'AGODA';
   if(s==='airbnb') return 'AIRBNB';
@@ -2630,7 +2644,7 @@ Deno.serve(async (req)=>{
     const {data:booking} = await supabase.from('bookings')
       .select('id,guest_id,sumber,status,invoice_no,catatan,created_at').eq('id',booking_id).maybeSingle();
     if(!booking) return err('Booking tidak ditemukan', 404);
-    if(booking.sumber !== 'website') return err('Booking ini tidak bisa dicek lewat jalur ini', 403);
+    if(!SUMBER_BOOKING_WEBSITE.includes(booking.sumber)) return err('Booking ini tidak bisa dicek lewat jalur ini', 403);
 
     // Nomor WA tamu adalah kuncinya, sama seperti confirm-payment dan
     // invoice: tanpa ini siapa pun yang menebak sebuah uuid bisa mengintip
@@ -2816,7 +2830,7 @@ Deno.serve(async (req)=>{
 
     const {data:pending} = await supabase.from('bookings')
       .select(SELECT_COLS)
-      .eq('sumber','website').eq('status','menunggu_pembayaran');
+      .in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran');
     let booking = (pending ?? []).find(x => paymentCode(x.id) === code) ?? null;
 
     // Tamu yang membayar di menit ke-59 dan owner yang membalas di menit
@@ -2829,7 +2843,7 @@ Deno.serve(async (req)=>{
     if(!booking){
       const {data:cancelled} = await supabase.from('bookings')
         .select(SELECT_COLS)
-        .eq('sumber','website').eq('status','batal');
+        .in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','batal');
       const expired = (cancelled ?? [])
         .filter(x => String(x.catatan ?? '').includes(EXPIRED_HOLD_MARK))
         .find(x => paymentCode(x.id) === code) ?? null;
@@ -2840,7 +2854,7 @@ Deno.serve(async (req)=>{
       // Mungkin sudah dikonfirmasi sebelumnya -- balasan ganda dari owner
       // harus aman, bukan error.
       const {data:already} = await supabase.from('bookings')
-        .select('id,unit_nomor,guest_nama,invoice_no,status').eq('sumber','website').eq('status','terjadwal');
+        .select('id,unit_nomor,guest_nama,invoice_no,status').in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','terjadwal');
       const done = (already ?? []).find(x => paymentCode(x.id) === code) ?? null;
       if(done) return json({success:true, already_confirmed:true, unit_nomor:done.unit_nomor, guest_nama:done.guest_nama, invoice_no:done.invoice_no});
       return json({success:false, reason:'not_found'});
@@ -3592,7 +3606,7 @@ Deno.serve(async (req)=>{
     const reminderCutoff = new Date(Date.now() - PAYMENT_REMINDER_AT_MINUTES*60*1000).toISOString();
     const {data:pendingUntukDiingatkan} = await supabase.from('bookings')
       .select('id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,created_at')
-      .eq('sumber','website').eq('status','menunggu_pembayaran').lte('created_at', reminderCutoff);
+      .in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran').lte('created_at', reminderCutoff);
 
     let diingatkan = 0;
     for(const bk of pendingUntukDiingatkan ?? []){
@@ -3619,7 +3633,7 @@ Deno.serve(async (req)=>{
     const cutoff = new Date(Date.now() - PENDING_PAYMENT_HOLD_MINUTES*60*1000).toISOString();
     const {data:stale} = await supabase.from('bookings')
       .select('id,unit_nomor,guest_nama,tgl_checkin,tgl_checkout,catatan,created_at')
-      .eq('sumber','website').eq('status','menunggu_pembayaran').lt('created_at', cutoff);
+      .in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran').lt('created_at', cutoff);
 
     const expired = [];
     for(const bk of stale ?? []){
@@ -3863,7 +3877,7 @@ Deno.serve(async (req)=>{
     const {data:booking} = await supabase.from('bookings')
       .select('id,guest_id,sumber,status').eq('id',booking_id).maybeSingle();
     if(!booking) return err('Booking tidak ditemukan', 404);
-    if(booking.sumber !== 'website') return err('Booking ini tidak bisa dicek lewat jalur ini', 403);
+    if(!SUMBER_BOOKING_WEBSITE.includes(booking.sumber)) return err('Booking ini tidak bisa dicek lewat jalur ini', 403);
 
     let guestHp = null;
     if(booking.guest_id){
