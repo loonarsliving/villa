@@ -1,10 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getCloudbedsBaseRateId, pushCloudbedsRate, collapseRateIntervals, getCloudbedsRoomTypeRate, CloudbedsApiError } from "@/lib/cloudbedsApi";
+import { getCloudbedsBaseRateId, pushCloudbedsRate, collapseRateIntervals, getCloudbedsRoomTypeRate, getCloudbedsRoomsAvailableByRoomType, CloudbedsApiError } from "@/lib/cloudbedsApi";
 import { resolveCloudbedsRoomTypeGroups } from "@/lib/cloudbedsRoomTypeMapping";
 import { syncCloudbedsRates, type RateSyncSummary } from "@/lib/cloudbedsRateSync";
 import {
   refreshCompetitorDataIfStale,
   refreshMarketDemandIfStale,
+  advanceFloorRamp,
+  rampedFloor,
+  FLOOR_RAMP_SETTINGS_KEY,
+  type FloorRampState,
   decideRatesForRoomType,
   type PricingSettings,
   type RoomTypeForPricing,
@@ -59,6 +63,14 @@ const JAKARTA_TZ = "Asia/Jakarta";
  * when the first full-year push was rejected outright.
  */
 const WINDOW_DAYS = 365;
+/**
+ * Okupansi dihitung dari sisa kamar Cloudbeds untuk tanggal sedekat ini;
+ * lebih jauh dari itu hampir tidak ada booking, dan satu panggilan
+ * getRatePlans untuk setahun penuh hanya menambah waktu run (batas 60 detik).
+ */
+const INVENTORY_HORIZON_DAYS = 90;
+/** Jendela permintaan yang menentukan laju kenaikan batas bawah. */
+const FLOOR_RAMP_DEMAND_DAYS = 14;
 
 function fmtDateJakarta(d: Date): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: JAKARTA_TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
@@ -93,6 +105,8 @@ export interface AiPricingRunSummary {
   autopush_enabled: boolean;
   push_requested: boolean;
   market_demand: MarketDemandRefreshResult;
+  inventory: { source: "cloudbeds" | "unit_count"; horizon_days: number; error?: string };
+  floor_ramp: { progress: number; demand_occupancy_pct: number | null; floors: Record<string, number> } | null;
   results: AiPricingRoomTypeResult[];
   reconciled: RateSyncSummary | null;
 }
@@ -122,7 +136,7 @@ export async function runAiDynamicPricing(supabase: SupabaseClient, pushOverride
   const autopushEnabled = !!settings?.ai_autopush_enabled;
   const pushRequested = pushOverride ?? autopushEnabled;
   if (!settings) {
-    return { ok: true, today, window_days: WINDOW_DAYS, autopush_enabled: false, push_requested: false, market_demand: { refreshed: false }, results: [], reconciled: null };
+    return { ok: true, today, window_days: WINDOW_DAYS, autopush_enabled: false, push_requested: false, market_demand: { refreshed: false }, inventory: { source: "unit_count", horizon_days: INVENTORY_HORIZON_DAYS }, floor_ramp: null, results: [], reconciled: null };
   }
 
   // Once per run, not per room type -- events are location-wide, and its
@@ -147,10 +161,62 @@ export async function runAiDynamicPricing(supabase: SupabaseClient, pushOverride
   const cbRoomTypeIdByVillaRoomType = new Map<string, string>();
   for (const [cb, villa] of villaRoomTypeIdByCloudbedsRoomType) cbRoomTypeIdByVillaRoomType.set(villa, cb);
 
+  // Sisa kamar yang dibuka di Cloudbeds, per tipe per tanggal. Gagal dibaca
+  // = kembali ke jumlah unit (cara lama), tidak pernah menghentikan run.
+  let availabilityByCbRoomType: Map<string, Map<string, number>> | null = null;
+  let inventoryError: string | undefined;
+  try {
+    availabilityByCbRoomType = await getCloudbedsRoomsAvailableByRoomType(today, addDays(today, INVENTORY_HORIZON_DAYS));
+  } catch (e) {
+    inventoryError = e instanceof Error ? e.message : String(e);
+  }
+
+  // Batas bawah bertahap: maju sekali per hari, lajunya mengikuti okupansi
+  // nyata 14 hari ke depan (semua tipe digabung).
+  const { data: rampRow } = await supabase.from("integration_settings").select("value").eq("key", FLOOR_RAMP_SETTINGS_KEY).maybeSingle();
+  let rampState = (rampRow?.value ?? null) as FloorRampState | null;
+  let demandOccupancyPct: number | null = null;
+  if (rampState && availabilityByCbRoomType) {
+    const { data: activeBookings } = await supabase
+      .from("bookings")
+      .select("unit_id, tgl_checkin, tgl_checkout, status, is_free_stay")
+      .in("status", ["terjadwal", "checkin"]);
+    const roomTypeByUnit = new Map((units ?? []).map((u: { id: string; room_type_id: string | null }) => [u.id, u.room_type_id]));
+    let sold = 0;
+    let sellable = 0;
+    for (let i = 0; i < FLOOR_RAMP_DEMAND_DAYS; i++) {
+      const d = addDays(today, i);
+      for (const [cbId, byDate] of availabilityByCbRoomType) {
+        const villaRt = villaRoomTypeIdByCloudbedsRoomType.get(cbId);
+        const avail = byDate.get(d);
+        if (!villaRt || avail == null) continue;
+        const onDate = (activeBookings ?? []).filter(
+          (b: { unit_id: string; tgl_checkin: string; tgl_checkout: string | null }) =>
+            roomTypeByUnit.get(b.unit_id) === villaRt && b.tgl_checkin <= d && (!b.tgl_checkout || b.tgl_checkout > d),
+        );
+        sold += onDate.filter((b: { is_free_stay: boolean | null }) => !b.is_free_stay).length;
+        sellable += avail + onDate.length;
+      }
+    }
+    demandOccupancyPct = sellable > 0 ? Math.round((sold / sellable) * 1000) / 10 : null;
+  }
+  if (rampState) {
+    const advanced = advanceFloorRamp(rampState, today, demandOccupancyPct);
+    if (advanced !== rampState) {
+      await supabase.from("integration_settings").update({ value: advanced }).eq("key", FLOOR_RAMP_SETTINGS_KEY);
+      rampState = advanced;
+    }
+  }
+  const rampFloors: Record<string, number> = {};
+
   const results: AiPricingRoomTypeResult[] = [];
   let researchBudget = 1;
 
-  for (const rt of (roomTypes ?? []) as RoomTypeForPricing[]) {
+  for (const rtRaw of (roomTypes ?? []) as RoomTypeForPricing[]) {
+    // Batas bawah efektif = yang tertinggi antara min_rate pemilik dan ramp.
+    const floor = rampedFloor(rampState, rtRaw.code);
+    if (floor !== null) rampFloors[rtRaw.code] = floor;
+    const rt: RoomTypeForPricing = floor !== null ? { ...rtRaw, min_rate: Math.max(Number(rtRaw.min_rate ?? 0), floor) } : rtRaw;
     const unitsOfType = (units ?? []).filter((u: { room_type_id: string | null }) => u.room_type_id === rt.id);
     if (unitsOfType.length === 0) continue;
 
@@ -184,7 +250,14 @@ export async function runAiDynamicPricing(supabase: SupabaseClient, pushOverride
     const competitorRefresh = await refreshCompetitorDataIfStale(supabase, rt, researchBudget > 0);
     if (competitorRefresh.refreshed || competitorRefresh.error) researchBudget--;
 
-    const decisions = await decideRatesForRoomType(supabase, rt, anchorRate, targetDates, pricingSettings);
+    const decisions = await decideRatesForRoomType(
+      supabase,
+      rt,
+      anchorRate,
+      targetDates,
+      pricingSettings,
+      cbRoomTypeId && availabilityByCbRoomType ? availabilityByCbRoomType.get(cbRoomTypeId) ?? null : null,
+    );
     const todayDecision = decisions.find((d) => d.date === today) ?? null;
 
     let pushed = false;
@@ -259,5 +332,10 @@ export async function runAiDynamicPricing(supabase: SupabaseClient, pushOverride
     reconciled = await syncCloudbedsRates(supabase);
   }
 
-  return { ok: true, today, window_days: WINDOW_DAYS, autopush_enabled: autopushEnabled, push_requested: pushRequested, market_demand: marketDemand, results, reconciled };
+  return { ok: true, today, window_days: WINDOW_DAYS, autopush_enabled: autopushEnabled, push_requested: pushRequested, market_demand: marketDemand,
+    inventory: { source: availabilityByCbRoomType ? "cloudbeds" : "unit_count", horizon_days: INVENTORY_HORIZON_DAYS, ...(inventoryError ? { error: inventoryError } : {}) },
+    floor_ramp: rampState ? { progress: rampState.progress, demand_occupancy_pct: demandOccupancyPct, floors: rampFloors } : null,
+    results,
+    reconciled,
+  };
 }

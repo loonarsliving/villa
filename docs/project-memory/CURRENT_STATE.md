@@ -2,6 +2,42 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-10-04 — okupansi dari inventori Cloudbeds + batas bawah naik bertahap (BRANCH, menunggu persetujuan owner)
+
+Owner: "jika kamar penuh apakah hargaku tetap main serendah itu? harusnya
+algoritmanya main" dan "batas bawah 450 ini terlalu rendah untuk villa,
+naikkan pelan-pelan sampai ketemu lagi di 550, entah dalam 3 atau 6 bulan".
+
+**Bug yang ditemukan.** Penyebut okupansi = jumlah unit (10 Standard),
+padahal owner hanya membuka 5 Standard di Cloudbeds sampai 15 Okt (9 setelah
+16 Okt, 10 mulai Nov). Contoh 5 Okt: 4 terjual, sisa 1 — mesin membaca 40%,
+kenyataannya 80%, sehingga harga tidak naik. Masalah ini sudah tercatat
+sejak 14 Sep, tapi belum pernah diperbaiki.
+
+**Perbaikan** (`aiPricingEngine.ts`, `aiDynamicPricingRun.ts`, `cloudbedsApi.ts`):
+- `getCloudbedsRoomsAvailableByRoomType`: sisa kamar per tipe per tanggal
+  dari getRatePlans, untuk 90 hari ke depan.
+- `occupancyFromAvailability`: terjual berbayar ÷ (sisa + semua terjual,
+  termasuk malam gratis). Kalau tidak ada data, kembali ke jumlah unit.
+- `advanceFloorRamp`/`rampedFloor`: batas bawah bertahap. State disimpan di
+  `integration_settings.villa_floor_ramp` dan maju sekali per hari.
+  Kecepatannya bergantung pada okupansi nyata 14 hari ke depan (≤50% = laju
+  6 bulan, ≥80% = laju 3 bulan). Selalu dijepit di antara kedua laju itu,
+  dan tidak pernah turun. Batas efektif = max(min_rate, ramp).
+- 11 tes baru (190 total).
+
+**Simulasi** (data produksi + ketersediaan Cloudbeds nyata, run 5 Okt):
+- Standard 5 Okt 520rb → 542rb (okupansi 80%);
+- 6 & 8 Okt 468rb → 520rb (40%, tidak lagi didiskon sebagai "sepi");
+- 7 Okt 487rb → 527rb (60%);
+- 10 Okt 706rb → 750rb;
+- tanggal Jan–Feb di 450rb → 451rb di malam pertama ramp;
+- Sawah View: 0 perubahan.
+
+**Untuk aktif** perlu baris `integration_settings.villa_floor_ramp` =
+`{"start_date":"2026-10-05","progress":0,"last_advanced":null,"room_types":{"standard":{"from":450000,"to":550000}}}`.
+Tanpa baris itu ramp tidak berjalan; okupansi Cloudbeds tetap berjalan.
+
 ## 2026-10-03 (malam) — Tarif late night naik ke Rp300.000
 
 Owner: *"naikkan harga di latenight di 300 ribu"*. Hanya konstanta
