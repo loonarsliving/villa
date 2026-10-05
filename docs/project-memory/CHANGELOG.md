@@ -4,6 +4,14 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-05 — AI resepsionis tahap 1: draf balasan WhatsApp — LIVE (owner: "Ya aktifkan")
+- Owner ingin balasan chat otomatis. Tahap 1 (pilihan owner: "draf dulu"): setiap pesan tamu di Chat Front Desk dibuatkan **draf** oleh AI (Mkhsistem `/api/villa/ai/chat-reply`); resepsionis menekan "Pakai draf" lalu Kirim. **Tidak ada yang terkirim ke tamu tanpa resepsionis.**
+- Fakta AI hanya dari `src/lib/aiResepsionisPengetahuan.ts` (dikoreksi owner 2026-10-05: check-in 15.00; early check-in hanya 12.00-14.00 Rp100.000 bila tidak ramai; extrabed belum tersedia; late check-out Rp100.000/jam lewat 12.00; paket di luar kamar diteruskan ke Rebecca) dan dari `/public/availability` villa-api (harga sama dengan loonars.id). Sandi WiFi hanya untuk tamu yang punya booking.
+- Penjaga: draf yang menyebut nominal uang di luar kedua sumber itu ditahan (`angkaTidakDikenal`) dan diberi label "Perlu dicek resepsionis"; draf basi begitu ada pesan masuk lain/balasan staf; draf dihapus saat staf membalas.
+- Label kategori di layar: Draf AI / Booking / Cek tanggal / Paket → Rebecca / Komplain → Security & Rebecca / Perlu dicek resepsionis. Penerusan WA sungguhan ke Rebecca/Security = tahap 2: Rebecca = `villa_users` role `manager`; Security = karyawan Mkhsistem aktif divisi "Security" cabang Loonars Private Living (di-approve owner 2026-10-05).
+- Saklar: `integration_settings.ai_resepsionis.mode` (`mati`/`draf`, bawaan `draf`).
+- Migrasi `20261005000003_wa_ai_draf.sql` (5 kolom nullable di `wa_conversations`) — di-apply 2026-10-05 atas persetujuan owner. Tanpa migrasi, kode aman: draf gagal disimpan (tercatat di log) dan layar Chat tidak menampilkan apa pun.
+
 ### 2026-10-03 — Late night booking (loonars.id/late) — LIVE (villa #151, loonars #12)
 - Role `late_night` (Laila) + halaman `/late-night`: unit Standard yang kosong & bersih, buat booking 01.00-09.00 WIB, QRIS statis Rp260.000, Tandai Lunas = check-in + PIN WA, batal, checkout.
 - villa-api: `/late-night/hari-ini`, `/late-night/qris`, `/late-night/bookings`, `/late-night/lunas`, `/late-night/batal`, `/late-night/checkout`; role dikunci ke `/late-night/*`; `sumber='late-night'` tidak didorong ke Cloudbeds; kanal finance DIRECT.

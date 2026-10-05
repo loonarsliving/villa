@@ -222,3 +222,9 @@ Migrasi `20261002000002_manager_kesiapan_kamar.sql`:
 - `villa_room_checks` — riwayat setiap pengecekan: `hasil` (siap/maintenance), `checklist` jsonb 10 poin, `catatan`, `cloudbeds_aksi` (ditutup/diperpanjang/dibuka/tidak_perlu/gagal), pesan Cloudbeds, pengecek.
 - RLS ON, policy service_role saja (pola 2026-09-08). Dibaca villa-api `unitMaintenanceBentrok()` secara GAGAL-TERBUKA, supaya villa-api yang ter-deploy sebelum migrasinya tidak menolak tamu.
 - `units.status` (yang sudah punya nilai `maintenance`) SENGAJA tidak dipakai: kolom itu ditimpa alur checkin/checkout.
+
+- **Kolom draf AI (2026-10-05, migrasi `20261005000003_wa_ai_draf.sql`, di-apply 2026-10-05 atas persetujuan owner)**:
+  `wa_conversations.ai_draf`, `ai_kategori`, `ai_alasan`, `ai_draf_untuk_pesan`
+  (FK ke `wa_conversation_messages`, `on delete set null`), `ai_draf_at`. Hanya
+  kolom nullable baru. Ditulis oleh `src/lib/aiResepsionis.ts` setelah pesan
+  masuk dicatat di `/api/wa/mirror`, dikosongkan saat staf membalas.

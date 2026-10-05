@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { terjemahkanChat } from "@/lib/aiBridge";
 import { kirimDariNomorUtama } from "@/lib/mkhsistemWa";
 import { catatPesan } from "@/lib/waChat";
+import { hapusDrafAiAman } from "@/lib/aiResepsionis";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -87,6 +88,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // gagal dan dikirim ulang, jadi dobel), tapi dicatat di server.
     console.error("[chat/reply] pesan terkirim tapi gagal dicatat", e instanceof Error ? e.message : String(e));
   }
+
+  // Pesan tamu sudah dijawab staf -- draf AI untuk pesan itu tidak berlaku lagi.
+  await hapusDrafAiAman(supabase, percakapan.id);
 
   return NextResponse.json({ success: true, diterjemahkan: terjemahan !== null });
 }
