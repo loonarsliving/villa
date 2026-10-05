@@ -295,3 +295,52 @@ export async function terjemahkanChat(teks: string, bahasaTujuan: string): Promi
   }
   return { bahasaAsal: data.detected_language.toLowerCase(), terjemahan: data.translation };
 }
+
+export type KategoriDrafAi = "jawab" | "cek_tanggal" | "booking" | "paket_rebecca" | "komplain" | "perlu_resepsionis";
+
+export interface DrafBalasanInput {
+  pengetahuan: string;
+  riwayat: { arah: "masuk" | "keluar"; isi: string; waktu?: string }[];
+  nama_tamu?: string | null;
+  konteks_tamu?: string | null;
+  sekarang: string;
+  ketersediaan?: {
+    checkin: string;
+    checkout: string;
+    tipe: { nama: string; tersedia: number; malam: number; harga_per_malam: number | null; harga_total: number | null }[];
+  } | null;
+}
+
+export interface DrafBalasan {
+  kategori: KategoriDrafAi;
+  draf: string;
+  cek_tanggal: { checkin: string; checkout: string } | null;
+  alasan: string;
+}
+
+/**
+ * Draf balasan WhatsApp untuk resepsionis, dari Mkhsistem
+ * (lib/ai/domains/villa-chat-reply.ts lewat /api/villa/ai/chat-reply).
+ * Hanya DRAF -- pemanggilnya (src/lib/aiResepsionis.ts) tidak pernah
+ * mengirimkannya ke tamu.
+ */
+export async function drafBalasanChat(input: DrafBalasanInput): Promise<DrafBalasan> {
+  const { baseUrl, secret } = await loadAiBridgeConfig();
+  const res = await fetch(`${baseUrl}/api/villa/ai/chat-reply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-internal-secret": secret },
+    body: JSON.stringify(input),
+    cache: "no-store",
+    signal: AbortSignal.timeout(30_000),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data || data.success !== true || typeof data.draf !== "string" || typeof data.kategori !== "string") {
+    throw new Error(`Draf AI gagal: ${data?.error || `HTTP ${res.status}`}`);
+  }
+  return {
+    kategori: data.kategori as KategoriDrafAi,
+    draf: data.draf,
+    cek_tanggal: data.cek_tanggal ?? null,
+    alasan: typeof data.alasan === "string" ? data.alasan : "",
+  };
+}
