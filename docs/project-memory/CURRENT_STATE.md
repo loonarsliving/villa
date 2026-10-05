@@ -361,6 +361,21 @@ itu bisa turun setiap kali ada pembatalan.
 - UI `/finance`: kartu "Gross Revenue (sudah check-in)" dan kartu baru
   "Booking Mendatang (belum dihitung)".
 
+**Revisi 2026-10-05 (owner):** angka finance tidak cocok dengan extranet
+OTA karena aturan di atas bergantung pada resepsionis menekan check-in.
+Kasus nyata: Airbnb Alfy Farhan, A1, 3-5 Okt (Rp1.495.000) -- tamu
+menginap, Airbnb mencatatnya, tapi di sistem tetap `terjadwal` sehingga
+Airbnb hilang dari Revenue by Channel. Owner: "sesuaikan dengan tanggal
+checkin yang km tarik dari cloudbeds". Aturannya sekarang:
+`STATUS_PEMASUKAN_DIAKUI = ['terjadwal','checkin','checkout']` DAN
+`tgl_checkin <= hari ini (WIB)`. Pemasukan diakui begitu tanggal check-in
+Cloudbeds tiba, tidak menunggu tombol check-in. Booking dengan tanggal
+check-in di masa depan tetap "Booking Mendatang" (alasan 2 Okt soal
+pembatalan tetap berlaku); `menunggu_pembayaran` tidak termasuk. Alert
+`belum_checkin` tetap ada tapi sekarang hanya peringatan operasional
+(sudah dihitung; tandai batal/no-show kalau tamu tidak datang).
+`pipeline.overdue_count` dihapus.
+
 **Tidak disentuh:** tabel `transactions`, bagi hasil, dan rumus dividen
 investor (`PHASE0-BASELINE.md` §2). Bagi hasil sudah dicatat saat check-in
 lewat alur front desk. Tidak ada perubahan skema.

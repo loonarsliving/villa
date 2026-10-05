@@ -269,7 +269,7 @@ export default function FinancePage() {
                 label="Booking Mendatang (belum dihitung)"
                 value={fmtCurrency(summary.pipeline.amount)}
                 accent="neutral"
-                sub={`${summary.pipeline.count} booking belum check-in${summary.pipeline.overdue_count > 0 ? ` · ${summary.pipeline.overdue_count} sudah lewat tanggalnya` : ""}. ${summary.pipeline.note}`}
+                sub={`${summary.pipeline.count} booking, tanggal check-in belum tiba. ${summary.pipeline.note}`}
               />
             )}
           </div>
@@ -406,7 +406,7 @@ export default function FinancePage() {
                       <td className="px-3 py-2.5">
                         {fmtCurrencyFull(b.revenue)}
                         {b.pemasukan_diakui === false && b.status !== "batal" && (
-                          <div className="text-ink/30 text-[9.5px] mt-0.5">belum check-in · belum dihitung</div>
+                          <div className="text-ink/30 text-[9.5px] mt-0.5">tanggal check-in belum tiba · belum dihitung</div>
                         )}
                       </td>
                       <td className="px-3 py-2.5">

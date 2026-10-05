@@ -1844,12 +1844,25 @@ function calculateExpectedSettlement({ sumber, tgl_checkin, tgl_checkout, config
  * bulan itu. Dengan aturan ini angka pemasukan hanya bisa NAIK seiring
  * tamu datang, tidak bisa turun karena pembatalan.
  *
+ * REVISI owner 2026-10-05: angka finance tidak cocok dengan extranet OTA
+ * karena aturan di atas bergantung pada resepsionis menekan "check-in".
+ * Contoh nyata: Airbnb Alfy Farhan, A1, 3-5 Okt (Rp1.495.000) -- tamunya
+ * menginap, Airbnb mencatatnya, tapi di sini tetap 'terjadwal' sehingga
+ * tidak terhitung. Owner: "sesuaikan dengan tanggal checkin yang km tarik
+ * dari cloudbeds". Jadi pemasukan sekarang diakui begitu TANGGAL check-in
+ * Cloudbeds sudah tiba (tgl_checkin <= hari ini) dan booking tidak batal --
+ * tidak lagi menunggu tombol check-in. Booking dengan tanggal check-in di
+ * masa depan tetap tidak dihitung (alasan 2 Okt soal pembatalan tetap
+ * berlaku). menunggu_pembayaran (website belum bayar) tidak termasuk.
+ *
  * Satu tempat aturan ini didefinisikan; summary, channel breakdown,
  * survival KPI, dan settlement semuanya memakainya.
  */
-const STATUS_PEMASUKAN_DIAKUI = ['checkin', 'checkout'];
+const STATUS_PEMASUKAN_DIAKUI = ['terjadwal', 'checkin', 'checkout'];
+// Satu argumen saja: dipakai sebagai .filter(isPemasukanDiakui), yang
+// mengoper index sebagai argumen kedua.
 function isPemasukanDiakui(b){
-  return STATUS_PEMASUKAN_DIAKUI.includes(b.status);
+  return STATUS_PEMASUKAN_DIAKUI.includes(b.status) && String(b.tgl_checkin ?? '') <= todayWIB();
 }
 
 /** Lazily creates a finance_settlements row for any booking that doesn't have one yet. Idempotent (unique booking_id, upsert ignoreDuplicates). */
@@ -1934,7 +1947,7 @@ function addDaysStr(dateStr, n){
 async function computeNetRevenueForRange(from, to){
   const { data: bookings } = await supabase.from('bookings')
     .select('sumber,total_bayar,tarif,durasi_malam,status')
-    .gte('tgl_checkin', from).lte('tgl_checkin', to)
+    .gte('tgl_checkin', from).lte('tgl_checkin', to).lte('tgl_checkin', todayWIB())
     .in('status', STATUS_PEMASUKAN_DIAKUI);
   const rows = bookings ?? [];
   const { commissionPctBySumber, commission_source } = await getOtaCommissionPctMap();
@@ -4537,11 +4550,13 @@ Deno.serve(async (req)=>{
     const active = bookings.filter(isPemasukanDiakui);
     const cancelled = bookings.filter(b=>b.status==='batal').length;
     const amountOf = b => Number(b.total_bayar ?? b.tarif ?? 0);
-    // Booking mendatang: masih di Cloudbeds, belum pemasukan.
+    // Booking mendatang: tanggal check-in Cloudbeds belum tiba, belum pemasukan.
     const todayForPipeline = todayWIB();
-    const pipelineRows = bookings.filter(b=>b.status==='terjadwal');
+    const pipelineRows = bookings.filter(b=>STATUS_PEMASUKAN_DIAKUI.includes(b.status) && b.tgl_checkin > todayForPipeline);
     const pipelineAmount = pipelineRows.reduce((s,b)=>s+amountOf(b),0);
-    const pipelineOverdue = pipelineRows.filter(b=>b.tgl_checkin < todayForPipeline);
+    // Sudah dihitung (tanggalnya sudah lewat), tapi resepsionis belum
+    // menekan check-in -- peringatan operasional saja, bukan soal angka.
+    const belumCheckin = bookings.filter(b=>b.status==='terjadwal' && b.tgl_checkin < todayForPipeline);
     const gross_revenue = active.reduce((s,b)=>s+amountOf(b),0);
     const payment_received = active.filter(b=>paymentStatusForBooking(b)==='PAID').reduce((s,b)=>s+amountOf(b),0);
     const outstanding = active.reduce((s,b)=>s+outstandingForBooking(b, amountOf(b)),0);
@@ -4577,16 +4592,15 @@ Deno.serve(async (req)=>{
     if(alertsDueToday>0) alerts.push({ type:'settlement_due', level:'info', message:`${alertsDueToday} settlement diperkirakan cair hari ini.` });
     if(alertsOverdue>0) alerts.push({ type:'overdue', level:'danger', message:`${alertsOverdue} settlement sudah lewat tanggal perkiraan cair dan belum diterima.` });
     if(alertsUnknown>0) alerts.push({ type:'unknown_settlement_rule', level:'warning', message:`${alertsUnknown} transaksi punya aturan settlement yang belum dikonfigurasi (UNKNOWN).` });
-    if(pipelineOverdue.length>0) alerts.push({ type:'belum_checkin', level:'warning', message:`${pipelineOverdue.length} booking sudah lewat tanggal check-in tapi belum di-check-in di sistem -- tidak dihitung sebagai pemasukan sampai resepsionis meng-check-in (atau tandai batal/no-show).` });
+    if(belumCheckin.length>0) alerts.push({ type:'belum_checkin', level:'warning', message:`${belumCheckin.length} booking sudah lewat tanggal check-in tapi belum di-check-in di sistem -- sudah DIHITUNG sebagai pemasukan (mengikuti tanggal Cloudbeds). Kalau tamunya ternyata tidak datang, tandai batal/no-show supaya angkanya terkoreksi.` });
 
     return json({
       period: { from, to },
-      recognition_rule: 'Pemasukan diakui per tanggal check-in, hanya untuk tamu yang sudah check-in (status checkin/checkout). Booking yang belum datang ditampilkan terpisah sebagai booking mendatang dan tidak dihitung.',
+      recognition_rule: 'Pemasukan diakui per tanggal check-in Cloudbeds: dihitung begitu tanggal check-in sudah tiba (tidak menunggu tombol check-in resepsionis), selama booking tidak batal. Booking dengan tanggal check-in di masa depan ditampilkan terpisah sebagai booking mendatang dan belum dihitung.',
       pipeline: {
         amount: pipelineAmount,
         count: pipelineRows.length,
-        overdue_count: pipelineOverdue.length,
-        note: 'Booking dengan tanggal check-in di periode ini yang tamunya belum datang. Masih tercatat di Cloudbeds, belum dihitung sebagai pemasukan -- bisa berubah kalau dibatalkan.',
+        note: 'Booking dengan tanggal check-in yang belum tiba. Masih tercatat di Cloudbeds, belum dihitung sebagai pemasukan -- bisa berubah kalau dibatalkan.',
       },
       gross_revenue, net_revenue: gross_revenue,
       net_revenue_note: 'Sama dengan Gross Revenue -- integrasi Cloudbeds ini hanya membawa total reservasi (grandTotal), tidak ada feed diskon/refund terpisah untuk dikurangkan.',
@@ -4623,7 +4637,7 @@ Deno.serve(async (req)=>{
     const { from, to } = financeDateRange();
     const { data: rows, error } = await supabase.from('bookings')
       .select('id,sumber,status,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_balance')
-      .gte('tgl_checkin', from).lte('tgl_checkin', to).in('status', STATUS_PEMASUKAN_DIAKUI);
+      .gte('tgl_checkin', from).lte('tgl_checkin', to).lte('tgl_checkin', todayWIB()).in('status', STATUS_PEMASUKAN_DIAKUI);
     if(error) return err(error.message);
     const bookings = rows ?? [];
     const configMap = await getSettlementConfigMap();
