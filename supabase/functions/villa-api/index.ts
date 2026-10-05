@@ -4655,7 +4655,7 @@ Deno.serve(async (req)=>{
     if(!isFinance) return forbidden();
     const { from, to } = financeDateRange();
     const { data: rows, error } = await supabase.from('bookings')
-      .select('id,sumber,status,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_subtotal,cloudbeds_balance')
+      .select('id,sumber,status,unit_nomor,guest_nama,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_subtotal,cloudbeds_balance')
       .gte('tgl_checkin', from).lte('tgl_checkin', to).lte('tgl_checkin', todayWIB()).in('status', STATUS_PEMASUKAN_DIAKUI);
     if(error) return err(error.message);
     const bookings = rows ?? [];
@@ -4678,10 +4678,20 @@ Deno.serve(async (req)=>{
     for(const b of bookings){
       const dateRow = byDate.get(b.tgl_checkin) ?? new Map();
       const key = b.sumber ?? 'other';
-      const c = dateRow.get(key) ?? { sumber:key, booking_count:0, gross:0, ota_deduction:0, net:0, commission_pct:0 };
+      const c = dateRow.get(key) ?? { sumber:key, booking_count:0, malam:0, gross:0, ota_deduction:0, net:0, commission_pct:0, menginap_lama:[] };
+      const malam = Number(b.durasi_malam ?? 0);
       c.booking_count++;
+      c.malam += malam;
       c.gross += pendapatanKotor(b);
       c.net += pendapatanBersih(b);
+      // Owner 2026-10-05: nilai seluruh masa inap tercatat di tanggal
+      // check-in, jadi booking >1 malam membuat satu tanggal terlihat besar.
+      // Ditampilkan per booking supaya tetap bisa dimengerti.
+      if(malam > 1) c.menginap_lama.push({
+        unit_nomor: b.unit_nomor, guest_nama: b.guest_nama,
+        tgl_checkin: b.tgl_checkin, tgl_checkout: b.tgl_checkout, malam,
+        bersih: pendapatanBersih(b), bersih_per_malam: pendapatanBersih(b) / malam,
+      });
       c.ota_deduction = c.gross - c.net;
       c.commission_pct = pctOf(c.gross, c.net);
       dateRow.set(key, c);
@@ -4692,6 +4702,7 @@ Deno.serve(async (req)=>{
       return {
         tgl_checkin,
         booking_count: chs.reduce((s,c)=>s+c.booking_count,0),
+        malam: chs.reduce((s,c)=>s+c.malam,0),
         gross: chs.reduce((s,c)=>s+c.gross,0),
         ota_deduction: chs.reduce((s,c)=>s+c.ota_deduction,0),
         net: chs.reduce((s,c)=>s+c.net,0),

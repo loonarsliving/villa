@@ -383,9 +383,22 @@ export interface FinanceChannelBreakdown {
   settlement_configs_count: number;
 }
 
+export interface FinanceLongStay {
+  unit_nomor: string | null;
+  guest_nama: string | null;
+  tgl_checkin: string;
+  tgl_checkout: string | null;
+  malam: number;
+  bersih: number;
+  bersih_per_malam: number;
+}
+
 export interface FinanceDateChannelRow {
   sumber: string;
   booking_count: number;
+  malam: number;
+  /** Booking lebih dari 1 malam -- nilai seluruh masa inapnya tercatat di tanggal check-in. */
+  menginap_lama: FinanceLongStay[];
   gross: number;
   ota_deduction: number;
   net: number;
@@ -395,6 +408,7 @@ export interface FinanceDateChannelRow {
 export interface FinanceDateRow {
   tgl_checkin: string;
   booking_count: number;
+  malam: number;
   gross: number;
   ota_deduction: number;
   net: number;
