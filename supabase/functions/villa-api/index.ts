@@ -4,29 +4,6 @@ import { timingSafeEqual } from 'node:crypto';
 
 const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
-// npm:imapflow (dipakai oleh scanPaymentInbox, lihat komentar di sana) punya
-// race condition di librarynya sendiri: greeting handler-nya (beginSession)
-// memanggil startSession()/authenticate() lewat then().catch() yang "keluar
-// dari thread parsing saat ini" tanpa di-await, dan di Supabase Edge Runtime
-// continuation itu kadang baru resume SETELAH client sudah ditutup (state
-// LOGOUT) -- baik oleh kode kita sendiri maupun oleh isolate yang dibekukan
-// lalu dipakai ulang untuk request lain. Hasilnya "Already logged out"
-// muncul sebagai unhandled rejection di luar try/catch manapun di kode kita,
-// dan Deno menjatuhkan RESPONS REQUEST LAIN yang kebetulan sedang berjalan
-// di isolate yang sama dengan 503 -- padahal request itu sendiri tidak
-// salah apa-apa. client.close() + client.on('error') (lihat scanPaymentInbox)
-// mengurangi kemungkinannya tapi terbukti dari log production TIDAK
-// menghilangkannya sepenuhnya. Ini jaring pengaman terakhir: menelan HANYA
-// unhandled rejection dengan pesan persis ini, supaya request lain yang
-// tidak berhubungan tidak ikut ditumbangkan olehnya. Error asli lain di
-// aplikasi ini TETAP muncul sebagai unhandled rejection seperti biasa.
-globalThis.addEventListener('unhandledrejection', (event)=>{
-  const msg = String(event.reason?.message ?? event.reason ?? '');
-  if(msg.includes('Already logged out')){
-    event.preventDefault();
-  }
-});
-
 const SESSION_SECRET = Deno.env.get('VILLA_SESSION_SECRET') ?? '';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 
@@ -209,6 +186,169 @@ async function tryConfirmBookingByNominal(nominal, onlyBookingId){
 }
 
 /**
+ * Klien IMAP minimal di atas Deno.connectTls -- pengganti npm:imapflow.
+ *
+ * CATATAN (2026-10-05): imapflow TIDAK PERNAH berhasil di Supabase Edge
+ * Runtime. Sejak fitur ini dipasang (2026-09-21) setiap panggilan
+ * /cron/check-payment-email berakhir 502 "Unexpected close
+ * (ClosedAfterConnectTLS)" -- socket TLS lapisan kompatibilitas node:tls
+ * Deno tertutup sebelum greeting server terbaca -- dan pemicu dari halaman
+ * tamu gagal dengan cara yang sama tapi diam-diam. Akibatnya semua booking
+ * website hanya terkonfirmasi lewat balasan LUNAS manual owner. Uji
+ * langsung dengan Deno.connectTls ke server yang sama (imap.hostinger.com)
+ * berhasil greeting, login, SEARCH dan FETCH, jadi yang dipakai sekarang
+ * jalur native itu, dengan hanya perintah yang dibutuhkan: LOGIN, SELECT,
+ * UID SEARCH, UID FETCH BODY.PEEK[] (PEEK = tidak otomatis menandai
+ * dibaca), UID STORE +FLAGS.SILENT (\Seen), LOGOUT.
+ */
+const IMAP_TIMEOUT_MS = 25000;
+
+function imapQuote(s){
+  return '"'+String(s).replace(/\\/g,'\\\\').replace(/"/g,'\\"')+'"';
+}
+
+function bytesToLatin1(b){
+  let s = '';
+  for(let i=0; i<b.length; i+=8192) s += String.fromCharCode(...b.subarray(i, i+8192));
+  return s;
+}
+
+class MiniImap {
+  constructor(conn){
+    this.conn = conn;
+    this.reader = conn.readable.getReader();
+    this.writer = conn.writable.getWriter();
+    this.buf = new Uint8Array(0);
+    this.tagN = 0;
+  }
+  async fill(){
+    const r = await this.reader.read();
+    if(r.done) throw new Error('Koneksi IMAP ditutup server');
+    const n = new Uint8Array(this.buf.length + r.value.length);
+    n.set(this.buf); n.set(r.value, this.buf.length);
+    this.buf = n;
+  }
+  async readLine(){
+    for(;;){
+      for(let i=0; i+1<this.buf.length; i++){
+        if(this.buf[i]===13 && this.buf[i+1]===10){
+          const line = bytesToLatin1(this.buf.subarray(0,i));
+          this.buf = this.buf.slice(i+2);
+          return line;
+        }
+      }
+      await this.fill();
+    }
+  }
+  async readBytes(n){
+    while(this.buf.length < n) await this.fill();
+    const out = this.buf.slice(0,n);
+    this.buf = this.buf.slice(n);
+    return out;
+  }
+  async greeting(){
+    const line = await this.readLine();
+    if(!/^\* (OK|PREAUTH)/i.test(line)) throw new Error(`Greeting IMAP tidak dikenal: ${line.slice(0,120)}`);
+  }
+  // Mengirim satu perintah dan mengembalikan respons untagged-nya:
+  // [{line, literals: Uint8Array[]}]. Literal {n} dibaca sebagai byte mentah.
+  async cmd(command){
+    const tag = `A${++this.tagN}`;
+    await this.writer.write(new TextEncoder().encode(`${tag} ${command}\r\n`));
+    const untagged = [];
+    for(;;){
+      let line = await this.readLine();
+      if(line.startsWith(tag+' ')){
+        if(!/^\S+ OK/i.test(line)){
+          // Hanya nama perintah yang ikut ke pesan error -- argumen LOGIN
+          // berisi password.
+          throw new Error(`IMAP ${command.split(' ')[0]} gagal: ${line.slice(tag.length+1, tag.length+121)}`);
+        }
+        return untagged;
+      }
+      const item = {line, literals:[]};
+      let m;
+      while((m = line.match(/\{(\d+)\}$/))){
+        item.literals.push(await this.readBytes(Number(m[1])));
+        line = await this.readLine();
+        item.line += ' ' + line;
+      }
+      untagged.push(item);
+    }
+  }
+  close(){ try { this.conn.close(); } catch {} }
+}
+
+function decodeQuotedPrintable(s){
+  const bytes = [];
+  const t = s.replace(/=\r?\n/g,'');
+  for(let i=0; i<t.length; i++){
+    if(t[i]==='=' && /^[0-9A-Fa-f]{2}$/.test(t.slice(i+1,i+3))){ bytes.push(parseInt(t.slice(i+1,i+3),16)); i+=2; }
+    else bytes.push(t.charCodeAt(i) & 0xff);
+  }
+  return new Uint8Array(bytes);
+}
+
+function decodeCharset(bytes, charset){
+  try { return new TextDecoder(charset || 'utf-8').decode(bytes); }
+  catch { return new TextDecoder('utf-8').decode(bytes); }
+}
+
+/**
+ * Mengambil teks yang bisa dibaca dari satu email mentah (string latin1,
+ * byte-per-karakter). Cukup MIME untuk notifikasi bank: multipart
+ * (rekursif), quoted-printable/base64, charset, lalu HTML diratakan jadi
+ * teks dengan tag diganti spasi -- notifikasi BTN QRIS memecah "Total",
+ * ":" dan "Rp 710.367" ke sel tabel yang berbeda.
+ */
+function emailToText(raw){
+  const sep = raw.search(/\r?\n\r?\n/);
+  const headerPart = sep>=0 ? raw.slice(0,sep) : raw;
+  const body = sep>=0 ? raw.slice(sep).replace(/^\r?\n\r?\n/,'') : '';
+  const headers = headerPart.replace(/\r?\n[ \t]+/g,' ');
+  const header = (name)=> (headers.match(new RegExp(`^${name}:\\s*(.*)$`,'im'))?.[1] ?? '').trim();
+  const ctype = header('Content-Type') || 'text/plain';
+  const cte = header('Content-Transfer-Encoding').toLowerCase();
+
+  if(/^multipart\//i.test(ctype)){
+    const boundary = ctype.match(/boundary="?([^";]+)"?/i)?.[1];
+    if(!boundary) return '';
+    return body.split('--'+boundary).slice(1)
+      .filter(p=>!p.startsWith('--'))
+      .map(p=>emailToText(p.replace(/^\r?\n/,'')))
+      .join('\n');
+  }
+  if(!/^text\//i.test(ctype)) return '';
+
+  let bytes;
+  if(cte==='quoted-printable') bytes = decodeQuotedPrintable(body);
+  else if(cte==='base64'){
+    try { bytes = Uint8Array.from(atob(body.replace(/\s+/g,'')), c=>c.charCodeAt(0)); }
+    catch { return ''; }
+  } else bytes = Uint8Array.from(body, c=>c.charCodeAt(0) & 0xff);
+  let text = decodeCharset(bytes, ctype.match(/charset="?([^";]+)"?/i)?.[1]);
+
+  if(/html/i.test(ctype)){
+    text = text.replace(/<(style|script)[\s\S]*?<\/\1>/gi,' ').replace(/<[^>]+>/g,' ')
+      .replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/&#(\d+);/g,(_,n)=>String.fromCharCode(Number(n)));
+  }
+  return text;
+}
+
+/**
+ * Membaca nominal "Total : Rp 710.367" dari teks email. Titik/koma ribuan
+ * dibuang; dua digit desimal di belakang (",00") dibuang dulu supaya
+ * nominalnya tidak jadi 100x lipat.
+ */
+function parseNominalBtn(text){
+  const cocok = text.match(/Total\s*:?\s*Rp\.?\s*([\d.,]+)/i);
+  if(!cocok) return null;
+  const angka = cocok[1].replace(/[.,]$/,'').replace(/[.,]\d{2}$/,'').replace(/[.,]/g,'');
+  const nominal = Number(angka);
+  return Number.isFinite(nominal) && nominal>0 ? nominal : null;
+}
+
+/**
  * Login IMAP sekali dan memeriksa email BTN QRIS yang belum dibaca.
  * onlyBookingId (opsional) membatasi pencocokan ke satu booking saja --
  * dipakai oleh pemicu dari halaman tamu (POST /public/bookings/check-payment)
@@ -218,88 +358,61 @@ async function tryConfirmBookingByNominal(nominal, onlyBookingId){
  * kebetulan sama).
  */
 async function scanPaymentInbox(cfg, {onlyBookingId} = {}){
-  let ImapFlow, simpleParser;
-  try {
-    ({ ImapFlow } = await import('npm:imapflow@^1.0.0'));
-    ({ simpleParser } = await import('npm:mailparser@^3.6.0'));
-  } catch(e){
-    return {diperiksa:0, dikonfirmasi:[], ambigu:[], gagal:`Gagal memuat library IMAP: ${String(e?.message ?? e)}`};
-  }
-
-  const client = new ImapFlow({
-    host: cfg.host, port: Number(cfg.port ?? 993), secure: cfg.secure !== false,
-    auth: { user: cfg.user, pass: cfg.password }, logger: false,
-  });
-  // Supabase Edge Runtime bisa membekukan lalu memakai ulang isolate yang
-  // sama untuk request lain (terlihat dari "booted"/"shutdown" yang
-  // berselang-seling di log). Kalau ImapFlow masih punya timer latar
-  // belakang (keepalive/IDLE) yang menyala saat isolate itu dibekukan,
-  // timer itu bisa menembak ULANG setelah dibangunkan untuk request LAIN
-  // yang tidak ada hubungannya -- muncul sebagai "event loop error: Error:
-  // Already logged out" yang bikin request itu gagal dengan 503, padahal
-  // request itu sendiri tidak melakukan apa-apa yang salah. Listener ini
-  // menelan error semacam itu supaya tidak merembet ke request lain.
-  client.on('error', ()=>{});
-
   let diperiksa = 0;
   const dikonfirmasi = [];
   const ambigu = [];
   let gagal = null;
+  let client = null;
+  // Batas waktu keseluruhan: menutup socket membuat read() yang sedang
+  // menunggu langsung gagal, jadi request tidak pernah menggantung
+  // melewati timeout pemanggil (villa_cron_post memberi 30 detik).
+  let timedOut = false;
+  const timer = setTimeout(()=>{ timedOut = true; client?.close(); }, IMAP_TIMEOUT_MS);
   try {
-    await client.connect();
-    const lock = await client.getMailboxLock('INBOX');
-    try {
-      const subjectFilter = cfg.subject_contains ?? 'Payment Merchant Success';
-      const uids = await client.search({seen:false, subject:subjectFilter}, {uid:true});
-      for(const uid of (uids ?? [])){
-        diperiksa++;
-        const msg = await client.fetchOne(uid, {source:true}, {uid:true});
-        if(!msg?.source) continue;
-        let bodyText = '';
-        try {
-          const parsed = await simpleParser(msg.source);
-          bodyText = parsed.text ?? parsed.html ?? '';
-        } catch { continue; }
+    const conn = await Deno.connectTls({hostname: cfg.host, port: Number(cfg.port ?? 993)});
+    client = new MiniImap(conn);
+    await client.greeting();
+    await client.cmd(`LOGIN ${imapQuote(cfg.user)} ${imapQuote(cfg.password)}`);
+    await client.cmd('SELECT INBOX');
 
-        const cocok = bodyText.match(/Total\s*:?\s*Rp\.?\s*([\d.,]+)/i);
-        if(!cocok){
-          // Format tidak dikenali -- tandai dibaca supaya tidak diulang
-          // terus, baik oleh cron penuh maupun pengecekan per-booking.
-          await client.messageFlagsAdd(uid, ['\\Seen'], {uid:true});
-          continue;
-        }
-        const nominal = Number(cocok[1].replace(/[.,]/g,''));
-        if(!Number.isFinite(nominal) || nominal<=0){
-          await client.messageFlagsAdd(uid, ['\\Seen'], {uid:true});
-          continue;
-        }
+    const subjectFilter = cfg.subject_contains ?? 'Payment Merchant Success';
+    const hasilSearch = await client.cmd(`UID SEARCH UNSEEN SUBJECT ${imapQuote(subjectFilter)}`);
+    const uids = hasilSearch
+      .map(u=>u.line.match(/^\* SEARCH\b(.*)$/i)?.[1] ?? '')
+      .join(' ').trim().split(/\s+/).filter(x=>/^\d+$/.test(x));
+    const tandaiDibaca = (uid)=>client.cmd(`UID STORE ${uid} +FLAGS.SILENT (\\Seen)`);
 
-        const hasil = await tryConfirmBookingByNominal(nominal, onlyBookingId);
-        if(onlyBookingId){
-          // Hanya tandai dibaca kalau memang cocok ke booking ini -- kalau
-          // tidak, jangan disentuh (lihat komentar di atas fungsi ini).
-          if(hasil.matched) await client.messageFlagsAdd(uid, ['\\Seen'], {uid:true});
-        } else {
-          await client.messageFlagsAdd(uid, ['\\Seen'], {uid:true});
-        }
-        if(hasil.ambigu) ambigu.push(hasil);
-        else if(hasil.matched) dikonfirmasi.push(hasil);
+    for(const uid of uids){
+      diperiksa++;
+      const fetched = await client.cmd(`UID FETCH ${uid} (BODY.PEEK[])`);
+      const literal = fetched.find(f=>f.literals.length)?.literals[0];
+      if(!literal) continue;
+
+      const nominal = parseNominalBtn(emailToText(bytesToLatin1(literal)));
+      if(nominal===null){
+        // Format tidak dikenali -- tandai dibaca supaya tidak diulang
+        // terus, baik oleh cron penuh maupun pengecekan per-booking.
+        await tandaiDibaca(uid);
+        continue;
       }
-    } finally {
-      lock.release();
+
+      const hasil = await tryConfirmBookingByNominal(nominal, onlyBookingId);
+      if(onlyBookingId){
+        // Hanya tandai dibaca kalau memang cocok ke booking ini -- kalau
+        // tidak, jangan disentuh (lihat komentar di atas fungsi ini).
+        if(hasil.matched) await tandaiDibaca(uid);
+      } else {
+        await tandaiDibaca(uid);
+      }
+      if(hasil.ambigu) ambigu.push(hasil);
+      else if(hasil.matched) dikonfirmasi.push(hasil);
     }
+    try { await client.cmd('LOGOUT'); } catch {}
   } catch(e){
-    // e.reason (kalau ada) adalah BYE reason dari server IMAP -- misalnya
-    // "Too many connections" -- yang jauh lebih berguna untuk diagnosis
-    // daripada pesan generik "Unexpected close" saja.
-    const detail = [e?.code, e?.reason].filter(Boolean).join(': ');
-    gagal = detail ? `${String(e?.message ?? e)} (${detail})` : String(e?.message ?? e);
+    gagal = timedOut ? `Timeout ${IMAP_TIMEOUT_MS/1000} detik saat membaca email` : String(e?.message ?? e);
   } finally {
-    // client.close() (bukan logout()) supaya socket-nya langsung
-    // dihancurkan alih-alih menunggu handshake LOGOUT -- itulah yang
-    // meninggalkan timer latar belakang menyala setelah fungsi ini selesai
-    // (lihat komentar di atas client.on('error', ...)).
-    try { client.close(); } catch {}
+    clearTimeout(timer);
+    client?.close();
   }
 
   return {diperiksa, dikonfirmasi, ambigu, gagal};
@@ -3902,6 +4015,10 @@ Deno.serve(async (req)=>{
 
     const hasil = await scanPaymentInbox(cfg, {onlyBookingId: booking_id});
     if(hasil.gagal){
+      // Tetap diam untuk tamu, tapi harus terlihat di log -- kegagalan
+      // senyap di sini yang membuat email otomatis mati 2 minggu tanpa
+      // ada yang tahu (lihat CATATAN di atas MiniImap).
+      console.error(`[check-payment] booking ${booking_id.slice(0,8)}: ${hasil.gagal}`);
       return json({success:true, checked:false, confirmed:false});
     }
     return json({success:true, checked:true, confirmed: hasil.dikonfirmasi.length>0});
