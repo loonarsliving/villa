@@ -2,7 +2,7 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
-## 2026-10-05 — Jumat lebih murah dari Sabtu + mesin belajar pola per hari (BRANCH, menunggu OK owner)
+## 2026-10-05 — Jumat lebih murah dari Sabtu + mesin belajar pola per hari (DI-MERGE #166, owner-approved)
 
 Owner: "untuk hari Jumat hampir 0 pemesanan ... harusnya mesin bisa melihat
 lemahnya bookingan dan mencari solusi untuk itu".
