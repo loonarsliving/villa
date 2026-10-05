@@ -378,7 +378,8 @@ export interface FinanceChannelBreakdown {
   channels: FinanceChannelRow[];
   totals: { revenue: number; net_revenue: number; payment: number; outstanding: number; ota_receivable: number };
   by_date: FinanceDateRow[];
-  commission_source: "cloudbeds_live" | "unavailable_no_api_key";
+  /** Booking OTA yang harga kamar Cloudbeds-nya belum tersimpan -- bersihnya sementara = kotor. */
+  bersih_belum_tersedia: number;
   settlement_configs_count: number;
 }
 
@@ -566,7 +567,6 @@ export interface FinanceSurvivalKpis {
   net_revenue_mtd: number;
   gross_revenue_mtd: number;
   ota_commission_mtd: number;
-  commission_source: "cloudbeds_live" | "unavailable_no_api_key";
   room_nights_mtd: number;
   booking_count_mtd: number;
   investor_guarantee: number;

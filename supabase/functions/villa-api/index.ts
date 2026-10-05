@@ -1573,10 +1573,14 @@ async function computeReport(unit_id, periode){
 
 /**
  * Live per-channel OTA commission %, from Cloudbeds' own getSources --
- * shared by computeOtaBreakdown() (investor-facing estimate) and the
- * Survival Control Center engine below, so the two never quietly
- * disagree about what an OTA's commission is. Empty map (0% everywhere)
- * if the API key is missing or the call fails -- never invents a number.
+ * used only by computeOtaBreakdown() (investor-facing estimate). Empty map
+ * (0% everywhere) if the API key is missing or the call fails -- never
+ * invents a number.
+ *
+ * Diperiksa langsung 2026-10-05: getSources properti ini TIDAK memuat
+ * sumber OTA sama sekali dan semua komisinya 0%, jadi peta ini selalu
+ * kosong. Halaman Finance karena itu tidak memakainya lagi -- lihat
+ * pendapatanBersih (harga kamar Cloudbeds sebelum fee OTA).
  */
 async function getOtaCommissionPctMap(){
   const commissionPctBySumber = new Map();
@@ -1865,6 +1869,25 @@ function isPemasukanDiakui(b){
   return STATUS_PEMASUKAN_DIAKUI.includes(b.status) && String(b.tgl_checkin ?? '') <= todayWIB();
 }
 
+/**
+ * KOTOR vs BERSIH per booking (owner 2026-10-05). Cloudbeds MENAMBAHKAN fee
+ * OTA ke harga ("Booking.com Fee" 15% di email reservasi: 447.950 + 67.192,50
+ * = Grand Total 515.142,50), padahal fee itu komisi yang tidak pernah
+ * diterima villa. getSources Cloudbeds mencatat komisi 0% untuk semua sumber,
+ * jadi menghitung bersih dari persentase tidak mungkin. Owner: "pakai angka
+ * deposit amount" = balanceDetailed.subTotal, disimpan di
+ * bookings.cloudbeds_subtotal. Booking non-Cloudbeds (website, walk-in) tidak
+ * punya fee OTA: bersih = kotor.
+ */
+function pendapatanKotor(b){ return Number(b.total_bayar ?? b.tarif ?? 0); }
+function pendapatanBersih(b){
+  // Booking website yang diteruskan ke Cloudbeds juga punya harga Cloudbeds,
+  // tapi yang berlaku adalah yang dibayar tamu di sini -- bukan harga
+  // Cloudbeds (lihat cloudbedsReservationSync.ts soal booking milik sendiri).
+  if(normalizedChannel(b.sumber) === 'DIRECT') return pendapatanKotor(b);
+  return b.cloudbeds_subtotal != null ? Number(b.cloudbeds_subtotal) : pendapatanKotor(b);
+}
+
 /** Lazily creates a finance_settlements row for any booking that doesn't have one yet. Idempotent (unique booking_id, upsert ignoreDuplicates). */
 async function ensureFinanceSettlements(bookings, configMap){
   // Settlement hanya untuk pemasukan yang sudah diakui: membuatnya untuk
@@ -1876,7 +1899,7 @@ async function ensureFinanceSettlements(bookings, configMap){
     return {
       booking_id: b.id,
       sumber: b.sumber,
-      amount: Number(b.total_bayar ?? b.tarif ?? 0),
+      amount: pendapatanBersih(b),
       expected_settlement_date: calc.expected_settlement_date,
       settlement_confidence: calc.confidence,
       settlement_status: 'PENDING',
@@ -1937,29 +1960,25 @@ function addDaysStr(dateStr, n){
 }
 
 /**
- * Net room revenue for bookings whose tgl_checkin falls in [from,to], net
- * of live Cloudbeds OTA commission (same method computeOtaBreakdown
- * uses -- getOtaCommissionPctMap() is shared, not duplicated). There is
- * no tax field anywhere in this schema, so "net of tax" is genuinely
- * NOT_AVAILABLE -- reported as such (tax_deduction: null), never
- * silently treated as zero.
+ * Room revenue for bookings whose tgl_checkin falls in [from,to]: kotor =
+ * Cloudbeds grandTotal, bersih = harga kamar sebelum fee OTA (lihat
+ * pendapatanBersih). There is no tax field anywhere in this schema, so
+ * "net of tax" is genuinely NOT_AVAILABLE -- reported as such
+ * (tax_deduction: null), never silently treated as zero.
  */
 async function computeNetRevenueForRange(from, to){
   const { data: bookings } = await supabase.from('bookings')
-    .select('sumber,total_bayar,tarif,durasi_malam,status')
+    .select('sumber,total_bayar,tarif,cloudbeds_subtotal,durasi_malam,status')
     .gte('tgl_checkin', from).lte('tgl_checkin', to).lte('tgl_checkin', todayWIB())
     .in('status', STATUS_PEMASUKAN_DIAKUI);
   const rows = bookings ?? [];
-  const { commissionPctBySumber, commission_source } = await getOtaCommissionPctMap();
-  let gross = 0, commission = 0, room_nights = 0;
+  let gross = 0, net = 0, room_nights = 0;
   for(const b of rows){
-    const amount = Number(b.total_bayar ?? b.tarif ?? 0);
-    const pct = commissionPctBySumber.get(b.sumber) ?? 0;
-    gross += amount;
-    commission += amount * (pct/100);
+    gross += pendapatanKotor(b);
+    net += pendapatanBersih(b);
     room_nights += Number(b.durasi_malam ?? 0);
   }
-  return { gross_revenue: gross, ota_commission: commission, net_revenue: gross - commission, room_nights, booking_count: rows.length, commission_source, tax_deduction: null };
+  return { gross_revenue: gross, ota_commission: gross - net, net_revenue: net, room_nights, booking_count: rows.length, tax_deduction: null };
 }
 
 /** Occupied/available room-nights from the daily inventory snapshot -- the SAME table /api/admin/revenue-metrics reads, so occupancy never disagrees between the two dashboards. */
@@ -2189,11 +2208,10 @@ async function computeSurvivalKpis(property_code, from, to){
     rooms_per_night_period,
     rooms_per_night_band: band,
     net_adr,
-    net_adr_note: 'Net dari komisi OTA live Cloudbeds; TIDAK termasuk potongan pajak -- tidak ada field pajak di sistem ini (NOT_AVAILABLE).',
+    net_adr_note: 'Bersih = harga kamar Cloudbeds sebelum fee OTA ("Deposit Amount" di email reservasi); fee OTA yang Cloudbeds tambahkan ke Grand Total tidak dihitung. TIDAK termasuk potongan pajak -- tidak ada field pajak di sistem ini (NOT_AVAILABLE).',
     net_revenue_mtd: netRevenueRange.net_revenue,
     gross_revenue_mtd: netRevenueRange.gross_revenue,
     ota_commission_mtd: netRevenueRange.ota_commission,
-    commission_source: netRevenueRange.commission_source,
     room_nights_mtd: netRevenueRange.room_nights,
     booking_count_mtd: netRevenueRange.booking_count,
     investor_guarantee: monthly_guarantee,
@@ -4540,7 +4558,7 @@ Deno.serve(async (req)=>{
     if(!isFinance) return forbidden();
     const { from, to } = financeDateRange();
     const { data: rows, error } = await supabase.from('bookings')
-      .select('id,sumber,status,tgl_checkin,tgl_checkout,total_bayar,tarif,cloudbeds_balance')
+      .select('id,sumber,status,tgl_checkin,tgl_checkout,total_bayar,tarif,cloudbeds_subtotal,cloudbeds_balance')
       .gte('tgl_checkin', from).lte('tgl_checkin', to);
     if(error) return err(error.message);
     const bookings = rows ?? [];
@@ -4553,11 +4571,12 @@ Deno.serve(async (req)=>{
     // Booking mendatang: tanggal check-in Cloudbeds belum tiba, belum pemasukan.
     const todayForPipeline = todayWIB();
     const pipelineRows = bookings.filter(b=>STATUS_PEMASUKAN_DIAKUI.includes(b.status) && b.tgl_checkin > todayForPipeline);
-    const pipelineAmount = pipelineRows.reduce((s,b)=>s+amountOf(b),0);
+    const pipelineAmount = pipelineRows.reduce((s,b)=>s+pendapatanBersih(b),0);
     // Sudah dihitung (tanggalnya sudah lewat), tapi resepsionis belum
     // menekan check-in -- peringatan operasional saja, bukan soal angka.
     const belumCheckin = bookings.filter(b=>b.status==='terjadwal' && b.tgl_checkin < todayForPipeline);
     const gross_revenue = active.reduce((s,b)=>s+amountOf(b),0);
+    const net_revenue = active.reduce((s,b)=>s+pendapatanBersih(b),0);
     const payment_received = active.filter(b=>paymentStatusForBooking(b)==='PAID').reduce((s,b)=>s+amountOf(b),0);
     const outstanding = active.reduce((s,b)=>s+outstandingForBooking(b, amountOf(b)),0);
     const cloudbedsVerifiedCount = active.filter(b=>b.cloudbeds_balance != null).length;
@@ -4602,8 +4621,8 @@ Deno.serve(async (req)=>{
         count: pipelineRows.length,
         note: 'Booking dengan tanggal check-in yang belum tiba. Masih tercatat di Cloudbeds, belum dihitung sebagai pemasukan -- bisa berubah kalau dibatalkan.',
       },
-      gross_revenue, net_revenue: gross_revenue,
-      net_revenue_note: 'Sama dengan Gross Revenue -- integrasi Cloudbeds ini hanya membawa total reservasi (grandTotal), tidak ada feed diskon/refund terpisah untuk dikurangkan.',
+      gross_revenue, net_revenue,
+      net_revenue_note: 'Bersih = harga kamar dari Cloudbeds ("Deposit Amount" di email reservasi), sebelum fee OTA yang Cloudbeds tambahkan ke Grand Total. Booking website/walk-in: bersih sama dengan kotor. Diskon/refund tidak tersedia dari Cloudbeds.',
       payment_received,
       payment_received_note: cloudbedsVerifiedCount>0
         ? `Untuk ${cloudbedsVerifiedCount} dari ${active.length} booking, dihitung dari saldo asli Cloudbeds (getReservations.balance). Sisanya (booking direct/walk-in atau belum tersinkron) memakai status booking (checkin/checkout = lunas, sesuai alur "Tandai Lunas" front desk) sebagai perkiraan.`
@@ -4636,13 +4655,13 @@ Deno.serve(async (req)=>{
     if(!isFinance) return forbidden();
     const { from, to } = financeDateRange();
     const { data: rows, error } = await supabase.from('bookings')
-      .select('id,sumber,status,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_balance')
+      .select('id,sumber,status,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_subtotal,cloudbeds_balance')
       .gte('tgl_checkin', from).lte('tgl_checkin', to).lte('tgl_checkin', todayWIB()).in('status', STATUS_PEMASUKAN_DIAKUI);
     if(error) return err(error.message);
     const bookings = rows ?? [];
     const configMap = await getSettlementConfigMap();
     await ensureFinanceSettlements(bookings, configMap);
-    const { commissionPctBySumber, commission_source } = await getOtaCommissionPctMap();
+    const pctOf = (gross, net) => gross > 0 ? Math.round(((gross - net) / gross) * 1000) / 10 : 0;
 
     const ids = bookings.map(b=>b.id);
     const settlementByBooking = new Map();
@@ -4653,18 +4672,18 @@ Deno.serve(async (req)=>{
 
     // Per tanggal check-in x channel (owner 2026-10-05: "tgl 1 ada 5
     // booking dari channel mana sj, nilai uangnya sdh bersih dluar potongan
-    // OTA?"). Bookings dan komisi sama persis dengan tabel per-channel.
+    // OTA?"). Kotor/bersih per booking dari pendapatanKotor/pendapatanBersih,
+    // sama dengan tabel per-channel di bawah.
     const byDate = new Map();
     for(const b of bookings){
-      const amount = Number(b.total_bayar ?? b.tarif ?? 0);
-      const pct = commissionPctBySumber.get(b.sumber) ?? 0;
       const dateRow = byDate.get(b.tgl_checkin) ?? new Map();
       const key = b.sumber ?? 'other';
-      const c = dateRow.get(key) ?? { sumber:key, booking_count:0, gross:0, ota_deduction:0, net:0, commission_pct:pct };
+      const c = dateRow.get(key) ?? { sumber:key, booking_count:0, gross:0, ota_deduction:0, net:0, commission_pct:0 };
       c.booking_count++;
-      c.gross += amount;
-      c.ota_deduction += amount * pct/100;
-      c.net += amount * (1 - pct/100);
+      c.gross += pendapatanKotor(b);
+      c.net += pendapatanBersih(b);
+      c.ota_deduction = c.gross - c.net;
+      c.commission_pct = pctOf(c.gross, c.net);
       dateRow.set(key, c);
       byDate.set(b.tgl_checkin, dateRow);
     }
@@ -4684,11 +4703,11 @@ Deno.serve(async (req)=>{
     for(const b of bookings){
       const key = b.sumber ?? 'other';
       const cur = bySumber.get(key) ?? { sumber:key, normalized_channel: normalizedChannel(key), revenue:0, net_revenue:0, payment:0, outstanding:0, ota_receivable:0, settled_count:0, unsettled_count:0, booking_count:0, room_nights:0 };
-      const amount = Number(b.total_bayar ?? b.tarif ?? 0);
-      const commissionPct = commissionPctBySumber.get(b.sumber) ?? 0;
+      const amount = pendapatanKotor(b);
+      const net = pendapatanBersih(b);
       const bOutstanding = outstandingForBooking(b, amount);
       cur.revenue += amount;
-      cur.net_revenue += amount * (1 - commissionPct/100);
+      cur.net_revenue += net;
       cur.booking_count++;
       cur.room_nights += Number(b.durasi_malam ?? 0);
       cur.payment += amount - bOutstanding;
@@ -4696,7 +4715,8 @@ Deno.serve(async (req)=>{
       const s = settlementByBooking.get(b.id);
       const settled = s?.settlement_status==='RECEIVED';
       if(settled) cur.settled_count++; else cur.unsettled_count++;
-      if(cur.normalized_channel!=='DIRECT' && !settled) cur.ota_receivable += amount;
+      // Yang ditransfer OTA ke villa adalah angka bersih, bukan Grand Total.
+      if(cur.normalized_channel!=='DIRECT' && !settled) cur.ota_receivable += net;
       bySumber.set(key, cur);
     }
     const cfgArr = [...configMap.values()];
@@ -4705,14 +4725,15 @@ Deno.serve(async (req)=>{
       return {
         ...c,
         ota_deduction: c.revenue - c.net_revenue,
-        commission_pct: commissionPctBySumber.get(c.sumber) ?? 0,
+        commission_pct: pctOf(c.revenue, c.net_revenue),
         avg_net_adr: c.room_nights>0 ? c.net_revenue/c.room_nights : null,
         collection_method: cfg?.collection_method ?? 'UNKNOWN',
         destination_account: cfg?.destination_account_label ?? null,
       };
     }).sort((a,b)=>b.revenue-a.revenue);
     const totals = channels.reduce((acc,c)=>({ revenue:acc.revenue+c.revenue, net_revenue:acc.net_revenue+c.net_revenue, payment:acc.payment+c.payment, outstanding:acc.outstanding+c.outstanding, ota_receivable:acc.ota_receivable+c.ota_receivable }), { revenue:0, net_revenue:0, payment:0, outstanding:0, ota_receivable:0 });
-    return json({ period:{from,to}, channels, totals, by_date, commission_source, settlement_configs_count: cfgArr.length });
+    const bersih_belum_tersedia = bookings.filter(b=>b.cloudbeds_subtotal == null && normalizedChannel(b.sumber)!=='DIRECT').length;
+    return json({ period:{from,to}, channels, totals, by_date, bersih_belum_tersedia, settlement_configs_count: cfgArr.length });
   }
 
   if(path==='/finance/bookings' && m==='GET'){
@@ -4726,7 +4747,7 @@ Deno.serve(async (req)=>{
     const offset = Math.max(0, Number(url.searchParams.get('offset') ?? 0));
 
     let query = supabase.from('bookings')
-      .select('id,unit_nomor,guest_nama,sumber,status,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_balance,cloudbeds_reservation_id,created_at', {count:'exact'})
+      .select('id,unit_nomor,guest_nama,sumber,status,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_subtotal,cloudbeds_balance,cloudbeds_reservation_id,created_at', {count:'exact'})
       .gte('tgl_checkin', from).lte('tgl_checkin', to)
       .order('tgl_checkin',{ascending:false});
     if(sumber) query = query.eq('sumber', sumber);

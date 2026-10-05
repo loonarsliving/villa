@@ -243,10 +243,12 @@ export async function POST(request: Request) {
         // `tarif` is the whole-stay amount here, same as total_bayar --
         // see the note in the Cloudbeds backfill route.
         let grandTotal = 0;
+        let subTotal: number | null = null;
         try {
           const totals = reservationId ? (await getCloudbedsReservationTotals({ reservationIDs: [reservationId] })).get(reservationId) : null;
           if (totals && tglCheckin) {
             grandTotal = totals.grandTotal;
+            subTotal = totals.subTotal;
           }
         } catch {
           // leave both at 0
@@ -280,6 +282,7 @@ export async function POST(request: Request) {
             durasi_malam: nights > 0 ? nights : null,
             tarif: grandTotal,
             total_bayar: grandTotal,
+            ...(subTotal != null ? { cloudbeds_subtotal: subTotal } : {}),
             status: statusSetelahSync(bookingSaatIni?.status, "terjadwal"),
             cloudbeds_reservation_id: reservationId,
           },
