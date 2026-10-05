@@ -397,10 +397,18 @@ amount".
   dari OTA; 18 settlement belum-diterima dikoreksi).
 - Contoh 1-5 Okt: kotor Rp20.317.787, potongan Rp1.435.965, bersih
   Rp18.881.822. Agoda tidak punya fee di Cloudbeds (bersih = kotor).
-- **Belum disentuh:** tabel `transactions` (dicatat resepsionis saat
-  check-in dari total_bayar = grandTotal) dan dasar dividen investor --
-  kemungkinan ikut terlalu tinggi untuk Booking.com/Traveloka/Airbnb, perlu
-  keputusan owner terpisah.
+- **Dasar dividen (owner setuju 2026-10-05, "oke bawa ke production"):**
+  `villa_commit_checkin` (migrasi `20261005000002`) sekarang mencatat
+  `cloudbeds_subtotal` ke `transactions` untuk booking OTA yang punya
+  angkanya; selain itu tetap `total_bayar`. Transaksi Oktober yang sudah
+  tercatat dikoreksi (10 baris Booking.com/Traveloka): dasar Oktober
+  Rp18.822.787 -> Rp17.581.822. **September TIDAK diubah** (dividen sudah
+  ditransfer); dasar September ternyata Rp1.486.094 terlalu tinggi, semuanya
+  dari 7 booking Airbnb.
+- Catatan: `transactions` tetap hanya terisi saat resepsionis menekan
+  check-in. Booking yang tamunya menginap tanpa check-in di sistem (mis.
+  Airbnb Alfy Farhan A1 3-5 Okt) sudah dihitung di Finance tapi TIDAK masuk
+  dasar dividen sampai di-check-in.
 
 **Tidak disentuh:** tabel `transactions`, bagi hasil, dan rumus dividen
 investor (`PHASE0-BASELINE.md` §2). Bagi hasil sudah dicatat saat check-in
