@@ -2,7 +2,7 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
-## 2026-10-05 — cek email pembayaran BTN QRIS ternyata TIDAK PERNAH jalan (PR, MENUNGGU persetujuan owner — menyentuh pembayaran)
+## 2026-10-05 — cek email pembayaran BTN QRIS ternyata TIDAK PERNAH jalan (DI-MERGE #159, owner-approved, TERVERIFIKASI live)
 
 Owner: "Knpa pgecekan email nya tidak otomatis ya, akhirnya orng yg memilih
 direct booking harus menunggu lama".
@@ -35,7 +35,12 @@ belakang dibuang supaya tidak jadi 100x. Kegagalan di rute tamu kini
 `console.error`. Diuji lokal terhadap server IMAP palsu (mode cron, mode
 per-booking, password salah, koneksi ditolak).
 
-**Setelah merge, cek:** `select status_code, content from net._http_response
+**Verifikasi live:** deploy villa-api v105 (run #70) hijau; cron 09:00 UTC
+5 Okt menjawab 200 `{"success":true,"diperiksa":0,...}` -- 502 pertama yang
+hilang sejak 21 Sep. (diperiksa 0 = tidak ada email BTN belum-dibaca saat
+itu.) Fungsi uji `uji-imap` dinonaktifkan (410), boleh dihapus.
+
+**Cara cek ulang:** `select status_code, content from net._http_response
 order by id desc` → respons `/cron/check-payment-email` harus 200
 `{"success":true,"diperiksa":...}`, bukan 502.
 
