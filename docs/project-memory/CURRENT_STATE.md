@@ -2,6 +2,37 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-10-05 — Jumat lebih murah dari Sabtu + mesin belajar pola per hari (BRANCH, menunggu OK owner)
+
+Owner: "untuk hari Jumat hampir 0 pemesanan ... harusnya mesin bisa melihat
+lemahnya bookingan dan mencari solusi untuk itu".
+
+**Temuan.**
+- Jumat Standard ke depan hampir kosong: 9/16/23 Okt masing-masing 0 terjual.
+- Harganya disamakan dengan Sabtu (+250rb, 706–749rb), padahal Kamis sekitar
+  480–520rb.
+- Mesin memang membaca sepinya, tapi reaksinya lemah:
+  - diskon tanggal dekat yang masih kosong hanya sekitar −6%;
+  - pace menggabungkan Jumat dengan Sabtu, sehingga Sabtu yang laku menutupi
+    Jumat.
+- Catatan jujur: Jumat yang SUDAH lewat (25 Sep, 2 Okt) sempat terjual
+  6 kamar. Kelemahannya ada di pemesanan ke depan, bukan di riwayat.
+
+**Perubahan** (`aiPricingEngine.ts`, +5 tes, total 195):
+- `FRIDAY_SURCHARGE_BY_ROOM_TYPE_CODE`: Standard Jumat +100rb (Sabtu tetap
+  +250rb). Sawah View tidak diubah karena laku di hari Jumat.
+- `learnDayOfWeekDemand` (SINYAL 6): rata-rata terjual per hari dari malam
+  yang sudah lewat (56 hari, minimal 30 malam dan 14 hari). Simpangannya
+  menjadi penyesuaian kecil (maks ±6% sebelum digabung berbobot 0,3).
+- Pace Jumat dan Sabtu dipisah (`paceDayGroup`). Selama salah satunya belum
+  punya 6 tanggal pembanding, kembali ke baseline gabungan.
+
+**Simulasi** (data produksi 5 Okt + ketersediaan Cloudbeds, run 6 Okt):
+- Jumat Standard turun sekitar 15–20%: 9 Okt 706rb → 565rb, 16 Okt 732rb →
+  585rb, 23 Okt 719rb → 575rb.
+- Sel–Kam turun 1–2% (terbukti lebih sepi); Sab/Min/Sen naik 0–2%.
+- Sawah View: 0 perubahan.
+
 ## 2026-10-05 — cek email pembayaran BTN QRIS ternyata TIDAK PERNAH jalan (DI-MERGE #159, owner-approved, TERVERIFIKASI live)
 
 Owner: "Knpa pgecekan email nya tidak otomatis ya, akhirnya orng yg memilih

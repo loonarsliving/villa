@@ -48,6 +48,89 @@ const WEEKEND_SURCHARGE_BY_ROOM_TYPE_CODE: Record<string, number> = {
   standard: 250000,
   sawah_view: 220000,
 };
+/**
+ * Owner instruction (2026-10-05): "untuk hari Jumat hampir 0 pemesanan".
+ * Sejak buka (20 Sep), Jumat adalah malam TERLEMAH untuk Standard (9 malam
+ * terjual, Sabtu 17, Minggu 18), tapi harganya disamakan dengan Sabtu
+ * (+250rb, lompat ~50% dari Kamis). Jumat kini punya tambahannya sendiri;
+ * tipe yang tidak tercantum memakai tambahan akhir pekan biasa (Sawah View
+ * laku di hari Jumat, jadi tidak diubah).
+ */
+const FRIDAY_SURCHARGE_BY_ROOM_TYPE_CODE: Record<string, number> = {
+  standard: 100000,
+};
+
+/**
+ * Pola permintaan per hari, DIPELAJARI dari malam yang sudah lewat (owner
+ * 2026-10-05: "harusnya mesin bisa melihat lemahnya bookingan dan mencari
+ * solusi untuk itu"). Beyond dan PriceLabs memperbarui pola hari-dalam-
+ * minggu dari data mereka sendiri setiap minggu; tambahan akhir pekan yang
+ * dipatok hanyalah tebakan awal.
+ *
+ * Untuk tiap hari (Senin..Minggu): rata-rata unit terjual per kemunculan
+ * hari itu, dibanding rata-rata semua hari. Hanya malam yang SUDAH lewat
+ * (pola penumpukannya selesai), jendela DOW_LOOKBACK_DAYS. Penyesuaian
+ * dibatasi kecil karena datanya masih sedikit, dan menguat sendiri saat
+ * data bertambah.
+ */
+const DOW_LOOKBACK_DAYS = 56;
+const DOW_MIN_NIGHTS = 30;
+const DOW_MIN_WINDOW_DAYS = 14;
+const DOW_SENSITIVITY = 0.15;
+const DOW_MAX_ADJUSTMENT_PCT = 0.06;
+
+export interface DayOfWeekDemand {
+  usable: boolean;
+  /** isoDay 1=Senin..7=Minggu -> simpangan relatif terhadap rata-rata hari lain (-0.4 = 40% di bawah). */
+  relativeByIsoDay: Map<number, number>;
+  nights: number;
+}
+
+function isoDay(dateStr: string): number {
+  const d = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
+  return d === 0 ? 7 : d;
+}
+
+export function learnDayOfWeekDemand(bookings: PaceBookingRow[], unitIds: Set<string>, today: string): DayOfWeekDemand {
+  const relevant = bookings.filter((b) => unitIds.has(b.unit_id) && (b.status === "terjadwal" || b.status === "checkin" || b.status === "checkout"));
+  const windowStart = new Date(Date.parse(`${today}T00:00:00Z`) - DOW_LOOKBACK_DAYS * 86400000).toISOString().slice(0, 10);
+  const soldByDate = new Map<string, number>();
+  for (const b of relevant) {
+    const end = b.tgl_checkout ?? b.tgl_checkin;
+    for (let d = new Date(`${b.tgl_checkin}T00:00:00Z`); d < new Date(`${end}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1)) {
+      const iso = d.toISOString().slice(0, 10);
+      if (iso < today && iso >= windowStart) soldByDate.set(iso, (soldByDate.get(iso) ?? 0) + 1);
+    }
+  }
+  const nights = [...soldByDate.values()].reduce((a, n) => a + n, 0);
+  const firstDate = [...soldByDate.keys()].sort()[0];
+  const empty = { usable: false, relativeByIsoDay: new Map<number, number>(), nights };
+  if (!firstDate) return empty;
+  const windowDays = Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${firstDate}T00:00:00Z`)) / 86400000);
+  if (nights < DOW_MIN_NIGHTS || windowDays < DOW_MIN_WINDOW_DAYS) return empty;
+
+  // Rata-rata per kemunculan hari itu sejak malam terjual pertama di jendela
+  // (bukan sejak awal jendela: villa baru buka 20 Sep 2026).
+  const sum = new Map<number, number>();
+  const occurrences = new Map<number, number>();
+  for (let d = firstDate; d < today; d = new Date(Date.parse(`${d}T00:00:00Z`) + 86400000).toISOString().slice(0, 10)) {
+    const k = isoDay(d);
+    occurrences.set(k, (occurrences.get(k) ?? 0) + 1);
+    sum.set(k, (sum.get(k) ?? 0) + (soldByDate.get(d) ?? 0));
+  }
+  const avgByDay = new Map([...occurrences].map(([k, n]) => [k, (sum.get(k) ?? 0) / n]));
+  const mean = [...avgByDay.values()].reduce((a, n) => a + n, 0) / avgByDay.size;
+  if (!(mean > 0)) return empty;
+  return { usable: true, relativeByIsoDay: new Map([...avgByDay].map(([k, v]) => [k, (v - mean) / mean])), nights };
+}
+
+/** Kelompok pace: Jumat dan Sabtu dibaca terpisah, bukan satu "akhir pekan". */
+export type PaceDayGroup = "fri" | "sat" | "weekday";
+export function paceDayGroup(dateStr: string): PaceDayGroup {
+  const d = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
+  return d === 5 ? "fri" : d === 6 ? "sat" : "weekday";
+}
+
 const MARKET_DEMAND_CREATED_BY = "ai_jogja_events_research";
 /** Declared here because AI_PERIOD_CREATED_BY below needs it; see SIGNAL 1. */
 const LOW_SEASON_CREATED_BY = "ai_low_season";
@@ -282,7 +365,7 @@ const MARKET_SEARCH_STALE_DAYS = 45;
  * "biasa saja" adalah cara paling halus untuk membuat sistem percaya diri
  * pada data yang tidak ada.
  */
-const SIGNAL_WEIGHTS = { occupancy: 0.6, pace: 0.28, market_search: 0.12, search_demand: 0.15, market_position: 0.25 } as const;
+const SIGNAL_WEIGHTS = { day_of_week: 0.3, occupancy: 0.6, pace: 0.28, market_search: 0.12, search_demand: 0.15, market_position: 0.25 } as const;
 
 /**
  * SINYAL 6 (owner 2026-09-30): posisi harga terhadap villa SEKELAS.
@@ -1035,7 +1118,8 @@ export interface PaceBookingRow {
  * Tanggal pembandingnya hanya tanggal menginap yang SUDAH lewat, jadi pola
  * penumpukannya sudah selesai dan tidak akan berubah lagi.
  */
-export function buildPaceBaseline(bookings: PaceBookingRow[], unitIds: Set<string>, today: string, weekend: boolean): PaceBaseline {
+export function buildPaceBaseline(bookings: PaceBookingRow[], unitIds: Set<string>, today: string, weekend: boolean | PaceDayGroup): PaceBaseline {
+  const sameGroup = (iso: string) => (typeof weekend === "boolean" ? isWeekendJakarta(iso) === weekend : paceDayGroup(iso) === weekend);
   const relevant = bookings.filter((b) => unitIds.has(b.unit_id) && (b.status === "terjadwal" || b.status === "checkin" || b.status === "checkout"));
 
   const stayDates = new Set<string>();
@@ -1043,7 +1127,7 @@ export function buildPaceBaseline(bookings: PaceBookingRow[], unitIds: Set<strin
     const end = b.tgl_checkout ?? b.tgl_checkin;
     for (let d = new Date(`${b.tgl_checkin}T00:00:00Z`); d < new Date(`${end}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1)) {
       const iso = d.toISOString().slice(0, 10);
-      if (iso < today && isWeekendJakarta(iso) === weekend) stayDates.add(iso);
+      if (iso < today && sameGroup(iso)) stayDates.add(iso);
     }
   }
 
@@ -1134,6 +1218,8 @@ export interface DateDecisionInput {
   searchDemandRelative?: number | null;
   /** Median harga villa tetangga untuk MALAM INI (tanggal puncak), atau null. */
   peakCompetitorMedian?: number | null;
+  /** Simpangan permintaan hari ini (Senin..Minggu) dari rata-rata, dipelajari dari malam yang sudah lewat. null = belum cukup data. */
+  dayOfWeekRelative?: number | null;
 }
 
 /**
@@ -1195,8 +1281,12 @@ export function decideRateForDate(input: DateDecisionInput): DatePriceDecision {
 
   // --- 2. Day-of-week seasonality (a known, permanent pattern) ---
   if (isWeekendJakarta(targetDate)) {
-    decidedRate += WEEKEND_SURCHARGE_BY_ROOM_TYPE_CODE[input.roomTypeCode ?? ""] ?? DEFAULT_WEEKEND_SURCHARGE;
+    const code = input.roomTypeCode ?? "";
+    const isFriday = new Date(`${targetDate}T00:00:00Z`).getUTCDay() === 5;
+    const fridaySurcharge = isFriday ? FRIDAY_SURCHARGE_BY_ROOM_TYPE_CODE[code] : undefined;
+    decidedRate += fridaySurcharge ?? WEEKEND_SURCHARGE_BY_ROOM_TYPE_CODE[code] ?? DEFAULT_WEEKEND_SURCHARGE;
     reasonCodes.push("weekend");
+    if (fridaySurcharge !== undefined) reasonCodes.push("friday_rate");
   }
 
   // The owner's own rate plan: base rate plus the weekend pattern, before
@@ -1276,6 +1366,18 @@ export function decideRateForDate(input: DateDecisionInput): DatePriceDecision {
   } else if (marketTrend === "naik" || marketTrend === "turun") {
     const trendPct = marketTrend === "naik" ? MARKET_TREND_ADJUSTMENT_PCT : -MARKET_TREND_ADJUSTMENT_PCT;
     signals.push({ code: marketTrend === "naik" ? "market_interest_up" : "market_interest_down", pct: trendPct, weight: SIGNAL_WEIGHTS.market_search });
+  }
+
+  // S6 · pola hari yang dipelajari: hari yang terbukti sepi dimurahkan
+  // sedikit, hari yang terbukti laku dinaikkan sedikit.
+  const dowRel = input.dayOfWeekRelative ?? null;
+  if (dowRel !== null && dowRel !== 0) {
+    if (coldStart) {
+      reasonCodes.push("day_of_week_held_cold_start");
+    } else {
+      const dowPct = Math.max(-DOW_MAX_ADJUSTMENT_PCT, Math.min(DOW_MAX_ADJUSTMENT_PCT, dowRel * DOW_SENSITIVITY));
+      if (Math.abs(dowPct) >= 0.005) signals.push({ code: dowPct < 0 ? "day_of_week_weak" : "day_of_week_strong", pct: dowPct, weight: SIGNAL_WEIGHTS.day_of_week });
+    }
   }
 
   // S5 · pencarian tanggal di website. Hanya menaikkan -- lihat SINYAL 5.
@@ -1504,6 +1606,9 @@ function narrateDecision(codes: string[], guardrail: DatePriceDecision["guardrai
   else if (has("market_interest_up")) parts.push("sedikit dinaikkan karena minat pencarian villa sedang naik");
   else if (has("market_interest_down")) parts.push("sedikit diturunkan karena minat pencarian villa sedang turun");
 
+  if (has("friday_rate")) parts.push("tambahan Jumat lebih kecil dari Sabtu karena Jumat lebih sepi");
+  if (has("day_of_week_weak")) parts.push("sedikit diturunkan karena hari ini terbukti lebih sepi dari hari lain");
+  else if (has("day_of_week_strong")) parts.push("sedikit dinaikkan karena hari ini terbukti lebih laku dari hari lain");
   if (has("search_demand_high")) parts.push("sedikit dinaikkan karena tanggal ini banyak dicari di website");
   if (has("below_peer_market")) parts.push("sedikit dinaikkan karena villa sekelas di sekitar dijual lebih mahal");
   if (has("competitor_market_cap")) parts.push("lalu dibatasi agar tidak melewati harga tengah villa sekitar");
@@ -1650,6 +1755,12 @@ export async function decideRatesForRoomType(
   const bookingRows = (allBookings ?? []) as PaceBookingRow[];
   const paceWeekend = buildPaceBaseline(bookingRows, unitIds, today, true);
   const paceWeekday = buildPaceBaseline(bookingRows, unitIds, today, false);
+  // Jumat dan Sabtu dipisah (Sabtu yang laku pernah menutupi Jumat yang
+  // sepi). Selama salah satunya belum punya cukup tanggal pembanding,
+  // kembali ke baseline akhir pekan gabungan.
+  const paceFriday = buildPaceBaseline(bookingRows, unitIds, today, "fri");
+  const paceSaturday = buildPaceBaseline(bookingRows, unitIds, today, "sat");
+  const dayOfWeek = learnDayOfWeekDemand(bookingRows, unitIds, today);
 
   const coldStart = (allBookings ?? []).length < COLD_START_MIN_BOOKINGS;
   const discountWindow = learnDiscountWindow((allBookings ?? []) as { created_at: string | null; tgl_checkin: string | null }[]);
@@ -1679,7 +1790,9 @@ export async function decideRatesForRoomType(
     const peakAnchor = peakAnchors.find((d) => peakMedianByDate.has(d));
 
     const daysToArrival = daysBetween(today, targetDate);
-    const paceBaseline = isWeekendJakarta(targetDate) ? paceWeekend : paceWeekday;
+    const group = paceDayGroup(targetDate);
+    const paceBaseline =
+      group === "fri" ? (paceFriday.usable ? paceFriday : paceWeekend) : group === "sat" ? (paceSaturday.usable ? paceSaturday : paceWeekend) : paceWeekday;
     const leadBucket = nearestLeadBucket(daysToArrival);
     const paceExpectedSold = paceBaseline.usable && leadBucket !== null ? paceBaseline.byLeadDays.get(leadBucket) ?? null : null;
 
@@ -1704,6 +1817,7 @@ export async function decideRatesForRoomType(
       minRate,
       maxRate,
       discountWindow,
+      dayOfWeekRelative: dayOfWeek.usable ? dayOfWeek.relativeByIsoDay.get(isoDay(targetDate)) ?? null : null,
       searchDemandRelative: searchDemandRelativeFor(searchDemand, targetDate),
       peakCompetitorMedian: peakAnchor ? peakMedianByDate.get(peakAnchor) ?? null : null,
     });
