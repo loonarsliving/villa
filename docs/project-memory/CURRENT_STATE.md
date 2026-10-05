@@ -2,6 +2,43 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-10-05 — cek email pembayaran BTN QRIS ternyata TIDAK PERNAH jalan (PR, MENUNGGU persetujuan owner — menyentuh pembayaran)
+
+Owner: "Knpa pgecekan email nya tidak otomatis ya, akhirnya orng yg memilih
+direct booking harus menunggu lama".
+
+**Temuan (diverifikasi dari log production & pg_net, bukan dugaan).**
+- Cron `check-payment-email` (pg_cron job 109, tiap 5 menit) dan pemicu
+  dari halaman tamu (`POST /public/bookings/check-payment`, tiap 20 detik)
+  memang berjalan, tapi **setiap** panggilan gagal sejak fitur dipasang
+  21 Sep: 503 lalu 502 `Gagal membaca email: Unexpected close
+  (ClosedAfterConnectTLS)`. Tidak ada satu pun respons 200 di log.
+- Rute tamu menelan kegagalan itu diam-diam (`checked:false`), jadi tidak
+  ada yang tahu. Booking 5 Okt 09:42 WIB (Rp 710.367) terkonfirmasi lewat
+  `/bridge/confirm-payment` (balasan LUNAS owner), bukan lewat email.
+- Penyebab: `npm:imapflow` lewat lapisan `node:tls` Deno di Supabase Edge
+  Runtime. Fungsi uji `uji-imap` (sementara, kini dinonaktifkan → 410)
+  memakai `Deno.connectTls` langsung ke server yang sama
+  (imap.hostinger.com:993): greeting, LOGIN, SEARCH (7 email BTN, 1 belum
+  dibaca) dan FETCH semuanya berhasil. Server email & password tidak
+  bermasalah.
+- Format email BTN: single-part `text/html` quoted-printable; "Total", ":"
+  dan "Rp 710.367" ada di sel tabel terpisah.
+
+**Perbaikan (branch `claude/loonars-email-payment-check-0uzbcv`).**
+`scanPaymentInbox` kini memakai klien IMAP minimal `MiniImap` di atas
+`Deno.connectTls` (LOGIN, SELECT, UID SEARCH, UID FETCH BODY.PEEK[],
+UID STORE +FLAGS.SILENT (\Seen), LOGOUT) + parser MIME kecil; imapflow,
+mailparser dan penangkal "Already logged out" dihapus. Logika pencocokan
+nominal (`tryConfirmBookingByNominal`) TIDAK diubah. Nominal ",00" di
+belakang dibuang supaya tidak jadi 100x. Kegagalan di rute tamu kini
+`console.error`. Diuji lokal terhadap server IMAP palsu (mode cron, mode
+per-booking, password salah, koneksi ditolak).
+
+**Setelah merge, cek:** `select status_code, content from net._http_response
+order by id desc` → respons `/cron/check-payment-email` harus 200
+`{"success":true,"diperiksa":...}`, bukan 502.
+
 ## 2026-10-04 — okupansi dari inventori Cloudbeds + batas bawah naik bertahap (DI-MERGE, owner-approved)
 
 Owner: "jika kamar penuh apakah hargaku tetap main serendah itu? harusnya
