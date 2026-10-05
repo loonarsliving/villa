@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 import { advanceFloorRamp, occupancyFromAvailability, rampedFloor, type FloorRampState } from "./aiPricingEngine";
+import { learnDayOfWeekDemand, paceDayGroup, buildPaceBaseline } from "./aiPricingEngine";
 import { acceptedPeakMedian, buildSearchDemand, decideRateForDate, fixedCalendarPeriodFor, learnDiscountWindow, OWNER_SELECTED_COMPETITOR, pickPeerPrices, searchDemandRelativeFor, type DateDecisionInput, type PricingSettings } from "./aiPricingEngine";
 
 /**
@@ -63,8 +64,15 @@ describe("anchor and weekend", () => {
   });
 
   it("uses Standard's larger weekend surcharge so the weekend price holds when the weekday base is cut (owner 2026-09-16, cut again 2026-09-29)", () => {
-    const d = decide({ targetDate: FRIDAY, anchorRate: 500000, minRate: 500000, roomTypeCode: "standard" });
+    // Sabtu: harga akhir pekan Standard tetap 750rb.
+    const d = decide({ targetDate: "2026-09-19", anchorRate: 500000, minRate: 500000, roomTypeCode: "standard" });
     expect(d.decided_rate).toBe(750000);
+  });
+
+  it("charges Standard a smaller Friday surcharge than Saturday (owner 2026-10-05: Jumat hampir 0 pemesanan)", () => {
+    const d = decide({ targetDate: FRIDAY, anchorRate: 500000, minRate: 450000, roomTypeCode: "standard" });
+    expect(d.decided_rate).toBe(600000);
+    expect(d.reason_codes).toContain("friday_rate");
   });
 
   it("uses Sawah View's own weekend surcharge so its weekend price also holds after its weekday cut (owner 2026-09-29)", () => {
@@ -591,5 +599,44 @@ describe("batas bawah naik bertahap 450rb -> 550rb dalam 3-6 bulan", () => {
     expect(advanceFloorRamp(d1, "2026-10-06", 90)).toBe(d1);
     const afterGap = advanceFloorRamp(d1, "2026-11-05", 0);
     expect(afterGap.progress).toBeCloseTo(31 / 183, 3);
+  });
+});
+
+describe("pola hari dipelajari dari booking sendiri (owner 2026-10-05)", () => {
+  const units = new Set(["u1", "u2", "u3", "u4", "u5"]);
+  const night = (unit: string, d: string) => ({ unit_id: unit, tgl_checkin: d, tgl_checkout: new Date(Date.parse(d + "T00:00:00Z") + 86400000).toISOString().slice(0, 10), status: "checkout", created_at: "2026-09-01T00:00:00Z" });
+  // 3 minggu: tiap hari 3 kamar terjual, kecuali Jumat hanya 1.
+  const rows: ReturnType<typeof night>[] = [];
+  for (let i = 0; i < 21; i++) {
+    const d = new Date(Date.parse("2026-09-21T00:00:00Z") + i * 86400000).toISOString().slice(0, 10);
+    const sold = new Date(d + "T00:00:00Z").getUTCDay() === 5 ? 1 : 3;
+    for (let u = 0; u < sold; u++) rows.push(night(`u${u + 1}`, d));
+  }
+
+  it("finds the weak day from past nights only", () => {
+    const dow = learnDayOfWeekDemand(rows, units, "2026-10-12");
+    expect(dow.usable).toBe(true);
+    expect(dow.relativeByIsoDay.get(5)!).toBeLessThan(-0.5);
+    expect(dow.relativeByIsoDay.get(6)!).toBeGreaterThan(0);
+  });
+
+  it("waits for enough history", () => {
+    expect(learnDayOfWeekDemand(rows.slice(0, 10), units, "2026-10-12").usable).toBe(false);
+  });
+
+  it("nudges a weak day down and a strong day up, both bounded", () => {
+    const weak = decide({ dayOfWeekRelative: -0.6 });
+    expect(weak.reason_codes).toContain("day_of_week_weak");
+    expect(weak.decided_rate).toBeLessThan(650000);
+    expect(weak.decided_rate).toBeGreaterThanOrEqual(Math.round(650000 * (1 - 0.06) / 1000) * 1000);
+    expect(decide({ dayOfWeekRelative: 0.3 }).reason_codes).toContain("day_of_week_strong");
+  });
+
+  it("reads Friday and Saturday pace separately", () => {
+    expect(paceDayGroup("2026-10-09")).toBe("fri");
+    expect(paceDayGroup("2026-10-10")).toBe("sat");
+    expect(paceDayGroup("2026-10-11")).toBe("weekday");
+    const fri = buildPaceBaseline(rows, units, "2026-10-12", "fri");
+    expect(fri.comparableDates).toBe(3);
   });
 });
