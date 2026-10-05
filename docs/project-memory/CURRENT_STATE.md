@@ -376,6 +376,32 @@ pembatalan tetap berlaku); `menunggu_pembayaran` tidak termasuk. Alert
 (sudah dihitung; tandai batal/no-show kalau tamu tidak datang).
 `pipeline.overdue_count` dihapus.
 
+**Kotor vs bersih (2026-10-05, owner):** Cloudbeds MENAMBAHKAN fee OTA ke
+harga, bukan memotongnya. Contoh email reservasi Booking.com: harga
+Rp447.950 + "Booking.com Fee" Rp67.192,50 = Grand Total Rp515.142,50;
+"Deposit Amount" Rp447.950. Diperiksa langsung lewat probe baca-saja:
+`getSources` properti ini tidak memuat sumber OTA dan semua komisinya 0%;
+reservasi tidak punya field komisi/net. Yang ada hanya
+`balanceDetailed.subTotal` (= Deposit Amount; Airbnb deposit 0 tapi
+subTotal tetap harga kamar) dan `grandTotal`. Owner: "pakai angka deposit
+amount".
+- Kolom baru `bookings.cloudbeds_subtotal` (migrasi
+  `bookings_cloudbeds_subtotal`), diisi sync tiap 10 menit dan webhook;
+  booking 1 Sep ke atas di-backfill sekali (103 booking OTA; 9 booking batal
+  dilewati karena Cloudbeds menolkan totalnya).
+- villa-api `pendapatanKotor(b)` = total_bayar (grandTotal);
+  `pendapatanBersih(b)` = cloudbeds_subtotal untuk booking OTA, = kotor untuk
+  DIRECT (website/walk-in, termasuk booking website yang diteruskan ke
+  Cloudbeds). Dipakai summary (net_revenue), channel breakdown + by_date,
+  computeNetRevenueForRange (Survival KPI), settlement (amount yang ditunggu
+  dari OTA; 18 settlement belum-diterima dikoreksi).
+- Contoh 1-5 Okt: kotor Rp20.317.787, potongan Rp1.435.965, bersih
+  Rp18.881.822. Agoda tidak punya fee di Cloudbeds (bersih = kotor).
+- **Belum disentuh:** tabel `transactions` (dicatat resepsionis saat
+  check-in dari total_bayar = grandTotal) dan dasar dividen investor --
+  kemungkinan ikut terlalu tinggi untuk Booking.com/Traveloka/Airbnb, perlu
+  keputusan owner terpisah.
+
 **Tidak disentuh:** tabel `transactions`, bagi hasil, dan rumus dividen
 investor (`PHASE0-BASELINE.md` §2). Bagi hasil sudah dicatat saat check-in
 lewat alur front desk. Tidak ada perubahan skema.

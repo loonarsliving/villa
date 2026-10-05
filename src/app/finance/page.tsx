@@ -420,10 +420,16 @@ export default function FinancePage() {
                 </table>
               </div>
               <div className="px-4 py-3 text-[10px] text-ink/40 leading-relaxed">
-                Nilai = total seluruh masa inap, dicatat di tanggal check-in. Persentase komisi diambil langsung dari
-                Cloudbeds{channels.commission_source !== "cloudbeds_live" ? " (saat ini TIDAK tersedia -- bersih sama dengan kotor)" : ""}.
-                Komisi 0% berarti Cloudbeds tidak mengirim angka komisi untuk channel itu, bukan berarti bebas komisi.
-                Pajak/biaya bank tidak termasuk.
+                Nilai = total seluruh masa inap, dicatat di tanggal check-in. Kotor = Grand Total Cloudbeds. Bersih = harga
+                kamar sebelum fee OTA (&quot;Deposit Amount&quot; di email reservasi Cloudbeds); potongan OTA = selisihnya.
+                Booking website/walk-in tidak punya fee OTA. Pajak/biaya bank tidak termasuk.
+                {channels.bersih_belum_tersedia > 0 && (
+                  <span className="text-ruby-500">
+                    {" "}
+                    {channels.bersih_belum_tersedia} booking OTA belum punya harga kamar dari Cloudbeds -- bersihnya sementara
+                    dihitung sama dengan kotor.
+                  </span>
+                )}
               </div>
             </Card>
           )}
