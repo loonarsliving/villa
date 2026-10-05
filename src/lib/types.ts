@@ -360,6 +360,7 @@ export interface FinanceChannelRow {
   revenue: number;
   net_revenue: number;
   ota_deduction: number;
+  commission_pct: number;
   avg_net_adr: number | null;
   payment: number;
   outstanding: number;
@@ -376,7 +377,27 @@ export interface FinanceChannelBreakdown {
   period: { from: string; to: string };
   channels: FinanceChannelRow[];
   totals: { revenue: number; net_revenue: number; payment: number; outstanding: number; ota_receivable: number };
+  by_date: FinanceDateRow[];
+  commission_source: "cloudbeds_live" | "unavailable_no_api_key";
   settlement_configs_count: number;
+}
+
+export interface FinanceDateChannelRow {
+  sumber: string;
+  booking_count: number;
+  gross: number;
+  ota_deduction: number;
+  net: number;
+  commission_pct: number;
+}
+
+export interface FinanceDateRow {
+  tgl_checkin: string;
+  booking_count: number;
+  gross: number;
+  ota_deduction: number;
+  net: number;
+  channels: FinanceDateChannelRow[];
 }
 
 export interface FinanceBookingRow {

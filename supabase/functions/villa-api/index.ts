@@ -4642,7 +4642,7 @@ Deno.serve(async (req)=>{
     const bookings = rows ?? [];
     const configMap = await getSettlementConfigMap();
     await ensureFinanceSettlements(bookings, configMap);
-    const { commissionPctBySumber } = await getOtaCommissionPctMap();
+    const { commissionPctBySumber, commission_source } = await getOtaCommissionPctMap();
 
     const ids = bookings.map(b=>b.id);
     const settlementByBooking = new Map();
@@ -4650,6 +4650,35 @@ Deno.serve(async (req)=>{
       const { data: settlements } = await supabase.from('finance_settlements').select('*').in('booking_id', ids);
       for(const s of (settlements ?? [])) settlementByBooking.set(s.booking_id, s);
     }
+
+    // Per tanggal check-in x channel (owner 2026-10-05: "tgl 1 ada 5
+    // booking dari channel mana sj, nilai uangnya sdh bersih dluar potongan
+    // OTA?"). Bookings dan komisi sama persis dengan tabel per-channel.
+    const byDate = new Map();
+    for(const b of bookings){
+      const amount = Number(b.total_bayar ?? b.tarif ?? 0);
+      const pct = commissionPctBySumber.get(b.sumber) ?? 0;
+      const dateRow = byDate.get(b.tgl_checkin) ?? new Map();
+      const key = b.sumber ?? 'other';
+      const c = dateRow.get(key) ?? { sumber:key, booking_count:0, gross:0, ota_deduction:0, net:0, commission_pct:pct };
+      c.booking_count++;
+      c.gross += amount;
+      c.ota_deduction += amount * pct/100;
+      c.net += amount * (1 - pct/100);
+      dateRow.set(key, c);
+      byDate.set(b.tgl_checkin, dateRow);
+    }
+    const by_date = [...byDate.entries()].sort(([a],[b])=>a<b?-1:1).map(([tgl_checkin, m])=>{
+      const chs = [...m.values()].sort((a,b)=>b.gross-a.gross);
+      return {
+        tgl_checkin,
+        booking_count: chs.reduce((s,c)=>s+c.booking_count,0),
+        gross: chs.reduce((s,c)=>s+c.gross,0),
+        ota_deduction: chs.reduce((s,c)=>s+c.ota_deduction,0),
+        net: chs.reduce((s,c)=>s+c.net,0),
+        channels: chs,
+      };
+    });
 
     const bySumber = new Map();
     for(const b of bookings){
@@ -4676,13 +4705,14 @@ Deno.serve(async (req)=>{
       return {
         ...c,
         ota_deduction: c.revenue - c.net_revenue,
+        commission_pct: commissionPctBySumber.get(c.sumber) ?? 0,
         avg_net_adr: c.room_nights>0 ? c.net_revenue/c.room_nights : null,
         collection_method: cfg?.collection_method ?? 'UNKNOWN',
         destination_account: cfg?.destination_account_label ?? null,
       };
     }).sort((a,b)=>b.revenue-a.revenue);
     const totals = channels.reduce((acc,c)=>({ revenue:acc.revenue+c.revenue, net_revenue:acc.net_revenue+c.net_revenue, payment:acc.payment+c.payment, outstanding:acc.outstanding+c.outstanding, ota_receivable:acc.ota_receivable+c.ota_receivable }), { revenue:0, net_revenue:0, payment:0, outstanding:0, ota_receivable:0 });
-    return json({ period:{from,to}, channels, totals, settlement_configs_count: cfgArr.length });
+    return json({ period:{from,to}, channels, totals, by_date, commission_source, settlement_configs_count: cfgArr.length });
   }
 
   if(path==='/finance/bookings' && m==='GET'){

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { FinanceShell } from "./_shell";
 import { SurvivalControlCenter } from "./_SurvivalControlCenter";
 import { useAuth } from "@/lib/auth";
@@ -352,6 +352,78 @@ export default function FinancePage() {
                     </tfoot>
                   )}
                 </table>
+              </div>
+            </Card>
+          )}
+
+          {/* Per tanggal check-in x channel */}
+          {channels && (
+            <Card className="mb-4">
+              <CardHeader
+                title="Pemasukan per Tanggal Check-in"
+                subtitle="Per channel, kotor vs bersih setelah potongan komisi OTA"
+              />
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr className="text-left text-ink/40 border-b border-ink/10">
+                      <th className="px-4 py-2">Tanggal / Channel</th>
+                      <th className="px-3 py-2">Booking</th>
+                      <th className="px-3 py-2">Kotor</th>
+                      <th className="px-3 py-2">Potongan OTA</th>
+                      <th className="px-3 py-2">Bersih</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {channels.by_date.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-6 text-center text-ink/30">
+                          Tidak ada data pada periode ini.
+                        </td>
+                      </tr>
+                    )}
+                    {channels.by_date.map((d) => (
+                      <Fragment key={d.tgl_checkin}>
+                        <tr className="border-t border-ink/10 bg-ink/[0.02] font-semibold text-ink/80">
+                          <td className="px-4 py-2">{fmtDate(d.tgl_checkin)}</td>
+                          <td className="px-3 py-2">{d.booking_count}</td>
+                          <td className="px-3 py-2">{fmtCurrencyFull(d.gross)}</td>
+                          <td className="px-3 py-2 text-ruby-500">{d.ota_deduction > 0 ? `−${fmtCurrencyFull(d.ota_deduction)}` : "—"}</td>
+                          <td className="px-3 py-2">{fmtCurrencyFull(d.net)}</td>
+                        </tr>
+                        {d.channels.map((c) => (
+                          <tr key={`${d.tgl_checkin}-${c.sumber}`} className="border-b border-ink/5 text-ink/70">
+                            <td className="pl-8 pr-3 py-1.5">
+                              {c.sumber}
+                              <span className="text-ink/30"> · komisi {c.commission_pct}%</span>
+                            </td>
+                            <td className="px-3 py-1.5">{c.booking_count}</td>
+                            <td className="px-3 py-1.5">{fmtCurrencyFull(c.gross)}</td>
+                            <td className="px-3 py-1.5 text-ruby-500">{c.ota_deduction > 0 ? `−${fmtCurrencyFull(c.ota_deduction)}` : "—"}</td>
+                            <td className="px-3 py-1.5">{fmtCurrencyFull(c.net)}</td>
+                          </tr>
+                        ))}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                  {channels.by_date.length > 0 && (
+                    <tfoot>
+                      <tr className="border-t border-ink/20 font-semibold text-ink/80">
+                        <td className="px-4 py-2.5">Total</td>
+                        <td className="px-3 py-2.5">{channels.by_date.reduce((s, d) => s + d.booking_count, 0)}</td>
+                        <td className="px-3 py-2.5">{fmtCurrencyFull(channels.by_date.reduce((s, d) => s + d.gross, 0))}</td>
+                        <td className="px-3 py-2.5 text-ruby-500">−{fmtCurrencyFull(channels.by_date.reduce((s, d) => s + d.ota_deduction, 0))}</td>
+                        <td className="px-3 py-2.5">{fmtCurrencyFull(channels.by_date.reduce((s, d) => s + d.net, 0))}</td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+              <div className="px-4 py-3 text-[10px] text-ink/40 leading-relaxed">
+                Nilai = total seluruh masa inap, dicatat di tanggal check-in. Persentase komisi diambil langsung dari
+                Cloudbeds{channels.commission_source !== "cloudbeds_live" ? " (saat ini TIDAK tersedia -- bersih sama dengan kotor)" : ""}.
+                Komisi 0% berarti Cloudbeds tidak mengirim angka komisi untuk channel itu, bukan berarti bebas komisi.
+                Pajak/biaya bank tidak termasuk.
               </div>
             </Card>
           )}
