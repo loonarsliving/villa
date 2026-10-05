@@ -369,6 +369,7 @@ export default function FinancePage() {
                     <tr className="text-left text-ink/40 border-b border-ink/10">
                       <th className="px-4 py-2">Tanggal / Channel</th>
                       <th className="px-3 py-2">Booking</th>
+                      <th className="px-3 py-2">Malam</th>
                       <th className="px-3 py-2">Kotor</th>
                       <th className="px-3 py-2">Potongan OTA</th>
                       <th className="px-3 py-2">Bersih</th>
@@ -377,7 +378,7 @@ export default function FinancePage() {
                   <tbody>
                     {channels.by_date.length === 0 && (
                       <tr>
-                        <td colSpan={5} className="px-4 py-6 text-center text-ink/30">
+                        <td colSpan={6} className="px-4 py-6 text-center text-ink/30">
                           Tidak ada data pada periode ini.
                         </td>
                       </tr>
@@ -387,21 +388,34 @@ export default function FinancePage() {
                         <tr className="border-t border-ink/10 bg-ink/[0.02] font-semibold text-ink/80">
                           <td className="px-4 py-2">{fmtDate(d.tgl_checkin)}</td>
                           <td className="px-3 py-2">{d.booking_count}</td>
+                          <td className="px-3 py-2">{d.malam}</td>
                           <td className="px-3 py-2">{fmtCurrencyFull(d.gross)}</td>
                           <td className="px-3 py-2 text-ruby-500">{d.ota_deduction > 0 ? `−${fmtCurrencyFull(d.ota_deduction)}` : "—"}</td>
                           <td className="px-3 py-2">{fmtCurrencyFull(d.net)}</td>
                         </tr>
                         {d.channels.map((c) => (
-                          <tr key={`${d.tgl_checkin}-${c.sumber}`} className="border-b border-ink/5 text-ink/70">
-                            <td className="pl-8 pr-3 py-1.5">
-                              {c.sumber}
-                              <span className="text-ink/30"> · komisi {c.commission_pct}%</span>
-                            </td>
-                            <td className="px-3 py-1.5">{c.booking_count}</td>
-                            <td className="px-3 py-1.5">{fmtCurrencyFull(c.gross)}</td>
-                            <td className="px-3 py-1.5 text-ruby-500">{c.ota_deduction > 0 ? `−${fmtCurrencyFull(c.ota_deduction)}` : "—"}</td>
-                            <td className="px-3 py-1.5">{fmtCurrencyFull(c.net)}</td>
-                          </tr>
+                          <Fragment key={`${d.tgl_checkin}-${c.sumber}`}>
+                            <tr className="border-b border-ink/5 text-ink/70">
+                              <td className="pl-8 pr-3 py-1.5">
+                                {c.sumber}
+                                <span className="text-ink/30"> · komisi {c.commission_pct}%</span>
+                              </td>
+                              <td className="px-3 py-1.5">{c.booking_count}</td>
+                              <td className="px-3 py-1.5">{c.malam}</td>
+                              <td className="px-3 py-1.5">{fmtCurrencyFull(c.gross)}</td>
+                              <td className="px-3 py-1.5 text-ruby-500">{c.ota_deduction > 0 ? `−${fmtCurrencyFull(c.ota_deduction)}` : "—"}</td>
+                              <td className="px-3 py-1.5">{fmtCurrencyFull(c.net)}</td>
+                            </tr>
+                            {c.menginap_lama.map((s) => (
+                              <tr key={`${d.tgl_checkin}-${c.sumber}-${s.unit_nomor}-${s.guest_nama}`} className="border-b border-ink/5">
+                                <td colSpan={6} className="pl-12 pr-3 py-1 text-[10px] text-gold-700">
+                                  ↳ termasuk 1 booking <strong>{s.malam} malam</strong>: Unit {s.unit_nomor ?? "—"} · {s.guest_nama ?? "—"} ·{" "}
+                                  {fmtDate(s.tgl_checkin)} s/d {s.tgl_checkout ? fmtDate(s.tgl_checkout) : "—"} · bersih {fmtCurrencyFull(s.bersih)}{" "}
+                                  (≈ {fmtCurrencyFull(s.bersih_per_malam)}/malam) -- seluruh nilainya tercatat di tanggal check-in ini.
+                                </td>
+                              </tr>
+                            ))}
+                          </Fragment>
                         ))}
                       </Fragment>
                     ))}
@@ -411,6 +425,7 @@ export default function FinancePage() {
                       <tr className="border-t border-ink/20 font-semibold text-ink/80">
                         <td className="px-4 py-2.5">Total</td>
                         <td className="px-3 py-2.5">{channels.by_date.reduce((s, d) => s + d.booking_count, 0)}</td>
+                        <td className="px-3 py-2.5">{channels.by_date.reduce((s, d) => s + d.malam, 0)}</td>
                         <td className="px-3 py-2.5">{fmtCurrencyFull(channels.by_date.reduce((s, d) => s + d.gross, 0))}</td>
                         <td className="px-3 py-2.5 text-ruby-500">−{fmtCurrencyFull(channels.by_date.reduce((s, d) => s + d.ota_deduction, 0))}</td>
                         <td className="px-3 py-2.5">{fmtCurrencyFull(channels.by_date.reduce((s, d) => s + d.net, 0))}</td>
