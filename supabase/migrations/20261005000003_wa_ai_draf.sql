@@ -1,5 +1,5 @@
 -- Draf balasan AI di Chat resepsionis (owner request 2026-10-05, tahap 1: draf saja).
--- BELUM diterapkan -- menunggu persetujuan owner atas perubahan skema.
+-- Diterapkan ke produksi lewat Supabase MCP (apply_migration "wa_ai_draf") 2026-10-05, owner: "Ya aktifkan".
 -- Hanya menambah kolom nullable; tidak ada data yang diubah atau dihapus.
 
 alter table public.wa_conversations add column if not exists ai_draf text;

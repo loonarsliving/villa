@@ -24,7 +24,12 @@ describe("angkaTidakDikenal", () => {
 
   it("meloloskan biaya early check-in dari pengetahuan dan harga dari sistem", () => {
     expect(angkaTidakDikenal("Early check-in Rp100.000 ya Kak", [PENGETAHUAN_UMUM], [])).toEqual([]);
+    expect(angkaTidakDikenal("Late check-out dikenakan 100 ribu per jam ya Kak", [PENGETAHUAN_UMUM], [])).toEqual([]);
     expect(angkaTidakDikenal("Standard Rp706.000/malam, total Rp1.412.000", [PENGETAHUAN_UMUM], [706000, 1412000])).toEqual([]);
+  });
+
+  it("total late check-out yang dihitung AI sendiri ditahan", () => {
+    expect(angkaTidakDikenal("Sampai jam 14.00 jadi Rp200.000 ya Kak", [PENGETAHUAN_UMUM], [])).toEqual([200000]);
   });
 
   it("harga sistem yang dibulatkan AI tetap ditahan", () => {

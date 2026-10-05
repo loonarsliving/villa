@@ -10,8 +10,8 @@
  * menyampaikannya ke tamu sebagai kebenaran.
  *
  * Yang SENGAJA tidak ada: harga kamar (selalu dari villa-api per tanggal),
- * harga/isi paket di luar kamar (owner: diteruskan ke Rebecca), aturan late
- * check-out (belum diputuskan owner).
+ * harga/isi paket di luar kamar (owner: diteruskan ke Rebecca).
+ * Late check-out: Rp100.000 per jam lewat 12.00 (owner 2026-10-05).
  */
 
 export const PENGETAHUAN_UMUM = `IDENTITAS
@@ -29,7 +29,7 @@ JAM
 - Check-in mulai pukul 15.00 WIB.
 - Check-out paling lambat pukul 12.00 WIB.
 - Early check-in: hanya bisa mulai pukul 12.00 sampai 14.00, biaya Rp100.000, dan TERGANTUNG ketersediaan kamar hari itu (kalau sedang ramai tidak bisa). Jangan dijanjikan pasti -- sampaikan bahwa resepsionis akan mengonfirmasi di hari kedatangan. Sebelum pukul 12.00 tidak bisa.
-- Late check-out: belum ada aturan baku -> serahkan ke resepsionis.
+- Late check-out (lewat pukul 12.00): dikenakan biaya Rp100.000 untuk setiap 1 jam keterlambatan, dan tergantung ketersediaan kamar (resepsionis yang mengonfirmasi). Jangan menghitung totalnya sendiri -- sebutkan tarif per jamnya saja.
 
 SYARAT CHECK-IN
 - Membawa KTP atau SIM.
