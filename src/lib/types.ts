@@ -348,7 +348,7 @@ export interface FinanceSummary {
   /** Aturan pengakuan pemasukan (per tanggal check-in, hanya tamu yang sudah check-in). */
   recognition_rule?: string;
   /** Booking di periode ini yang tamunya belum datang: masih di Cloudbeds, belum pemasukan. */
-  pipeline?: { amount: number; count: number; overdue_count: number; note: string };
+  pipeline?: { amount: number; count: number; note: string };
   alerts: FinanceAlert[];
   last_cloudbeds_activity: string | null;
   data_caveats: string[];
