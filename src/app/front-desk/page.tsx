@@ -90,8 +90,15 @@ export default function FrontDeskPage() {
     setCiSearch("");
     setCiTab("existing");
     setCiOpen(true);
+    // date_from WAJIB ada: tanpa itu villa-api hanya mengembalikan 50
+    // booking yang paling baru DIBUAT, sehingga tamu yang memesan jauh-jauh
+    // hari hilang dari daftar tepat di hari kedatangannya (Shella, A5,
+    // 6 Okt 2026). Dengan rentang tanggal villa-api mengembalikan semuanya
+    // tanpa batas 50, terurut tanggal check-in. 30 hari ke belakang tetap
+    // menangkap tamu yang terlambat datang.
+    const sejak = todayISO(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
     api
-      .get<Booking[]>("/bookings?status=terjadwal")
+      .get<Booking[]>(`/bookings?status=terjadwal&date_from=${sejak}`)
       .then((b) => setScheduledBookings(b || []))
       .catch(() => setScheduledBookings([]));
   }
@@ -217,8 +224,10 @@ export default function FrontDeskPage() {
    * dibuat berbulan-bulan lalu untuk kedatangan hari ini justru berada
    * paling bawah -- resepsionis harus menyisir daftar untuk menemukan tamu
    * yang sedang berdiri di depannya, dan begitu jumlah booking menembus 50
-   * baris, yang paling lama dibuat malah hilang dari daftar. Pengurutan dan
-   * pencarian ini dilakukan di sisi klien, tanpa mengubah villa-api.
+   * baris, yang paling lama dibuat malah hilang dari daftar. Potongan 50
+   * baris itu sekarang dihindari lewat `date_from` di openCheckin;
+   * pengurutan dan pencarian tetap dilakukan di sisi klien, tanpa mengubah
+   * villa-api.
    */
   const hariIni = todayISO();
   const ciQuery = ciSearch.trim().toLowerCase();
