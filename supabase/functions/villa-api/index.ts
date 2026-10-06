@@ -4,29 +4,6 @@ import { timingSafeEqual } from 'node:crypto';
 
 const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
-// npm:imapflow (dipakai oleh scanPaymentInbox, lihat komentar di sana) punya
-// race condition di librarynya sendiri: greeting handler-nya (beginSession)
-// memanggil startSession()/authenticate() lewat then().catch() yang "keluar
-// dari thread parsing saat ini" tanpa di-await, dan di Supabase Edge Runtime
-// continuation itu kadang baru resume SETELAH client sudah ditutup (state
-// LOGOUT) -- baik oleh kode kita sendiri maupun oleh isolate yang dibekukan
-// lalu dipakai ulang untuk request lain. Hasilnya "Already logged out"
-// muncul sebagai unhandled rejection di luar try/catch manapun di kode kita,
-// dan Deno menjatuhkan RESPONS REQUEST LAIN yang kebetulan sedang berjalan
-// di isolate yang sama dengan 503 -- padahal request itu sendiri tidak
-// salah apa-apa. client.close() + client.on('error') (lihat scanPaymentInbox)
-// mengurangi kemungkinannya tapi terbukti dari log production TIDAK
-// menghilangkannya sepenuhnya. Ini jaring pengaman terakhir: menelan HANYA
-// unhandled rejection dengan pesan persis ini, supaya request lain yang
-// tidak berhubungan tidak ikut ditumbangkan olehnya. Error asli lain di
-// aplikasi ini TETAP muncul sebagai unhandled rejection seperti biasa.
-globalThis.addEventListener('unhandledrejection', (event)=>{
-  const msg = String(event.reason?.message ?? event.reason ?? '');
-  if(msg.includes('Already logged out')){
-    event.preventDefault();
-  }
-});
-
 const SESSION_SECRET = Deno.env.get('VILLA_SESSION_SECRET') ?? '';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 
@@ -148,7 +125,7 @@ function paymentCode(bookingId){
  */
 async function generateKodeUnikPembayaran(){
   const {data:pending} = await supabase.from('bookings')
-    .select('total_bayar').eq('sumber','website').eq('status','menunggu_pembayaran');
+    .select('total_bayar').in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran');
   const dipakai = new Set((pending??[]).map(b=>Number(b.total_bayar)%1000));
   for(let coba=0; coba<20; coba++){
     const kandidat = 100 + Math.floor(Math.random()*900);
@@ -174,7 +151,7 @@ async function tryConfirmBookingByNominal(nominal, onlyBookingId){
     // bawah tahu booking ini sudah pernah didorong (kalau ada) dan tidak
     // membuat reservasi Cloudbeds kedua untuk booking yang sama.
     .select('id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,total_bayar,created_at,invoice_no,cloudbeds_reservation_id,adults,children')
-    .eq('sumber','website').eq('status','menunggu_pembayaran').eq('total_bayar', nominal);
+    .in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran').eq('total_bayar', nominal);
   if(onlyBookingId) q = q.eq('id', onlyBookingId);
   const {data:pendingSama} = await q;
   if(!pendingSama?.length) return {matched:false};
@@ -209,6 +186,169 @@ async function tryConfirmBookingByNominal(nominal, onlyBookingId){
 }
 
 /**
+ * Klien IMAP minimal di atas Deno.connectTls -- pengganti npm:imapflow.
+ *
+ * CATATAN (2026-10-05): imapflow TIDAK PERNAH berhasil di Supabase Edge
+ * Runtime. Sejak fitur ini dipasang (2026-09-21) setiap panggilan
+ * /cron/check-payment-email berakhir 502 "Unexpected close
+ * (ClosedAfterConnectTLS)" -- socket TLS lapisan kompatibilitas node:tls
+ * Deno tertutup sebelum greeting server terbaca -- dan pemicu dari halaman
+ * tamu gagal dengan cara yang sama tapi diam-diam. Akibatnya semua booking
+ * website hanya terkonfirmasi lewat balasan LUNAS manual owner. Uji
+ * langsung dengan Deno.connectTls ke server yang sama (imap.hostinger.com)
+ * berhasil greeting, login, SEARCH dan FETCH, jadi yang dipakai sekarang
+ * jalur native itu, dengan hanya perintah yang dibutuhkan: LOGIN, SELECT,
+ * UID SEARCH, UID FETCH BODY.PEEK[] (PEEK = tidak otomatis menandai
+ * dibaca), UID STORE +FLAGS.SILENT (\Seen), LOGOUT.
+ */
+const IMAP_TIMEOUT_MS = 25000;
+
+function imapQuote(s){
+  return '"'+String(s).replace(/\\/g,'\\\\').replace(/"/g,'\\"')+'"';
+}
+
+function bytesToLatin1(b){
+  let s = '';
+  for(let i=0; i<b.length; i+=8192) s += String.fromCharCode(...b.subarray(i, i+8192));
+  return s;
+}
+
+class MiniImap {
+  constructor(conn){
+    this.conn = conn;
+    this.reader = conn.readable.getReader();
+    this.writer = conn.writable.getWriter();
+    this.buf = new Uint8Array(0);
+    this.tagN = 0;
+  }
+  async fill(){
+    const r = await this.reader.read();
+    if(r.done) throw new Error('Koneksi IMAP ditutup server');
+    const n = new Uint8Array(this.buf.length + r.value.length);
+    n.set(this.buf); n.set(r.value, this.buf.length);
+    this.buf = n;
+  }
+  async readLine(){
+    for(;;){
+      for(let i=0; i+1<this.buf.length; i++){
+        if(this.buf[i]===13 && this.buf[i+1]===10){
+          const line = bytesToLatin1(this.buf.subarray(0,i));
+          this.buf = this.buf.slice(i+2);
+          return line;
+        }
+      }
+      await this.fill();
+    }
+  }
+  async readBytes(n){
+    while(this.buf.length < n) await this.fill();
+    const out = this.buf.slice(0,n);
+    this.buf = this.buf.slice(n);
+    return out;
+  }
+  async greeting(){
+    const line = await this.readLine();
+    if(!/^\* (OK|PREAUTH)/i.test(line)) throw new Error(`Greeting IMAP tidak dikenal: ${line.slice(0,120)}`);
+  }
+  // Mengirim satu perintah dan mengembalikan respons untagged-nya:
+  // [{line, literals: Uint8Array[]}]. Literal {n} dibaca sebagai byte mentah.
+  async cmd(command){
+    const tag = `A${++this.tagN}`;
+    await this.writer.write(new TextEncoder().encode(`${tag} ${command}\r\n`));
+    const untagged = [];
+    for(;;){
+      let line = await this.readLine();
+      if(line.startsWith(tag+' ')){
+        if(!/^\S+ OK/i.test(line)){
+          // Hanya nama perintah yang ikut ke pesan error -- argumen LOGIN
+          // berisi password.
+          throw new Error(`IMAP ${command.split(' ')[0]} gagal: ${line.slice(tag.length+1, tag.length+121)}`);
+        }
+        return untagged;
+      }
+      const item = {line, literals:[]};
+      let m;
+      while((m = line.match(/\{(\d+)\}$/))){
+        item.literals.push(await this.readBytes(Number(m[1])));
+        line = await this.readLine();
+        item.line += ' ' + line;
+      }
+      untagged.push(item);
+    }
+  }
+  close(){ try { this.conn.close(); } catch {} }
+}
+
+function decodeQuotedPrintable(s){
+  const bytes = [];
+  const t = s.replace(/=\r?\n/g,'');
+  for(let i=0; i<t.length; i++){
+    if(t[i]==='=' && /^[0-9A-Fa-f]{2}$/.test(t.slice(i+1,i+3))){ bytes.push(parseInt(t.slice(i+1,i+3),16)); i+=2; }
+    else bytes.push(t.charCodeAt(i) & 0xff);
+  }
+  return new Uint8Array(bytes);
+}
+
+function decodeCharset(bytes, charset){
+  try { return new TextDecoder(charset || 'utf-8').decode(bytes); }
+  catch { return new TextDecoder('utf-8').decode(bytes); }
+}
+
+/**
+ * Mengambil teks yang bisa dibaca dari satu email mentah (string latin1,
+ * byte-per-karakter). Cukup MIME untuk notifikasi bank: multipart
+ * (rekursif), quoted-printable/base64, charset, lalu HTML diratakan jadi
+ * teks dengan tag diganti spasi -- notifikasi BTN QRIS memecah "Total",
+ * ":" dan "Rp 710.367" ke sel tabel yang berbeda.
+ */
+function emailToText(raw){
+  const sep = raw.search(/\r?\n\r?\n/);
+  const headerPart = sep>=0 ? raw.slice(0,sep) : raw;
+  const body = sep>=0 ? raw.slice(sep).replace(/^\r?\n\r?\n/,'') : '';
+  const headers = headerPart.replace(/\r?\n[ \t]+/g,' ');
+  const header = (name)=> (headers.match(new RegExp(`^${name}:\\s*(.*)$`,'im'))?.[1] ?? '').trim();
+  const ctype = header('Content-Type') || 'text/plain';
+  const cte = header('Content-Transfer-Encoding').toLowerCase();
+
+  if(/^multipart\//i.test(ctype)){
+    const boundary = ctype.match(/boundary="?([^";]+)"?/i)?.[1];
+    if(!boundary) return '';
+    return body.split('--'+boundary).slice(1)
+      .filter(p=>!p.startsWith('--'))
+      .map(p=>emailToText(p.replace(/^\r?\n/,'')))
+      .join('\n');
+  }
+  if(!/^text\//i.test(ctype)) return '';
+
+  let bytes;
+  if(cte==='quoted-printable') bytes = decodeQuotedPrintable(body);
+  else if(cte==='base64'){
+    try { bytes = Uint8Array.from(atob(body.replace(/\s+/g,'')), c=>c.charCodeAt(0)); }
+    catch { return ''; }
+  } else bytes = Uint8Array.from(body, c=>c.charCodeAt(0) & 0xff);
+  let text = decodeCharset(bytes, ctype.match(/charset="?([^";]+)"?/i)?.[1]);
+
+  if(/html/i.test(ctype)){
+    text = text.replace(/<(style|script)[\s\S]*?<\/\1>/gi,' ').replace(/<[^>]+>/g,' ')
+      .replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/&#(\d+);/g,(_,n)=>String.fromCharCode(Number(n)));
+  }
+  return text;
+}
+
+/**
+ * Membaca nominal "Total : Rp 710.367" dari teks email. Titik/koma ribuan
+ * dibuang; dua digit desimal di belakang (",00") dibuang dulu supaya
+ * nominalnya tidak jadi 100x lipat.
+ */
+function parseNominalBtn(text){
+  const cocok = text.match(/Total\s*:?\s*Rp\.?\s*([\d.,]+)/i);
+  if(!cocok) return null;
+  const angka = cocok[1].replace(/[.,]$/,'').replace(/[.,]\d{2}$/,'').replace(/[.,]/g,'');
+  const nominal = Number(angka);
+  return Number.isFinite(nominal) && nominal>0 ? nominal : null;
+}
+
+/**
  * Login IMAP sekali dan memeriksa email BTN QRIS yang belum dibaca.
  * onlyBookingId (opsional) membatasi pencocokan ke satu booking saja --
  * dipakai oleh pemicu dari halaman tamu (POST /public/bookings/check-payment)
@@ -218,88 +358,61 @@ async function tryConfirmBookingByNominal(nominal, onlyBookingId){
  * kebetulan sama).
  */
 async function scanPaymentInbox(cfg, {onlyBookingId} = {}){
-  let ImapFlow, simpleParser;
-  try {
-    ({ ImapFlow } = await import('npm:imapflow@^1.0.0'));
-    ({ simpleParser } = await import('npm:mailparser@^3.6.0'));
-  } catch(e){
-    return {diperiksa:0, dikonfirmasi:[], ambigu:[], gagal:`Gagal memuat library IMAP: ${String(e?.message ?? e)}`};
-  }
-
-  const client = new ImapFlow({
-    host: cfg.host, port: Number(cfg.port ?? 993), secure: cfg.secure !== false,
-    auth: { user: cfg.user, pass: cfg.password }, logger: false,
-  });
-  // Supabase Edge Runtime bisa membekukan lalu memakai ulang isolate yang
-  // sama untuk request lain (terlihat dari "booted"/"shutdown" yang
-  // berselang-seling di log). Kalau ImapFlow masih punya timer latar
-  // belakang (keepalive/IDLE) yang menyala saat isolate itu dibekukan,
-  // timer itu bisa menembak ULANG setelah dibangunkan untuk request LAIN
-  // yang tidak ada hubungannya -- muncul sebagai "event loop error: Error:
-  // Already logged out" yang bikin request itu gagal dengan 503, padahal
-  // request itu sendiri tidak melakukan apa-apa yang salah. Listener ini
-  // menelan error semacam itu supaya tidak merembet ke request lain.
-  client.on('error', ()=>{});
-
   let diperiksa = 0;
   const dikonfirmasi = [];
   const ambigu = [];
   let gagal = null;
+  let client = null;
+  // Batas waktu keseluruhan: menutup socket membuat read() yang sedang
+  // menunggu langsung gagal, jadi request tidak pernah menggantung
+  // melewati timeout pemanggil (villa_cron_post memberi 30 detik).
+  let timedOut = false;
+  const timer = setTimeout(()=>{ timedOut = true; client?.close(); }, IMAP_TIMEOUT_MS);
   try {
-    await client.connect();
-    const lock = await client.getMailboxLock('INBOX');
-    try {
-      const subjectFilter = cfg.subject_contains ?? 'Payment Merchant Success';
-      const uids = await client.search({seen:false, subject:subjectFilter}, {uid:true});
-      for(const uid of (uids ?? [])){
-        diperiksa++;
-        const msg = await client.fetchOne(uid, {source:true}, {uid:true});
-        if(!msg?.source) continue;
-        let bodyText = '';
-        try {
-          const parsed = await simpleParser(msg.source);
-          bodyText = parsed.text ?? parsed.html ?? '';
-        } catch { continue; }
+    const conn = await Deno.connectTls({hostname: cfg.host, port: Number(cfg.port ?? 993)});
+    client = new MiniImap(conn);
+    await client.greeting();
+    await client.cmd(`LOGIN ${imapQuote(cfg.user)} ${imapQuote(cfg.password)}`);
+    await client.cmd('SELECT INBOX');
 
-        const cocok = bodyText.match(/Total\s*:?\s*Rp\.?\s*([\d.,]+)/i);
-        if(!cocok){
-          // Format tidak dikenali -- tandai dibaca supaya tidak diulang
-          // terus, baik oleh cron penuh maupun pengecekan per-booking.
-          await client.messageFlagsAdd(uid, ['\\Seen'], {uid:true});
-          continue;
-        }
-        const nominal = Number(cocok[1].replace(/[.,]/g,''));
-        if(!Number.isFinite(nominal) || nominal<=0){
-          await client.messageFlagsAdd(uid, ['\\Seen'], {uid:true});
-          continue;
-        }
+    const subjectFilter = cfg.subject_contains ?? 'Payment Merchant Success';
+    const hasilSearch = await client.cmd(`UID SEARCH UNSEEN SUBJECT ${imapQuote(subjectFilter)}`);
+    const uids = hasilSearch
+      .map(u=>u.line.match(/^\* SEARCH\b(.*)$/i)?.[1] ?? '')
+      .join(' ').trim().split(/\s+/).filter(x=>/^\d+$/.test(x));
+    const tandaiDibaca = (uid)=>client.cmd(`UID STORE ${uid} +FLAGS.SILENT (\\Seen)`);
 
-        const hasil = await tryConfirmBookingByNominal(nominal, onlyBookingId);
-        if(onlyBookingId){
-          // Hanya tandai dibaca kalau memang cocok ke booking ini -- kalau
-          // tidak, jangan disentuh (lihat komentar di atas fungsi ini).
-          if(hasil.matched) await client.messageFlagsAdd(uid, ['\\Seen'], {uid:true});
-        } else {
-          await client.messageFlagsAdd(uid, ['\\Seen'], {uid:true});
-        }
-        if(hasil.ambigu) ambigu.push(hasil);
-        else if(hasil.matched) dikonfirmasi.push(hasil);
+    for(const uid of uids){
+      diperiksa++;
+      const fetched = await client.cmd(`UID FETCH ${uid} (BODY.PEEK[])`);
+      const literal = fetched.find(f=>f.literals.length)?.literals[0];
+      if(!literal) continue;
+
+      const nominal = parseNominalBtn(emailToText(bytesToLatin1(literal)));
+      if(nominal===null){
+        // Format tidak dikenali -- tandai dibaca supaya tidak diulang
+        // terus, baik oleh cron penuh maupun pengecekan per-booking.
+        await tandaiDibaca(uid);
+        continue;
       }
-    } finally {
-      lock.release();
+
+      const hasil = await tryConfirmBookingByNominal(nominal, onlyBookingId);
+      if(onlyBookingId){
+        // Hanya tandai dibaca kalau memang cocok ke booking ini -- kalau
+        // tidak, jangan disentuh (lihat komentar di atas fungsi ini).
+        if(hasil.matched) await tandaiDibaca(uid);
+      } else {
+        await tandaiDibaca(uid);
+      }
+      if(hasil.ambigu) ambigu.push(hasil);
+      else if(hasil.matched) dikonfirmasi.push(hasil);
     }
+    try { await client.cmd('LOGOUT'); } catch {}
   } catch(e){
-    // e.reason (kalau ada) adalah BYE reason dari server IMAP -- misalnya
-    // "Too many connections" -- yang jauh lebih berguna untuk diagnosis
-    // daripada pesan generik "Unexpected close" saja.
-    const detail = [e?.code, e?.reason].filter(Boolean).join(': ');
-    gagal = detail ? `${String(e?.message ?? e)} (${detail})` : String(e?.message ?? e);
+    gagal = timedOut ? `Timeout ${IMAP_TIMEOUT_MS/1000} detik saat membaca email` : String(e?.message ?? e);
   } finally {
-    // client.close() (bukan logout()) supaya socket-nya langsung
-    // dihancurkan alih-alih menunggu handshake LOGOUT -- itulah yang
-    // meninggalkan timer latar belakang menyala setelah fungsi ini selesai
-    // (lihat komentar di atas client.on('error', ...)).
-    try { client.close(); } catch {}
+    clearTimeout(timer);
+    client?.close();
   }
 
   return {diperiksa, dikonfirmasi, ambigu, gagal};
@@ -316,6 +429,18 @@ async function scanPaymentInbox(cfg, {onlyBookingId} = {}){
  * QRIS seolah unitnya masih ditahan. Sekarang pembatalannya nyata.
  */
 const PENDING_PAYMENT_HOLD_MINUTES = 60;
+
+/**
+ * Sumber booking yang dibuat tamu sendiri lewat loonars.id dan dibayar lewat
+ * QRIS villa. Selain 'website', ada 'investor': booking dengan kode menginap
+ * gratis investor. Yang lebih dari semalam tetap menunggu pembayaran untuk
+ * malam-malam sisanya, jadi ia harus ikut jalur yang sama: kode unik
+ * nominal, konfirmasi email BTN / balasan LUNAS, pengingat, pembatalan
+ * otomatis, dan halaman status tamu. Sebelum ini semua jalur itu hanya
+ * mencari 'website', sehingga booking investor yang belum lunas tidak
+ * pernah terkonfirmasi otomatis dan tidak pernah kedaluwarsa (2026-10-04).
+ */
+const SUMBER_BOOKING_WEBSITE = ['website', 'investor'];
 
 /**
  * Penanda di kolom catatan untuk booking yang dibatalkan oleh mesin, bukan
@@ -441,6 +566,17 @@ async function pushBookingToCloudbeds(booking){
   // stop here. This is what makes the retry sweep below safe to run every
   // ten minutes.
   if(booking.cloudbeds_reservation_id) return;
+
+  // Booking late night (loonars.id/late) SENGAJA tidak didorong ke
+  // Cloudbeds. postReservation tidak membawa harga, jadi Cloudbeds memberi
+  // harga sendiri (Rp468rb ke atas), dan webhook Cloudbeds meng-upsert
+  // reservasi itu kembali ke baris ini -- tarif late night yang benar-benar
+  // dibayar tamu akan tertimpa angka Cloudbeds. Malam yang dijual juga
+  // malam yang sudah lewat tengah malam (tamu masuk 01.00, keluar 09.00).
+  // Konsekuensinya diterima: kamar itu tetap tampil kosong di Cloudbeds
+  // untuk malam tersebut. Owner menegaskan 2026-10-03: "jgan sambungkan
+  // dgan cloudbeds khusus late night". Lihat CURRENT_STATE.md 2026-10-03.
+  if(booking.sumber === 'late-night') return;
 
   const logOutbound = async (matched, extra) => {
     await supabase.from('cloudbeds_events_log').insert({
@@ -766,6 +902,310 @@ function findConflicts(bookings, checkin, checkout){
   return map;
 }
 
+// ── LATE NIGHT BOOKING (role late_night) ────────────────────────────────
+// Owner 2026-10-03: halaman loonars.id/late (repo loonars, app/late),
+// hanya untuk Laila (marketing late night). Tamu masuk lewat tengah malam dan keluar 09.00
+// WIB. Jawaban owner atas desainnya:
+//   - tarif tetap (awalnya Rp260.000, sekarang LATE_NIGHT_TARIF), itu yang
+//     ditagih DAN dicatat;
+//   - Laila sendiri yang menekan Lunas, yang sekaligus check-in + kirim PIN;
+//   - hanya unit tipe Standard;
+//   - pemasukan ikut bagi hasil investor seperti booking biasa (lewat
+//     villa_commit_checkin, jalur yang sama dengan check-in resepsionis).
+// Tarif ini SENGAJA tidak lewat computeStayTarif / villa_rates: ini harga
+// tetap yang ditentukan owner, bukan harga dinamis per malam.
+// Dinaikkan dari Rp260.000 ke Rp300.000 atas perintah owner 2026-10-03
+// ("naikkan harga di latenight di 300 ribu").
+const LATE_NIGHT_TARIF = 300000;
+// Booking hanya bisa DIBUAT pukul 01.00 s/d sebelum 09.00 WIB.
+const LATE_NIGHT_JAM_MULAI = 1;
+const LATE_NIGHT_JAM_SELESAI = 9;
+const LATE_NIGHT_ROOM_TYPE = 'standard';
+// Booking yang belum ditandai Lunas setelah sekian menit dibatalkan supaya
+// kamarnya tidak tertahan. Tidak ada cron: pembatalan dijalankan setiap kali
+// halaman late night dimuat atau booking baru dibuat.
+const LATE_NIGHT_HOLD_MINUTES = 30;
+const LATE_NIGHT_MARK = '[Late Night]';
+
+function jamMenitWIB(d = new Date()){
+  const f = new Intl.DateTimeFormat('en-GB', {timeZone: WIB_TZ, hour:'2-digit', minute:'2-digit', hourCycle:'h23'});
+  const [jam, menit] = f.format(d).split(':').map(Number);
+  return {jam, menit};
+}
+
+/**
+ * Malam yang dijual late night = malam KEMARIN (tanggal WIB), keluar hari
+ * ini. Dengan begitu booking ini bentrok dengan tamu yang memang masih
+ * menginap malam itu (dan dengan exclusion constraint bookings), tapi tidak
+ * dengan tamu yang check-in hari ini pukul 14.00.
+ */
+function jendelaLateNight(d = new Date()){
+  const {jam} = jamMenitWIB(d);
+  const hariIni = todayWIB(d);
+  const geser = (n) => {
+    const t = new Date(`${hariIni}T00:00:00Z`);
+    t.setUTCDate(t.getUTCDate() + n);
+    return t.toISOString().slice(0,10);
+  };
+  // Sejak 09.00 WIB late night berikutnya adalah MALAM INI (masuk lewat
+  // tengah malam nanti, keluar besok). Sebelumnya halaman tetap menghitung
+  // malam kemarin yang sudah lewat, sehingga sepanjang siang unit yang sudah
+  // dibooking untuk malam ini tampil "Kosong & bersih" (B1, 3 Okt 2026).
+  // Booking tetap hanya bisa dibuat saat `buka`, dan saat itu malamnya
+  // selalu kemarin -- aturan pembuatan booking tidak berubah.
+  const sesudahJendela = jam >= LATE_NIGHT_JAM_SELESAI;
+  return {
+    buka: jam >= LATE_NIGHT_JAM_MULAI && jam < LATE_NIGHT_JAM_SELESAI,
+    malam: sesudahJendela ? hariIni : geser(-1),
+    checkout: sesudahJendela ? geser(1) : hariIni,
+  };
+}
+
+async function batalkanLateNightBasi(){
+  const batas = Date.now() - LATE_NIGHT_HOLD_MINUTES*60*1000;
+  const hariIni = todayWIB();
+  const {data} = await supabase.from('bookings')
+    .select('id,catatan,created_at,tgl_checkout')
+    .eq('sumber','late-night').eq('status','terjadwal');
+  for(const bk of data ?? []){
+    if(new Date(bk.created_at).getTime() >= batas && bk.tgl_checkout >= hariIni) continue;
+    await supabase.from('bookings')
+      .update({status:'batal', catatan:`${bk.catatan ?? ''} ${EXPIRED_HOLD_MARK} ${new Date().toISOString()}`.trim()})
+      .eq('id', bk.id).eq('status','terjadwal');
+  }
+}
+
+/** Unit Standard beserta apakah bisa dijual untuk malam late night ini. */
+async function unitLateNight(j){
+  const {data:rt} = await supabase.from('villa_room_types').select('id').eq('code', LATE_NIGHT_ROOM_TYPE);
+  const rtIds = (rt ?? []).map(r=>r.id);
+  if(!rtIds.length) return [];
+  const {data:units} = await supabase.from('units').select('id,nomor,status').in('room_type_id', rtIds).order('nomor');
+  const {data:bookings} = await supabase.from('bookings')
+    .select('unit_id,tgl_checkin,tgl_checkout,guest_nama').in('status',['terjadwal','checkin']);
+  const bentrok = findConflicts(bookings ?? [], j.malam, j.checkout);
+  const ditutup = await unitMaintenanceBentrok(j.malam, j.checkout);
+  return (units ?? []).map(u=>{
+    let alasan = null;
+    if(bentrok.has(u.id)) alasan = 'Sedang ditempati / sudah dibooking';
+    else if(ditutup.has(u.id)) alasan = ditutup.get(u.id).sumber === 'cloudbeds' ? 'Ditutup di Cloudbeds' : 'Ditutup maintenance';
+    // Tamu datang tengah malam: kamar yang belum dibersihkan tidak dijual.
+    else if(u.status !== 'available') alasan = u.status === 'dirty' ? 'Belum dibersihkan' : `Status kamar: ${u.status}`;
+    // `ditutup`: ditutup di Cloudbeds / maintenance -- halaman Laila tidak
+    // menampilkannya sama sekali, supaya daftarnya sama dengan kamar yang
+    // dibuka di akun manager (owner 2026-10-03: "kamar yg di buka itu hanya 9
+    // knapa jadi 10").
+    return {id:u.id, nomor:u.nomor, tersedia: !alasan, alasan, ditutup: ditutup.has(u.id)};
+  });
+}
+
+// ── KESIAPAN KAMAR (role manager) ───────────────────────────────────────
+// Owner 2026-10-02: kamar TERBUKA secara bawaan, seperti selama ini. Manager
+// (Rebecca) mengecek 10 poin, lalu menekan "Kamar Maintenance" kalau ada
+// kerusakan -- kamar ditutup di Cloudbeds lewat room block out_of_service,
+// jadi jumlah kamar yang tampil di OTA berkurang satu -- atau "Kamar Siap"
+// yang membuka blok itu lagi. Tidak ada yang menutup kamar otomatis.
+const CHECKLIST_KAMAR = ['kebersihan','bathroom','linen','gorden','ac','tv','kolam','air_bersih','pembuangan_air','lampu'];
+// Satu blok paling lama 30 malam; lebih dari itu manager memperpanjang lagi.
+// Batas ini juga menjaga rentang di bawah 35 hari yang diterima getRoomBlocks.
+const MAKS_MALAM_MAINTENANCE = 30;
+
+/**
+ * Unit yang TIDAK BOLEH dijual untuk salah satu malam [checkin, checkout):
+ *  1. ditutup manager lewat Kamar Maintenance (villa_room_maintenance), dan
+ *  2. ditutup langsung di Cloudbeds (room block apa pun, mis. 5 unit yang
+ *     owner tutup sementara -- keputusan owner 3 Okt 2026: "harus ditutup
+ *     juga" di loonars.id dan Front Desk, mengikuti Cloudbeds).
+ * Malam yang ditutup = startDate s/d endDate, keduanya ikut (anggapan
+ * konservatif: lebih baik tidak menjual satu malam daripada menjual kamar
+ * yang ditutup).
+ *
+ * GAGAL TERBUKA: kalau tabel atau Cloudbeds tidak terbaca, pemesanan tetap
+ * berjalan seperti sebelum fitur ini ada. Tidak boleh ada tamu yang ditolak
+ * karena pemeriksaan ini rusak.
+ */
+async function unitMaintenanceBentrok(checkin, checkout){
+  const hasil = new Map();
+  let q = supabase.from('villa_room_maintenance').select('unit_id,tutup_mulai,tutup_sampai').gte('tutup_sampai', checkin);
+  if(checkout) q = q.lt('tutup_mulai', checkout);
+  const {data, error} = await q;
+  if(error) console.error('villa_room_maintenance tidak terbaca:', error.message);
+  for(const r of data ?? []) hasil.set(r.unit_id, {...r, sumber:'manager'});
+
+  for(const [unit_id, r] of await unitDiblokCloudbeds(checkin, checkout)){
+    if(!hasil.has(unit_id)) hasil.set(unit_id, r);
+  }
+  return hasil;
+}
+
+// Cache singkat per isolate: halaman pencarian loonars.id bisa memanggil
+// ketersediaan beberapa kali berturut-turut; tidak perlu ke Cloudbeds tiap
+// kali. 60 detik tetap "realtime" untuk keperluan buka-tutup kamar.
+const CACHE_BLOK_MS = 60_000;
+const cacheBlokCloudbeds = new Map();
+
+/** Room block Cloudbeds yang menutup malam di [checkin, checkout), dipetakan ke unit villa. */
+async function unitDiblokCloudbeds(checkin, checkout){
+  const hasil = new Map();
+  // Malam terakhir yang dipakai; booking bulanan tanpa checkout cukup diperiksa 35 malam pertama.
+  const malamTerakhir = checkout ? addDaysStr(checkout, -1) : addDaysStr(checkin, 34);
+  if(malamTerakhir < checkin) return hasil;
+
+  const blok = [];
+  // getRoomBlocks menerima rentang maksimal 35 hari: pecah per 35 hari.
+  for(let mulai = checkin; mulai <= malamTerakhir; mulai = addDaysStr(mulai, 35)){
+    const sampai = addDaysStr(mulai, 34) < malamTerakhir ? addDaysStr(mulai, 34) : malamTerakhir;
+    const kunci = `${mulai}|${sampai}`;
+    const tersimpan = cacheBlokCloudbeds.get(kunci);
+    let isi;
+    if(tersimpan && Date.now() - tersimpan.at < CACHE_BLOK_MS){
+      isi = tersimpan.data;
+    } else {
+      // Batas 8 detik: pemesanan tamu tidak boleh ikut menggantung.
+      isi = await cloudbedsBlokDalamRentang(mulai, sampai, 8000);
+      if(isi === null){ console.error('getRoomBlocks tidak terbaca untuk', kunci); continue; }
+      if(cacheBlokCloudbeds.size > 200) cacheBlokCloudbeds.clear();
+      cacheBlokCloudbeds.set(kunci, {at: Date.now(), data: isi});
+    }
+    blok.push(...isi);
+  }
+  if(!blok.length) return hasil;
+
+  const {data:map} = await supabase.from('cloudbeds_room_mapping').select('unit_id,cloudbeds_room_id');
+  const unitByRoom = new Map((map ?? []).map(r=>[String(r.cloudbeds_room_id), r.unit_id]));
+  for(const k of blok){
+    if(!k.startDate || !k.endDate) continue;
+    // Pastikan benar-benar beririsan dengan malam menginap.
+    if(k.startDate > malamTerakhir || k.endDate < checkin) continue;
+    for(const roomID of k.roomIDs){
+      const unit_id = unitByRoom.get(roomID);
+      if(unit_id && !hasil.has(unit_id)){
+        hasil.set(unit_id, {unit_id, tutup_mulai: k.startDate, tutup_sampai: k.endDate, sumber:'cloudbeds', alasan: k.alasan});
+      }
+    }
+  }
+  return hasil;
+}
+
+/**
+ * Satu panggilan tulis ke Cloudbeds (form-urlencoded, seperti semua panggilan
+ * tulis lain di file ini). Mengembalikan {ok, pesan, body}; tidak pernah
+ * melempar, supaya penolakan Cloudbeds sampai ke manager sebagai pesan.
+ */
+async function cloudbedsTulis(method, endpoint, form){
+  const apiKey = cloudbedsApiKey();
+  if(!apiKey) return {ok:false, pesan:'CLOUDBEDS_API_KEY belum dikonfigurasi', body:null};
+  const propertyId = (Deno.env.get('CLOUDBEDS_PROPERTY_ID') ?? '').trim();
+  if(propertyId) form.set('propertyID', propertyId);
+  let res, body;
+  try{
+    res = await fetch(`${CLOUDBEDS_API_BASE}/${endpoint}`, {
+      method,
+      headers:{'x-api-key':apiKey,'Content-Type':'application/x-www-form-urlencoded'},
+      body: form.toString(),
+      signal: AbortSignal.timeout(20000),
+    });
+    body = await res.json().catch(()=>null);
+  }catch(e){
+    return {ok:false, pesan:`Cloudbeds tidak bisa dihubungi: ${e?.message ?? e}`, body:null};
+  }
+  const ok = res.ok && body?.success === true;
+  return {ok, pesan: ok ? null : (body?.message || body?.error || `Cloudbeds HTTP ${res.status}`), body};
+}
+
+/**
+ * Baca balik satu room block. Jawaban "success" dari Cloudbeds tidak pernah
+ * dipercaya begitu saja di integrasi ini (lihat CURRENT_STATE.md, "Cloudbeds
+ * API contracts"): blok baru dianggap ada kalau benar-benar terbaca kembali.
+ * Mengembalikan blok-nya, null kalau tidak ada, atau undefined kalau
+ * pembacaannya sendiri gagal (jangan disamakan dengan "tidak ada").
+ */
+async function cloudbedsBacaRoomBlock(roomBlockID, padaTanggal){
+  const apiKey = cloudbedsApiKey();
+  if(!apiKey) return undefined;
+  const url = new URL(`${CLOUDBEDS_API_BASE}/getRoomBlocks`);
+  const propertyId = (Deno.env.get('CLOUDBEDS_PROPERTY_ID') ?? '').trim();
+  if(propertyId) url.searchParams.set('propertyID', propertyId);
+  url.searchParams.set('roomBlockID', String(roomBlockID));
+  url.searchParams.set('startDate', padaTanggal);
+  url.searchParams.set('endDate', padaTanggal);
+  try{
+    const res = await fetch(url, {headers:{'x-api-key':apiKey}, signal: AbortSignal.timeout(20000)});
+    const body = await res.json().catch(()=>null);
+    if(!res.ok || body?.success === false) return undefined;
+    // data bisa objek {roomBlocks:[...]} (sesuai spec) atau array per properti.
+    const wadah = Array.isArray(body?.data) ? body.data : [body?.data];
+    for(const w of wadah){
+      for(const blk of (w?.roomBlocks ?? [])){
+        if(String(blk.roomBlockID) === String(roomBlockID)) return blk;
+      }
+    }
+    return null;
+  }catch{ return undefined; }
+}
+
+async function cloudbedsRoomTypeIdUntuk(roomID){
+  const apiKey = cloudbedsApiKey();
+  if(!apiKey) return null;
+  try{
+    const res = await fetch(`${CLOUDBEDS_API_BASE}/getRooms`, {headers:{'x-api-key':apiKey}, signal: AbortSignal.timeout(20000)});
+    const body = await res.json().catch(()=>null);
+    for(const entry of (body?.data ?? [])){
+      const kandidat = Array.isArray(entry.rooms) ? entry.rooms : [entry];
+      for(const r of kandidat){
+        if(String(r.roomID) === String(roomID)) return String(entry.roomTypeID ?? r.roomTypeID ?? '') || null;
+      }
+    }
+  }catch{ /* ditangani pemanggil sebagai null */ }
+  return null;
+}
+
+/**
+ * Blok yang SUDAH ada di Cloudbeds untuk rentang tanggal ini (dibuat di luar
+ * modul ini, mis. owner menutup unit langsung di Cloudbeds). Mengembalikan
+ * array blok dengan daftar roomID-nya, atau null kalau tidak bisa dibaca.
+ * Rentang dibatasi 35 hari oleh Cloudbeds.
+ */
+async function cloudbedsBlokDalamRentang(mulai, sampai, batasMs = 15000){
+  const apiKey = cloudbedsApiKey();
+  if(!apiKey) return null;
+  const url = new URL(`${CLOUDBEDS_API_BASE}/getRoomBlocks`);
+  const propertyId = (Deno.env.get('CLOUDBEDS_PROPERTY_ID') ?? '').trim();
+  if(propertyId) url.searchParams.set('propertyID', propertyId);
+  url.searchParams.set('startDate', mulai);
+  url.searchParams.set('endDate', sampai);
+  url.searchParams.set('pageSize', '100');
+  try{
+    const res = await fetch(url, {headers:{'x-api-key':apiKey}, signal: AbortSignal.timeout(batasMs)});
+    const body = await res.json().catch(()=>null);
+    if(!res.ok || body?.success === false) return null;
+    const wadah = Array.isArray(body?.data) ? body.data : [body?.data];
+    const hasil = [];
+    for(const w of wadah){
+      for(const blk of (w?.roomBlocks ?? [])){
+        hasil.push({
+          roomBlockID: String(blk.roomBlockID ?? ''),
+          tipe: blk.roomBlockType ?? null,
+          alasan: blk.roomBlockReason ?? null,
+          startDate: blk.startDate ?? null,
+          endDate: blk.endDate ?? null,
+          roomIDs: (blk.rooms ?? []).map(r=>String(r.roomID)),
+          rooms: (blk.rooms ?? []).map(r=>({roomID: String(r.roomID), roomTypeID: r.roomTypeID != null ? String(r.roomTypeID) : null, isSource: r.isSource})),
+        });
+      }
+    }
+    return hasil;
+  }catch{ return null; }
+}
+
+const LABEL_TIPE_BLOK = {out_of_service:'out of service', blocked_dates:'blokir tanggal', courtesy_hold:'courtesy hold'};
+
+async function catatRoomBlockLog(event_type, matched, payload){
+  await supabase.from('cloudbeds_events_log').insert({
+    reservation_id: null, event_type, payload, matched, error: payload?.error ?? null,
+  });
+}
+
 // Pencarian tanggal di website = sinyal permintaan untuk mesin harga AI
 // (villa src/lib/aiPricingEngine.ts, SINYAL 5), seperti data "lookers" yang
 // dipakai sistem revenue hotel. Tanpa data pribadi -- lihat migrasi
@@ -974,6 +1414,97 @@ async function hitungHargaPromo(promo, roomTypeId, tgl_checkin, tgl_checkout, ni
   };
 }
 
+/**
+ * Kode referral karyawan (owner 2026-10-02). BUKAN diskon: tamu tetap
+ * membayar harga normal ("10% itu masuk ke fee, tp harga yg ditrima tamu ttp
+ * normal"). Kodenya hanya menandai karyawan yang membawa tamu, dan karyawan
+ * itu mendapat fee 10% dari nilai booking, sah setelah tamu lunas
+ * (diturunkan dari bookings.status, lihat statusFeeReferral). Referral
+ * tidak pernah mengubah harga tamu.
+ *
+ * Hanya dipakai jalur pemesanan loonars.id (/public/bookings).
+ */
+const REFERRAL_KODE_RE = /^REF-[A-Z0-9]{2,20}$/;
+
+async function periksaReferral(kode){
+  const bersih = String(kode ?? '').trim().toUpperCase();
+  if(!REFERRAL_KODE_RE.test(bersih)) return {ok:false, alasan:'Kode referral tidak ditemukan'};
+  const {data:ref} = await supabase.from('villa_referral_codes').select('*').eq('kode', bersih).maybeSingle();
+  if(!ref) return {ok:false, alasan:'Kode referral tidak ditemukan'};
+  if(ref.aktif !== true) return {ok:false, alasan:'Kode referral sudah tidak aktif'};
+  return {ok:true, ref};
+}
+
+/** Fee karyawan dari nilai booking (yang ditagih ke tamu, tanpa kode unik). */
+function hitungFeeReferral(ref, nilaiBooking){
+  const persen = Number(ref.fee_persen ?? 10);
+  return {fee_persen: persen, fee: Math.round(Number(nilaiBooking) * persen / 100)};
+}
+
+/** 'menunggu_lunas' | 'sah' | 'gugur', dari status booking saat ini. */
+function statusFeeReferral(bookingStatus){
+  if(['terjadwal','checkin','checkout'].includes(bookingStatus)) return 'sah';
+  if(bookingStatus === 'menunggu_pembayaran') return 'menunggu_lunas';
+  return 'gugur';
+}
+
+/** Kode baru dari nama karyawan: "REF-" + nama depan (maks 8 huruf) + 2 angka. */
+async function buatKodeReferralUnik(nama, kodeDiminta){
+  if(kodeDiminta){
+    let k = String(kodeDiminta).trim().toUpperCase().replace(/\s+/g,'');
+    if(!k.startsWith('REF-')) k = `REF-${k.replace(/^REF/,'')}`;
+    if(!REFERRAL_KODE_RE.test(k)) return {ok:false, alasan:'Kode hanya boleh huruf/angka (2-20 karakter) setelah REF-'};
+    const {data:ada} = await supabase.from('villa_referral_codes').select('id').eq('kode', k).maybeSingle();
+    if(ada) return {ok:false, alasan:`Kode ${k} sudah dipakai`};
+    const {data:promo} = await supabase.from('villa_promos').select('id').eq('kode', k).maybeSingle();
+    if(promo) return {ok:false, alasan:`Kode ${k} sudah dipakai sebagai kode promo`};
+    return {ok:true, kode:k};
+  }
+  const dasar = (String(nama ?? '').toUpperCase().split(/\s+/)[0] ?? '').replace(/[^A-Z0-9]/g,'').slice(0,8) || 'LOONARS';
+  for(let i=0;i<20;i++){
+    const k = `REF-${dasar}${String(Math.floor(Math.random()*90)+10)}`;
+    const {data:ada} = await supabase.from('villa_referral_codes').select('id').eq('kode', k).maybeSingle();
+    const {data:promo} = await supabase.from('villa_promos').select('id').eq('kode', k).maybeSingle();
+    if(!ada && !promo) return {ok:true, kode:k};
+  }
+  return {ok:false, alasan:'Gagal membuat kode unik, coba lagi'};
+}
+
+/** Kode + rekap pemakaian, dipakai dashboard Mkhsistem dan Finance villa. */
+async function daftarReferral(){
+  const {data:codes, error} = await supabase.from('villa_referral_codes').select('*').order('created_at', {ascending:false});
+  if(error) return {error:error.message};
+  const {data:reds, error:redErr} = await supabase.from('villa_referral_redemptions').select('*').order('created_at', {ascending:false});
+  if(redErr) return {error:redErr.message};
+  const bookingIds = [...new Set((reds ?? []).map(r=>r.booking_id).filter(Boolean))];
+  const {data:bks} = bookingIds.length
+    ? await supabase.from('bookings').select('id,status,unit_nomor').in('id', bookingIds)
+    : {data:[]};
+  const bkById = new Map((bks ?? []).map(b=>[b.id, b]));
+  const pemakaian = (reds ?? []).map(r => {
+    const bk = r.booking_id ? bkById.get(r.booking_id) : null;
+    return {
+      ...r,
+      booking_status: bk?.status ?? null,
+      unit_nomor: bk?.unit_nomor ?? null,
+      status_fee: statusFeeReferral(bk?.status ?? null),
+    };
+  });
+  const kode = (codes ?? []).map(c => {
+    const milik = pemakaian.filter(p => p.referral_code_id === c.id);
+    const sah = milik.filter(p => p.status_fee === 'sah');
+    return {
+      ...c,
+      jumlah_dipakai: milik.filter(p => p.status_fee !== 'gugur').length,
+      jumlah_sah: sah.length,
+      fee_sah: sah.reduce((s,p)=>s+Number(p.fee||0), 0),
+      fee_menunggu: milik.filter(p=>p.status_fee==='menunggu_lunas').reduce((s,p)=>s+Number(p.fee||0), 0),
+      fee_sudah_dibayar: sah.filter(p=>p.fee_dibayar_at).reduce((s,p)=>s+Number(p.fee||0), 0),
+    };
+  });
+  return {kode, pemakaian};
+}
+
 async function computeWalkinIncome(periode){
   const [y,mo] = periode.split('-').map(Number);
   const start = new Date(Date.UTC(y, mo-1, 1)).toISOString();
@@ -1042,10 +1573,14 @@ async function computeReport(unit_id, periode){
 
 /**
  * Live per-channel OTA commission %, from Cloudbeds' own getSources --
- * shared by computeOtaBreakdown() (investor-facing estimate) and the
- * Survival Control Center engine below, so the two never quietly
- * disagree about what an OTA's commission is. Empty map (0% everywhere)
- * if the API key is missing or the call fails -- never invents a number.
+ * used only by computeOtaBreakdown() (investor-facing estimate). Empty map
+ * (0% everywhere) if the API key is missing or the call fails -- never
+ * invents a number.
+ *
+ * Diperiksa langsung 2026-10-05: getSources properti ini TIDAK memuat
+ * sumber OTA sama sekali dan semua komisinya 0%, jadi peta ini selalu
+ * kosong. Halaman Finance karena itu tidak memakainya lagi -- lihat
+ * pendapatanBersih (harga kamar Cloudbeds sebelum fee OTA).
  */
 async function getOtaCommissionPctMap(){
   const commissionPctBySumber = new Map();
@@ -1142,6 +1677,10 @@ function normalizedChannel(sumber){
   // via whichever booking engine the click-through lands on, so this is
   // DIRECT for settlement purposes even though it's a distinct traffic source.
   if(s==='walk-in' || s==='website' || s==='whatsapp' || s==='google') return 'DIRECT';
+  // Late night: dibayar langsung ke QRIS villa, tidak ada OTA di tengah.
+  if(s==='late-night') return 'DIRECT';
+  // Menginap investor lewat loonars.id: sisa malamnya dibayar langsung ke QRIS villa.
+  if(s==='investor') return 'DIRECT';
   if(s==='booking.com') return 'BOOKING_COM';
   if(s==='agoda') return 'AGODA';
   if(s==='airbnb') return 'AIRBNB';
@@ -1295,16 +1834,72 @@ function calculateExpectedSettlement({ sumber, tgl_checkin, tgl_checkout, config
   };
 }
 
+/**
+ * PENGAKUAN PEMASUKAN (owner 2026-10-02): pemasukan baru dicatat pada
+ * tanggal check-in, dan hanya untuk tamu yang BENAR-BENAR sudah check-in
+ * (status checkin/checkout). Booking yang masih 'terjadwal' tetap ada di
+ * Cloudbeds sebagai booking mendatang, tapi tidak dihitung sebagai
+ * pemasukan.
+ *
+ * Alasan owner: "agar kita tidak kaget ketika ada yang membatalkan
+ * bookingan, dan hitungan finance lebih stabil". Data 2 Okt 2026 jadi
+ * buktinya: 8 booking Oktober senilai Rp17,97 jt batal sebelum tamunya
+ * datang, padahal sebelumnya sempat ikut terhitung sebagai pendapatan
+ * bulan itu. Dengan aturan ini angka pemasukan hanya bisa NAIK seiring
+ * tamu datang, tidak bisa turun karena pembatalan.
+ *
+ * REVISI owner 2026-10-05: angka finance tidak cocok dengan extranet OTA
+ * karena aturan di atas bergantung pada resepsionis menekan "check-in".
+ * Contoh nyata: Airbnb Alfy Farhan, A1, 3-5 Okt (Rp1.495.000) -- tamunya
+ * menginap, Airbnb mencatatnya, tapi di sini tetap 'terjadwal' sehingga
+ * tidak terhitung. Owner: "sesuaikan dengan tanggal checkin yang km tarik
+ * dari cloudbeds". Jadi pemasukan sekarang diakui begitu TANGGAL check-in
+ * Cloudbeds sudah tiba (tgl_checkin <= hari ini) dan booking tidak batal --
+ * tidak lagi menunggu tombol check-in. Booking dengan tanggal check-in di
+ * masa depan tetap tidak dihitung (alasan 2 Okt soal pembatalan tetap
+ * berlaku). menunggu_pembayaran (website belum bayar) tidak termasuk.
+ *
+ * Satu tempat aturan ini didefinisikan; summary, channel breakdown,
+ * survival KPI, dan settlement semuanya memakainya.
+ */
+const STATUS_PEMASUKAN_DIAKUI = ['terjadwal', 'checkin', 'checkout'];
+// Satu argumen saja: dipakai sebagai .filter(isPemasukanDiakui), yang
+// mengoper index sebagai argumen kedua.
+function isPemasukanDiakui(b){
+  return STATUS_PEMASUKAN_DIAKUI.includes(b.status) && String(b.tgl_checkin ?? '') <= todayWIB();
+}
+
+/**
+ * KOTOR vs BERSIH per booking (owner 2026-10-05). Cloudbeds MENAMBAHKAN fee
+ * OTA ke harga ("Booking.com Fee" 15% di email reservasi: 447.950 + 67.192,50
+ * = Grand Total 515.142,50), padahal fee itu komisi yang tidak pernah
+ * diterima villa. getSources Cloudbeds mencatat komisi 0% untuk semua sumber,
+ * jadi menghitung bersih dari persentase tidak mungkin. Owner: "pakai angka
+ * deposit amount" = balanceDetailed.subTotal, disimpan di
+ * bookings.cloudbeds_subtotal. Booking non-Cloudbeds (website, walk-in) tidak
+ * punya fee OTA: bersih = kotor.
+ */
+function pendapatanKotor(b){ return Number(b.total_bayar ?? b.tarif ?? 0); }
+function pendapatanBersih(b){
+  // Booking website yang diteruskan ke Cloudbeds juga punya harga Cloudbeds,
+  // tapi yang berlaku adalah yang dibayar tamu di sini -- bukan harga
+  // Cloudbeds (lihat cloudbedsReservationSync.ts soal booking milik sendiri).
+  if(normalizedChannel(b.sumber) === 'DIRECT') return pendapatanKotor(b);
+  return b.cloudbeds_subtotal != null ? Number(b.cloudbeds_subtotal) : pendapatanKotor(b);
+}
+
 /** Lazily creates a finance_settlements row for any booking that doesn't have one yet. Idempotent (unique booking_id, upsert ignoreDuplicates). */
 async function ensureFinanceSettlements(bookings, configMap){
-  const candidates = bookings.filter(b => b.status !== 'batal');
+  // Settlement hanya untuk pemasukan yang sudah diakui: membuatnya untuk
+  // booking yang belum datang berarti menagih uang yang bisa batal.
+  const candidates = bookings.filter(isPemasukanDiakui);
   if(!candidates.length) return;
   const rows = candidates.map(b => {
     const calc = calculateExpectedSettlement({ sumber: b.sumber, tgl_checkin: b.tgl_checkin, tgl_checkout: b.tgl_checkout, configMap });
     return {
       booking_id: b.id,
       sumber: b.sumber,
-      amount: Number(b.total_bayar ?? b.tarif ?? 0),
+      amount: pendapatanBersih(b),
       expected_settlement_date: calc.expected_settlement_date,
       settlement_confidence: calc.confidence,
       settlement_status: 'PENDING',
@@ -1365,29 +1960,25 @@ function addDaysStr(dateStr, n){
 }
 
 /**
- * Net room revenue for bookings whose tgl_checkin falls in [from,to], net
- * of live Cloudbeds OTA commission (same method computeOtaBreakdown
- * uses -- getOtaCommissionPctMap() is shared, not duplicated). There is
- * no tax field anywhere in this schema, so "net of tax" is genuinely
- * NOT_AVAILABLE -- reported as such (tax_deduction: null), never
- * silently treated as zero.
+ * Room revenue for bookings whose tgl_checkin falls in [from,to]: kotor =
+ * Cloudbeds grandTotal, bersih = harga kamar sebelum fee OTA (lihat
+ * pendapatanBersih). There is no tax field anywhere in this schema, so
+ * "net of tax" is genuinely NOT_AVAILABLE -- reported as such
+ * (tax_deduction: null), never silently treated as zero.
  */
 async function computeNetRevenueForRange(from, to){
   const { data: bookings } = await supabase.from('bookings')
-    .select('sumber,total_bayar,tarif,durasi_malam,status')
-    .gte('tgl_checkin', from).lte('tgl_checkin', to)
-    .neq('status', 'batal');
+    .select('sumber,total_bayar,tarif,cloudbeds_subtotal,durasi_malam,status')
+    .gte('tgl_checkin', from).lte('tgl_checkin', to).lte('tgl_checkin', todayWIB())
+    .in('status', STATUS_PEMASUKAN_DIAKUI);
   const rows = bookings ?? [];
-  const { commissionPctBySumber, commission_source } = await getOtaCommissionPctMap();
-  let gross = 0, commission = 0, room_nights = 0;
+  let gross = 0, net = 0, room_nights = 0;
   for(const b of rows){
-    const amount = Number(b.total_bayar ?? b.tarif ?? 0);
-    const pct = commissionPctBySumber.get(b.sumber) ?? 0;
-    gross += amount;
-    commission += amount * (pct/100);
+    gross += pendapatanKotor(b);
+    net += pendapatanBersih(b);
     room_nights += Number(b.durasi_malam ?? 0);
   }
-  return { gross_revenue: gross, ota_commission: commission, net_revenue: gross - commission, room_nights, booking_count: rows.length, commission_source, tax_deduction: null };
+  return { gross_revenue: gross, ota_commission: gross - net, net_revenue: net, room_nights, booking_count: rows.length, tax_deduction: null };
 }
 
 /** Occupied/available room-nights from the daily inventory snapshot -- the SAME table /api/admin/revenue-metrics reads, so occupancy never disagrees between the two dashboards. */
@@ -1617,11 +2208,10 @@ async function computeSurvivalKpis(property_code, from, to){
     rooms_per_night_period,
     rooms_per_night_band: band,
     net_adr,
-    net_adr_note: 'Net dari komisi OTA live Cloudbeds; TIDAK termasuk potongan pajak -- tidak ada field pajak di sistem ini (NOT_AVAILABLE).',
+    net_adr_note: 'Bersih = harga kamar Cloudbeds sebelum fee OTA ("Deposit Amount" di email reservasi); fee OTA yang Cloudbeds tambahkan ke Grand Total tidak dihitung. TIDAK termasuk potongan pajak -- tidak ada field pajak di sistem ini (NOT_AVAILABLE).',
     net_revenue_mtd: netRevenueRange.net_revenue,
     gross_revenue_mtd: netRevenueRange.gross_revenue,
     ota_commission_mtd: netRevenueRange.ota_commission,
-    commission_source: netRevenueRange.commission_source,
     room_nights_mtd: netRevenueRange.room_nights,
     booking_count_mtd: netRevenueRange.booking_count,
     investor_guarantee: monthly_guarantee,
@@ -1754,6 +2344,9 @@ Deno.serve(async (req)=>{
 
     const {data:bookings} = await supabase.from('bookings').select('unit_id,tgl_checkin,tgl_checkout').in('status',['terjadwal','checkin']);
     const conflicts = findConflicts(bookings??[], checkin, checkout);
+    // Unit yang ditutup manager (Kamar Maintenance) tidak dijual di loonars.id
+    // juga, bukan hanya di OTA -- jalur ini tidak lewat Cloudbeds.
+    for(const id of (await unitMaintenanceBentrok(checkin, checkout)).keys()) conflicts.set(id, 'maintenance');
     const nights = Math.max(1, Math.round((new Date(checkout).getTime() - new Date(checkin).getTime())/86400000));
 
     const byType = new Map();
@@ -1888,6 +2481,17 @@ Deno.serve(async (req)=>{
     });
   }
 
+  // Cek kode referral karyawan untuk form loonars.id. Tidak ada harga yang
+  // dihitung (referral tidak mengubah harga tamu), dan sama seperti voucher
+  // investor, nama karyawan pemilik kode TIDAK dibocorkan ke halaman publik.
+  if(path==='/public/referral' && m==='GET'){
+    const kode = String(url.searchParams.get('code') ?? '').trim().toUpperCase();
+    if(!kode) return err('Kode wajib diisi');
+    const cek = await periksaReferral(kode);
+    if(!cek.ok) return json({berlaku:false, alasan:cek.alasan});
+    return json({berlaku:true, kode:cek.ref.kode});
+  }
+
   if(path==='/public/bookings' && m==='POST'){
     const b = await req.json().catch(()=>null);
     if(!b) return err('Body tidak valid');
@@ -1900,6 +2504,7 @@ Deno.serve(async (req)=>{
     const email = String(b.email??'').trim();
     const promo_code = String(b.promo_code??'').trim().toUpperCase() || null;
     const voucher_code = String(b.voucher_code??'').trim().toUpperCase() || null;
+    const referral_code = String(b.referral_code??'').trim().toUpperCase() || null;
 
     // Jumlah tamu. Cloudbeds minta adults[] dan children[] per tipe kamar,
     // dan sebelum ini villa-api mengirim angka tetap 1 dewasa 0 anak untuk
@@ -1936,6 +2541,17 @@ Deno.serve(async (req)=>{
       voucherTerpakai = cek;
     }
 
+    // Kode referral karyawan: tidak bisa digabung dengan promo atau kode
+    // investor (formnya pun hanya punya satu kolom kode). Diperiksa sebelum
+    // unit dicari, alasan yang sama dengan voucher di atas.
+    let referralCek = null;
+    if(referral_code){
+      if(promo_code || voucher_code) return err('Kode referral tidak bisa digabung dengan kode promo atau kode investor', 409);
+      const cek = await periksaReferral(referral_code);
+      if(!cek.ok) return err(cek.alasan, 409);
+      referralCek = cek;
+    }
+
     let unitsQ = supabase.from('units').select('id,nomor,tarif_harian,room_type_id');
     if(room_type){
       const {data:rt} = await supabase.from('villa_room_types').select('id').eq('code',room_type).maybeSingle();
@@ -1951,6 +2567,7 @@ Deno.serve(async (req)=>{
       .in('unit_id', candidateUnits.map(u=>u.id))
       .in('status', ['terjadwal','checkin']);
     const conflicts = findConflicts(existingBookings??[], tgl_checkin, tgl_checkout);
+    for(const id of (await unitMaintenanceBentrok(tgl_checkin, tgl_checkout)).keys()) conflicts.set(id, 'maintenance');
     const freeUnit = candidateUnits.find(u=>!conflicts.has(u.id));
     if(!freeUnit) return err('Maaf, villa sudah penuh untuk tanggal yang dipilih. Silakan pilih tanggal lain atau hubungi kami di WhatsApp.', 409);
 
@@ -1989,6 +2606,13 @@ Deno.serve(async (req)=>{
         computedTarif = hasil.total;
         promoTerpakai = {promo, hasil};
       }
+    }
+
+    // Referral: harga tamu TIDAK diubah. Fee karyawan dihitung dari yang
+    // ditagih ke tamu (lihat hitungFeeReferral), di server.
+    let referralTerpakai = null;
+    if(referralCek){
+      referralTerpakai = {ref: referralCek.ref, hasil: hitungFeeReferral(referralCek.ref, computedTarif)};
     }
 
     const {data:g} = await supabase.from('guests').insert({nama, hp, email}).select('id').single();
@@ -2045,7 +2669,9 @@ Deno.serve(async (req)=>{
         // dipakai dua kali.
         voucher_id: voucherTerpakai ? voucherTerpakai.voucher.id : null,
         is_free_stay: false,
-        catatan: voucherTerpakai
+        catatan: referralTerpakai
+          ? `[Website] Referral ${referralTerpakai.ref.kode} (${referralTerpakai.ref.employee_nama}) -- fee karyawan ${referralTerpakai.hasil.fee_persen}% Rp ${Math.round(referralTerpakai.hasil.fee).toLocaleString('id-ID')} setelah lunas. Harga tamu normal.${catatan ? ` -- ${catatan}` : ''}`
+          : voucherTerpakai
           ? `[Menginap investor] Kode ${voucherTerpakai.voucher.kode} atas nama ${voucherTerpakai.pemilik.nama} -- malam pertama gratis (Rp ${Math.round(nilaiMalamGratis).toLocaleString('id-ID')}), sisanya dibayar.${catatan ? ` -- ${catatan}` : ''}`
           : (catatan ? `[Website] ${catatan}` : '[Website] Booking mandiri dari loonars.id -- menunggu bukti pembayaran QRIS.'),
       }
@@ -2076,6 +2702,29 @@ Deno.serve(async (req)=>{
       await supabase.from('villa_promos')
         .update({terpakai: Number(promoTerpakai.promo.terpakai ?? 0) + 1, updated_at: new Date().toISOString()})
         .eq('id', promoTerpakai.promo.id);
+    }
+
+    // Pemakaian referral = calon fee karyawan. Dicatat setelah booking jadi
+    // (sama seperti promo). Gagal mencatat TIDAK menggagalkan pemesanan
+    // tamu, tapi dilaporkan ke owner supaya fee karyawan tidak hilang.
+    if(referralTerpakai){
+      const {error:refErr} = await supabase.from('villa_referral_redemptions').insert({
+        referral_code_id: referralTerpakai.ref.id,
+        kode: referralTerpakai.ref.kode,
+        employee_id: referralTerpakai.ref.employee_id ?? null,
+        employee_nama: referralTerpakai.ref.employee_nama,
+        booking_id: booking.id,
+        guest_nama: nama,
+        tgl_checkin, tgl_checkout, malam: nights,
+        nilai_booking: computedTarif,
+        fee_persen: referralTerpakai.hasil.fee_persen,
+        fee: referralTerpakai.hasil.fee,
+      });
+      if(refErr){
+        console.error('referral: gagal mencatat pemakaian', refErr.message);
+        await notif(freeUnit.id, 'all', 'booking', 'Fee referral GAGAL dicatat',
+          `Booking ${String(booking.id).slice(0,8)} memakai kode ${referralTerpakai.ref.kode} (${referralTerpakai.ref.employee_nama}) tapi pemakaiannya gagal dicatat: ${refErr.message}. Catat fee Rp ${Math.round(referralTerpakai.hasil.fee).toLocaleString('id-ID')} secara manual.`, booking.id);
+      }
     }
 
     // Menginap gratis berhenti di sini: tidak ada kode pembayaran, tidak ada
@@ -2113,7 +2762,7 @@ Deno.serve(async (req)=>{
     // ditampilkan ke tamu, supaya keduanya melihat angka yang sama persis.
     const notifySetting = await getSetting('villa_notify');
     await sendWa(notifySetting?.owner_hp ?? null,
-      `Booking baru dari website\n\n${nama} (${hp})\nUnit ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\nTotal (dengan kode unik): Rp ${Math.round(totalDitagih).toLocaleString('id-ID')}${promoTerpakai ? `\nPromo ${promoTerpakai.promo.kode} (normal Rp ${Math.round(promoTerpakai.hasil.harga_normal).toLocaleString('id-ID')})` : ''}${voucherTerpakai ? `\nKode investor ${voucherTerpakai.voucher.kode} (${voucherTerpakai.pemilik.nama}) -- malam pertama gratis Rp ${Math.round(nilaiMalamGratis).toLocaleString('id-ID')}` : ''}\n\nKalau dana sudah masuk, sistem akan mengonfirmasi otomatis lewat email. Kalau belum juga terkonfirmasi, balas:\nLUNAS ${kode}`,
+      `Booking baru dari website\n\n${nama} (${hp})\nUnit ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\nTotal (dengan kode unik): Rp ${Math.round(totalDitagih).toLocaleString('id-ID')}${promoTerpakai ? `\nPromo ${promoTerpakai.promo.kode} (normal Rp ${Math.round(promoTerpakai.hasil.harga_normal).toLocaleString('id-ID')})` : ''}${referralTerpakai ? `\nReferral ${referralTerpakai.ref.kode} (${referralTerpakai.ref.employee_nama}) -- fee karyawan ${referralTerpakai.hasil.fee_persen}% Rp ${Math.round(referralTerpakai.hasil.fee).toLocaleString('id-ID')} setelah lunas` : ''}${voucherTerpakai ? `\nKode investor ${voucherTerpakai.voucher.kode} (${voucherTerpakai.pemilik.nama}) -- malam pertama gratis Rp ${Math.round(nilaiMalamGratis).toLocaleString('id-ID')}` : ''}\n\nKalau dana sudah masuk, sistem akan mengonfirmasi otomatis lewat email. Kalau belum juga terkonfirmasi, balas:\nLUNAS ${kode}`,
       {booking_id: booking.id, unit_id: freeUnit.id, template_type:'website_booking_awaiting_payment'});
 
     return json({
@@ -2122,6 +2771,7 @@ Deno.serve(async (req)=>{
       tarif: computedTarif, total_bayar: totalDitagih, kode_unik: kodeUnik, status: booking.status,
       promo: promoTerpakai ? {kode: promoTerpakai.promo.kode, nama: promoTerpakai.promo.nama, harga_normal: promoTerpakai.hasil.harga_normal, hemat: promoTerpakai.hasil.hemat} : null,
       menginap_gratis: voucherTerpakai ? {kode: voucherTerpakai.voucher.kode, malam_gratis: 1, hemat: nilaiMalamGratis} : null,
+      referral: referralTerpakai ? {kode: referralTerpakai.ref.kode} : null,
     }, 201);
   }
 
@@ -2138,7 +2788,7 @@ Deno.serve(async (req)=>{
     const {data:booking} = await supabase.from('bookings')
       .select('id,guest_id,sumber,status,invoice_no,catatan,created_at').eq('id',booking_id).maybeSingle();
     if(!booking) return err('Booking tidak ditemukan', 404);
-    if(booking.sumber !== 'website') return err('Booking ini tidak bisa dicek lewat jalur ini', 403);
+    if(!SUMBER_BOOKING_WEBSITE.includes(booking.sumber)) return err('Booking ini tidak bisa dicek lewat jalur ini', 403);
 
     // Nomor WA tamu adalah kuncinya, sama seperti confirm-payment dan
     // invoice: tanpa ini siapa pun yang menebak sebuah uuid bisa mengintip
@@ -2324,7 +2974,7 @@ Deno.serve(async (req)=>{
 
     const {data:pending} = await supabase.from('bookings')
       .select(SELECT_COLS)
-      .eq('sumber','website').eq('status','menunggu_pembayaran');
+      .in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran');
     let booking = (pending ?? []).find(x => paymentCode(x.id) === code) ?? null;
 
     // Tamu yang membayar di menit ke-59 dan owner yang membalas di menit
@@ -2337,7 +2987,7 @@ Deno.serve(async (req)=>{
     if(!booking){
       const {data:cancelled} = await supabase.from('bookings')
         .select(SELECT_COLS)
-        .eq('sumber','website').eq('status','batal');
+        .in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','batal');
       const expired = (cancelled ?? [])
         .filter(x => String(x.catatan ?? '').includes(EXPIRED_HOLD_MARK))
         .find(x => paymentCode(x.id) === code) ?? null;
@@ -2348,7 +2998,7 @@ Deno.serve(async (req)=>{
       // Mungkin sudah dikonfirmasi sebelumnya -- balasan ganda dari owner
       // harus aman, bukan error.
       const {data:already} = await supabase.from('bookings')
-        .select('id,unit_nomor,guest_nama,invoice_no,status').eq('sumber','website').eq('status','terjadwal');
+        .select('id,unit_nomor,guest_nama,invoice_no,status').in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','terjadwal');
       const done = (already ?? []).find(x => paymentCode(x.id) === code) ?? null;
       if(done) return json({success:true, already_confirmed:true, unit_nomor:done.unit_nomor, guest_nama:done.guest_nama, invoice_no:done.invoice_no});
       return json({success:false, reason:'not_found'});
@@ -2434,6 +3084,69 @@ Deno.serve(async (req)=>{
 
     const terkirim = await sendWa(investor.hp, pesan, {template_type:'dividend_proof_forward', file:mediaUrl});
     return json({success:terkirim, unit_code:unitCode, investor_nama:investor.nama, terkirim});
+  }
+
+  // ── Jembatan kode referral karyawan (Mkhsistem) ────────────────────────
+  // Dashboard Vando dan perintah WA "REFERAL <nama>" di Mkhsistem membuat
+  // dan membaca kode lewat sini. Siapa yang boleh (Vando / super admin)
+  // dijaga di Mkhsistem; di sini cukup secret jembatan. Pengiriman WA ke
+  // karyawan juga dilakukan Mkhsistem (karyawan ada di sana, bukan di sini).
+  if(path.startsWith('/bridge/referral/') && m==='POST'){
+    const bridge = await getVercelBridge();
+    if(!bridge.secret) return err('Jembatan belum dikonfigurasi',503);
+    if(!await secretsMatch(req.headers.get('x-internal-secret') ?? '', bridge.secret)) return err('Unauthorized',401);
+    const b = await req.json().catch(()=>({}));
+
+    if(path==='/bridge/referral/list'){
+      const hasil = await daftarReferral();
+      if(hasil.error) return err(hasil.error);
+      return json(hasil);
+    }
+
+    // create = selalu kode baru; issue = kode aktif terakhir milik karyawan
+    // itu, atau buat kalau belum punya (dipakai perintah WA, supaya
+    // meminta berulang kali tidak menimbun kode).
+    if(path==='/bridge/referral/create' || path==='/bridge/referral/issue'){
+      const employee_id = String(b?.employee_id ?? '').trim() || null;
+      const employee_nama = String(b?.employee_nama ?? '').trim();
+      if(!employee_nama) return err('employee_nama wajib diisi');
+      if(employee_id && !/^[0-9a-f-]{36}$/i.test(employee_id)) return err('employee_id tidak valid');
+
+      if(path==='/bridge/referral/issue' && employee_id){
+        const {data:ada} = await supabase.from('villa_referral_codes').select('*')
+          .eq('employee_id', employee_id).eq('aktif', true)
+          .order('created_at', {ascending:false}).limit(1).maybeSingle();
+        if(ada) return json({success:true, baru:false, kode:ada});
+      }
+
+      const kodeBaru = await buatKodeReferralUnik(employee_nama, path==='/bridge/referral/create' ? (b?.kode || null) : null);
+      if(!kodeBaru.ok) return json({success:false, alasan:kodeBaru.alasan}, 409);
+      const {data:row, error} = await supabase.from('villa_referral_codes').insert({
+        kode: kodeBaru.kode,
+        employee_id,
+        employee_nama,
+        catatan: String(b?.catatan ?? '').trim() || null,
+        dibuat_oleh: String(b?.dibuat_oleh ?? '').trim() || 'mkhsistem',
+      }).select('*').single();
+      if(error){
+        if(error.code === '23505') return json({success:false, alasan:'Kode sudah dipakai, coba lagi'}, 409);
+        return err(error.message);
+      }
+      return json({success:true, baru:true, kode:row}, 201);
+    }
+
+    if(path==='/bridge/referral/set-active'){
+      const id = String(b?.id ?? '');
+      if(!/^[0-9a-f-]{36}$/i.test(id)) return err('id tidak valid');
+      if(typeof b?.aktif !== 'boolean') return err('aktif wajib boolean');
+      const {data:row, error} = await supabase.from('villa_referral_codes')
+        .update({aktif:b.aktif, updated_at:new Date().toISOString()}).eq('id', id).select('*').maybeSingle();
+      if(error) return err(error.message);
+      if(!row) return err('Kode tidak ditemukan', 404);
+      return json({success:true, kode:row});
+    }
+
+    return err('Not found', 404);
   }
 
   // ── Jembatan promo untuk AI (Mkhsistem) ────────────────────────────────
@@ -3037,7 +3750,7 @@ Deno.serve(async (req)=>{
     const reminderCutoff = new Date(Date.now() - PAYMENT_REMINDER_AT_MINUTES*60*1000).toISOString();
     const {data:pendingUntukDiingatkan} = await supabase.from('bookings')
       .select('id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,created_at')
-      .eq('sumber','website').eq('status','menunggu_pembayaran').lte('created_at', reminderCutoff);
+      .in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran').lte('created_at', reminderCutoff);
 
     let diingatkan = 0;
     for(const bk of pendingUntukDiingatkan ?? []){
@@ -3064,7 +3777,7 @@ Deno.serve(async (req)=>{
     const cutoff = new Date(Date.now() - PENDING_PAYMENT_HOLD_MINUTES*60*1000).toISOString();
     const {data:stale} = await supabase.from('bookings')
       .select('id,unit_nomor,guest_nama,tgl_checkin,tgl_checkout,catatan,created_at')
-      .eq('sumber','website').eq('status','menunggu_pembayaran').lt('created_at', cutoff);
+      .in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran').lt('created_at', cutoff);
 
     const expired = [];
     for(const bk of stale ?? []){
@@ -3308,7 +4021,7 @@ Deno.serve(async (req)=>{
     const {data:booking} = await supabase.from('bookings')
       .select('id,guest_id,sumber,status').eq('id',booking_id).maybeSingle();
     if(!booking) return err('Booking tidak ditemukan', 404);
-    if(booking.sumber !== 'website') return err('Booking ini tidak bisa dicek lewat jalur ini', 403);
+    if(!SUMBER_BOOKING_WEBSITE.includes(booking.sumber)) return err('Booking ini tidak bisa dicek lewat jalur ini', 403);
 
     let guestHp = null;
     if(booking.guest_id){
@@ -3333,6 +4046,10 @@ Deno.serve(async (req)=>{
 
     const hasil = await scanPaymentInbox(cfg, {onlyBookingId: booking_id});
     if(hasil.gagal){
+      // Tetap diam untuk tamu, tapi harus terlihat di log -- kegagalan
+      // senyap di sini yang membuat email otomatis mati 2 minggu tanpa
+      // ada yang tahu (lihat CATATAN di atas MiniImap).
+      console.error(`[check-payment] booking ${booking_id.slice(0,8)}: ${hasil.gagal}`);
       return json({success:true, checked:false, confirmed:false});
     }
     return json({success:true, checked:true, confirmed: hasil.dikonfirmasi.length>0});
@@ -3344,6 +4061,473 @@ Deno.serve(async (req)=>{
   const isStaff = session.role==='receptionist' || isAdmin;
   const isOwner = session.role==='owner';
   const isFinance = session.role==='finance' || isAdmin;
+  const isManager = session.role==='manager' || isAdmin;
+
+  // Role manager HANYA boleh memakai modul kesiapan kamar. Dikunci di sini,
+  // satu kali, karena banyak rute di bawah (/bookings, /transactions,
+  // /report, /units...) hanya menolak investor dan akan terbuka untuk role
+  // baru apa pun yang tidak disebut namanya. /me/password ada di atas
+  // requireAuth ini, jadi ganti password tetap jalan.
+  if(session.role==='manager' && !path.startsWith('/manager/')) return forbidden();
+
+  // Role late_night (Laila) HANYA boleh memakai modul late night -- dikunci
+  // di sini dengan alasan yang sama seperti manager di atas. Admin boleh
+  // membuka modul ini juga.
+  if(session.role==='late_night' && !path.startsWith('/late-night/')) return forbidden();
+  if(path.startsWith('/late-night/') && session.role!=='late_night' && !isAdmin) return forbidden();
+
+  if(path==='/late-night/hari-ini' && m==='GET'){
+    await batalkanLateNightBasi();
+    const j = jendelaLateNight();
+    const unit = await unitLateNight(j);
+    const seminggu = new Date(`${j.checkout}T00:00:00Z`);
+    seminggu.setUTCDate(seminggu.getUTCDate() - 7);
+    const {data:booking, error} = await supabase.from('bookings')
+      .select('id,unit_id,unit_nomor,guest_nama,status,total_bayar,checkin_time,tgl_checkin,tgl_checkout,created_at,checkin_at,checkout_at')
+      .eq('sumber','late-night').gte('tgl_checkout', seminggu.toISOString().slice(0,10))
+      .order('created_at',{ascending:false}).limit(50);
+    if(error) return err(error.message);
+    return json({
+      jendela_buka: j.buka,
+      jam_mulai: LATE_NIGHT_JAM_MULAI,
+      jam_selesai: LATE_NIGHT_JAM_SELESAI,
+      malam: j.malam,
+      checkout: j.checkout,
+      tarif: LATE_NIGHT_TARIF,
+      hold_menit: LATE_NIGHT_HOLD_MINUTES,
+      unit,
+      booking: booking ?? [],
+    });
+  }
+
+  if(path==='/late-night/qris' && m==='GET'){
+    const setting = await getSetting('walkin_qris');
+    return json({data_url: setting?.data_url ?? null});
+  }
+
+  if(path==='/late-night/bookings' && m==='POST'){
+    const b = await req.json().catch(()=>null);
+    if(!b) return err('Body tidak valid');
+    const nama = String(b.nama ?? '').trim();
+    const hp = String(b.hp ?? '').trim();
+    const adults = Number.isFinite(Number(b.adults)) ? Math.trunc(Number(b.adults)) : 1;
+    if(nama.length < 2) return err('Nama tamu wajib diisi');
+    if(!/^[0-9+][0-9+\-\s]{7,}$/.test(hp)) return err('Nomor WhatsApp tamu tidak valid');
+    if(adults < 1 || adults > 20) return err('Jumlah tamu tidak valid');
+    if(!b.unit_id) return err('Pilih unit dulu');
+
+    const j = jendelaLateNight();
+    if(!j.buka){
+      return err(`Late night booking hanya bisa dibuat pukul ${String(LATE_NIGHT_JAM_MULAI).padStart(2,'0')}.00-${String(LATE_NIGHT_JAM_SELESAI).padStart(2,'0')}.00 WIB`, 409);
+    }
+    await batalkanLateNightBasi();
+    const u = (await unitLateNight(j)).find(x=>x.id === b.unit_id);
+    if(!u) return err('Unit tidak ditemukan atau bukan tipe Standard', 404);
+    if(!u.tersedia) return err(`Unit ${u.nomor} tidak bisa dijual: ${u.alasan}`, 409);
+
+    // Tamu yang sama (nomor sama) dipakai ulang, seperti webhook Cloudbeds.
+    let guest_id = null;
+    const {data:g0} = await supabase.from('guests').select('id').eq('hp', hp).limit(1).maybeSingle();
+    guest_id = g0?.id ?? null;
+    if(!guest_id){
+      const {data:g} = await supabase.from('guests').insert({nama, hp}).select('id').single();
+      guest_id = g?.id ?? null;
+    }
+
+    const {jam, menit} = jamMenitWIB();
+    const jamMasuk = `${String(jam).padStart(2,'0')}:${String(menit).padStart(2,'0')}`;
+    const {data, error} = await supabase.from('bookings').insert({
+      unit_id: u.id, unit_nomor: u.nomor, guest_id, guest_nama: nama,
+      tipe: 'harian', sumber: 'late-night',
+      tgl_checkin: j.malam, tgl_checkout: j.checkout, durasi_malam: 1,
+      checkin_time: `${jamMasuk}:00`,
+      tarif: LATE_NIGHT_TARIF, total_bayar: LATE_NIGHT_TARIF,
+      status: 'terjadwal', adults, children: 0,
+      catatan: `${LATE_NIGHT_MARK} Dibuat ${session.email} pukul ${jamMasuk} WIB, keluar ${String(LATE_NIGHT_JAM_SELESAI).padStart(2,'0')}.00 WIB. QRIS statis Rp${LATE_NIGHT_TARIF.toLocaleString('id-ID')}.`,
+    }).select('id,unit_id,unit_nomor,guest_nama,status,total_bayar,checkin_time,tgl_checkin,tgl_checkout,created_at').single();
+    if(error){
+      if(error.code === '23P01') return err(`Unit ${u.nomor} baru saja terisi -- pilih unit lain`, 409);
+      return err(error.message);
+    }
+    await notif(u.id,'all','booking',`Late night — Unit ${u.nomor}`,`${nama} · menunggu pembayaran QRIS Rp${LATE_NIGHT_TARIF.toLocaleString('id-ID')} (dibuat ${session.email})`,data.id);
+    return json(data, 201);
+  }
+
+  // Lunas = pembayaran QRIS sudah dicek Laila sendiri (keputusan owner).
+  // Langsung check-in lewat villa_commit_checkin: PIN dibuat, unit jadi
+  // occupied, pemasukan sebesar LATE_NIGHT_TARIF tercatat di transactions (bagi hasil).
+  if(path==='/late-night/lunas' && m==='POST'){
+    const b = await req.json().catch(()=>null);
+    if(!b?.booking_id) return err('booking_id wajib diisi');
+    const {data:bk} = await supabase.from('bookings')
+      .select('id,sumber,status,tgl_checkout,guest_id').eq('id', b.booking_id).maybeSingle();
+    if(!bk || bk.sumber !== 'late-night') return err('Booking late night tidak ditemukan', 404);
+    if(bk.status === 'batal') return err('Booking ini sudah batal (lewat batas waktu bayar) -- buat booking baru', 409);
+    if(bk.status !== 'terjadwal') return err('Booking ini sudah ditandai lunas', 409);
+    if(bk.tgl_checkout < todayWIB()) return err('Booking ini sudah lewat waktunya', 409);
+
+    const {data, error} = await supabase.rpc('villa_commit_checkin', {
+      p_booking_id: bk.id,
+      p_checkin_by: session.email ?? session.uid,
+      p_ktp_photo_path: null,
+      p_signature_data_url: null,
+    });
+    if(error){
+      const msg = error.message ?? '';
+      if(msg.includes('already_checked_in')) return err('Booking ini sudah ditandai lunas', 409);
+      if(msg.includes('invalid_booking_status')) return err('Booking tidak dalam status yang bisa ditandai lunas', 409);
+      return err(msg, 500);
+    }
+    await notif(data.unit_id,'all','checkin',`Late night check-in — Unit ${data.unit_nomor}`,`${data.guest_nama} · lunas QRIS Rp${LATE_NIGHT_TARIF.toLocaleString('id-ID')} (dikonfirmasi ${session.email})`,bk.id);
+
+    let hp = null;
+    if(data.guest_id){
+      const {data:g} = await supabase.from('guests').select('hp').eq('id', data.guest_id).maybeSingle();
+      hp = g?.hp ?? null;
+    }
+    const wa_terkirim = await sendWa(hp,
+      `Halo ${data.guest_nama}, selamat datang di Loonars Private Living!\nKode PIN pintu Anda: *${data.pin_kode}*\nCheck-out paling lambat pukul ${String(LATE_NIGHT_JAM_SELESAI).padStart(2,'0')}.00 WIB. Mohon jaga kerahasiaan kode ini. Terima kasih.`,
+      {booking_id: bk.id, unit_id: data.unit_id, template_type:'pin_checkin'});
+    return json({success:true, pin_kode: data.pin_kode, unit_nomor: data.unit_nomor, wa_terkirim: !!wa_terkirim});
+  }
+
+  if(path==='/late-night/batal' && m==='POST'){
+    const b = await req.json().catch(()=>null);
+    if(!b?.booking_id) return err('booking_id wajib diisi');
+    const {data:bk} = await supabase.from('bookings')
+      .select('id,catatan').eq('id', b.booking_id).eq('sumber','late-night').maybeSingle();
+    if(!bk) return err('Booking late night tidak ditemukan', 404);
+    const {data:upd, error} = await supabase.from('bookings')
+      .update({status:'batal', catatan:`${bk.catatan ?? ''} [Dibatalkan ${session.email} ${new Date().toISOString()}]`.trim()})
+      .eq('id', bk.id).eq('status','terjadwal').select('id');
+    if(error) return err(error.message);
+    if(!(upd ?? []).length) return err('Hanya booking yang belum lunas yang bisa dibatalkan', 409);
+    return json({success:true});
+  }
+
+  if(path==='/late-night/checkout' && m==='POST'){
+    const b = await req.json().catch(()=>null);
+    if(!b?.booking_id) return err('booking_id wajib diisi');
+    const {data:bk} = await supabase.from('bookings')
+      .select('id').eq('id', b.booking_id).eq('sumber','late-night').maybeSingle();
+    if(!bk) return err('Booking late night tidak ditemukan', 404);
+    const {data, error} = await supabase.rpc('villa_commit_checkout', {
+      p_booking_id: bk.id,
+      p_checkout_by: session.email ?? session.uid,
+      p_kondisi: null,
+    });
+    if(error){
+      const msg = error.message ?? '';
+      if(msg.includes('already_checked_out')) return err('Tamu ini sudah checkout', 409);
+      if(msg.includes('invalid_booking_status')) return err('Booking belum lunas, tidak bisa checkout', 409);
+      return err(msg, 500);
+    }
+    await notif(data.unit_id,'all','checkout',`Late night checkout — Unit ${data.unit_nomor}`,`${data.guest_nama} sudah keluar. Housekeeping dijadwalkan.`,bk.id);
+    return json({success:true});
+  }
+
+
+  // ── KESIAPAN KAMAR ──────────────────────────────────────────────────────
+  // Lihat komentar di atas CHECKLIST_KAMAR.
+
+  if(path==='/manager/whoami' && m==='GET'){
+    if(!isManager) return forbidden();
+    return json({ ok:true, role: session.role });
+  }
+
+  if(path==='/manager/kamar' && m==='GET'){
+    if(!isManager) return forbidden();
+    const hariIni = todayWIB();
+    const [{data:units, error:uErr}, {data:rt}, {data:map}, {data:mnt, error:mErr}, {data:cek, error:cErr}, {data:tamu}] = await Promise.all([
+      supabase.from('units').select('id,nomor,blok,status,room_type_id').order('nomor'),
+      supabase.from('villa_room_types').select('id,name'),
+      supabase.from('cloudbeds_room_mapping').select('unit_id,cloudbeds_room_id'),
+      supabase.from('villa_room_maintenance').select('*'),
+      // Cukup untuk menemukan pengecekan terakhir tiap unit (13 unit).
+      supabase.from('villa_room_checks').select('unit_id,hasil,checklist,catatan,cloudbeds_aksi,cloudbeds_pesan,dicek_oleh_nama,created_at').order('created_at',{ascending:false}).limit(300),
+      supabase.from('bookings').select('unit_id,tgl_checkin,tgl_checkout,status').in('status',['terjadwal','checkin']).or(`tgl_checkout.gte.${hariIni},tgl_checkout.is.null`),
+    ]);
+    if(uErr) return err(uErr.message);
+    if(mErr || cErr) return err('Tabel kesiapan kamar belum tersedia -- migrasi 20261002000002 belum dijalankan', 503);
+    const rtNama = new Map((rt??[]).map(r=>[r.id, r.name]));
+    const terpetakan = new Set((map??[]).filter(r=>r.cloudbeds_room_id).map(r=>r.unit_id));
+    // Kamar yang ditutup langsung di Cloudbeds (bukan lewat modul ini) dalam
+    // 30 hari ke depan -- supaya manager tidak mengira kamar itu dijual.
+    // Gagal baca = tidak ditampilkan, halaman tetap jalan.
+    const blokCb = await cloudbedsBlokDalamRentang(hariIni, addDaysStr(hariIni, 29));
+    const roomIdUnit = new Map((map??[]).map(r=>[r.unit_id, String(r.cloudbeds_room_id)]));
+    const milikModul = new Set((mnt??[]).map(r=>String(r.cloudbeds_room_block_id)));
+    const mntBy = new Map((mnt??[]).map(r=>[r.unit_id, r]));
+    const cekBy = new Map();
+    for(const c of cek??[]) if(!cekBy.has(c.unit_id)) cekBy.set(c.unit_id, c);
+    return json({
+      hari_ini: hariIni,
+      cloudbeds_terbaca: blokCb !== null,
+      checklist: CHECKLIST_KAMAR,
+      maks_malam: MAKS_MALAM_MAINTENANCE,
+      kamar: (units??[]).map(u=>{
+        const mt = mntBy.get(u.id) ?? null;
+        const booking = (tamu??[]).filter(b=>b.unit_id===u.id).sort((a,b)=>String(a.tgl_checkin).localeCompare(String(b.tgl_checkin)));
+        return {
+          unit_id: u.id, nomor: u.nomor, blok: u.blok, status_unit: u.status,
+          tipe: rtNama.get(u.room_type_id) ?? null,
+          cloudbeds_terpetakan: terpetakan.has(u.id),
+          // Blok yang sudah lewat tanggalnya sudah tidak menutup apa pun di
+          // Cloudbeds; ditampilkan sebagai "terbuka lagi", bukan maintenance.
+          maintenance: mt ? {...mt, berakhir: mt.tutup_sampai < hariIni} : null,
+          cek_terakhir: cekBy.get(u.id) ?? null,
+          // Hanya tanggal, tanpa nama tamu: cukup untuk memilih kapan kamar
+          // bisa ditutup tanpa bentrok.
+          booking_mendatang: booking.slice(0,3).map(b=>({tgl_checkin:b.tgl_checkin, tgl_checkout:b.tgl_checkout, sedang_menginap:b.status==='checkin'})),
+          blok_cloudbeds_lain: (blokCb ?? [])
+            .filter(k=>!milikModul.has(k.roomBlockID) && k.roomIDs.includes(roomIdUnit.get(u.id) ?? '-'))
+            .map(k=>({tipe: LABEL_TIPE_BLOK[k.tipe] ?? k.tipe, alasan: k.alasan, startDate: k.startDate, endDate: k.endDate})),
+        };
+      }),
+    });
+  }
+
+  if(path==='/manager/riwayat' && m==='GET'){
+    if(!isManager) return forbidden();
+    const unit_id = url.searchParams.get('unit_id');
+    let q = supabase.from('villa_room_checks').select('*').order('created_at',{ascending:false}).limit(50);
+    if(unit_id) q = q.eq('unit_id', unit_id);
+    const {data,error} = await q;
+    if(error) return err(error.message);
+    return json(data);
+  }
+
+  if(path==='/manager/kamar/cek' && m==='POST'){
+    if(!isManager) return forbidden();
+    const b = await req.json().catch(()=>null);
+    const unit_id = String(b?.unit_id ?? '');
+    const hasil = b?.hasil;
+    if(!/^[0-9a-f-]{36}$/i.test(unit_id)) return err('unit_id tidak valid');
+    if(!['siap','maintenance'].includes(hasil)) return err('hasil harus siap atau maintenance');
+
+    const checklist = {};
+    for(const k of CHECKLIST_KAMAR) checklist[k] = b?.checklist?.[k] === true;
+    const catatan = String(b?.catatan ?? '').trim().slice(0,500) || null;
+    const semuaBaik = CHECKLIST_KAMAR.every(k=>checklist[k]);
+    if(hasil==='siap' && !semuaBaik) return err('Kamar Siap hanya bisa kalau ke-10 poin checklist sudah dicentang baik');
+    // Alasan ikut tertulis di room block Cloudbeds, supaya siapa pun yang
+    // melihat kalender Cloudbeds tahu kenapa kamarnya tertutup.
+    if(hasil==='maintenance' && !catatan) return err('Tulis kerusakannya di catatan -- alasan ini ikut tercatat di Cloudbeds');
+
+    const {data:unit} = await supabase.from('units').select('id,nomor').eq('id',unit_id).maybeSingle();
+    if(!unit) return err('Unit tidak ditemukan',404);
+    const {data:mt, error:mtErr} = await supabase.from('villa_room_maintenance').select('*').eq('unit_id',unit_id).maybeSingle();
+    if(mtErr) return err('Tabel kesiapan kamar belum tersedia -- migrasi 20261002000002 belum dijalankan', 503);
+
+    const hariIni = todayWIB();
+    const {data:pengecek} = await supabase.from('villa_users').select('nama').eq('id',session.uid).maybeSingle();
+    const namaPengecek = pengecek?.nama ?? session.email ?? null;
+    const catatCek = async (extra) => {
+      await supabase.from('villa_room_checks').insert({
+        unit_id, unit_nomor: unit.nomor, hasil, checklist, catatan,
+        dicek_oleh: session.uid, dicek_oleh_nama: namaPengecek, ...extra,
+      });
+    };
+
+    // ── KAMAR SIAP ──
+    // Owner 3 Okt 2026: "saya ingin semua bisa dikendalikan di dashboard
+    // itu" -- Kamar Siap membuka blok maintenance milik modul ini DAN blok
+    // yang dibuat langsung di Cloudbeds (mis. A2/A3 yang owner tutup).
+    if(hasil==='siap'){
+      const mtAktif = !!mt && mt.tutup_sampai >= hariIni;
+      // Blok modul yang sudah lewat: tidak menutup apa pun lagi; cukup dibersihkan.
+      // Blok lama itu tidak dihapus dari Cloudbeds supaya riwayatnya utuh.
+      if(mt && !mtAktif) await supabase.from('villa_room_maintenance').delete().eq('unit_id',unit_id);
+
+      if(mtAktif){
+        const hapus = await cloudbedsTulis('POST', 'deleteRoomBlock', new URLSearchParams({roomBlockID: mt.cloudbeds_room_block_id}));
+        // Baca balik apa pun jawabannya: blok yang sudah dihapus orang langsung
+        // di Cloudbeds membuat delete "gagal", padahal kamarnya sudah terbuka.
+        const sisa = await cloudbedsBacaRoomBlock(mt.cloudbeds_room_block_id, mt.tutup_mulai > hariIni ? mt.tutup_mulai : hariIni);
+        const terbuka = sisa === null;
+        await catatRoomBlockLog('outbound.room_block.deleted', terbuka, {unit_id, roomBlockID: mt.cloudbeds_room_block_id, jawaban: hapus.body, error: terbuka ? null : (hapus.pesan ?? 'blok masih terbaca setelah dihapus')});
+        if(!terbuka){
+          const pesan = sisa === undefined
+            ? `Cloudbeds belum bisa dipastikan sudah membuka unit ${unit.nomor}${hapus.pesan ? ': '+hapus.pesan : ''}. Kamar dianggap masih tertutup -- coba lagi sebentar.`
+            : `Cloudbeds menolak membuka unit ${unit.nomor}: ${hapus.pesan ?? 'blok masih ada'}.`;
+          await catatCek({cloudbeds_aksi:'gagal', cloudbeds_room_block_id: mt.cloudbeds_room_block_id, cloudbeds_pesan: pesan});
+          return err(pesan, 502);
+        }
+        await supabase.from('villa_room_maintenance').delete().eq('unit_id',unit_id);
+      }
+
+      // Blok yang dibuat langsung di Cloudbeds (35 hari ke depan -- batas
+      // getRoomBlocks). Kalau satu blok berisi beberapa kamar, HANYA kamar ini
+      // yang dikeluarkan (putRoomBlock dengan sisa kamar); kamar lain tetap
+      // tertutup. Courtesy hold tidak disentuh: itu tahanan untuk tamu.
+      const {data:mapCb} = await supabase.from('cloudbeds_room_mapping').select('cloudbeds_room_id').eq('unit_id',unit_id).maybeSingle();
+      const roomID = mapCb?.cloudbeds_room_id ? String(mapCb.cloudbeds_room_id) : null;
+      const dibukaLain = [];
+      let peringatan = null;
+      if(roomID){
+        const semua = await cloudbedsBlokDalamRentang(hariIni, addDaysStr(hariIni, 34));
+        if(semua === null){
+          peringatan = 'Blokir di Cloudbeds tidak terbaca saat ini -- kalau kamar ini ditutup langsung di Cloudbeds, tekan Kamar Siap lagi sebentar lagi.';
+        } else {
+          const lain = semua.filter(k=>k.roomIDs.includes(roomID) && k.roomBlockID !== mt?.cloudbeds_room_block_id);
+          const gagal = [];
+          for(const k of lain){
+            if(k.tipe === 'courtesy_hold'){ gagal.push(`courtesy hold ${k.startDate} s/d ${k.endDate} (tahanan tamu, buka di Cloudbeds)`); continue; }
+            const sisaKamar = k.rooms.filter(r=>r.roomID !== roomID && r.isSource !== false);
+            let tulis;
+            if(!sisaKamar.length){
+              tulis = await cloudbedsTulis('POST', 'deleteRoomBlock', new URLSearchParams({roomBlockID: k.roomBlockID}));
+            } else {
+              const form = new URLSearchParams({roomBlockID: k.roomBlockID});
+              if(k.startDate) form.set('startDate', k.startDate);
+              if(k.endDate) form.set('endDate', k.endDate);
+              if(k.alasan) form.set('roomBlockReason', k.alasan);
+              sisaKamar.forEach((r, n)=>{
+                form.set(`rooms[${n}][roomID]`, r.roomID);
+                if(r.roomTypeID) form.set(`rooms[${n}][roomTypeID]`, r.roomTypeID);
+              });
+              tulis = await cloudbedsTulis('PUT', 'putRoomBlock', form);
+            }
+            await catatRoomBlockLog(sisaKamar.length ? 'outbound.room_block.room_removed' : 'outbound.room_block.deleted', tulis.ok, {
+              unit_id, roomID, roomBlockID: k.roomBlockID, blok_asal: k, sisa_kamar: sisaKamar.map(r=>r.roomID),
+              jawaban: tulis.body, error: tulis.ok ? null : tulis.pesan,
+            });
+            dibukaLain.push(`${LABEL_TIPE_BLOK[k.tipe] ?? k.tipe ?? 'blok'} ${k.startDate} s/d ${k.endDate}${k.alasan ? ` "${k.alasan}"` : ''}${sisaKamar.length ? ` (${sisaKamar.length} kamar lain tetap tertutup)` : ''}`);
+            if(!tulis.ok) gagal.push(`${k.startDate} s/d ${k.endDate}: ${tulis.pesan}`);
+          }
+          // Baca balik: kamar ini harus sudah tidak ada di blok mana pun (kecuali courtesy hold).
+          if(lain.length){
+            const setelah = await cloudbedsBlokDalamRentang(hariIni, addDaysStr(hariIni, 34));
+            const masih = setelah === null ? null : setelah.filter(k=>k.roomIDs.includes(roomID) && k.tipe !== 'courtesy_hold');
+            if(masih === null || masih.length || gagal.length){
+              const pesan = `Unit ${unit.nomor} belum sepenuhnya terbuka di Cloudbeds${gagal.length ? ': '+gagal.join('; ') : (masih === null ? ' (tidak bisa dibaca balik)' : ' (blok masih terbaca)')}. Coba lagi, atau cek kalender Cloudbeds.`;
+              await catatCek({cloudbeds_aksi:'gagal', cloudbeds_pesan: pesan});
+              return err(pesan, 502);
+            }
+          }
+        }
+      }
+
+      // Supaya loonars.id dan Front Desk di isolate ini langsung melihat perubahan.
+      cacheBlokCloudbeds.clear();
+      const dibuka = mtAktif || dibukaLain.length > 0;
+      await catatCek({
+        cloudbeds_aksi: dibuka ? 'dibuka' : 'tidak_perlu',
+        cloudbeds_room_block_id: mtAktif ? mt.cloudbeds_room_block_id : null,
+        cloudbeds_pesan: dibukaLain.length ? `Blok Cloudbeds dibuka: ${dibukaLain.join('; ')}` : peringatan,
+      });
+      if(dibuka){
+        await notif(unit_id, 'receptionist', 'maintenance', `Kamar Siap -- Unit ${unit.nomor}`,
+          `${namaPengecek ?? 'Manager'} membuka lagi Unit ${unit.nomor}; kamar kembali dijual.`, null);
+        return json({success:true, aksi:'dibuka', pesan:`Unit ${unit.nomor} dibuka dan kembali dijual di Cloudbeds/OTA, loonars.id, dan Front Desk.`});
+      }
+      return json({success:true, aksi:'tidak_perlu', pesan:`Unit ${unit.nomor} siap dan tetap dijual.${peringatan ? ' '+peringatan : ''}`});
+    }
+
+    // ── KAMAR MAINTENANCE ──
+    const tutup_mulai = String(b?.tutup_mulai ?? hariIni);
+    const tutup_sampai = String(b?.tutup_sampai ?? '');
+    if(!isValidDateStr(tutup_mulai) || !isValidDateStr(tutup_sampai)) return err('Tanggal tutup tidak valid');
+    if(tutup_mulai < hariIni) return err('Tanggal mulai tutup tidak boleh sebelum hari ini');
+    if(tutup_sampai < tutup_mulai) return err('Tanggal selesai harus sama atau setelah tanggal mulai');
+    const masihAktif = mt && mt.tutup_sampai >= hariIni;
+    // Saat memperpanjang, blok tetap dimulai dari tanggal mulai lamanya.
+    const mulaiEfektif = masihAktif && mt.tutup_mulai < tutup_mulai ? mt.tutup_mulai : tutup_mulai;
+    const malam = Math.round((new Date(tutup_sampai).getTime() - new Date(mulaiEfektif).getTime())/86400000) + 1;
+    if(malam > MAKS_MALAM_MAINTENANCE) return err(`Paling lama ${MAKS_MALAM_MAINTENANCE} malam sekali tutup -- perpanjang lagi nanti kalau perlu`);
+
+    // Bentrok dengan tamu/booking: tolak di sini dengan tanggal yang jelas,
+    // jangan biarkan jadi pesan Cloudbeds yang membingungkan. Memindahkan
+    // tamu adalah keputusan resepsionis, bukan efek samping tombol ini.
+    const {data:bk} = await supabase.from('bookings').select('tgl_checkin,tgl_checkout,status')
+      .eq('unit_id',unit_id).in('status',['terjadwal','checkin']);
+    const bentrok = (bk??[]).find(x=>datesOverlap(x.tgl_checkin, x.tgl_checkout, tutup_mulai, addDaysStr(tutup_sampai,1)));
+    if(bentrok){
+      return err(`Unit ${unit.nomor} ${bentrok.status==='checkin'?'sedang ditempati tamu':'sudah dipesan'} ${bentrok.tgl_checkin} s/d ${bentrok.tgl_checkout ?? '?'}. Pilih tanggal tutup di luar itu, atau minta resepsionis memindahkan tamunya dulu.`, 409);
+    }
+
+    const {data:mapping} = await supabase.from('cloudbeds_room_mapping').select('cloudbeds_room_id').eq('unit_id',unit_id).maybeSingle();
+    if(!mapping?.cloudbeds_room_id) return err(`Unit ${unit.nomor} belum dipetakan ke kamar Cloudbeds -- hubungi admin`, 409);
+
+    const alasan = `Maintenance (${namaPengecek ?? 'manager'}): ${catatan}`.slice(0,250);
+
+    let hasilCb, aksi;
+    if(masihAktif){
+      // Perpanjang / ubah tanggal blok yang sama, jangan hapus lalu buat baru:
+      // di sela keduanya kamar sempat terbuka dan bisa terjual.
+      // Tanggal mulai blok yang sudah berjalan tidak dimundurkan.
+      const mulaiBaru = mulaiEfektif;
+      const form = new URLSearchParams({roomBlockID: mt.cloudbeds_room_block_id, startDate: mulaiBaru, endDate: tutup_sampai, roomBlockReason: alasan});
+      hasilCb = await cloudbedsTulis('PUT', 'putRoomBlock', form);
+      hasilCb.roomBlockID = mt.cloudbeds_room_block_id;
+      hasilCb.mulai = mulaiBaru;
+      aksi = 'diperpanjang';
+    } else {
+      const roomTypeID = await cloudbedsRoomTypeIdUntuk(mapping.cloudbeds_room_id);
+      if(!roomTypeID) return err('Tipe kamar Cloudbeds untuk unit ini tidak ditemukan -- coba lagi, atau hubungi admin', 502);
+      const form = new URLSearchParams({roomBlockType:'out_of_service', roomBlockReason: alasan, startDate: tutup_mulai, endDate: tutup_sampai});
+      form.set('rooms[0][roomID]', String(mapping.cloudbeds_room_id));
+      form.set('rooms[0][roomTypeID]', roomTypeID);
+      hasilCb = await cloudbedsTulis('POST', 'postRoomBlock', form);
+      hasilCb.roomBlockID = hasilCb.body?.roomBlockID ? String(hasilCb.body.roomBlockID) : null;
+      hasilCb.mulai = tutup_mulai;
+      aksi = 'ditutup';
+    }
+
+    // Baca balik: blok baru dianggap ada kalau benar-benar terbaca di Cloudbeds.
+    const terbaca = hasilCb.roomBlockID ? await cloudbedsBacaRoomBlock(hasilCb.roomBlockID, hasilCb.mulai) : undefined;
+    const berhasil = hasilCb.ok && !!terbaca;
+    await catatRoomBlockLog(aksi==='ditutup' ? 'outbound.room_block.created' : 'outbound.room_block.updated', berhasil, {
+      unit_id, roomID: mapping.cloudbeds_room_id, roomBlockID: hasilCb.roomBlockID, mulai: hasilCb.mulai, sampai: tutup_sampai,
+      jawaban: hasilCb.body, terbaca: terbaca ?? null, error: berhasil ? null : (hasilCb.pesan ?? 'blok tidak terbaca kembali'),
+    });
+    if(!berhasil){
+      let pesan;
+      if(aksi==='ditutup'){
+        // "Some date has another event assigned in this period" = kamar ini
+        // sudah punya blok atau reservasi di Cloudbeds pada rentang itu.
+        // Sebutkan yang mana, jangan bilang "masih dijual" -- kalau itu blok,
+        // kamarnya justru sedang TIDAK dijual. Untuk membukanya, Kamar Siap
+        // (sejak 3 Okt 2026 boleh membuka blok yang dibuat di Cloudbeds).
+        const lain = (await cloudbedsBlokDalamRentang(hasilCb.mulai, tutup_sampai) ?? [])
+          .filter(k=>k.roomIDs.includes(String(mapping.cloudbeds_room_id)));
+        if(lain.length){
+          const k = lain[0];
+          pesan = `Unit ${unit.nomor} SUDAH DITUTUP langsung di Cloudbeds (${LABEL_TIPE_BLOK[k.tipe] ?? k.tipe ?? 'blok'}, ${k.startDate ?? '?'} s/d ${k.endDate ?? '?'}${k.alasan ? `, "${k.alasan}"` : ''}), jadi saat ini memang tidak dijual di OTA. Tidak perlu ditutup lagi; untuk membukanya, tekan Kamar Siap.`;
+        } else if(/another event/i.test(hasilCb.pesan ?? '')){
+          pesan = `Unit ${unit.nomor} sudah punya reservasi di Cloudbeds antara ${hasilCb.mulai} dan ${tutup_sampai} yang belum tercatat di sistem villa. Kamar tidak ditutup -- cek kalender Cloudbeds, atau pilih tanggal lain.`;
+        } else {
+          pesan = `Cloudbeds menolak menutup unit ${unit.nomor}: ${hasilCb.pesan ?? 'blok tidak terbaca kembali setelah dibuat'}. Kamar MASIH DIJUAL.`;
+        }
+      } else {
+        pesan = `Cloudbeds menolak memperpanjang maintenance unit ${unit.nomor}: ${hasilCb.pesan ?? 'blok tidak terbaca kembali'}. Tanggal tutup lama (s/d ${mt.tutup_sampai}) tetap berlaku.`;
+      }
+      await catatCek({cloudbeds_aksi:'gagal', tutup_mulai, tutup_sampai, cloudbeds_room_block_id: hasilCb.roomBlockID, cloudbeds_pesan: pesan});
+      // Bentrok kalender = keadaan kamar, bukan gangguan Cloudbeds.
+      return err(pesan, /another event/i.test(hasilCb.pesan ?? '') ? 409 : 502);
+    }
+
+    const {error:upErr} = await supabase.from('villa_room_maintenance').upsert({
+      unit_id, tutup_mulai: hasilCb.mulai, tutup_sampai, alasan: catatan,
+      cloudbeds_room_block_id: hasilCb.roomBlockID,
+      ditutup_oleh: session.uid, ditutup_oleh_nama: namaPengecek, updated_at: new Date().toISOString(),
+    }, {onConflict:'unit_id'});
+    await catatCek({cloudbeds_aksi: aksi, tutup_mulai: hasilCb.mulai, tutup_sampai, cloudbeds_room_block_id: hasilCb.roomBlockID,
+      cloudbeds_pesan: `Cloudbeds: ${terbaca.startDate ?? '?'} s/d ${terbaca.endDate ?? '?'}`});
+    if(upErr){
+      // Cloudbeds SUDAH tertutup tapi catatan kita gagal: jangan dilaporkan
+      // sukses biasa, karena tombol Kamar Siap tidak akan tahu blok mana yang
+      // harus dibuka.
+      return err(`Unit ${unit.nomor} sudah ditutup di Cloudbeds (blok ${hasilCb.roomBlockID}), tapi gagal dicatat di sistem: ${upErr.message}. Laporkan ke admin.`, 500);
+    }
+    // Ke resepsionis saja: investor tidak perlu notifikasi operasional ini.
+    cacheBlokCloudbeds.clear();
+    await notif(unit_id, 'receptionist', 'maintenance', `Maintenance -- Unit ${unit.nomor}`,
+      `${namaPengecek ?? 'Manager'} menutup Unit ${unit.nomor} ${hasilCb.mulai} s/d ${tutup_sampai}: ${catatan}`, null);
+    return json({success:true, aksi, pesan:`Unit ${unit.nomor} ditutup ${hasilCb.mulai} s/d ${tutup_sampai} dan tidak dijual di Cloudbeds/OTA maupun loonars.id.`,
+      cloudbeds: {startDate: terbaca.startDate ?? null, endDate: terbaca.endDate ?? null}});
+  }
+
 
   // ── FINANCE DASHBOARD ───────────────────────────────────────────────────
   // See the module comment above calculateExpectedSettlement() for the data
@@ -3374,17 +4558,25 @@ Deno.serve(async (req)=>{
     if(!isFinance) return forbidden();
     const { from, to } = financeDateRange();
     const { data: rows, error } = await supabase.from('bookings')
-      .select('id,sumber,status,tgl_checkin,tgl_checkout,total_bayar,tarif,cloudbeds_balance')
+      .select('id,sumber,status,tgl_checkin,tgl_checkout,total_bayar,tarif,cloudbeds_subtotal,cloudbeds_balance')
       .gte('tgl_checkin', from).lte('tgl_checkin', to);
     if(error) return err(error.message);
     const bookings = rows ?? [];
     const configMap = await getSettlementConfigMap();
     await ensureFinanceSettlements(bookings, configMap);
 
-    const active = bookings.filter(b=>b.status!=='batal');
-    const cancelled = bookings.length - active.length;
+    const active = bookings.filter(isPemasukanDiakui);
+    const cancelled = bookings.filter(b=>b.status==='batal').length;
     const amountOf = b => Number(b.total_bayar ?? b.tarif ?? 0);
+    // Booking mendatang: tanggal check-in Cloudbeds belum tiba, belum pemasukan.
+    const todayForPipeline = todayWIB();
+    const pipelineRows = bookings.filter(b=>STATUS_PEMASUKAN_DIAKUI.includes(b.status) && b.tgl_checkin > todayForPipeline);
+    const pipelineAmount = pipelineRows.reduce((s,b)=>s+pendapatanBersih(b),0);
+    // Sudah dihitung (tanggalnya sudah lewat), tapi resepsionis belum
+    // menekan check-in -- peringatan operasional saja, bukan soal angka.
+    const belumCheckin = bookings.filter(b=>b.status==='terjadwal' && b.tgl_checkin < todayForPipeline);
     const gross_revenue = active.reduce((s,b)=>s+amountOf(b),0);
+    const net_revenue = active.reduce((s,b)=>s+pendapatanBersih(b),0);
     const payment_received = active.filter(b=>paymentStatusForBooking(b)==='PAID').reduce((s,b)=>s+amountOf(b),0);
     const outstanding = active.reduce((s,b)=>s+outstandingForBooking(b, amountOf(b)),0);
     const cloudbedsVerifiedCount = active.filter(b=>b.cloudbeds_balance != null).length;
@@ -3419,11 +4611,18 @@ Deno.serve(async (req)=>{
     if(alertsDueToday>0) alerts.push({ type:'settlement_due', level:'info', message:`${alertsDueToday} settlement diperkirakan cair hari ini.` });
     if(alertsOverdue>0) alerts.push({ type:'overdue', level:'danger', message:`${alertsOverdue} settlement sudah lewat tanggal perkiraan cair dan belum diterima.` });
     if(alertsUnknown>0) alerts.push({ type:'unknown_settlement_rule', level:'warning', message:`${alertsUnknown} transaksi punya aturan settlement yang belum dikonfigurasi (UNKNOWN).` });
+    if(belumCheckin.length>0) alerts.push({ type:'belum_checkin', level:'warning', message:`${belumCheckin.length} booking sudah lewat tanggal check-in tapi belum di-check-in di sistem -- sudah DIHITUNG sebagai pemasukan (mengikuti tanggal Cloudbeds). Kalau tamunya ternyata tidak datang, tandai batal/no-show supaya angkanya terkoreksi.` });
 
     return json({
       period: { from, to },
-      gross_revenue, net_revenue: gross_revenue,
-      net_revenue_note: 'Sama dengan Gross Revenue -- integrasi Cloudbeds ini hanya membawa total reservasi (grandTotal), tidak ada feed diskon/refund terpisah untuk dikurangkan.',
+      recognition_rule: 'Pemasukan diakui per tanggal check-in Cloudbeds: dihitung begitu tanggal check-in sudah tiba (tidak menunggu tombol check-in resepsionis), selama booking tidak batal. Booking dengan tanggal check-in di masa depan ditampilkan terpisah sebagai booking mendatang dan belum dihitung.',
+      pipeline: {
+        amount: pipelineAmount,
+        count: pipelineRows.length,
+        note: 'Booking dengan tanggal check-in yang belum tiba. Masih tercatat di Cloudbeds, belum dihitung sebagai pemasukan -- bisa berubah kalau dibatalkan.',
+      },
+      gross_revenue, net_revenue,
+      net_revenue_note: 'Bersih = harga kamar dari Cloudbeds ("Deposit Amount" di email reservasi), sebelum fee OTA yang Cloudbeds tambahkan ke Grand Total. Booking website/walk-in: bersih sama dengan kotor. Diskon/refund tidak tersedia dari Cloudbeds.',
       payment_received,
       payment_received_note: cloudbedsVerifiedCount>0
         ? `Untuk ${cloudbedsVerifiedCount} dari ${active.length} booking, dihitung dari saldo asli Cloudbeds (getReservations.balance). Sisanya (booking direct/walk-in atau belum tersinkron) memakai status booking (checkin/checkout = lunas, sesuai alur "Tandai Lunas" front desk) sebagai perkiraan.`
@@ -3456,13 +4655,13 @@ Deno.serve(async (req)=>{
     if(!isFinance) return forbidden();
     const { from, to } = financeDateRange();
     const { data: rows, error } = await supabase.from('bookings')
-      .select('id,sumber,status,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_balance')
-      .gte('tgl_checkin', from).lte('tgl_checkin', to).neq('status','batal');
+      .select('id,sumber,status,unit_nomor,guest_nama,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_subtotal,cloudbeds_balance')
+      .gte('tgl_checkin', from).lte('tgl_checkin', to).lte('tgl_checkin', todayWIB()).in('status', STATUS_PEMASUKAN_DIAKUI);
     if(error) return err(error.message);
     const bookings = rows ?? [];
     const configMap = await getSettlementConfigMap();
     await ensureFinanceSettlements(bookings, configMap);
-    const { commissionPctBySumber } = await getOtaCommissionPctMap();
+    const pctOf = (gross, net) => gross > 0 ? Math.round(((gross - net) / gross) * 1000) / 10 : 0;
 
     const ids = bookings.map(b=>b.id);
     const settlementByBooking = new Map();
@@ -3471,15 +4670,55 @@ Deno.serve(async (req)=>{
       for(const s of (settlements ?? [])) settlementByBooking.set(s.booking_id, s);
     }
 
+    // Per tanggal check-in x channel (owner 2026-10-05: "tgl 1 ada 5
+    // booking dari channel mana sj, nilai uangnya sdh bersih dluar potongan
+    // OTA?"). Kotor/bersih per booking dari pendapatanKotor/pendapatanBersih,
+    // sama dengan tabel per-channel di bawah.
+    const byDate = new Map();
+    for(const b of bookings){
+      const dateRow = byDate.get(b.tgl_checkin) ?? new Map();
+      const key = b.sumber ?? 'other';
+      const c = dateRow.get(key) ?? { sumber:key, booking_count:0, malam:0, gross:0, ota_deduction:0, net:0, commission_pct:0, menginap_lama:[] };
+      const malam = Number(b.durasi_malam ?? 0);
+      c.booking_count++;
+      c.malam += malam;
+      c.gross += pendapatanKotor(b);
+      c.net += pendapatanBersih(b);
+      // Owner 2026-10-05: nilai seluruh masa inap tercatat di tanggal
+      // check-in, jadi booking >1 malam membuat satu tanggal terlihat besar.
+      // Ditampilkan per booking supaya tetap bisa dimengerti.
+      if(malam > 1) c.menginap_lama.push({
+        unit_nomor: b.unit_nomor, guest_nama: b.guest_nama,
+        tgl_checkin: b.tgl_checkin, tgl_checkout: b.tgl_checkout, malam,
+        bersih: pendapatanBersih(b), bersih_per_malam: pendapatanBersih(b) / malam,
+      });
+      c.ota_deduction = c.gross - c.net;
+      c.commission_pct = pctOf(c.gross, c.net);
+      dateRow.set(key, c);
+      byDate.set(b.tgl_checkin, dateRow);
+    }
+    const by_date = [...byDate.entries()].sort(([a],[b])=>a<b?-1:1).map(([tgl_checkin, m])=>{
+      const chs = [...m.values()].sort((a,b)=>b.gross-a.gross);
+      return {
+        tgl_checkin,
+        booking_count: chs.reduce((s,c)=>s+c.booking_count,0),
+        malam: chs.reduce((s,c)=>s+c.malam,0),
+        gross: chs.reduce((s,c)=>s+c.gross,0),
+        ota_deduction: chs.reduce((s,c)=>s+c.ota_deduction,0),
+        net: chs.reduce((s,c)=>s+c.net,0),
+        channels: chs,
+      };
+    });
+
     const bySumber = new Map();
     for(const b of bookings){
       const key = b.sumber ?? 'other';
       const cur = bySumber.get(key) ?? { sumber:key, normalized_channel: normalizedChannel(key), revenue:0, net_revenue:0, payment:0, outstanding:0, ota_receivable:0, settled_count:0, unsettled_count:0, booking_count:0, room_nights:0 };
-      const amount = Number(b.total_bayar ?? b.tarif ?? 0);
-      const commissionPct = commissionPctBySumber.get(b.sumber) ?? 0;
+      const amount = pendapatanKotor(b);
+      const net = pendapatanBersih(b);
       const bOutstanding = outstandingForBooking(b, amount);
       cur.revenue += amount;
-      cur.net_revenue += amount * (1 - commissionPct/100);
+      cur.net_revenue += net;
       cur.booking_count++;
       cur.room_nights += Number(b.durasi_malam ?? 0);
       cur.payment += amount - bOutstanding;
@@ -3487,7 +4726,8 @@ Deno.serve(async (req)=>{
       const s = settlementByBooking.get(b.id);
       const settled = s?.settlement_status==='RECEIVED';
       if(settled) cur.settled_count++; else cur.unsettled_count++;
-      if(cur.normalized_channel!=='DIRECT' && !settled) cur.ota_receivable += amount;
+      // Yang ditransfer OTA ke villa adalah angka bersih, bukan Grand Total.
+      if(cur.normalized_channel!=='DIRECT' && !settled) cur.ota_receivable += net;
       bySumber.set(key, cur);
     }
     const cfgArr = [...configMap.values()];
@@ -3496,13 +4736,15 @@ Deno.serve(async (req)=>{
       return {
         ...c,
         ota_deduction: c.revenue - c.net_revenue,
+        commission_pct: pctOf(c.revenue, c.net_revenue),
         avg_net_adr: c.room_nights>0 ? c.net_revenue/c.room_nights : null,
         collection_method: cfg?.collection_method ?? 'UNKNOWN',
         destination_account: cfg?.destination_account_label ?? null,
       };
     }).sort((a,b)=>b.revenue-a.revenue);
     const totals = channels.reduce((acc,c)=>({ revenue:acc.revenue+c.revenue, net_revenue:acc.net_revenue+c.net_revenue, payment:acc.payment+c.payment, outstanding:acc.outstanding+c.outstanding, ota_receivable:acc.ota_receivable+c.ota_receivable }), { revenue:0, net_revenue:0, payment:0, outstanding:0, ota_receivable:0 });
-    return json({ period:{from,to}, channels, totals, settlement_configs_count: cfgArr.length });
+    const bersih_belum_tersedia = bookings.filter(b=>b.cloudbeds_subtotal == null && normalizedChannel(b.sumber)!=='DIRECT').length;
+    return json({ period:{from,to}, channels, totals, by_date, bersih_belum_tersedia, settlement_configs_count: cfgArr.length });
   }
 
   if(path==='/finance/bookings' && m==='GET'){
@@ -3516,7 +4758,7 @@ Deno.serve(async (req)=>{
     const offset = Math.max(0, Number(url.searchParams.get('offset') ?? 0));
 
     let query = supabase.from('bookings')
-      .select('id,unit_nomor,guest_nama,sumber,status,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_balance,cloudbeds_reservation_id,created_at', {count:'exact'})
+      .select('id,unit_nomor,guest_nama,sumber,status,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_subtotal,cloudbeds_balance,cloudbeds_reservation_id,created_at', {count:'exact'})
       .gte('tgl_checkin', from).lte('tgl_checkin', to)
       .order('tgl_checkin',{ascending:false});
     if(sumber) query = query.eq('sumber', sumber);
@@ -3526,7 +4768,7 @@ Deno.serve(async (req)=>{
     let bookings = rows ?? [];
 
     const configMap = await getSettlementConfigMap();
-    await ensureFinanceSettlements(bookings.filter(b=>b.status!=='batal'), configMap);
+    await ensureFinanceSettlements(bookings, configMap);
     const ids = bookings.map(b=>b.id);
     const settlementByBooking = new Map();
     if(ids.length){
@@ -3543,6 +4785,7 @@ Deno.serve(async (req)=>{
         normalized_channel: normalizedChannel(b.sumber), status: b.status,
         tgl_checkin: b.tgl_checkin, tgl_checkout: b.tgl_checkout, durasi_malam: b.durasi_malam,
         revenue: amount, payment_status: pay, outstanding: outstandingForBooking(b, amount),
+        pemasukan_diakui: isPemasukanDiakui(b),
         payment_status_source: b.cloudbeds_balance != null ? 'cloudbeds_balance' : 'booking_status_estimate',
         cloudbeds_reservation_id: b.cloudbeds_reservation_id,
         settlement_status: s?.settlement_status ?? null,
@@ -3652,6 +4895,40 @@ Deno.serve(async (req)=>{
     if(error) return err(error.message);
     await writeFinanceAudit({ entity_type:'finance_ota_settlement_config', entity_id: existing.id, session, action:'delete_settlement_config', old_value: existing, new_value: null });
     return json({ success:true });
+  }
+
+  // Fee referral karyawan (owner 2026-10-02): siapa memakai kode siapa,
+  // berapa fee-nya, dan apakah sudah sah (tamu lunas) / sudah dicairkan.
+  if(path==='/finance/referral-fees' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const hasil = await daftarReferral();
+    if(hasil.error) return err(hasil.error);
+    return json(hasil);
+  }
+
+  // Tandai fee sudah / belum dicairkan ke karyawan. Hanya fee yang SAH
+  // (tamu lunas) yang boleh ditandai dibayar.
+  if(path==='/finance/referral-fees/paid' && m==='POST'){
+    if(!isFinance) return forbidden();
+    const body = await req.json().catch(()=>({}));
+    const id = String(body?.id ?? '');
+    if(!/^[0-9a-f-]{36}$/i.test(id)) return err('id tidak valid');
+    const dibayar = body?.dibayar !== false;
+    const {data:existing} = await supabase.from('villa_referral_redemptions').select('*').eq('id', id).maybeSingle();
+    if(!existing) return err('Data fee tidak ditemukan', 404);
+    if(dibayar){
+      const {data:bk} = existing.booking_id
+        ? await supabase.from('bookings').select('status').eq('id', existing.booking_id).maybeSingle()
+        : {data:null};
+      if(statusFeeReferral(bk?.status ?? null) !== 'sah') return err('Fee belum sah: tamu belum lunas atau booking batal', 409);
+    }
+    const patch = dibayar
+      ? {fee_dibayar_at: new Date().toISOString(), fee_dibayar_oleh: session.email ?? session.uid}
+      : {fee_dibayar_at: null, fee_dibayar_oleh: null};
+    const {data:saved, error} = await supabase.from('villa_referral_redemptions').update(patch).eq('id', id).select('*').single();
+    if(error) return err(error.message);
+    await writeFinanceAudit({ entity_type:'villa_referral_redemptions', entity_id: id, session, action: dibayar ? 'referral_fee_paid' : 'referral_fee_unpaid', old_value: existing, new_value: saved, reason: body?.reason ?? null });
+    return json(saved);
   }
 
   if(path==='/finance/settlements/process' && m==='POST'){
@@ -4465,11 +5742,17 @@ Deno.serve(async (req)=>{
     const {data:units} = await supabase.from('units').select('id,nomor,blok,status');
     const {data:bookings} = await supabase.from('bookings').select('unit_id,tgl_checkin,tgl_checkout,guest_nama').in('status',['terjadwal','checkin']);
     const conflicts = findConflicts(bookings??[], checkin, checkout||null);
-    return json((units??[]).map(u=>({
-      ...u,
-      tersedia_untuk_tanggal: !conflicts.has(u.id),
-      dibooking_oleh: conflicts.get(u.id)??null,
-    })));
+    // Unit yang ditutup (manager atau langsung di Cloudbeds) tidak dijual walk-in.
+    const ditutup = await unitMaintenanceBentrok(checkin, checkout||null);
+    return json((units??[]).map(u=>{
+      const t = ditutup.get(u.id);
+      return {
+        ...u,
+        tersedia_untuk_tanggal: !conflicts.has(u.id) && !t,
+        dibooking_oleh: conflicts.get(u.id)??null,
+        ditutup: t ? {sumber: t.sumber, tutup_mulai: t.tutup_mulai, tutup_sampai: t.tutup_sampai} : null,
+      };
+    }));
   }
 
   // Perkiraan harga untuk layar kasir/walk-in SEBELUM booking dibuat --
@@ -4521,6 +5804,12 @@ Deno.serve(async (req)=>{
     const conflict = (existing??[]).find(e=>datesOverlap(e.tgl_checkin, e.tgl_checkout, b.tgl_checkin, b.tgl_checkout??null));
     if(conflict){
       return err(`Unit ${b.unit_nomor??''} sudah dibooking ${conflict.guest_nama} (${conflict.tgl_checkin}${conflict.tgl_checkout?' s/d '+conflict.tgl_checkout:' — belum ada tanggal keluar'}) -- bentrok dengan tanggal yang dipilih`, 409);
+    }
+    const tutup = (await unitMaintenanceBentrok(b.tgl_checkin, b.tgl_checkout ?? null)).get(b.unit_id);
+    if(tutup){
+      return err(tutup.sumber==='cloudbeds'
+        ? `Unit ${b.unit_nomor??''} sedang ditutup di Cloudbeds (${tutup.tutup_mulai} s/d ${tutup.tutup_sampai}${tutup.alasan ? `, ${tutup.alasan}` : ''}) -- pilih unit lain`
+        : `Unit ${b.unit_nomor??''} sedang ditutup maintenance (${tutup.tutup_mulai} s/d ${tutup.tutup_sampai}) -- pilih unit lain, atau minta manager menandai Kamar Siap dulu`, 409);
     }
 
     const {data:unit, error:unitErr} = await supabase.from('units')

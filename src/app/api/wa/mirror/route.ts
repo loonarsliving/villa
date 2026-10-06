@@ -1,5 +1,6 @@
 import { after, NextResponse } from "next/server";
 
+import { buatDrafAiAman } from "@/lib/aiResepsionis";
 import { secretsMatch } from "@/lib/internalSecret";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { bolehMasukResepsionis, catatPesanMasukAman, kirimSapaanPertamaAman, terjemahkanPesanMasukAman } from "@/lib/waChat";
@@ -7,6 +8,8 @@ import { normalizeInbound } from "@/lib/whacenter";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// after() menerjemahkan lalu meminta draf AI (bisa dua panggilan AI + cek ketersediaan).
+export const maxDuration = 60;
 
 /**
  * Salinan pesan masuk ke nomor utama 082228885223, diteruskan oleh Mkhsistem.
@@ -31,6 +34,10 @@ export const dynamic = "force-dynamic";
  * begitu dia membalas (kasus nyata 2026-09-28, lihat teksSapaanPertama).
  * Sapaan dikirim lewat after(), setelah Mkhsistem menerima jawaban ini, supaya
  * jalurnya tidak ikut tertahan.
+ *
+ * Setiap pesan yang tercatat juga dibuatkan DRAF balasan AI (src/lib/aiResepsionis.ts)
+ * lewat after(). Draf itu hanya tampil di layar Chat -- tidak ada yang terkirim ke
+ * tamu tanpa resepsionis menekan Kirim.
  *
  * HANYA mencatat -- tidak menjalankan LUNAS/PROMO/dll. Perintah-perintah itu
  * sudah diproses Mkhsistem untuk nomor ini; memprosesnya lagi di sini berarti
@@ -62,7 +69,11 @@ export async function POST(request: Request) {
   });
 
   if (hasil) {
-    after(() => terjemahkanPesanMasukAman(supabase, hasil.conversationId, hasil.messageId, inbound.text));
+    // Terjemahan dulu, baru draf: AI membaca versi Indonesia dari pesan tamu asing.
+    after(async () => {
+      await terjemahkanPesanMasukAman(supabase, hasil.conversationId, hasil.messageId, inbound.text);
+      if (inbound.text.trim()) await buatDrafAiAman(supabase, hasil.conversationId, hasil.messageId);
+    });
   }
   if (hasil?.baru && !hasil.guestId) {
     after(() => kirimSapaanPertamaAman(supabase, hasil.conversationId, inbound.sender, inbound.senderName));

@@ -52,6 +52,9 @@ Status tags: DONE (UI + call site implemented and wired, though server behavior 
 - **Next.js 15→16 security upgrade** — IN_PROGRESS, NOT on `main`. Branch `claude/security-3-repos-tj69ek`, commit `341ac2f`.
 - **Server-side role-gating hardening proxy** — IN_PROGRESS, NOT on `main`. Same branch, commit `1657dfb`.
 
+## Late night booking (`loonars.id/late`, cadangan `/late-night`) — LIVE 2026-10-03
+- Hanya role `late_night` (Laila) dan admin. Tamu masuk 01.00, keluar 09.00 WIB; tarif tetap Rp260.000 lewat QRIS statis; hanya unit Standard; Laila sendiri yang menandai Lunas (check-in + PIN WA); pemasukan ikut bagi hasil. Detail: CURRENT_STATE.md 2026-10-03.
+
 ## Explicitly not implemented
 - **Smart-lock / automated physical access control** — explicitly NOT implemented and not intended, per code comment in the Cloudbeds webhook route: "there's no smart lock to trigger automatically."
 - **Automated testing** — NOT IMPLEMENTED. No test files, test runner config, or test script found anywhere in the repo (`package.json` has no `test` script; no `*.test.*`/`*.spec.*` files; no Jest/Vitest/Playwright config).

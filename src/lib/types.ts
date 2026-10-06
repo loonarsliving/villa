@@ -1,4 +1,4 @@
-export type Role = "owner" | "receptionist" | "admin" | "finance";
+export type Role = "owner" | "receptionist" | "admin" | "finance" | "manager" | "late_night";
 
 export interface SessionUser {
   id: string;
@@ -30,6 +30,8 @@ export interface UnitAvailability {
   status: Unit["status"];
   tersedia_untuk_tanggal: boolean;
   dibooking_oleh: string | null;
+  /** Ditutup manager (Kamar Maintenance) atau langsung di Cloudbeds -- tidak dijual. */
+  ditutup?: { sumber: "manager" | "cloudbeds"; tutup_mulai: string; tutup_sampai: string } | null;
 }
 
 export interface Booking {
@@ -343,6 +345,10 @@ export interface FinanceSummary {
   bookings_counted: number;
   cloudbeds_balance_verified_count: number;
   cancelled_excluded: number;
+  /** Aturan pengakuan pemasukan (per tanggal check-in, hanya tamu yang sudah check-in). */
+  recognition_rule?: string;
+  /** Booking di periode ini yang tamunya belum datang: masih di Cloudbeds, belum pemasukan. */
+  pipeline?: { amount: number; count: number; note: string };
   alerts: FinanceAlert[];
   last_cloudbeds_activity: string | null;
   data_caveats: string[];
@@ -354,6 +360,7 @@ export interface FinanceChannelRow {
   revenue: number;
   net_revenue: number;
   ota_deduction: number;
+  commission_pct: number;
   avg_net_adr: number | null;
   payment: number;
   outstanding: number;
@@ -370,7 +377,42 @@ export interface FinanceChannelBreakdown {
   period: { from: string; to: string };
   channels: FinanceChannelRow[];
   totals: { revenue: number; net_revenue: number; payment: number; outstanding: number; ota_receivable: number };
+  by_date: FinanceDateRow[];
+  /** Booking OTA yang harga kamar Cloudbeds-nya belum tersimpan -- bersihnya sementara = kotor. */
+  bersih_belum_tersedia: number;
   settlement_configs_count: number;
+}
+
+export interface FinanceLongStay {
+  unit_nomor: string | null;
+  guest_nama: string | null;
+  tgl_checkin: string;
+  tgl_checkout: string | null;
+  malam: number;
+  bersih: number;
+  bersih_per_malam: number;
+}
+
+export interface FinanceDateChannelRow {
+  sumber: string;
+  booking_count: number;
+  malam: number;
+  /** Booking lebih dari 1 malam -- nilai seluruh masa inapnya tercatat di tanggal check-in. */
+  menginap_lama: FinanceLongStay[];
+  gross: number;
+  ota_deduction: number;
+  net: number;
+  commission_pct: number;
+}
+
+export interface FinanceDateRow {
+  tgl_checkin: string;
+  booking_count: number;
+  malam: number;
+  gross: number;
+  ota_deduction: number;
+  net: number;
+  channels: FinanceDateChannelRow[];
 }
 
 export interface FinanceBookingRow {
@@ -392,6 +434,8 @@ export interface FinanceBookingRow {
   settlement_status: SettlementStatus | null;
   settlement_confidence: SettlementConfidence | null;
   expected_settlement_date: string | null;
+  /** false = tamu belum check-in, tidak dihitung sebagai pemasukan. */
+  pemasukan_diakui?: boolean;
 }
 
 export interface FinanceBookingList {
@@ -537,7 +581,6 @@ export interface FinanceSurvivalKpis {
   net_revenue_mtd: number;
   gross_revenue_mtd: number;
   ota_commission_mtd: number;
-  commission_source: "cloudbeds_live" | "unavailable_no_api_key";
   room_nights_mtd: number;
   booking_count_mtd: number;
   investor_guarantee: number;
@@ -638,4 +681,148 @@ export interface WaConversationMessageRow {
   /** Masuk: terjemahan Indonesia dari `isi`. Keluar: teks Indonesia asli resepsionis (`isi` = yang diterima tamu). */
   terjemahan: string | null;
   created_at: string;
+}
+
+/** Kode referral karyawan (villa_referral_codes) + rekap dari villa-api /finance/referral-fees. */
+export interface ReferralCodeRow {
+  id: string;
+  kode: string;
+  employee_id: string | null;
+  employee_nama: string;
+  fee_persen: number;
+  aktif: boolean;
+  catatan: string | null;
+  dibuat_oleh: string | null;
+  created_at: string;
+  jumlah_dipakai: number;
+  jumlah_sah: number;
+  fee_sah: number;
+  fee_menunggu: number;
+  fee_sudah_dibayar: number;
+}
+
+/** 'sah' = tamu sudah lunas; diturunkan villa-api dari bookings.status. */
+export type ReferralFeeStatus = "menunggu_lunas" | "sah" | "gugur";
+
+export interface ReferralRedemptionRow {
+  id: string;
+  referral_code_id: string;
+  kode: string;
+  employee_id: string | null;
+  employee_nama: string;
+  booking_id: string | null;
+  guest_nama: string | null;
+  tgl_checkin: string | null;
+  tgl_checkout: string | null;
+  malam: number | null;
+  /** Yang ditagih ke tamu (harga normal, tanpa kode unik). */
+  nilai_booking: number;
+  fee_persen: number;
+  fee: number;
+  fee_dibayar_at: string | null;
+  fee_dibayar_oleh: string | null;
+  created_at: string;
+  booking_status: string | null;
+  unit_nomor: string | null;
+  status_fee: ReferralFeeStatus;
+}
+
+export interface ReferralFeesResponse {
+  kode: ReferralCodeRow[];
+  pemakaian: ReferralRedemptionRow[];
+}
+
+/** Satu kamar di modul Kesiapan Kamar (villa-api GET /manager/kamar). */
+export interface KamarKesiapan {
+  unit_id: string;
+  nomor: string;
+  blok: string;
+  status_unit: Unit["status"];
+  tipe: string | null;
+  cloudbeds_terpetakan: boolean;
+  /** null = kamar terbuka dan dijual seperti biasa (keadaan bawaan). */
+  maintenance: {
+    tutup_mulai: string;
+    tutup_sampai: string;
+    alasan: string;
+    cloudbeds_room_block_id: string;
+    ditutup_oleh_nama: string | null;
+    updated_at: string;
+    /** Tanggal tutupnya sudah lewat -- Cloudbeds sudah menjualnya lagi. */
+    berakhir: boolean;
+  } | null;
+  cek_terakhir: {
+    hasil: "siap" | "maintenance";
+    checklist: Record<string, boolean>;
+    catatan: string | null;
+    cloudbeds_aksi: string;
+    cloudbeds_pesan: string | null;
+    dicek_oleh_nama: string | null;
+    created_at: string;
+  } | null;
+  booking_mendatang: { tgl_checkin: string; tgl_checkout: string | null; sedang_menginap: boolean }[];
+  /** Blok yang dibuat langsung di Cloudbeds (bukan dari modul ini), 30 hari ke depan. */
+  blok_cloudbeds_lain: { tipe: string | null; alasan: string | null; startDate: string | null; endDate: string | null }[];
+}
+
+export interface KesiapanKamarResponse {
+  hari_ini: string;
+  /** false = blok Cloudbeds tidak bisa dibaca saat ini; tanda "ditutup di Cloudbeds" mungkin tidak lengkap. */
+  cloudbeds_terbaca: boolean;
+  checklist: string[];
+  maks_malam: number;
+  kamar: KamarKesiapan[];
+}
+
+export interface RiwayatCekKamar {
+  id: string;
+  unit_id: string;
+  unit_nomor: string | null;
+  hasil: "siap" | "maintenance";
+  checklist: Record<string, boolean>;
+  catatan: string | null;
+  tutup_mulai: string | null;
+  tutup_sampai: string | null;
+  cloudbeds_aksi: "ditutup" | "diperpanjang" | "dibuka" | "tidak_perlu" | "gagal";
+  cloudbeds_pesan: string | null;
+  dicek_oleh_nama: string | null;
+  created_at: string;
+}
+
+/** GET /late-night/hari-ini -- modul late night (role late_night). */
+export interface LateNightUnit {
+  id: string;
+  nomor: string;
+  tersedia: boolean;
+  alasan: string | null;
+  /** Ditutup di Cloudbeds / maintenance -- tidak ditampilkan. */
+  ditutup?: boolean;
+}
+
+export interface LateNightBooking {
+  id: string;
+  unit_id: string;
+  unit_nomor: string;
+  guest_nama: string;
+  status: "terjadwal" | "checkin" | "checkout" | "batal";
+  total_bayar: number;
+  checkin_time: string | null;
+  tgl_checkin: string;
+  tgl_checkout: string;
+  created_at: string;
+  checkin_at: string | null;
+  checkout_at: string | null;
+}
+
+export interface LateNightHariIni {
+  jendela_buka: boolean;
+  jam_mulai: number;
+  jam_selesai: number;
+  /** Malam yang dijual (tanggal WIB kemarin); tamu keluar `checkout`. */
+  malam: string;
+  checkout: string;
+  tarif: number;
+  hold_menit: number;
+  unit: LateNightUnit[];
+  booking: LateNightBooking[];
 }

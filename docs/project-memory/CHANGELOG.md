@@ -4,6 +4,35 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-05 — AI resepsionis tahap 1: draf balasan WhatsApp — LIVE (owner: "Ya aktifkan")
+- Owner ingin balasan chat otomatis. Tahap 1 (pilihan owner: "draf dulu"): setiap pesan tamu di Chat Front Desk dibuatkan **draf** oleh AI (Mkhsistem `/api/villa/ai/chat-reply`); resepsionis menekan "Pakai draf" lalu Kirim. **Tidak ada yang terkirim ke tamu tanpa resepsionis.**
+- Fakta AI hanya dari `src/lib/aiResepsionisPengetahuan.ts` (dikoreksi owner 2026-10-05: check-in 15.00; early check-in hanya 12.00-14.00 Rp100.000 bila tidak ramai; extrabed belum tersedia; late check-out Rp100.000/jam lewat 12.00; paket di luar kamar diteruskan ke Rebecca) dan dari `/public/availability` villa-api (harga sama dengan loonars.id). Sandi WiFi hanya untuk tamu yang punya booking.
+- Penjaga: draf yang menyebut nominal uang di luar kedua sumber itu ditahan (`angkaTidakDikenal`) dan diberi label "Perlu dicek resepsionis"; draf basi begitu ada pesan masuk lain/balasan staf; draf dihapus saat staf membalas.
+- Label kategori di layar: Draf AI / Booking / Cek tanggal / Paket → Rebecca / Komplain → Security & Rebecca / Perlu dicek resepsionis. Penerusan WA sungguhan ke Rebecca/Security = tahap 2: Rebecca = `villa_users` role `manager`; Security = karyawan Mkhsistem aktif divisi "Security" cabang Loonars Private Living (di-approve owner 2026-10-05).
+- Saklar: `integration_settings.ai_resepsionis.mode` (`mati`/`draf`, bawaan `draf`).
+- Migrasi `20261005000003_wa_ai_draf.sql` (5 kolom nullable di `wa_conversations`) — di-apply 2026-10-05 atas persetujuan owner. Tanpa migrasi, kode aman: draf gagal disimpan (tercatat di log) dan layar Chat tidak menampilkan apa pun.
+
+### 2026-10-03 — Late night booking (loonars.id/late) — LIVE (villa #151, loonars #12)
+- Role `late_night` (Laila) + halaman `/late-night`: unit Standard yang kosong & bersih, buat booking 01.00-09.00 WIB, QRIS statis Rp260.000, Tandai Lunas = check-in + PIN WA, batal, checkout.
+- villa-api: `/late-night/hari-ini`, `/late-night/qris`, `/late-night/bookings`, `/late-night/lunas`, `/late-night/batal`, `/late-night/checkout`; role dikunci ke `/late-night/*`; `sumber='late-night'` tidak didorong ke Cloudbeds; kanal finance DIRECT.
+- Halaman utama Laila: `loonars.id/late` di repo loonars (`app/late/`), memanggil villa-api langsung. Tidak ada subdomain/DNS.
+- Migrasi `20261003000001_late_night_booking.sql` (role + sumber), di-apply 2026-10-03 atas persetujuan owner.
+
+### 2026-10-02 — Role manager + Kesiapan Kamar (buka-tutup kamar di Cloudbeds) — LIVE (PR #146)
+- Role login `manager` (Rebecca): hanya modul `/manager` (checklist 10 poin + Kamar Siap / Kamar Maintenance) dan `/manager/riwayat`. villa-api menolak role ini di luar `/manager/*`.
+- Kamar Maintenance = Cloudbeds room block `out_of_service` (post/put, dibaca balik); Kamar Siap = `deleteRoomBlock`. Bawaan tetap TERBUKA (keputusan owner). Unit maintenance juga ditolak di loonars.id dan walk-in.
+- Migrasi `20261002000002_manager_kesiapan_kamar.sql`: role `manager` di `villa_users_role_check`, tabel `villa_room_maintenance` (keadaan sekarang) dan `villa_room_checks` (riwayat), RLS service_role.
+- Diterapkan atas persetujuan owner ("bawa saja ke production"): migrasi di-apply, PR di-merge. Scope room block API key dan semantik `endDate` BELUM diuji ke Cloudbeds sungguhan -- penekanan pertama tombol Maintenance adalah ujinya.
+
+### 2026-10-02 — Kode referral karyawan (fee karyawan 10%, harga tamu normal) — BELUM LIVE
+- Owner: kode referral yang dibuat Vando di Mkhsistem, dikirim ke karyawan lewat WA, dipakai tamu di loonars.id; karyawan yang menjual dapat fee; tabel fee di Finance villa.
+- **Keputusan owner (2026-10-02):** "10%" itu **fee, bukan diskon** -- *"diskon 10% itu fungsinya agar 10% itu masuk ke fee, tp harga yg ditrima tamu ttp normal"*. Tamu bayar harga normal; karyawan pemilik kode dapat **fee 10% dari nilai booking** (tanpa kode unik), **sah setelah tamu lunas**; **hanya booking loonars.id**. (Versi pertama sempat salah membangunnya sebagai diskon tamu yang menembus `min_rate`; dikoreksi sebelum apa pun live.)
+- Migrasi `20261002000001_referral_karyawan.sql`: `villa_referral_codes`, `villa_referral_redemptions` (RLS service_role). Status fee tidak disimpan -- diturunkan dari `bookings.status` (`terjadwal/checkin/checkout` = sah, `menunggu_pembayaran` = menunggu lunas, lainnya = gugur).
+- villa-api: `GET /public/referral` (cek kode saja, tanpa nama karyawan, tanpa harga), `referral_code` di `POST /public/bookings` (harga tamu tidak diubah, tidak bisa digabung promo/kode investor, fee dihitung di server, pemakaian dicatat setelah booking jadi), `POST /bridge/referral/{list,create,issue,set-active}` (secret jembatan, dipanggil Mkhsistem), `GET /finance/referral-fees` + `POST /finance/referral-fees/paid` (finance/admin, hanya fee sah, tercatat di `finance_audit_log`).
+- UI: `/finance/referral` (rekap per karyawan + daftar pemakaian + tandai fee dicairkan).
+- Pasangan: loonars (kolom kode di BookingForm menerima `REF-...`) dan Mkhsistem (`/villa-referral`, perintah WA `REFERAL <nama>`, permission `villa_referral.manage`, migrasi 0283).
+- **Belum diterapkan:** migrasi belum di-apply, villa-api belum di-deploy, PR belum di-merge -- menciptakan kewajiban bayar fee (uang), menunggu persetujuan owner (aturan MERGE AUTHORITY).
+
 ### 2026-09-28 (lanjutan) — Sambutan OTA diperluas: bukan cuma Agoda/Airbnb
 - Owner: *"biarkan lebih banyak ota, jangan hanya agoda dan airbnb, karna cloudbedsku banyak koneksinya"*. `SUMBER_OTA_DISAMBUT` di `src/lib/otaWelcome.ts` sekarang: agoda, airbnb, **booking.com, traveloka, tiket** (+3 tes memastikan daftar ini, +3 tes nama platform di teks).
 - **Sengaja TIDAK** menambah `google` (metasearch -- tamu tetap bayar lewat kanal lain, lihat `mapSourceNameToSumber`) atau `cloudbeds` (keranjang bawaan untuk `sourceName` yang tidak dikenali, bukan satu platform tertentu -- lihat `cloudbedsSourceMapping.ts`). Kalau owner menyambungkan OTA baru yang belum dikenali pemetaan itu, harus didaftarkan sumbernya dulu di sana sebelum ditambahkan ke daftar sambutan.
@@ -312,3 +341,7 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 - Added `src/lib/pdfToImage.ts` (`pdfFirstPageToPngDataUrl`, new dependency `pdfjs-dist`) — renders page 1 of a PDF to a PNG data URL in the browser at upload time. `front-desk/payment-gateway`'s QRIS upload (`onUploadQris`) now branches on file type: PDF goes through this conversion, images go through the existing `FileReader` path — both end up as the same PNG/JPEG data URL stored via the existing `saveQrisImage()`/`walkin_qris` mechanism, so nothing on the backend or display side changed.
 - No behavior change for image uploads (still 8MB raw sanity cap, ~1.5MB after encoding, same storage/display path).
 - Verified via `tsc --noEmit` and `next build` (PDF worker resolves correctly through Next.js's webpack bundling via `new URL(..., import.meta.url)`); not yet manually tested against a real PDF QRIS file in a browser from this session.
+
+## 2026-10-04 — Kode menginap gratis investor bisa dipakai lagi
+- `bookings_sumber_check` ditambah nilai `investor` (migrasi `20261004000001_allow_investor_booking_source.sql`, sudah diterapkan ke produksi dengan izin owner). Sebelumnya setiap booking dengan kode investor ditolak database. Belum pernah ada satu pun booking `investor` yang berhasil tersimpan.
+- villa-api: semua jalur pembayaran booking loonars.id (kode unik nominal, konfirmasi email BTN, balasan LUNAS, pengingat WA, pembatalan otomatis 60 menit, halaman status tamu) sekarang memakai `SUMBER_BOOKING_WEBSITE = ['website','investor']`. Sebelumnya semuanya hanya mencari `website`, jadi booking investor lebih dari semalam (sisa malamnya dibayar) tidak akan pernah terkonfirmasi atau kedaluwarsa. `normalizedChannel('investor')` = DIRECT.

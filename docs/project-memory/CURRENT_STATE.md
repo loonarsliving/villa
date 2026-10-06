@@ -2,6 +2,488 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+## 2026-10-05 — Jumat lebih murah dari Sabtu + mesin belajar pola per hari (DI-MERGE #166, owner-approved)
+
+Owner: "untuk hari Jumat hampir 0 pemesanan ... harusnya mesin bisa melihat
+lemahnya bookingan dan mencari solusi untuk itu".
+
+**Temuan.**
+- Jumat Standard ke depan hampir kosong: 9/16/23 Okt masing-masing 0 terjual.
+- Harganya disamakan dengan Sabtu (+250rb, 706–749rb), padahal Kamis sekitar
+  480–520rb.
+- Mesin memang membaca sepinya, tapi reaksinya lemah:
+  - diskon tanggal dekat yang masih kosong hanya sekitar −6%;
+  - pace menggabungkan Jumat dengan Sabtu, sehingga Sabtu yang laku menutupi
+    Jumat.
+- Catatan jujur: Jumat yang SUDAH lewat (25 Sep, 2 Okt) sempat terjual
+  6 kamar. Kelemahannya ada di pemesanan ke depan, bukan di riwayat.
+
+**Perubahan** (`aiPricingEngine.ts`, +5 tes, total 195):
+- `FRIDAY_SURCHARGE_BY_ROOM_TYPE_CODE`: Standard Jumat +100rb (Sabtu tetap
+  +250rb). Sawah View tidak diubah karena laku di hari Jumat.
+- `learnDayOfWeekDemand` (SINYAL 6): rata-rata terjual per hari dari malam
+  yang sudah lewat (56 hari, minimal 30 malam dan 14 hari). Simpangannya
+  menjadi penyesuaian kecil (maks ±6% sebelum digabung berbobot 0,3).
+- Pace Jumat dan Sabtu dipisah (`paceDayGroup`). Selama salah satunya belum
+  punya 6 tanggal pembanding, kembali ke baseline gabungan.
+
+**Simulasi** (data produksi 5 Okt + ketersediaan Cloudbeds, run 6 Okt):
+- Jumat Standard turun sekitar 15–20%: 9 Okt 706rb → 565rb, 16 Okt 732rb →
+  585rb, 23 Okt 719rb → 575rb.
+- Sel–Kam turun 1–2% (terbukti lebih sepi); Sab/Min/Sen naik 0–2%.
+- Sawah View: 0 perubahan.
+
+## 2026-10-05 — cek email pembayaran BTN QRIS ternyata TIDAK PERNAH jalan (DI-MERGE #159, owner-approved, TERVERIFIKASI live)
+
+Owner: "Knpa pgecekan email nya tidak otomatis ya, akhirnya orng yg memilih
+direct booking harus menunggu lama".
+
+**Temuan (diverifikasi dari log production & pg_net, bukan dugaan).**
+- Cron `check-payment-email` (pg_cron job 109, tiap 5 menit) dan pemicu
+  dari halaman tamu (`POST /public/bookings/check-payment`, tiap 20 detik)
+  memang berjalan, tapi **setiap** panggilan gagal sejak fitur dipasang
+  21 Sep: 503 lalu 502 `Gagal membaca email: Unexpected close
+  (ClosedAfterConnectTLS)`. Tidak ada satu pun respons 200 di log.
+- Rute tamu menelan kegagalan itu diam-diam (`checked:false`), jadi tidak
+  ada yang tahu. Booking 5 Okt 09:42 WIB (Rp 710.367) terkonfirmasi lewat
+  `/bridge/confirm-payment` (balasan LUNAS owner), bukan lewat email.
+- Penyebab: `npm:imapflow` lewat lapisan `node:tls` Deno di Supabase Edge
+  Runtime. Fungsi uji `uji-imap` (sementara, kini dinonaktifkan → 410)
+  memakai `Deno.connectTls` langsung ke server yang sama
+  (imap.hostinger.com:993): greeting, LOGIN, SEARCH (7 email BTN, 1 belum
+  dibaca) dan FETCH semuanya berhasil. Server email & password tidak
+  bermasalah.
+- Format email BTN: single-part `text/html` quoted-printable; "Total", ":"
+  dan "Rp 710.367" ada di sel tabel terpisah.
+
+**Perbaikan (branch `claude/loonars-email-payment-check-0uzbcv`).**
+`scanPaymentInbox` kini memakai klien IMAP minimal `MiniImap` di atas
+`Deno.connectTls` (LOGIN, SELECT, UID SEARCH, UID FETCH BODY.PEEK[],
+UID STORE +FLAGS.SILENT (\Seen), LOGOUT) + parser MIME kecil; imapflow,
+mailparser dan penangkal "Already logged out" dihapus. Logika pencocokan
+nominal (`tryConfirmBookingByNominal`) TIDAK diubah. Nominal ",00" di
+belakang dibuang supaya tidak jadi 100x. Kegagalan di rute tamu kini
+`console.error`. Diuji lokal terhadap server IMAP palsu (mode cron, mode
+per-booking, password salah, koneksi ditolak).
+
+**Verifikasi live:** deploy villa-api v105 (run #70) hijau; cron 09:00 UTC
+5 Okt menjawab 200 `{"success":true,"diperiksa":0,...}` -- 502 pertama yang
+hilang sejak 21 Sep. (diperiksa 0 = tidak ada email BTN belum-dibaca saat
+itu.) Fungsi uji `uji-imap` dinonaktifkan (410), boleh dihapus.
+
+**Cara cek ulang:** `select status_code, content from net._http_response
+order by id desc` → respons `/cron/check-payment-email` harus 200
+`{"success":true,"diperiksa":...}`, bukan 502.
+
+## 2026-10-04 — okupansi dari inventori Cloudbeds + batas bawah naik bertahap (DI-MERGE, owner-approved)
+
+Owner: "jika kamar penuh apakah hargaku tetap main serendah itu? harusnya
+algoritmanya main" dan "batas bawah 450 ini terlalu rendah untuk villa,
+naikkan pelan-pelan sampai ketemu lagi di 550, entah dalam 3 atau 6 bulan".
+
+**Bug yang ditemukan.** Penyebut okupansi = jumlah unit (10 Standard),
+padahal owner hanya membuka 5 Standard di Cloudbeds sampai 15 Okt (9 setelah
+16 Okt, 10 mulai Nov). Contoh 5 Okt: 4 terjual, sisa 1 — mesin membaca 40%,
+kenyataannya 80%, sehingga harga tidak naik. Masalah ini sudah tercatat
+sejak 14 Sep, tapi belum pernah diperbaiki.
+
+**Perbaikan** (`aiPricingEngine.ts`, `aiDynamicPricingRun.ts`, `cloudbedsApi.ts`):
+- `getCloudbedsRoomsAvailableByRoomType`: sisa kamar per tipe per tanggal
+  dari getRatePlans, untuk 90 hari ke depan.
+- `occupancyFromAvailability`: terjual berbayar ÷ (sisa + semua terjual,
+  termasuk malam gratis). Kalau tidak ada data, kembali ke jumlah unit.
+- `advanceFloorRamp`/`rampedFloor`: batas bawah bertahap. State disimpan di
+  `integration_settings.villa_floor_ramp` dan maju sekali per hari.
+  Kecepatannya bergantung pada okupansi nyata 14 hari ke depan (≤50% = laju
+  6 bulan, ≥80% = laju 3 bulan). Selalu dijepit di antara kedua laju itu,
+  dan tidak pernah turun. Batas efektif = max(min_rate, ramp).
+- 11 tes baru (190 total).
+
+**Simulasi** (data produksi + ketersediaan Cloudbeds nyata, run 5 Okt):
+- Standard 5 Okt 520rb → 542rb (okupansi 80%);
+- 6 & 8 Okt 468rb → 520rb (40%, tidak lagi didiskon sebagai "sepi");
+- 7 Okt 487rb → 527rb (60%);
+- 10 Okt 706rb → 750rb;
+- tanggal Jan–Feb di 450rb → 451rb di malam pertama ramp;
+- Sawah View: 0 perubahan.
+
+**Aktif sejak 2026-10-04** (owner: "ya naikkan"). Baris
+`integration_settings.villa_floor_ramp` dibuat dengan dua tipe:
+**Standard 450rb → 550rb** dan **Sawah View 600rb → 700rb** (Sawah View
+ditambahkan atas persetujuan owner), mulai `2026-10-05`. Untuk menghentikan
+ramp, hapus tipe dari `room_types` atau hapus barisnya. Batas bawah sudah
+naik tetap terlindungi oleh `progress` yang tersimpan, dan
+`villa_room_types.min_rate` tidak pernah ditulis otomatis.
+
+## 2026-10-03 (malam) — Tarif late night naik ke Rp300.000
+
+Owner: *"naikkan harga di latenight di 300 ribu"*. Hanya konstanta
+`LATE_NIGHT_TARIF` di villa-api (260000 -> 300000); halaman loonars.id/late
+dan /late-night membaca tarif dari `/late-night/hari-ini`. Saat diubah belum
+ada satu pun booking `sumber='late-night'`, jadi tidak ada booking lama
+bertarif 260rb. Booking yang sudah dibuat menyimpan `total_bayar`-nya
+sendiri; perubahan tarif hanya berlaku untuk booking baru.
+
+Catatan dari sesi yang sama: owner memastikan yang dibuka 9 kamar (6
+Standard: A1 A2 A3 A4 B1 B2 + Sawah View A5 B4 C4; ditutup B3 C1 C2 C3).
+Rencana memindah tamu A3->B3 dan B1->C1 dibatalkan karena booking ke depan
+sudah banyak. Yang masih harus dijaga: maintenance B2 (5-31 Okt, Beca)
+membuat Standard tinggal 5 mulai 5 Okt, dan blok Cloudbeds "Kamar belum
+ready" (B3 C1 C2 C3) habis 16 Okt -- tanpa perpanjangan, 17 Okt kamar yang
+dijual jadi 12-13.
+
+## 2026-10-03 — Late night booking (loonars.id/late) — LIVE
+
+**Dirilis 2026-10-03 atas persetujuan owner ("Gas rilis")**: migrasi
+`late_night_booking` di-apply (constraint dibaca balik), villa PR #151
+di-merge -> villa-api v100 (isi live identik dengan `main`) + Vercel villa
+READY, loonars PR #12 di-merge. Akun Laila belum dibuat (Admin -> Pengguna
+-> role Late Night). Rute `/late-night/*` belum pernah dijalankan sungguhan
+saat rilis (sandbox tidak bisa menghubungi Supabase): booking pertama
+Laila adalah ujinya -- periksa log Edge Function kalau ada keluhan.
+
+Owner: halaman di loonars.id untuk late night booking, hanya bisa diakses
+Laila (marketing late night) lewat login. Tamu menginap 01.00-09.00 WIB,
+pembayaran QRIS statis. Jawaban owner atas pertanyaan desain:
+- tarif **Rp260.000** ("260 yg benar") -- itu yang ditagih dan dicatat
+  (angka 250rb di permintaan awal TIDAK dipakai);
+- **Laila sendiri** yang menekan Lunas (= check-in + PIN WA);
+- **hanya unit Standard**;
+- pemasukan **ikut bagi hasil** seperti booking biasa.
+
+Desain (branch `claude/late-night-booking-l4n7tx`):
+- **Alamat: `loonars.id/late`** (repo `loonars`, `app/late/`). Rencana awal
+  subdomain `latenight.loonars.id` DIBATALKAN atas pilihan owner ("loonars.id/late
+  ... jd tidak perlu mnyntuh hostinger") -- DNS loonars.id ada di Hostinger
+  (nameserver dns-parking.com) dan tidak perlu diubah. Halaman itu hanya
+  tampilan: login dan semua aturan lewat villa-api (`/login`, `/me/password`,
+  `/late-night/*`), sesi disimpan di localStorage `loonars_late_sesi`,
+  `noindex` + `disallow: /late` di robots. Aplikasi villa juga punya
+  `/late-night` (cadangan, dan tujuan `roleHome` kalau Laila login di
+  living.haluoleo.id).
+- Role baru `late_night`; villa-api menolaknya di luar `/late-night/*`, dan
+  `/late-night/*` hanya untuk `late_night` + admin.
+- Booking = baris `bookings` biasa: `sumber='late-night'`, malam KEMARIN
+  (WIB) s/d hari ini, `tarif=total_bayar=260000` (konstanta
+  `LATE_NIGHT_TARIF`, tidak lewat `computeStayTarif`/`villa_rates`). Hanya
+  bisa dibuat 01.00-08.59 WIB. Unit harus Standard, tidak bentrok, tidak
+  ditutup (`unitMaintenanceBentrok`), dan `units.status='available'`.
+- Lunas -> `villa_commit_checkin` (PIN, unit occupied, `transactions` income
+  -> bagi hasil) -> WA PIN. Belum lunas 30 menit -> dibatalkan (lazy, saat
+  halaman dimuat/booking dibuat; tidak ada cron). Checkout bisa dari halaman
+  Laila atau front desk seperti biasa.
+- **TIDAK didorong ke Cloudbeds** -- ditegaskan owner: *"Jgan sambungkan
+  dgan cloudbeds khusus late night"* (`pushBookingToCloudbeds` keluar untuk
+  `sumber='late-night'`): postReservation tanpa harga + webhook yang
+  meng-upsert balik akan menimpa Rp260.000 dengan harga Cloudbeds.
+  Konsekuensi: malam itu kamar tetap tampil kosong di Cloudbeds/OTA. Yang
+  masih BACA dari Cloudbeds: daftar unit menolak unit yang ditutup di
+  Cloudbeds (`unitMaintenanceBentrok`), sesuai aturan owner "kamar yang
+  ditutup di Cloudbeds tidak dijual di mana pun".
+- Migrasi `20261003000001_late_night_booking.sql`: `late_night` di
+  `villa_users_role_check`, `late-night` di `bookings_sumber_check`.
+
+Urutan rilis setelah owner setuju: apply migrasi -> merge villa (villa-api +
+Vercel villa) -> merge loonars (halaman `/late`; harus SETELAH villa-api
+punya `/late-night/*`) -> admin membuat akun Laila (Admin -> Pengguna ->
+role Late Night). Tidak ada perubahan DNS/domain.
+
+Temuan sampingan (belum diperbaiki, di luar lingkup): webhook Cloudbeds
+(`src/app/api/webhooks/cloudbeds/route.ts`) meng-upsert booking per
+`cloudbeds_reservation_id` TANPA memeriksa `dibuatDiSini()`, berbeda dengan
+sync 10 menit. Booking website yang sudah didorong ke Cloudbeds bisa
+tertimpa tarif/sumber Cloudbeds oleh event webhook.
+
+## 2026-10-03 — Manager boleh membuka blok yang dibuat langsung di Cloudbeds
+
+Owner: *"saya ingin semua bisa dikendalikan di dashboard itu, karena unit
+A2 dan A3 sedikit lagi siap dibuka, jadi dia bisa membukanya"*. Ini
+MENGGANTIKAN keputusan sebelumnya ("blok milik pihak lain tidak diambil
+alih").
+
+Kamar Siap (villa-api `/manager/kamar/cek`, hasil `siap`) kini juga
+mencari blok Cloudbeds yang memuat roomID unit itu dalam 35 hari ke depan:
+- blok berisi kamar ini saja → `deleteRoomBlock`;
+- blok berisi beberapa kamar → `putRoomBlock` dengan SISA kamar (tanggal &
+  alasan blok dipertahankan) -- kamar lain tetap tertutup;
+- `courtesy_hold` tidak disentuh (tahanan tamu).
+Dibaca balik; gagal = HTTP 502, keadaan dicatat `gagal`. Detail blok asal
+disimpan di `cloudbeds_events_log` (`outbound.room_block.deleted` /
+`.room_removed`, payload `blok_asal`) supaya bisa dibuat ulang. Cache blok
+availability dikosongkan setelah buka/tutup.
+
+Batas yang diketahui: blok yang MULAI lebih dari 35 hari ke depan tidak
+terlihat dan tidak dibuka. `putRoomBlock` dengan daftar kamar berkurang
+belum pernah diuji sungguhan.
+
+## 2026-10-03 — loonars.id & Front Desk kini mengikuti SEMUA blok Cloudbeds
+
+Owner menjawab pertanyaan terbuka di bawah: *"ya harus ditutup juga ...
+jika manager menutup dan membuka, front dan loonars.id menyesuaikan, begitu
+juga dengan Cloudbeds"*. Aturannya sekarang satu: **kamar yang tertutup di
+Cloudbeds tidak dijual di mana pun**, siapa pun yang menutupnya.
+
+`unitMaintenanceBentrok()` (villa-api) kini menggabungkan
+`villa_room_maintenance` DAN room block Cloudbeds hidup
+(`getRoomBlocks`, dipecah per 35 hari, cache 60 dtk per isolate, batas 8
+dtk, gagal-terbuka). Dipakai oleh `/public/availability`,
+`/public/bookings`, `POST /bookings` (walk-in), dan sekarang juga
+`GET /availability` (daftar unit kasir Front Desk, field baru `ditutup`).
+Malam blok dianggap inklusif sampai `endDate` (konservatif).
+
+Konsekuensi langsung: C2, C3, B1, A2, A3 tidak lagi bisa dipesan lewat
+loonars.id maupun walk-in selama bloknya ada di Cloudbeds. Booking yang
+SUDAH ada di unit itu tidak disentuh. Penugasan/pindah unit
+(`/bridge/...putReservation`, webhook) tidak memakai pemeriksaan ini.
+
+Belum diputuskan: apakah manager boleh MEMBUKA blok yang dibuat owner
+langsung di Cloudbeds lewat Kamar Siap. Saat ini tidak (lihat entri di
+bawah); tanyakan owner sebelum mengubahnya.
+
+## 2026-10-03 — FAKTA dari owner: 5 unit yang sengaja ditutup di Cloudbeds
+
+Owner (3 Okt 2026): *"C2, C3, B1, A2, A3 adalah unit yang kami tutup
+sementara di Cloudbeds."* Kelimanya tipe Regular (RER), cocok dengan
+keputusan 14 Sep "buka 8 unit dulu" (3 Sawah View + 5 dari 10 Regular).
+Penutupannya berupa blok yang dibuat langsung di Cloudbeds, bukan lewat
+modul Kesiapan Kamar.
+
+Konsekuensi yang sudah terbukti: Kamar Maintenance pada salah satu unit
+ini ditolak Cloudbeds ("another event assigned in this period") -- itu
+BENAR, bukan bug. Halaman manager kini menandainya "DITUTUP DI CLOUDBEDS"
+(PR #147). Jangan buka atau ambil alih blok ini dari kode tanpa owner.
+
+PERTANYAAN TERBUKA (belum ditanyakan jawabannya): loonars.id
+(`/public/availability`, `/public/bookings`) dan walk-in tidak membaca
+blok Cloudbeds, jadi kelima unit ini tetap bisa terjual lewat jalur itu.
+Di DB, A2 dan A3 berstatus `occupied` pada 2 Okt. Belum diketahui apakah
+penjualan langsung di unit-unit ini disengaja.
+
+## 2026-10-03 — Uji pertama Kesiapan Kamar: API key BOLEH menulis room block; C2 bentrok dengan "event" lain di Cloudbeds
+
+Owner menekan Kamar Maintenance pada C2 (3–17 Okt 2026). Cloudbeds menjawab
+`success:false` "Failed to add event to the calendar: Some date has another
+event assigned in this period." Artinya:
+- **API key punya izin room block** (penolakannya soal kalender, bukan
+  scope) -- satu dari dua hal yang belum teruji kini terjawab. Semantik
+  `endDate` (inklusif atau tidak) MASIH belum teruji.
+- C2 tidak punya booking di sistem villa pada rentang itu, jadi yang
+  bentrok ada di Cloudbeds saja: blok yang sudah ada (owner sengaja hanya
+  membuka 8 dari 13 unit, 14 Sep) atau reservasi Cloudbeds yang belum
+  tersinkron. Sesi ini tidak bisa membaca Cloudbeds langsung untuk
+  memastikan yang mana.
+- Pesan lama "Kamar MASIH DIJUAL" menyesatkan untuk kasus ini.
+
+Perbaikan: saat bentrok, villa-api membaca `getRoomBlocks` dan menyebut
+blok yang sudah ada (tipe, tanggal, alasan), atau -- kalau tidak ada blok --
+menyebut kemungkinan reservasi Cloudbeds yang belum tercatat (HTTP 409).
+`GET /manager/kamar` kini juga menandai kamar yang ditutup langsung di
+Cloudbeds 30 hari ke depan (`blok_cloudbeds_lain`, gagal-terbuka). Blok
+milik pihak lain SENGAJA tidak diambil alih: Kamar Siap tidak boleh
+membuka kamar yang ditutup owner langsung di Cloudbeds.
+
+## 2026-10-02 — Role manager + Kesiapan Kamar (buka-tutup kamar di Cloudbeds) — LIVE, API room block BELUM TERUJI
+
+Owner: role login baru **manager** (Rebecca) yang hanya melihat satu modul,
+checklist kesiapan kamar (kebersihan, bathroom, linen, gorden, AC, TV,
+kebersihan kolam, air bersih, pembuangan air, lampu), dengan dua tombol
+**Kamar Siap** dan **Kamar Maintenance**.
+
+**Keputusan owner yang membentuk desainnya** (dua kali dikoreksi dalam
+percakapan; jangan diulangi): *"saat ini kamar otomatis terbuka kan,
+biarkan seperti itu, jika manager melihat ada kerusakan maka dia bisa
+menutup kamar, tp jika dia rasa kamar siap maka itu memicu kamar ttp ready
+dijual"*. Jadi **bawaannya TERBUKA**; tidak ada yang menutup kamar otomatis
+(tidak saat checkout, tidak saat belum dicek).
+
+**Cara kerja:**
+- Kamar Maintenance → Cloudbeds `postRoomBlock` (`out_of_service`, satu
+  roomID) → kamar itu hilang dari ketersediaan OTA. Juga ditolak di
+  loonars.id (`/public/availability`, `/public/bookings`) dan walk-in
+  (`POST /bookings`), karena jalur itu tidak lewat Cloudbeds. Catatan
+  kerusakan wajib (ikut jadi `roomBlockReason`). Maks 30 malam sekali
+  tutup; menekan lagi = perpanjang lewat `putRoomBlock` (blok yang sama,
+  bukan hapus-buat, supaya tidak ada celah kamar terjual).
+- Kamar Siap → wajib 10 poin dicentang → `deleteRoomBlock` kalau sedang
+  ditutup; kalau memang terbuka, hanya dicatat.
+- Setiap tulis ke Cloudbeds DIBACA BALIK (`getRoomBlocks?roomBlockID=`)
+  sebelum dianggap berhasil; kalau gagal, keadaan di sistem tidak diubah
+  dan manager melihat pesan Cloudbeds-nya. Semua tercatat di
+  `cloudbeds_events_log` (`outbound.room_block.*`) dan `villa_room_checks`.
+- Tidak bisa menutup tanggal yang bentrok dengan booking `terjadwal`/
+  `checkin` (memindahkan tamu = keputusan resepsionis).
+- `units.status` SENGAJA tidak disentuh (ditimpa alur checkin/checkout).
+
+**Akses:** villa-api mengunci role `manager` hanya ke `/manager/*`
+(+ `/me/password`). Ini penting: banyak rute (`/bookings`, `/transactions`,
+`/report`, `/units`, `/summary`) hanya menolak `owner`, sehingga role baru
+apa pun bisa membacanya. Untuk `finance` itu MEMANG DISENGAJA (owner
+2026-10-02: finance harus bisa mengecek data booking dan transaksi) --
+jangan dikunci. Admin juga bisa
+membuka `/manager` (menu "Kesiapan Kamar" di panel admin).
+
+**Owner minta API diuji dulu sebelum ke production (2026-10-02).** Sesi ini
+BELUM berhasil mengujinya: sandbox diblokir ke `api.cloudbeds.com` dan ke
+`*.supabase.co`; fungsi uji sementara `uji-roomblock` sempat dipasang di
+Supabase tapi tidak pernah dijalankan, dan sudah diganti stub 410. Yang
+masih harus dibuktikan:
+1. apakah API key punya scope `write:roomblock` / `delete:roomblock`;
+2. apakah `endDate` room block INKLUSIF (malam terakhir ikut ditutup) --
+   kode menganggap inklusif. Ingat: `getRate` eksklusif, `putRate` inklusif;
+   jangan menebak. Uji pada satu kamar di tanggal jauh lalu lihat kalender
+   Cloudbeds. Pesan sukses menampilkan tanggal yang dibaca balik dari
+   Cloudbeds untuk membantu ini.
+
+**Diterapkan 2026-10-02 atas persetujuan owner** (*"Bawa saja ke
+production"*), walau API room block belum teruji: migrasi
+`20261002000002` sudah di-apply (lewat `execute_sql` per bagian, karena
+`apply_migration` berulang kali timeout 60 dtk tanpa error di log
+Postgres; hanya bagian role yang tercatat di `schema_migrations` sebagai
+`manager_kesiapan_kamar_role`), PR #146 di-merge → villa-api & Vercel
+ter-deploy. Akun Rebecca belum dibuat (Admin → Pengguna → role "Manager").
+**Penekanan "Kamar Maintenance" pertama kali = uji sungguhan**: lakukan pada
+kamar kosong, tanggal jauh, lalu langsung "Kamar Siap"; lihat
+`cloudbeds_events_log` (`outbound.room_block.*`) dan kalender Cloudbeds.
+
+**Sinkronisasi (owner menegaskan loonars.id & Front Desk sinkron realtime
+dengan Cloudbeds):** sinkronnya lewat RESERVASI (webhook + cron 10 menit
+masuk, `postReservation` keluar). Room block BUKAN reservasi, jadi tidak
+pernah masuk tabel `bookings` -- karena itu pengecekan
+`unitMaintenanceBentrok()` di `/public/availability`, `/public/bookings`,
+dan `POST /bookings` tetap diperlukan. Jangan dihapus dengan alasan
+"sudah sinkron".
+
+**Sisa uji coba:** Edge Function `uji-roomblock` (bukan villa-api) masih ada
+di proyek Supabase sebagai stub yang selalu menjawab 410 dan
+`verify_jwt=true`. Tidak pernah menjalankan panggilan Cloudbeds. Boleh
+dihapus dari dashboard Supabase (MCP tidak punya alat hapus fungsi).
+
+## 2026-10-02 — Finance: pemasukan diakui per tanggal check-in, hanya tamu yang sudah check-in
+
+Owner: "yang dicatat pemasukan itu adalah per tanggal check-in, jika masih
+bookingan biarkan itu ada di Cloudbeds, tapi di sistem per tanggal check-in,
+agar kita tidak kaget ketika ada yang membatalkan bookingan, dan hitungan
+finance lebih stabil".
+
+**Sebelumnya:** endpoint `/finance/*` sudah memfilter per `tgl_checkin`,
+tapi menghitung SEMUA booking yang tidak batal, termasuk yang masih
+`terjadwal` (tamu belum datang). Data Oktober per 2 Okt:
+- sudah check-in: 9 booking, Rp9,15 jt;
+- masih terjadwal: 28 booking, Rp19,28 jt;
+- sudah batal: 8 booking, Rp17,97 jt, semuanya batal sebelum tamunya datang.
+
+Dashboard lama menampilkan Rp28,4 jt sebagai pendapatan Oktober, dan angka
+itu bisa turun setiap kali ada pembatalan.
+
+**Sekarang** (villa-api, satu aturan `isPemasukanDiakui` /
+`STATUS_PEMASUKAN_DIAKUI = ['checkin','checkout']`):
+- `/finance/summary`: gross/net/payment/outstanding/OTA receivable hanya
+  dari booking yang sudah check-in. Ada field baru `pipeline`
+  (booking mendatang: jumlah, nilai, yang lewat tanggal) dan
+  `recognition_rule`. Alert baru `belum_checkin` muncul untuk booking yang
+  sudah lewat tanggal check-in tapi belum di-check-in.
+- `/finance/channel-breakdown` dan `computeNetRevenueForRange` (Survival
+  Control Center, investor entitlement, guarantee gap) memakai aturan yang
+  sama.
+- `ensureFinanceSettlements` hanya membuat baris settlement untuk booking
+  yang sudah check-in.
+- `/finance/bookings` tetap menampilkan semua booking, dengan
+  `pemasukan_diakui`. Halaman menandai yang belum dihitung.
+- UI `/finance`: kartu "Gross Revenue (sudah check-in)" dan kartu baru
+  "Booking Mendatang (belum dihitung)".
+
+**Revisi 2026-10-05 (owner):** angka finance tidak cocok dengan extranet
+OTA karena aturan di atas bergantung pada resepsionis menekan check-in.
+Kasus nyata: Airbnb Alfy Farhan, A1, 3-5 Okt (Rp1.495.000) -- tamu
+menginap, Airbnb mencatatnya, tapi di sistem tetap `terjadwal` sehingga
+Airbnb hilang dari Revenue by Channel. Owner: "sesuaikan dengan tanggal
+checkin yang km tarik dari cloudbeds". Aturannya sekarang:
+`STATUS_PEMASUKAN_DIAKUI = ['terjadwal','checkin','checkout']` DAN
+`tgl_checkin <= hari ini (WIB)`. Pemasukan diakui begitu tanggal check-in
+Cloudbeds tiba, tidak menunggu tombol check-in. Booking dengan tanggal
+check-in di masa depan tetap "Booking Mendatang" (alasan 2 Okt soal
+pembatalan tetap berlaku); `menunggu_pembayaran` tidak termasuk. Alert
+`belum_checkin` tetap ada tapi sekarang hanya peringatan operasional
+(sudah dihitung; tandai batal/no-show kalau tamu tidak datang).
+`pipeline.overdue_count` dihapus.
+
+**Kotor vs bersih (2026-10-05, owner):** Cloudbeds MENAMBAHKAN fee OTA ke
+harga, bukan memotongnya. Contoh email reservasi Booking.com: harga
+Rp447.950 + "Booking.com Fee" Rp67.192,50 = Grand Total Rp515.142,50;
+"Deposit Amount" Rp447.950. Diperiksa langsung lewat probe baca-saja:
+`getSources` properti ini tidak memuat sumber OTA dan semua komisinya 0%;
+reservasi tidak punya field komisi/net. Yang ada hanya
+`balanceDetailed.subTotal` (= Deposit Amount; Airbnb deposit 0 tapi
+subTotal tetap harga kamar) dan `grandTotal`. Owner: "pakai angka deposit
+amount".
+- Kolom baru `bookings.cloudbeds_subtotal` (migrasi
+  `bookings_cloudbeds_subtotal`), diisi sync tiap 10 menit dan webhook;
+  booking 1 Sep ke atas di-backfill sekali (103 booking OTA; 9 booking batal
+  dilewati karena Cloudbeds menolkan totalnya).
+- villa-api `pendapatanKotor(b)` = total_bayar (grandTotal);
+  `pendapatanBersih(b)` = cloudbeds_subtotal untuk booking OTA, = kotor untuk
+  DIRECT (website/walk-in, termasuk booking website yang diteruskan ke
+  Cloudbeds). Dipakai summary (net_revenue), channel breakdown + by_date,
+  computeNetRevenueForRange (Survival KPI), settlement (amount yang ditunggu
+  dari OTA; 18 settlement belum-diterima dikoreksi).
+- Contoh 1-5 Okt: kotor Rp20.317.787, potongan Rp1.435.965, bersih
+  Rp18.881.822. Agoda tidak punya fee di Cloudbeds (bersih = kotor).
+- **Dasar dividen (owner setuju 2026-10-05, "oke bawa ke production"):**
+  `villa_commit_checkin` (migrasi `20261005000002`) sekarang mencatat
+  `cloudbeds_subtotal` ke `transactions` untuk booking OTA yang punya
+  angkanya; selain itu tetap `total_bayar`. Transaksi Oktober yang sudah
+  tercatat dikoreksi (10 baris Booking.com/Traveloka): dasar Oktober
+  Rp18.822.787 -> Rp17.581.822. **September TIDAK diubah** (dividen sudah
+  ditransfer); dasar September ternyata Rp1.486.094 terlalu tinggi, semuanya
+  dari 7 booking Airbnb.
+- Catatan: `transactions` tetap hanya terisi saat resepsionis menekan
+  check-in. Booking yang tamunya menginap tanpa check-in di sistem (mis.
+  Airbnb Alfy Farhan A1 3-5 Okt) sudah dihitung di Finance tapi TIDAK masuk
+  dasar dividen sampai di-check-in.
+
+**Tidak disentuh:** tabel `transactions`, bagi hasil, dan rumus dividen
+investor (`PHASE0-BASELINE.md` §2). Bagi hasil sudah dicatat saat check-in
+lewat alur front desk. Tidak ada perubahan skema.
+
+Konsekuensi yang perlu diingat: di awal bulan, pendapatan dan investor
+entitlement di Survival Control Center terlihat lebih kecil dari sebelumnya,
+lalu naik seiring tamu datang. Itu memang tujuannya. Angka booking mendatang
+ada di kartu tersendiri.
+
+## 2026-10-02 — KEPUTUSAN OWNER: harga OTA di bawah batas minimal DIBIARKAN (fase ramp-up 3 bulan)
+
+Owner membandingkan harga Agoda, Booking.com, dan website untuk 6 Okt. Saya
+cek lewat Cloudbeds langsung (`/api/admin/cloudbeds/health`):
+- Cloudbeds hanya punya satu rate plan per tipe, tidak ada rate plan turunan.
+  Standard 468.000, Sawah View 643.000. Website persis sama (949rb dan
+  1.243rb untuk 6–8 Okt).
+- Booking.com: 468.000 − "Late Escape Deal" 15% = 397.800. Promo ini diatur
+  di extranet Booking.com dan ditanggung villa.
+- Agoda Standard: 361.637 = 468.000 × 0,85 ÷ 1,1 (promo 15% di YCS, harga
+  tampil sebelum pajak). Lalu potongan AGODASPONSORED yang ditanggung Agoda.
+  Pool Villa (Sawah View) tampil sekitar 30% di bawah Cloudbeds; kemungkinan
+  promo bertumpuk, belum terverifikasi karena tidak ada akses YCS.
+- Akibatnya: `min_rate` hanya menjaga harga Cloudbeds. Promo OTA memotong
+  setelahnya, jadi harga jual OTA (dan pendapatan bersih setelah komisi) bisa
+  jauh di bawah `min_rate`.
+
+**Keputusan owner:** "biarkan saja seperti ini dulu agar loonars sangat ramai
+dulu untuk fase ramp up, setelah 3 bulan baru kita naikkan harga". Jangan
+matikan promo OTA, dan jangan buat mesin harga mengompensasinya, sebelum
+sekitar **awal Januari 2027** atau owner sendiri memintanya. Opsi yang sudah
+ditawarkan untuk nanti: mesin harga memperhitungkan persen promo per OTA
+supaya harga jual OTA tidak tembus `min_rate`.
+
+## 2026-10-02 — Kode referral karyawan dibangun, MENUNGGU persetujuan owner
+
+Lihat CHANGELOG 2026-10-02. Kode di branch `claude/referral-karyawan-r7k2pd`
+di tiga repo (villa, loonars, Mkhsistem). Belum ada yang live: migrasi villa
+`20261002000001` dan Mkhsistem `0283` belum di-apply, villa-api belum
+di-deploy, PR belum di-merge, karena fitur ini menciptakan kewajiban bayar
+fee 10% ke karyawan (harga tamu TIDAK berubah -- keputusan owner). Urutan rilis yang aman: apply kedua migrasi -> deploy
+villa-api -> merge villa & Mkhsistem -> merge loonars (form baru mengirim
+`referral_code`, yang diabaikan villa-api lama).
+
 ## 2026-09-27 — Chat WhatsApp dua arah dibangun untuk Front Desk
 
 Owner minta modul chat di halaman resepsionis yang "menarik dari webhook

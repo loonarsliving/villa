@@ -302,6 +302,10 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
           durasi_malam: nights > 0 ? nights : null,
           tarif: stayTotal,
           total_bayar: stayTotal,
+          // Harga kamar sebelum fee OTA yang Cloudbeds tambahkan ke grandTotal
+          // = "Deposit Amount" di email reservasi; ini yang dipakai Finance
+          // sebagai pendapatan bersih (owner 2026-10-05).
+          ...(totals ? { cloudbeds_subtotal: totals.subTotal } : {}),
           cloudbeds_balance: cloudbedsBalance,
           status: statusSetelahSync(statusSaatIni.get(resv.reservationID), statusToVilla(resv.status)),
           cloudbeds_reservation_id: resv.reservationID,

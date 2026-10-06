@@ -36,6 +36,22 @@ const statusChip: Record<WaStatusTamu, string> = {
 
 const POLL_MS = 8000;
 
+// Draf AI (src/lib/aiResepsionis.ts): siapa yang seharusnya menangani pesan ini.
+interface DrafAi {
+  draf: string;
+  kategori: string;
+  alasan: string | null;
+  dibuat: string;
+}
+const kategoriAi: Record<string, { label: string; kelas: string }> = {
+  jawab: { label: "Draf AI", kelas: "bg-sage-500/15 text-sage-600" },
+  booking: { label: "Draf AI · Booking", kelas: "bg-sage-500/15 text-sage-600" },
+  cek_tanggal: { label: "Draf AI · Cek tanggal", kelas: "bg-azure-500/10 text-azure-600" },
+  paket_rebecca: { label: "Paket → teruskan ke Rebecca", kelas: "bg-gold-500/20 text-ink" },
+  komplain: { label: "Komplain → Security & Rebecca", kelas: "bg-ruby-500/15 text-ruby-500" },
+  perlu_resepsionis: { label: "Perlu dicek resepsionis", kelas: "bg-ruby-500/15 text-ruby-500" },
+};
+
 // Pilihan bahasa tamu di header. "id" = tanpa terjemahan.
 const BAHASA: { kode: string; nama: string }[] = [
   { kode: "id", nama: "Indonesia (tanpa terjemahan)" },
@@ -98,6 +114,9 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<WaConversationMessageRow[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [draft, setDraft] = useState("");
+  const [drafAi, setDrafAi] = useState<DrafAi | null>(null);
+  // Draf yang sudah diabaikan resepsionis (per waktu dibuat) tidak dimunculkan lagi.
+  const [drafDiabaikan, setDrafDiabaikan] = useState<string | null>(null);
   const [pending, setPending] = useState<PesanTertunda[]>([]);
   const [filter, setFilter] = useState<Filter>("semua");
   const [cari, setCari] = useState("");
@@ -181,14 +200,28 @@ export default function ChatPage() {
       });
   }, [toast]);
 
+  // Draf AI selalu diam-diam: kalau gagal dimuat, resepsionis tetap membalas seperti biasa.
+  const loadDrafAi = useCallback((id: string) => {
+    localApi<DrafAi | null>(`/api/chat/conversations/${id}/draf`)
+      .then((d) => {
+        if (activeIdRef.current === id) setDrafAi(d ?? null);
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     activeIdRef.current = activeId;
+    setDrafAi(null);
     if (!activeId) return;
     setMessages([]);
     loadMessages(activeId);
-    const id = setInterval(() => loadMessages(activeId, true), POLL_MS);
+    loadDrafAi(activeId);
+    const id = setInterval(() => {
+      loadMessages(activeId, true);
+      loadDrafAi(activeId);
+    }, POLL_MS);
     return () => clearInterval(id);
-  }, [activeId, loadMessages]);
+  }, [activeId, loadMessages, loadDrafAi]);
 
   // Isi percakapan di HP menutupi layar -- halaman di belakangnya jangan ikut tergulir.
   useEffect(() => {
@@ -567,6 +600,39 @@ export default function ChatPage() {
                   </>
                 )}
               </div>
+
+              {drafAi && drafAi.dibuat !== drafDiabaikan && (
+                <div className="shrink-0 mx-3 lg:mx-5 mt-2 rounded-2xl border border-ink/10 bg-base-800/60 px-3.5 py-2.5">
+                  <div className="flex items-center gap-2 text-[11px] font-semibold">
+                    <span className={`px-2 py-0.5 rounded-full ${(kategoriAi[drafAi.kategori] ?? kategoriAi.perlu_resepsionis).kelas}`}>
+                      {(kategoriAi[drafAi.kategori] ?? kategoriAi.perlu_resepsionis).label}
+                    </span>
+                    <span className="text-ink/40 font-normal">belum terkirim — periksa dulu</span>
+                  </div>
+                  <div className="mt-1.5 text-[14px] leading-snug whitespace-pre-wrap break-words text-ink">{drafAi.draf}</div>
+                  {drafAi.alasan && <div className="mt-1 text-[12px] text-ink/50">{drafAi.alasan}</div>}
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDraft(drafAi.draf);
+                        setDrafDiabaikan(drafAi.dibuat);
+                        inputRef.current?.focus();
+                      }}
+                      className="px-3 py-1.5 rounded-full bg-gold-500 text-white text-[12px] font-semibold"
+                    >
+                      Pakai draf
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDrafDiabaikan(drafAi.dibuat)}
+                      className="px-3 py-1.5 rounded-full border border-ink/15 text-ink/60 text-[12px] font-semibold"
+                    >
+                      Abaikan
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="shrink-0 flex items-end gap-2 px-3 lg:px-5 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:pb-3 bg-base-900 border-t border-ink/[0.06]">
                 <textarea

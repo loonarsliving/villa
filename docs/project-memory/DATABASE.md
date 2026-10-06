@@ -207,3 +207,24 @@ service_role saja, tidak ada policy untuk `anon`/`authenticated`.
   panggil RPC dua kali, verifikasi `unread_count=2` dan pratinjau ikut
   ter-update, verifikasi cascade delete membersihkan pesannya) -- data
   ujinya dihapus setelah terbukti, tidak ada sisa di produksi.
+
+## `villa_referral_codes` / `villa_referral_redemptions` (2026-10-02, kode referral karyawan) — migrasi ditulis, BELUM di-apply
+
+- `villa_referral_codes`: `kode` unik berformat `REF-[A-Z0-9]{2,20}` (tanda hubung = tidak bisa tertukar dengan kode investor 8 karakter), `employee_id` → `employees(id)` Mkhsistem (`on delete set null`), `employee_nama` (salinan), `fee_persen` (default 10), `aktif`, `dibuat_oleh`.
+- `villa_referral_redemptions`: satu baris per booking yang memakai kode (unik per `booking_id`), menyimpan `nilai_booking` (yang ditagih ke tamu = harga normal, tanpa kode unik), `fee_persen`, `fee` dalam rupiah saat booking dibuat. Referral tidak mengubah harga tamu, plus `fee_dibayar_at/oleh` untuk pencairan. `booking_id` `on delete set null` supaya catatan fee tidak hilang.
+- Status fee (menunggu lunas / sah / gugur) **tidak disimpan**, diturunkan villa-api dari `bookings.status`.
+- RLS ON, satu policy service_role. Semua akses lewat villa-api.
+
+## `villa_room_maintenance` / `villa_room_checks` + role `manager` (2026-10-02, Kesiapan Kamar) — SUDAH di-apply 2026-10-02
+Migrasi `20261002000002_manager_kesiapan_kamar.sql`:
+- `villa_users_role_check` diperluas dengan `'manager'` (daftar lama dibaca langsung dari DB: owner, receptionist, admin, security, cleaning_service, finance).
+- `villa_room_maintenance` — satu baris per unit yang SEDANG ditutup (PK `unit_id`): `tutup_mulai`/`tutup_sampai` (malam pertama & terakhir, inklusif), `alasan`, `cloudbeds_room_block_id`, siapa yang menutup. Tidak ada baris = kamar dijual (bawaan). Baris yang `tutup_sampai`-nya lewat dianggap sudah terbuka.
+- `villa_room_checks` — riwayat setiap pengecekan: `hasil` (siap/maintenance), `checklist` jsonb 10 poin, `catatan`, `cloudbeds_aksi` (ditutup/diperpanjang/dibuka/tidak_perlu/gagal), pesan Cloudbeds, pengecek.
+- RLS ON, policy service_role saja (pola 2026-09-08). Dibaca villa-api `unitMaintenanceBentrok()` secara GAGAL-TERBUKA, supaya villa-api yang ter-deploy sebelum migrasinya tidak menolak tamu.
+- `units.status` (yang sudah punya nilai `maintenance`) SENGAJA tidak dipakai: kolom itu ditimpa alur checkin/checkout.
+
+- **Kolom draf AI (2026-10-05, migrasi `20261005000003_wa_ai_draf.sql`, di-apply 2026-10-05 atas persetujuan owner)**:
+  `wa_conversations.ai_draf`, `ai_kategori`, `ai_alasan`, `ai_draf_untuk_pesan`
+  (FK ke `wa_conversation_messages`, `on delete set null`), `ai_draf_at`. Hanya
+  kolom nullable baru. Ditulis oleh `src/lib/aiResepsionis.ts` setelah pesan
+  masuk dicatat di `/api/wa/mirror`, dikosongkan saat staf membalas.

@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 
+import { advanceFloorRamp, occupancyFromAvailability, rampedFloor, type FloorRampState } from "./aiPricingEngine";
+import { learnDayOfWeekDemand, paceDayGroup, buildPaceBaseline } from "./aiPricingEngine";
 import { acceptedPeakMedian, buildSearchDemand, decideRateForDate, fixedCalendarPeriodFor, learnDiscountWindow, OWNER_SELECTED_COMPETITOR, pickPeerPrices, searchDemandRelativeFor, type DateDecisionInput, type PricingSettings } from "./aiPricingEngine";
 
 /**
@@ -62,8 +64,15 @@ describe("anchor and weekend", () => {
   });
 
   it("uses Standard's larger weekend surcharge so the weekend price holds when the weekday base is cut (owner 2026-09-16, cut again 2026-09-29)", () => {
-    const d = decide({ targetDate: FRIDAY, anchorRate: 500000, minRate: 500000, roomTypeCode: "standard" });
+    // Sabtu: harga akhir pekan Standard tetap 750rb.
+    const d = decide({ targetDate: "2026-09-19", anchorRate: 500000, minRate: 500000, roomTypeCode: "standard" });
     expect(d.decided_rate).toBe(750000);
+  });
+
+  it("charges Standard a smaller Friday surcharge than Saturday (owner 2026-10-05: Jumat hampir 0 pemesanan)", () => {
+    const d = decide({ targetDate: FRIDAY, anchorRate: 500000, minRate: 450000, roomTypeCode: "standard" });
+    expect(d.decided_rate).toBe(600000);
+    expect(d.reason_codes).toContain("friday_rate");
   });
 
   it("uses Sawah View's own weekend surcharge so its weekend price also holds after its weekday cut (owner 2026-09-29)", () => {
@@ -538,5 +547,96 @@ describe("hasil riset puncak harus benar-benar harga puncak", () => {
   it("needs three villas and an ordinary-night comparison", () => {
     expect(acceptedPeakMedian([1500000, 1800000], 1000000)).toBeNull();
     expect(acceptedPeakMedian([1500000, 1800000, 1400000], null)).toBeNull();
+  });
+});
+
+describe("okupansi dari inventori yang dijual di Cloudbeds (owner 2026-10-04)", () => {
+  it("counts against the rooms actually open, not every unit owned", () => {
+    // 5 Okt 2026: 4 Standard terjual, sisa 1 di Cloudbeds -> 80%, bukan 40%.
+    expect(occupancyFromAvailability(4, 0, 1)).toBe(80);
+  });
+  it("keeps free investor nights out of demand but inside the room count", () => {
+    expect(occupancyFromAvailability(2, 1, 2)).toBe(40);
+  });
+  it("falls back (null) when Cloudbeds has no data or the date is not on sale", () => {
+    expect(occupancyFromAvailability(3, 0, undefined)).toBeNull();
+    expect(occupancyFromAvailability(0, 0, 0)).toBeNull();
+  });
+  it("is enough to trigger the high-occupancy increase that the old count missed", () => {
+    expect(decide({ occupancyPct: occupancyFromAvailability(4, 0, 1)! }).reason_codes).toContain("high_occupancy");
+  });
+});
+
+describe("batas bawah naik bertahap 450rb -> 550rb dalam 3-6 bulan", () => {
+  const start: FloorRampState = { start_date: "2026-10-05", progress: 0, last_advanced: null, room_types: { standard: { from: 450000, to: 550000 } } };
+  const addDays = (d: string, n: number) => new Date(Date.parse(d + "T00:00:00Z") + n * 86400000).toISOString().slice(0, 10);
+  const runDays = (days: number, occ: number | null) => {
+    let st = start;
+    for (let i = 1; i <= days; i++) st = advanceFloorRamp(st, addDays(start.start_date, i), occ);
+    return st;
+  };
+
+  it("starts at the current floor and only touches configured room types", () => {
+    expect(rampedFloor(start, "standard")).toBe(450000);
+    expect(rampedFloor(start, "sawah_view")).toBeNull();
+    expect(rampedFloor(null, "standard")).toBeNull();
+  });
+  it("reaches 550rb in about 6 months when demand is weak", () => {
+    expect(rampedFloor(runDays(91, 20), "standard")).toBe(500000);
+    expect(rampedFloor(runDays(183, 20), "standard")).toBe(550000);
+  });
+  it("reaches 550rb in about 3 months when the villa is selling well", () => {
+    expect(rampedFloor(runDays(91, 85), "standard")).toBe(550000);
+  });
+  it("never goes past the target or backwards", () => {
+    const done = runDays(400, 90);
+    expect(rampedFloor(done, "standard")).toBe(550000);
+    const later = advanceFloorRamp({ ...done, progress: 0.6, last_advanced: "2027-01-01" }, "2027-01-02", 0);
+    expect(later.progress).toBeGreaterThanOrEqual(0.6);
+  });
+  it("advances only once per day and catches up after missed runs", () => {
+    const d1 = advanceFloorRamp(start, "2026-10-06", 50);
+    expect(advanceFloorRamp(d1, "2026-10-06", 90)).toBe(d1);
+    const afterGap = advanceFloorRamp(d1, "2026-11-05", 0);
+    expect(afterGap.progress).toBeCloseTo(31 / 183, 3);
+  });
+});
+
+describe("pola hari dipelajari dari booking sendiri (owner 2026-10-05)", () => {
+  const units = new Set(["u1", "u2", "u3", "u4", "u5"]);
+  const night = (unit: string, d: string) => ({ unit_id: unit, tgl_checkin: d, tgl_checkout: new Date(Date.parse(d + "T00:00:00Z") + 86400000).toISOString().slice(0, 10), status: "checkout", created_at: "2026-09-01T00:00:00Z" });
+  // 3 minggu: tiap hari 3 kamar terjual, kecuali Jumat hanya 1.
+  const rows: ReturnType<typeof night>[] = [];
+  for (let i = 0; i < 21; i++) {
+    const d = new Date(Date.parse("2026-09-21T00:00:00Z") + i * 86400000).toISOString().slice(0, 10);
+    const sold = new Date(d + "T00:00:00Z").getUTCDay() === 5 ? 1 : 3;
+    for (let u = 0; u < sold; u++) rows.push(night(`u${u + 1}`, d));
+  }
+
+  it("finds the weak day from past nights only", () => {
+    const dow = learnDayOfWeekDemand(rows, units, "2026-10-12");
+    expect(dow.usable).toBe(true);
+    expect(dow.relativeByIsoDay.get(5)!).toBeLessThan(-0.5);
+    expect(dow.relativeByIsoDay.get(6)!).toBeGreaterThan(0);
+  });
+
+  it("waits for enough history", () => {
+    expect(learnDayOfWeekDemand(rows.slice(0, 10), units, "2026-10-12").usable).toBe(false);
+  });
+
+  it("nudges a weak day down and a strong day up, both bounded", () => {
+    const weak = decide({ dayOfWeekRelative: -0.6 });
+    expect(weak.reason_codes).toContain("day_of_week_weak");
+    expect(weak.decided_rate).toBeLessThan(650000);
+    expect(weak.decided_rate).toBeGreaterThanOrEqual(Math.round(650000 * (1 - 0.06) / 1000) * 1000);
+    expect(decide({ dayOfWeekRelative: 0.3 }).reason_codes).toContain("day_of_week_strong");
+  });
+
+  it("reads Friday and Saturday pace separately", () => {
+    expect(paceDayGroup("2026-10-09")).toBe("fri");
+    expect(paceDayGroup("2026-10-10")).toBe("sat");
+    expect(paceDayGroup("2026-10-11")).toBe("weekday");
+    const fri = buildPaceBaseline(rows, units, "2026-10-12", "fri");
+    expect(fri.comparableDates).toBe(3);
   });
 });
