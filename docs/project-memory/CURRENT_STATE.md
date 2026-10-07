@@ -3,6 +3,32 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-07 — Laporan mingguan WhatsApp ke investor (tiap Rabu 15:50 WIB)
+
+Permintaan owner: tiap 7 hari kirim WA ke investor berisi revenue, okupansi,
+dan porsi booking per channel, mulai 7 Okt 2026.
+
+- Cron Vercel `/api/cron/investor-weekly-report`, `50 8 * * 3` (Rabu 15:50
+  WIB), dijaga `CRON_SECRET` seperti cron lain. Jamnya dipilih supaya kiriman
+  pertama jatuh di hari owner memintanya.
+- Penerima: `villa_users` role `owner`, `is_active` (per 7 Okt: 14 aktif,
+  12 punya nomor; nomor kembar dikirim sekali). Dikirim dari 0822 lewat
+  Mkhsistem (`kirimDariNomorUtama`), dicatat `wa_messages_log`
+  `template_type='investor_weekly_report'`; nomor yang sudah menerima dalam
+  3 hari terakhir dilewati.
+- Isi (`src/lib/investorWeeklyReportText.ts`, +9 tes): 7 malam Rabu-Selasa
+  sebelumnya. Pendapatan bersih/kotor memakai aturan villa-api
+  (`isPemasukanDiakui` per tanggal check-in, `pendapatanBersih`); okupansi
+  = malam-kamar terisi / (jumlah unit x 7); minggu sebelumnya; channel
+  tamu check-in; booking baru masuk (tanpa batal); minggu depan yang sudah
+  terisi; paragraf strategi tetap dari owner (KOL berjalan, barter menginap
+  KOL ditunda selama soft opening, target okupansi 80% akhir 2026). Owner
+  minta rencana Airbnb TIDAK disampaikan. Ganti teks strategi di
+  `TEKS_STRATEGI` kalau owner minta.
+- Minggu ke-1 (30 Sep-6 Okt): bersih Rp23.106.817, okupansi 49,5% (45/91),
+  minggu sebelumnya 30,8%; Agoda 65%, Booking.com 24%, Traveloka 8%,
+  Airbnb 3%.
+
 ## 2026-10-07 — Finance: menu "Checklist Dana Masuk" (/finance/checklist-dana)
 
 Permintaan owner: checklist manual dana yang sudah masuk dan belum, supaya
