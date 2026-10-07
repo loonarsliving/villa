@@ -35,6 +35,10 @@
       "schedule": "25 17 * * *"
     },
     {
+      "path": "/api/cron/investor-weekly-report",
+      "schedule": "50 8 * * 3"
+    },
+    {
       "path": "/api/cron/peak-competitor-research",
       "schedule": "0 18 * * *"
     }

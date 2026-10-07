@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-07 — Laporan mingguan WhatsApp ke investor
+- Cron baru `/api/cron/investor-weekly-report` (Rabu 15:50 WIB): revenue bersih/kotor, okupansi, porsi channel, booking baru, minggu depan, dan strategi KOL/target 80% akhir 2026 ke semua investor aktif dari 0822. Detail di CURRENT_STATE.md 2026-10-07.
+
 ### 2026-10-05 — AI resepsionis tahap 1: draf balasan WhatsApp — LIVE (owner: "Ya aktifkan")
 - Owner ingin balasan chat otomatis. Tahap 1 (pilihan owner: "draf dulu"): setiap pesan tamu di Chat Front Desk dibuatkan **draf** oleh AI (Mkhsistem `/api/villa/ai/chat-reply`); resepsionis menekan "Pakai draf" lalu Kirim. **Tidak ada yang terkirim ke tamu tanpa resepsionis.**
 - Fakta AI hanya dari `src/lib/aiResepsionisPengetahuan.ts` (dikoreksi owner 2026-10-05: check-in 15.00; early check-in hanya 12.00-14.00 Rp100.000 bila tidak ramai; extrabed belum tersedia; late check-out Rp100.000/jam lewat 12.00; paket di luar kamar diteruskan ke Rebecca) dan dari `/public/availability` villa-api (harga sama dengan loonars.id). Sandi WiFi hanya untuk tamu yang punya booking.
