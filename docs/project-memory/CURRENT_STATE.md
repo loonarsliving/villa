@@ -3,6 +3,11 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-07 — Kamar view (Sawah View) dipertahankan harganya mulai 12 Okt (BELUM MERGE, menunggu owner)
+- Owner: "mulai minggu depan kt pakai strategi mempertahankan harga kamar dgan view, jd yg kena promo2 itu adalah kamar non view, bgtu jga di ota".
+- villa-api `kamarViewDilindungi` (`KODE_KAMAR_VIEW = ['sawah_view']`, mulai tanggal pesan WIB `2026-10-12`): Sawah View di loonars.id = harga normal mesin harga (tanpa potongan website 82%) dan kode promo ditolak ("Promo berlaku untuk kamar Standard"). Standard tidak berubah.
+- Promo OTA (Agoda/Booking/Traveloka/Airbnb) diatur di extranet masing-masing oleh owner -- tidak bisa dari sistem ini.
+
 ## 2026-10-07 — Harga loonars.id selalu lebih murah dari Agoda (BELUM MERGE, menunggu owner)
 - Owner: "harga direct upayakan selalu menang dari agoda", "tp jgan sampai harga kt trllu murah".
 - Data nyata (8 booking Agoda terakhir, harga dari `villa_rate_history` saat dipesan): Agoda membayar villa **tepat 80%** harga Cloudbeds; tamu Agoda melihat ±85% (promo 15%). Sebelumnya loonars.id menjual 100% harga Cloudbeds -- paling mahal dari semua kanal kecuali Airbnb (116%, markup channel di Cloudbeds).

@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-07 — Sawah View tanpa potongan website & tanpa kode promo mulai pesan 12 Okt — menunggu persetujuan merge owner
+- Lihat CURRENT_STATE.md 2026-10-07 (kamar view dipertahankan harganya).
+
 ### 2026-10-07 — Harga loonars.id = 82% harga Cloudbeds (selalu lebih murah dari Agoda) — menunggu persetujuan merge owner
 - villa-api `computeWebsiteStayPrice` (pengaman: >= 80% harga malam itu = yang dibayar Agoda, >= 82% batas bawah/ramp, <= harga normal); loonars.id menampilkan harga normal dicoret. Lihat CURRENT_STATE.md 2026-10-07.
 

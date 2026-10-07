@@ -1379,9 +1379,27 @@ async function stayNightRates(unit, tgl_checkin, nights){
 const HARGA_WEBSITE_FAKTOR = 0.82;
 const HARGA_WEBSITE_MIN_FAKTOR_AGODA = 0.80;
 
+/**
+ * Kamar view dipertahankan harganya (owner 2026-10-07: "mulai minggu depan kt
+ * pakai strategi mempertahankan harga kamar dgan view, jd yg kena promo2 itu
+ * adalah kamar non view"). Mulai tanggal pesan di bawah ini (WIB), kamar view
+ * di loonars.id dijual harga normal mesin harga -- tanpa potongan website dan
+ * tanpa kode promo. Promo hanya untuk kamar non-view (Standard).
+ * Promo di extranet OTA diatur owner di Agoda/Booking/Traveloka sendiri;
+ * sistem ini tidak bisa mengubahnya.
+ */
+const KAMAR_VIEW_TANPA_PROMO_MULAI = '2026-10-12';
+const KODE_KAMAR_VIEW = ['sawah_view'];
+
+function kamarViewDilindungi(roomTypeCode){
+  return KODE_KAMAR_VIEW.includes(String(roomTypeCode ?? '')) && todayWIB() >= KAMAR_VIEW_TANPA_PROMO_MULAI;
+}
+
 async function batasBawahWebsitePerMalam(roomTypeId){
   if(!roomTypeId) return 0;
   const {data:rt} = await supabase.from('villa_room_types').select('code,min_rate').eq('id', roomTypeId).maybeSingle();
+  // Tanpa potongan: lantai = tak terhingga, dijepit ke harga normal di hargaWebsiteSemalam.
+  if(kamarViewDilindungi(rt?.code)) return Infinity;
   let lantai = Number(rt?.min_rate ?? 0);
   const ramp = await getSetting('villa_floor_ramp');
   const cfg = rt?.code ? ramp?.room_types?.[rt.code] : null;
@@ -1444,7 +1462,8 @@ async function hitungHargaPromo(promo, roomTypeId, tgl_checkin, tgl_checkout, ni
   }
   if(!roomTypeId) return {ok:false, alasan:'Unit ini belum punya tipe kamar, promo tidak bisa dihitung'};
 
-  const {data:rt} = await supabase.from('villa_room_types').select('min_rate,name').eq('id', roomTypeId).maybeSingle();
+  const {data:rt} = await supabase.from('villa_room_types').select('min_rate,name,code').eq('id', roomTypeId).maybeSingle();
+  if(kamarViewDilindungi(rt?.code)) return {ok:false, alasan:`Promo tidak berlaku untuk kamar ${rt?.name ?? 'view'}. Promo berlaku untuk kamar Standard.`};
   const minRate = Number(rt?.min_rate ?? 0);
   if(!(minRate > 0)) return {ok:false, alasan:'Batas bawah harga tipe kamar belum diatur'};
 
