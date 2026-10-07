@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-11 — Sawah View tanpa potongan website & tanpa kode promo mulai pesan 12 Okt — owner-approved
+- Lihat CURRENT_STATE.md 2026-10-11.
+
 ### 2026-10-09 — Nomor WhatsApp tamu wajib di kartu check-in
 - Kolom wajib di `CheckinCard`, disimpan ke `guests.hp` saat check-in (kecuali menimpa nomor booking website). `GET /bookings` membawa `guest_hp` untuk staf. Lihat CURRENT_STATE.md.
 

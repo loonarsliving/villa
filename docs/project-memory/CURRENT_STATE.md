@@ -3,6 +3,11 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-11 — Kamar view (Sawah View) dipertahankan harganya mulai pesan 12 Okt (owner-approved: "Ya bawa ke production")
+- Owner 2026-10-07: "mulai minggu depan kt pakai strategi mempertahankan harga kamar dgan view, jd yg kena promo2 itu adalah kamar non view, bgtu jga di ota".
+- villa-api `kamarViewDilindungi` (`KODE_KAMAR_VIEW = ['sawah_view']`, mulai tanggal pesan WIB `2026-10-12`): Sawah View di loonars.id = harga normal mesin harga (tanpa potongan website 82%) dan kode promo ditolak ("Promo berlaku untuk kamar Standard"). Standard tidak berubah. Mesin harga AI tidak diubah (owner belum memutuskan lantai 630rb; dibiarkan).
+- OTA: owner memasang Base Rate Adjustment +Rp150.000 khusus Sawah per channel di Cloudbeds Distribution (7 Okt ~20.00 WIB). Tidak terlihat lewat API harga Cloudbeds (yang terbaca hanya harga dasar). Terverifikasi di Agoda: booking Sawah 10 Okt dibayar 800.200 = 80% x (850rb + 150rb). Traveloka belum pasti (rasio tidak konsisten); Booking.com belum ada booking Sawah.
+
 ## 2026-10-09 (malam) — Sinkronisasi Cloudbeds tidak lagi membuat tamu baru tiap kali jalan
 
 Ditemukan saat mengecek kiriman pertama WA info malam (21.00, 9 Okt):
