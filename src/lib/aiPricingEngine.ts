@@ -573,6 +573,18 @@ const PRICE_ROUNDING_STEP = 1000;
 export const FIXED_CALENDAR_CREATED_BY = "fixed_calendar_peak";
 const CHRISTMAS_NEW_YEAR_ADJUSTMENT_PCT = 0.2;
 const NEW_YEARS_EVE_ADJUSTMENT_PCT = 0.4;
+/**
+ * Owner instruction (2026-10-07): "harga tahun baruku harusnya naik hingga
+ * 1 jutaan, jadi meskipun kena diskon dia tetap kuat". Persen saja tidak
+ * cukup: sejak promo weekday menurunkan harga dasar (Standard 500rb), +40%
+ * hanya menghasilkan ~700rb, lalu promo OTA memotongnya lagi. Malam 31 Des
+ * kini punya harga TARGET minimal per tipe; persen tetap dipakai kalau
+ * hasilnya lebih tinggi. Tetap kena rem harian (naik bertahap) dan max_rate.
+ */
+const NEW_YEARS_EVE_TARGET_BY_ROOM_TYPE_CODE: Record<string, number> = {
+  standard: 1000000,
+  sawah_view: 1100000,
+};
 
 /** Puncak kalender tetap yang menutupi satu malam menginap, atau null. */
 export function fixedCalendarPeriodFor(date: string): SeasonPeriod | null {
@@ -1458,6 +1470,13 @@ export function decideRateForDate(input: DateDecisionInput): DatePriceDecision {
       reasonCodes.push("event_demand_unproven");
     }
     if (earnedShare > 0) decidedRate = Math.round(decidedRate * (1 + periodPct * earnedShare));
+    if (period.created_by === FIXED_CALENDAR_CREATED_BY && targetDate.slice(5, 10) === "12-31") {
+      const nyeTarget = NEW_YEARS_EVE_TARGET_BY_ROOM_TYPE_CODE[input.roomTypeCode ?? ""];
+      if (nyeTarget !== undefined && decidedRate < nyeTarget) {
+        decidedRate = nyeTarget;
+        reasonCodes.push("new_years_eve_target");
+      }
+    }
   }
 
   // --- 6. Competitor band: a sanity CAP, never a floor ---
@@ -1590,6 +1609,7 @@ function narrateDecision(codes: string[], guardrail: DatePriceDecision["guardrai
   if (has("low_season_discount")) parts.push("diturunkan lagi karena masuk periode sepi");
   else if (has("low_season_discount_not_needed")) parts.push("masuk periode sepi tapi tanggal ini sudah laku, jadi tidak didiskon");
   else if (has("new_years_eve_peak")) parts.push("dinaikkan penuh karena malam tahun baru, malam paling ramai dalam setahun");
+  if (has("new_years_eve_target")) parts.push("dinaikkan ke harga target malam tahun baru agar tetap kuat walau terkena promo OTA");
   else if (has("christmas_new_year_peak")) parts.push("dinaikkan penuh karena libur Natal dan Tahun Baru");
   else if (has("recurring_peak")) parts.push("dinaikkan penuh karena puncak musiman tahunan yang sudah pasti");
   else if (has("owner_high_season")) parts.push("dinaikkan penuh karena periode high season yang diatur pemilik");
