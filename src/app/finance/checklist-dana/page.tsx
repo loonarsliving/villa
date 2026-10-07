@@ -255,6 +255,7 @@ export default function ChecklistDanaPage() {
                         {belumDiList.length > 0 && <input type="checkbox" checked={semuaDipilih} onChange={toggleAll} aria-label="Pilih semua" />}
                       </th>
                       <th className="text-left px-3 py-2">Check-in</th>
+                      <th className="text-left px-3 py-2">Check-out</th>
                       <th className="text-left px-3 py-2">Tamu / Unit</th>
                       <th className="text-left px-3 py-2">Channel</th>
                       <th className="text-right px-3 py-2">Seharusnya</th>
@@ -275,6 +276,9 @@ export default function ChecklistDanaPage() {
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap">
                             {fmtDate(i.tgl_checkin)}
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            {fmtDate(i.tgl_checkout)}
                             <div className="text-ink/30 text-[10px]">{i.malam} malam</div>
                           </td>
                           <td className="px-3 py-2">
