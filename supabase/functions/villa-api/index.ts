@@ -1228,9 +1228,9 @@ function normalBlok(blk){
  */
 async function keluarkanKamarDariBlok(k, roomID, hariIni){
   const sisaKamar = (k.rooms ?? []).filter(r=>r.roomID !== roomID && r.isSource !== false);
-  const put = async (endDate, rooms) => {
+  const put = async ({startDate = k.startDate, endDate = k.endDate, rooms} = {}) => {
     const form = new URLSearchParams({roomBlockID: k.roomBlockID});
-    if(k.startDate) form.set('startDate', k.startDate);
+    if(startDate) form.set('startDate', startDate);
     if(endDate) form.set('endDate', endDate);
     if(k.alasan) form.set('roomBlockReason', k.alasan);
     (rooms ?? []).forEach((r, n)=>{
@@ -1240,40 +1240,80 @@ async function keluarkanKamarDariBlok(k, roomID, hariIni){
     return cloudbedsTulis('PUT', 'putRoomBlock', form);
   };
   const hapus = () => cloudbedsTulis('POST', 'deleteRoomBlock', new URLSearchParams({roomBlockID: k.roomBlockID}));
+  const besokTgl = addDaysStr(hariIni, 1);
 
-  let tulis, cara, besok = false;
+  // Baca balik: apakah kamar ini sudah tidak tertutup untuk malam ini dan
+  // seterusnya? true / false / undefined (tidak terbaca).
+  let terakhirTerbaca = null;
+  const sudahTerbuka = async (mulaiBaca) => {
+    const blk = await cloudbedsBacaRoomBlock(k.roomBlockID, mulaiBaca ?? k.startDate ?? hariIni);
+    terakhirTerbaca = blk ?? null;
+    if(blk === undefined) return undefined;
+    if(blk === null) return true;
+    const n = normalBlok(blk);
+    if(!n.roomIDs.includes(roomID)) return true;
+    if(n.endDate != null && n.endDate <= hariIni) return true;   // berakhir sebelum malam ini
+    return false;
+  };
+
+  const percobaan = [];  // jejak untuk log: apa saja yang dicoba dan jawabannya
+  const coba = async (cara, aksi, mulaiBaca) => {
+    const t = await aksi();
+    const buka = await sudahTerbuka(mulaiBaca);
+    percobaan.push({cara, ok: t.ok, pesan: t.pesan, jawaban: t.body, terbuka: buka});
+    return buka === true;
+  };
+
+  let terbuka = false, cara = null, besok = false;
   if(sisaKamar.length){
-    tulis = await put(k.endDate, sisaKamar); cara = 'kamar_dikeluarkan';
+    // Blok berisi kamar lain juga: keluarkan kamar ini saja (terbukti jalan, juga pada blok yang sudah berjalan).
+    cara = 'kamar_dikeluarkan';
+    terbuka = await coba(cara, () => put({rooms: sisaKamar}));
   } else if(!k.startDate || k.startDate > hariIni){
-    tulis = await hapus(); cara = 'dihapus';
+    cara = 'dihapus';
+    terbuka = await coba(cara, hapus);
   } else if(k.startDate < hariIni){
-    tulis = await put(hariIni); cara = 'dipendekkan';
+    // Sudah berjalan sejak kemarin atau lebih: delete ditolak Cloudbeds,
+    // jadi akhiri blok hari ini (endDate eksklusif) -> malam ini terbuka.
+    cara = 'dipendekkan';
+    terbuka = await coba(cara, () => put({endDate: hariIni}));
   } else {
-    tulis = await hapus(); cara = 'dihapus';
-    if(!tulis.ok){
-      const besokTgl = addDaysStr(hariIni, 1);
-      if(k.endDate && k.endDate > besokTgl) tulis = await put(besokTgl);
-      cara = 'dipendekkan'; besok = true;
+    // Mulai HARI INI. Owner (7 Okt 2026): kamar harus bisa dibuka kapan saja,
+    // tanpa menunggu. Coba semua jalan yang ada, berhenti di yang berhasil.
+    cara = 'dihapus';
+    terbuka = await coba(cara, hapus);
+    if(!terbuka){
+      // Geser blok ke besok (jadi belum berjalan), lalu hapus.
+      cara = 'digeser_lalu_dihapus';
+      const geser = await put({startDate: besokTgl, endDate: addDaysStr(besokTgl, 1)});
+      percobaan.push({cara: 'geser_ke_besok', ok: geser.ok, pesan: geser.pesan, jawaban: geser.body});
+      if(geser.ok) terbuka = await coba(cara, hapus, besokTgl);
+    }
+    if(!terbuka){
+      // Blok nol malam: endDate (eksklusif) = startDate = hari ini.
+      cara = 'dipendekkan_nol';
+      terbuka = await coba(cara, () => put({endDate: hariIni}));
+    }
+    if(!terbuka){
+      // Semua ditolak Cloudbeds: pendekkan ke satu malam supaya besok pasti terbuka.
+      cara = 'dipendekkan_satu_malam';
+      if(k.endDate && k.endDate > besokTgl) await put({endDate: besokTgl});
+      const blk = await cloudbedsBacaRoomBlock(k.roomBlockID, hariIni);
+      const n = blk ? normalBlok(blk) : null;
+      besok = blk === null || !!(n && (n.endDate == null || n.endDate <= besokTgl));
     }
   }
 
-  // Baca balik pada tanggal mulai blok itu sendiri.
-  const blk = await cloudbedsBacaRoomBlock(k.roomBlockID, k.startDate ?? hariIni);
-  let terbuka;
-  if(blk === undefined) terbuka = false;
-  else if(blk === null) terbuka = true;
-  else {
-    const n = normalBlok(blk);
-    const batas = besok ? addDaysStr(hariIni, 1) : hariIni;
-    terbuka = !n.roomIDs.includes(roomID) || (n.endDate != null && n.endDate <= batas);
-  }
+  const sukses = terbuka || besok;
+  const pesanAkhir = percobaan.filter(x=>!x.ok && x.pesan).map(x=>x.pesan).pop() ?? null;
   await catatRoomBlockLog(`outbound.room_block.${cara}`, terbuka, {
     roomID, roomBlockID: k.roomBlockID, blok_asal: k, sisa_kamar: sisaKamar.map(r=>r.roomID),
-    jawaban: tulis.body, terbaca: blk ?? null, error: terbuka ? null : (tulis.pesan ?? 'blok masih menutup kamar ini setelah dibaca balik'),
+    percobaan, terbaca: terakhirTerbaca, error: terbuka ? null : (pesanAkhir ?? 'blok masih menutup kamar ini setelah dibaca balik'),
   });
   return {
-    ok: terbuka && !besok, besok: terbuka && besok, cara,
-    pesan: terbuka ? null : (blk === undefined ? 'Cloudbeds tidak bisa dibaca balik' : (tulis.pesan ?? 'blok masih menutup kamar ini')),
+    ok: terbuka, besok: !terbuka && besok, cara,
+    pesan: sukses ? null : (terakhirTerbaca === null && percobaan.some(x=>x.terbuka === undefined) ? 'Cloudbeds tidak bisa dibaca balik' : (pesanAkhir ?? 'blok masih menutup kamar ini')),
+    alasanBesok: besok && !terbuka ? (pesanAkhir ?? 'Cloudbeds menolak membuka blok yang mulai hari ini') : null,
   };
 }
 
@@ -4518,6 +4558,7 @@ Deno.serve(async (req)=>{
       const roomID = mapCb?.cloudbeds_room_id ? String(mapCb.cloudbeds_room_id) : null;
       const dibuka = [];      // deskripsi blok yang dibuka, untuk riwayat
       let besokSaja = false;  // blok baru mulai hari ini: terbuka mulai besok
+      let alasanBesok = null;
       let peringatan = null;
 
       // 1. Blok maintenance milik modul ini -- dibaca dulu dari Cloudbeds
@@ -4536,7 +4577,7 @@ Deno.serve(async (req)=>{
             await catatCek({cloudbeds_aksi:'gagal', cloudbeds_room_block_id: mt.cloudbeds_room_block_id, cloudbeds_pesan: pesan});
             return err(pesan, 502);
           }
-          if(hasilBuka.besok) besokSaja = true;
+          if(hasilBuka.besok){ besokSaja = true; alasanBesok = hasilBuka.alasanBesok; }
         }
         // Blok sudah tidak ada (null) = sudah dibuka orang di Cloudbeds.
         if(besokSaja){
@@ -4562,7 +4603,7 @@ Deno.serve(async (req)=>{
             const h = await keluarkanKamarDariBlok(k, roomID, hariIni);
             if(h.ok || h.besok){
               dibuka.push(ket + (h.cara==='kamar_dikeluarkan' ? ' (kamar lain di blok itu tetap tertutup)' : ''));
-              if(h.besok) besokSaja = true;
+              if(h.besok){ besokSaja = true; alasanBesok = h.alasanBesok; }
             } else {
               gagal.push(`${ket}: ${h.pesan}`);
             }
@@ -4578,7 +4619,7 @@ Deno.serve(async (req)=>{
       // Supaya loonars.id dan Front Desk di isolate ini langsung melihat perubahan.
       cacheBlokCloudbeds.clear();
       const adaYangDibuka = dibuka.length > 0;
-      const catatanBesok = besokSaja ? ' Blokir baru mulai hari ini dan Cloudbeds tidak mengizinkan membukanya untuk malam ini, jadi kamar terbuka mulai BESOK.' : '';
+      const catatanBesok = besokSaja ? ` Blokir baru mulai hari ini dan Cloudbeds menolak semua cara membukanya untuk malam ini (${alasanBesok ?? 'tanpa alasan'}), jadi kamar terbuka di Cloudbeds mulai BESOK. Supaya tidak ada booking yang bentrok, loonars.id dan Front Desk mengikuti: terbuka mulai besok juga.` : '';
       await catatCek({
         cloudbeds_aksi: adaYangDibuka ? 'dibuka' : 'tidak_perlu',
         cloudbeds_room_block_id: mtAktif ? mt.cloudbeds_room_block_id : null,

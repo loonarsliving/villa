@@ -284,6 +284,24 @@ Temuan sampingan (belum diperbaiki, di luar lingkup): webhook Cloudbeds
 sync 10 menit. Booking website yang sudah didorong ke Cloudbeds bisa
 tertimpa tarif/sumber Cloudbeds oleh event webhook.
 
+## 2026-10-07 — Owner: kamar harus bisa dibuka KAPAN SAJA, tanpa menunggu
+
+Owner: *"harusnya dia bisa buka dan tutup kamar kapanpun itu, jadi tidak
+perlu menunggu2 waktu, jika kamar sudah siap langsung dibuka kembali"*.
+Kendalanya ada di Cloudbeds: blok yang startDate-nya HARI INI tidak bisa
+dihapus ("already started"), dan spesifikasi API tidak menyebut jalan lain.
+`keluarkanKamarDariBlok()` kini mencoba berurutan, berhenti di yang
+pertama terbukti (dibaca balik) membuka malam ini:
+1. deleteRoomBlock;
+2. geser blok ke besok (putRoomBlock startDate=besok) lalu delete;
+3. blok nol malam (putRoomBlock endDate = startDate = hari ini);
+4. kalau semua ditolak: pendekkan ke satu malam, terbuka besok, dan alasan
+   Cloudbeds ditampilkan. loonars.id/Front Desk ikut tertutup malam itu
+   supaya tidak ada booking yang bentrok dengan Cloudbeds.
+Setiap percobaan + jawaban Cloudbeds dicatat di `cloudbeds_events_log`
+(payload `percobaan`). BELUM DIKETAHUI cara mana yang diterima Cloudbeds --
+lihat log setelah kasus "tutup lalu buka di hari yang sama" pertama.
+
 ## 2026-10-07 — endDate room block Cloudbeds itu EKSKLUSIF; blok yang sudah berjalan tidak bisa dihapus
 
 Dua fakta Cloudbeds yang terbukti dari produksi (A4):
