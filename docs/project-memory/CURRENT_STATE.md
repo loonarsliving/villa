@@ -3,12 +3,12 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
-## 2026-10-07 — Laporan mingguan WhatsApp ke investor (tiap Rabu 14:25 WIB)
+## 2026-10-07 — Laporan mingguan WhatsApp ke investor (tiap Rabu 16:00-16:59 WIB)
 
 Permintaan owner: tiap 7 hari kirim WA ke investor berisi revenue, okupansi,
 dan porsi booking per channel, mulai 7 Okt 2026.
 
-- Cron Vercel `/api/cron/investor-weekly-report`, `25 7 * * 3` (Rabu 14:25
+- Cron Vercel `/api/cron/investor-weekly-report`, `0 9 * * 3` (Rabu 16:00-16:59
   WIB), dijaga `CRON_SECRET` seperti cron lain. Jamnya dipilih supaya kiriman
   pertama jatuh di hari owner memintanya.
 - Penerima: `villa_users` role `owner`, `is_active` (per 7 Okt: 14 aktif,

@@ -8,7 +8,7 @@ export const maxDuration = 60;
 
 /**
  * Laporan mingguan WhatsApp ke investor (owner 2026-10-07). Vercel Cron
- * tiap Rabu 14:25 WIB (vercel.json `25 7 * * 3`), melaporkan 7 malam
+ * tiap Rabu 16:00-16:59 WIB (vercel.json `0 9 * * 3`; paket Hobby: cron jalan kapan saja dalam jam itu), melaporkan 7 malam
  * Rabu-Selasa sebelumnya. Jamnya disetel supaya kiriman pertama jatuh tepat saat owner
  * memintanya (7 Okt). Same CRON_SECRET guard as the other cron routes.
  */
