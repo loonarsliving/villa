@@ -8,9 +8,9 @@ export const maxDuration = 60;
 
 /**
  * Laporan mingguan WhatsApp ke investor (owner 2026-10-07). Vercel Cron
- * tiap Rabu 15:50 WIB (vercel.json `50 8 * * 3`), melaporkan 7 malam
- * Rabu-Selasa sebelumnya. Jamnya dipilih supaya kiriman pertama jatuh di
- * hari owner memintanya. Same CRON_SECRET guard as the other cron routes.
+ * tiap Rabu 14:25 WIB (vercel.json `25 7 * * 3`), melaporkan 7 malam
+ * Rabu-Selasa sebelumnya. Jamnya disetel supaya kiriman pertama jatuh tepat saat owner
+ * memintanya (7 Okt). Same CRON_SECRET guard as the other cron routes.
  */
 export async function GET(request: Request) {
   const expected = (process.env.CRON_SECRET || "").trim();
