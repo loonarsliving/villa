@@ -826,3 +826,53 @@ export interface LateNightHariIni {
   unit: LateNightUnit[];
   booking: LateNightBooking[];
 }
+
+// /finance/checklist-dana -- checklist manual dana masuk vs belum.
+export interface FinanceChecklistItem {
+  booking_id: string;
+  unit_nomor: string | null;
+  guest_nama: string;
+  sumber: string | null;
+  normalized_channel: string;
+  tgl_checkin: string;
+  tgl_checkout: string;
+  malam: number;
+  kotor: number;
+  seharusnya: number;
+  cloudbeds_reservation_id: string | null;
+  masuk: boolean;
+  settlement_status: string | null;
+  expected_settlement_date: string | null;
+  amount_received: number | null;
+  received_date: string | null;
+  bank_reference: string | null;
+  variance_amount: number | null;
+  notes: string | null;
+}
+
+export interface FinanceChecklistChannel {
+  sumber: string;
+  seharusnya: number;
+  diterima: number;
+  belum: number;
+  count_masuk: number;
+  count_belum: number;
+}
+
+export interface FinanceChecklist {
+  from: string;
+  to: string;
+  today: string;
+  items: FinanceChecklistItem[];
+  per_channel: FinanceChecklistChannel[];
+  totals: {
+    seharusnya: number;
+    diterima: number;
+    belum: number;
+    selisih: number;
+    count: number;
+    count_masuk: number;
+    count_belum: number;
+    count_lewat_jatuh_tempo: number;
+  };
+}
