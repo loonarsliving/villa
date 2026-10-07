@@ -284,6 +284,29 @@ Temuan sampingan (belum diperbaiki, di luar lingkup): webhook Cloudbeds
 sync 10 menit. Booking website yang sudah didorong ke Cloudbeds bisa
 tertimpa tarif/sumber Cloudbeds oleh event webhook.
 
+## 2026-10-07 — endDate room block Cloudbeds itu EKSKLUSIF; blok yang sudah berjalan tidak bisa dihapus
+
+Dua fakta Cloudbeds yang terbukti dari produksi (A4):
+1. **endDate room block = hari kamar dibuka lagi (eksklusif).** Rebecca
+   menutup A4 "6 s/d 7 Okt" -> dikirim startDate 06 / endDate 07 ->
+   Cloudbeds tetap menjual malam 7 Okt (booking Agoda masuk 6 Okt 19:30 WIB
+   saat blok aktif, tamu menginap di kamar yang toilet/wastafelnya sedang
+   diperbaiki). Sejak itu: villa mengirim endDate = malam terakhir + 1, dan
+   semua pembacaan blok memakai `malamTerakhir = endDate - 1`
+   (`normalBlok()`), termasuk ketersediaan loonars.id/Front Desk.
+   Ingat: ini KEBALIKAN `putRate` (inklusif) dan sama dengan `getRate`
+   (eksklusif) -- jangan pernah menebak semantik tanggal Cloudbeds.
+2. **"Cannot delete a room block that has already started."** Kamar Siap
+   kini memakai `keluarkanKamarDariBlok()`: blok berisi kamar lain ->
+   putRoomBlock sisa kamar; belum mulai -> delete; sudah berjalan ->
+   putRoomBlock endDate = hari ini (malam ini terbuka); mulai hari ini ->
+   coba delete, kalau ditolak dipendekkan ke satu malam (terbuka besok).
+   Semuanya dibaca balik.
+
+Data lama: baris `villa_room_maintenance` yang dibuat sebelum perbaikan
+menyimpan tutup_sampai = endDate Cloudbeds (yang eksklusif) -- dikoreksi
+-1 hari setelah deploy supaya sesuai kenyataan di Cloudbeds.
+
 ## 2026-10-03 — Manager boleh membuka blok yang dibuat langsung di Cloudbeds
 
 Owner: *"saya ingin semua bisa dikendalikan di dashboard itu, karena unit
