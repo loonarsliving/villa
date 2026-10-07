@@ -284,6 +284,17 @@ Temuan sampingan (belum diperbaiki, di luar lingkup): webhook Cloudbeds
 sync 10 menit. Booking website yang sudah didorong ke Cloudbeds bisa
 tertimpa tarif/sumber Cloudbeds oleh event webhook.
 
+## 2026-10-07 — ATURAN OWNER: ditutup hari ini → paling cepat dibuka besok
+
+Owner: *"kalau ditutup di hari itu minimal bukanya di hari besoknya"*. Ini
+MENGGANTIKAN percobaan berurutan (hapus / geser ke besok / nol malam) di
+entri bawah. Blok yang startDate-nya hari ini kini langsung dipendekkan ke
+satu malam (endDate eksklusif = besok) tanpa trik; kamar terbuka besok di
+Cloudbeds, loonars.id, dan Front Desk. Blok yang mulai kemarin atau lebih
+awal tetap bisa dibuka malam itu juga (endDate = hari ini); blok yang belum
+mulai dihapus. UI manager menampilkan "Kamar Siap (buka besok)" /
+"Dibuka Besok" untuk kasus ini.
+
 ## 2026-10-07 — Owner: kamar harus bisa dibuka KAPAN SAJA, tanpa menunggu
 
 Owner: *"harusnya dia bisa buka dan tutup kamar kapanpun itu, jadi tidak

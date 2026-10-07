@@ -1278,30 +1278,20 @@ async function keluarkanKamarDariBlok(k, roomID, hariIni){
     cara = 'dipendekkan';
     terbuka = await coba(cara, () => put({endDate: hariIni}));
   } else {
-    // Mulai HARI INI. Owner (7 Okt 2026): kamar harus bisa dibuka kapan saja,
-    // tanpa menunggu. Coba semua jalan yang ada, berhenti di yang berhasil.
-    cara = 'dihapus';
-    terbuka = await coba(cara, hapus);
-    if(!terbuka){
-      // Geser blok ke besok (jadi belum berjalan), lalu hapus.
-      cara = 'digeser_lalu_dihapus';
-      const geser = await put({startDate: besokTgl, endDate: addDaysStr(besokTgl, 1)});
-      percobaan.push({cara: 'geser_ke_besok', ok: geser.ok, pesan: geser.pesan, jawaban: geser.body});
-      if(geser.ok) terbuka = await coba(cara, hapus, besokTgl);
+    // Mulai HARI INI. Aturan owner (7 Okt 2026): "kalau ditutup di hari itu,
+    // minimal bukanya di hari besoknya". Cloudbeds juga tidak mengizinkan
+    // menghapus blok yang sudah mulai. Jadi blok dipendekkan sampai malam ini
+    // saja (endDate eksklusif = besok) dan kamar terbuka besok -- tanpa
+    // trik menggeser/menghapus.
+    cara = 'dipendekkan_satu_malam';
+    if(k.endDate && k.endDate > besokTgl){
+      const t = await put({endDate: besokTgl});
+      percobaan.push({cara, ok: t.ok, pesan: t.pesan, jawaban: t.body});
     }
-    if(!terbuka){
-      // Blok nol malam: endDate (eksklusif) = startDate = hari ini.
-      cara = 'dipendekkan_nol';
-      terbuka = await coba(cara, () => put({endDate: hariIni}));
-    }
-    if(!terbuka){
-      // Semua ditolak Cloudbeds: pendekkan ke satu malam supaya besok pasti terbuka.
-      cara = 'dipendekkan_satu_malam';
-      if(k.endDate && k.endDate > besokTgl) await put({endDate: besokTgl});
-      const blk = await cloudbedsBacaRoomBlock(k.roomBlockID, hariIni);
-      const n = blk ? normalBlok(blk) : null;
-      besok = blk === null || !!(n && (n.endDate == null || n.endDate <= besokTgl));
-    }
+    const blk = await cloudbedsBacaRoomBlock(k.roomBlockID, hariIni);
+    terakhirTerbaca = blk ?? null;
+    const n = blk ? normalBlok(blk) : null;
+    besok = blk === null || !!(n && (!n.roomIDs.includes(roomID) || (n.endDate != null && n.endDate <= besokTgl)));
   }
 
   const sukses = terbuka || besok;
@@ -4619,7 +4609,7 @@ Deno.serve(async (req)=>{
       // Supaya loonars.id dan Front Desk di isolate ini langsung melihat perubahan.
       cacheBlokCloudbeds.clear();
       const adaYangDibuka = dibuka.length > 0;
-      const catatanBesok = besokSaja ? ` Blokir baru mulai hari ini dan Cloudbeds menolak semua cara membukanya untuk malam ini (${alasanBesok ?? 'tanpa alasan'}), jadi kamar terbuka di Cloudbeds mulai BESOK. Supaya tidak ada booking yang bentrok, loonars.id dan Front Desk mengikuti: terbuka mulai besok juga.` : '';
+      const catatanBesok = besokSaja ? ' Kamar ini ditutup mulai hari ini, jadi sesuai aturan paling cepat dibuka BESOK: tutupnya dipendekkan sampai malam ini saja, dan besok kamar otomatis dijual lagi di Cloudbeds, loonars.id, dan Front Desk.' : '';
       await catatCek({
         cloudbeds_aksi: adaYangDibuka ? 'dibuka' : 'tidak_perlu',
         cloudbeds_room_block_id: mtAktif ? mt.cloudbeds_room_block_id : null,

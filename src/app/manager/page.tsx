@@ -165,6 +165,9 @@ function ModalCek({
   const [kirim, setKirim] = useState<"siap" | "maintenance" | null>(null);
 
   const semuaBaik = checklist.every((k) => centang[k]);
+  // Aturan owner: kamar yang ditutup hari ini paling cepat dibuka besok.
+  const mulaiHariIni = !!mt && mt.tutup_mulai === hariIni;
+  const sudahDijadwalkanBesok = !!mt && mt.tutup_mulai === hariIni && mt.tutup_sampai === hariIni;
 
   async function simpan(hasil: "siap" | "maintenance") {
     setKirim(hasil);
@@ -201,8 +204,8 @@ function ModalCek({
           >
             {kirim === "maintenance" ? "Menutup..." : mt ? "Perpanjang Maintenance" : "Kamar Maintenance"}
           </button>
-          <Btn variant="primary" onClick={() => simpan("siap")} disabled={kirim !== null || !semuaBaik}>
-            {kirim === "siap" ? "Menyimpan..." : "Kamar Siap"}
+          <Btn variant="primary" onClick={() => simpan("siap")} disabled={kirim !== null || !semuaBaik || sudahDijadwalkanBesok}>
+            {kirim === "siap" ? "Menyimpan..." : sudahDijadwalkanBesok ? "Dibuka Besok" : mulaiHariIni ? "Kamar Siap (buka besok)" : "Kamar Siap"}
           </Btn>
         </>
       }
@@ -220,7 +223,14 @@ function ModalCek({
       {mt && (
         <div className="mb-4 rounded-lg border border-ruby-500/30 bg-ruby-500/10 px-3 py-2.5 text-[11.5px] text-ruby-400">
           Sedang maintenance {fmtDate(mt.tutup_mulai)} s/d {fmtDate(mt.tutup_sampai)} — {mt.alasan}
-          {mt.ditutup_oleh_nama ? ` (${mt.ditutup_oleh_nama})` : ""}. Tekan <b>Kamar Siap</b> untuk menjualnya lagi.
+          {mt.ditutup_oleh_nama ? ` (${mt.ditutup_oleh_nama})` : ""}.{" "}
+          {sudahDijadwalkanBesok ? (
+            <>Kamar sudah dijadwalkan <b>dibuka besok</b> — ditutup mulai hari ini, jadi paling cepat dibuka besok.</>
+          ) : mulaiHariIni ? (
+            <>Ditutup mulai hari ini, jadi paling cepat dibuka <b>besok</b>. Tekan <b>Kamar Siap</b> untuk memendekkan tutupnya sampai malam ini saja.</>
+          ) : (
+            <>Tekan <b>Kamar Siap</b> untuk menjualnya lagi mulai malam ini.</>
+          )}
         </div>
       )}
 
