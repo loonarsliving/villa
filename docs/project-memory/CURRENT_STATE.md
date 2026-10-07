@@ -3,6 +3,13 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-07 — Harga loonars.id selalu lebih murah dari Agoda (BELUM MERGE, menunggu owner)
+- Owner: "harga direct upayakan selalu menang dari agoda", "tp jgan sampai harga kt trllu murah".
+- Data nyata (8 booking Agoda terakhir, harga dari `villa_rate_history` saat dipesan): Agoda membayar villa **tepat 80%** harga Cloudbeds; tamu Agoda melihat ±85% (promo 15%). Sebelumnya loonars.id menjual 100% harga Cloudbeds -- paling mahal dari semua kanal kecuali Airbnb (116%, markup channel di Cloudbeds).
+- villa-api `computeWebsiteStayPrice`: harga website per malam = 82% harga normal, dibulatkan ke bawah ke Rp1.000, dengan pengaman: tidak di bawah 80% (yang dibayar Agoda), tidak di bawah 82% batas bawah tipe unit hari ini (min_rate atau ramp `villa_floor_ramp`), tidak di atas harga normal. Dipakai `/public/availability` (tambah field `price_total_normal`), `/public/promo`, `/public/voucher`, `/public/bookings`. Kasir walk-in, booking staf, Cloudbeds/OTA, dan mesin harga AI TIDAK berubah.
+- loonars.id: harga normal tampil dicoret + "Harga khusus website · lebih hemat dari OTA".
+- Promo kode (`hitungHargaPromo`, dijepit ke min_rate) kini hampir selalu "harga normal sudah lebih murah" karena pembandingnya harga website.
+
 ## 2026-10-07 — Laporan mingguan WhatsApp ke investor (tiap Rabu 16:00-16:59 WIB)
 
 Permintaan owner: tiap 7 hari kirim WA ke investor berisi revenue, okupansi,
