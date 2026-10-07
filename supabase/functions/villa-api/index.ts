@@ -1332,27 +1332,80 @@ async function periksaVoucherInvestor(kode, tgl_checkin, tgl_checkout){
 }
 
 async function computeStayTarif(unit, tgl_checkin, nights){
+  return (await stayNightRates(unit, tgl_checkin, nights)).reduce((a,b)=>a+b, 0);
+}
+
+/** Harga tiap malam (villa_rates, atau tarif_harian kalau tanggal itu belum punya harga). */
+async function stayNightRates(unit, tgl_checkin, nights){
   const flatTarif = Number(unit.tarif_harian ?? 0);
-  let computedTarif = flatTarif * nights;
+  const nightDates=[];
+  for(let i=0;i<nights;i++){
+    const d=new Date(`${tgl_checkin}T00:00:00Z`); d.setUTCDate(d.getUTCDate()+i);
+    nightDates.push(d.toISOString().slice(0,10));
+  }
+  let plannedByDate = new Map();
   if(unit.room_type_id){
-    const nightDates=[];
-    for(let i=0;i<nights;i++){
-      const d=new Date(`${tgl_checkin}T00:00:00Z`); d.setUTCDate(d.getUTCDate()+i);
-      nightDates.push(d.toISOString().slice(0,10));
-    }
     const {data:plannedRates} = await supabase.from('villa_rates').select('date,rate')
       .eq('room_type_id',unit.room_type_id).in('date',nightDates);
-    const plannedByDate = new Map((plannedRates??[]).map(r=>[r.date, Number(r.rate)]));
-    if(plannedByDate.size>0){
-      computedTarif = 0;
-      for(let i=0;i<nights;i++){
-        const d=new Date(`${tgl_checkin}T00:00:00Z`); d.setUTCDate(d.getUTCDate()+i);
-        const dateStr=d.toISOString().slice(0,10);
-        computedTarif += plannedByDate.has(dateStr) ? plannedByDate.get(dateStr) : flatTarif;
-      }
-    }
+    plannedByDate = new Map((plannedRates??[]).map(r=>[r.date, Number(r.rate)]));
   }
-  return computedTarif;
+  return nightDates.map(d => plannedByDate.has(d) ? plannedByDate.get(d) : flatTarif);
+}
+
+/**
+ * Harga loonars.id: selalu sedikit lebih murah dari Agoda (owner 2026-10-07:
+ * "harga direct upayakan selalu menang dari agoda", "tp jgan sampai harga kt
+ * trllu murah").
+ *
+ * Dasar angkanya dari data booking nyata, bukan tebakan: Agoda menjual
+ * dengan promo 15% (tamu melihat +-85% harga Cloudbeds) dan membayar ke
+ * villa tepat 80% harga Cloudbeds saat dipesan (dicek 8 booking terakhir per
+ * 2026-10-07). Booking direct tidak dipotong siapa pun, jadi 82% berarti
+ * tamu membayar lebih murah dari Agoda DAN villa menerima lebih banyak dari
+ * Agoda.
+ *
+ * Dua pengaman per malam, supaya harga website tidak pernah terlalu murah:
+ *   1. tidak di bawah yang dibayar Agoda (80% harga malam itu) -- direct tidak
+ *      boleh lebih rugi dari OTA termurah;
+ *   2. tidak di bawah 82% batas bawah tipe unit hari ini (min_rate, atau
+ *      batas bawah ramp villa_floor_ramp kalau lebih tinggi) -- jadi ikut
+ *      naik pelan-pelan bersama ramp, dan harga manual yang salah ketik tidak
+ *      menyeret harga website ke bawah.
+ * Dan tidak pernah lebih mahal dari harga normal.
+ *
+ * Hanya untuk loonars.id. Harga Cloudbeds/OTA, mesin harga AI, dan kasir
+ * walk-in (computeStayTarif) tidak berubah.
+ */
+const HARGA_WEBSITE_FAKTOR = 0.82;
+const HARGA_WEBSITE_MIN_FAKTOR_AGODA = 0.80;
+
+async function batasBawahWebsitePerMalam(roomTypeId){
+  if(!roomTypeId) return 0;
+  const {data:rt} = await supabase.from('villa_room_types').select('code,min_rate').eq('id', roomTypeId).maybeSingle();
+  let lantai = Number(rt?.min_rate ?? 0);
+  const ramp = await getSetting('villa_floor_ramp');
+  const cfg = rt?.code ? ramp?.room_types?.[rt.code] : null;
+  if(cfg && Number.isFinite(Number(ramp?.progress))){
+    const p = Math.max(0, Math.min(1, Number(ramp.progress)));
+    lantai = Math.max(lantai, Math.round((Number(cfg.from) + (Number(cfg.to) - Number(cfg.from)) * p) / 1000) * 1000);
+  }
+  return Math.round(lantai * HARGA_WEBSITE_FAKTOR / 1000) * 1000;
+}
+
+function hargaWebsiteSemalam(normal, lantaiWebsite){
+  if(!(normal > 0)) return normal;
+  const diskon = Math.floor(normal * HARGA_WEBSITE_FAKTOR / 1000) * 1000;
+  const minAgoda = Math.ceil(normal * HARGA_WEBSITE_MIN_FAKTOR_AGODA / 1000) * 1000;
+  return Math.min(normal, Math.max(diskon, minAgoda, lantaiWebsite));
+}
+
+/** {normal, website} untuk satu masa menginap di loonars.id. */
+async function computeWebsiteStayPrice(unit, tgl_checkin, nights){
+  const perMalam = await stayNightRates(unit, tgl_checkin, nights);
+  const lantaiWebsite = await batasBawahWebsitePerMalam(unit.room_type_id);
+  const normal = perMalam.reduce((a,b)=>a+b, 0);
+  const website = perMalam.reduce((a,r)=>a + hargaWebsiteSemalam(r, lantaiWebsite), 0);
+  return {normal, website};
 }
 
 /**
@@ -2402,13 +2455,17 @@ Deno.serve(async (req)=>{
     }
     const room_types_result = [];
     for(const entry of byType.values()){
-      let price_total = null;
+      let price_total = null, price_total_normal = null;
       if(entry.sampleFreeUnit){
-        price_total = await computeStayTarif(entry.sampleFreeUnit, checkin, nights);
+        const harga = await computeWebsiteStayPrice(entry.sampleFreeUnit, checkin, nights);
+        price_total = harga.website;
+        price_total_normal = harga.normal;
       }
       room_types_result.push({
         code: entry.code, name: entry.name, total: entry.total, available: entry.available,
         nights, price_total, price_per_night_avg: price_total != null ? Math.round(price_total / nights) : null,
+        // Harga sebelum potongan website, untuk ditampilkan dicoret.
+        price_total_normal,
       });
     }
     await catatPencarianKetersediaan({
@@ -2463,8 +2520,8 @@ Deno.serve(async (req)=>{
         ? await supabase.from('units').select('id,tarif_harian,room_type_id').eq('room_type_id', rt.id).order('nomor').limit(1).maybeSingle()
         : {data:null};
       if(unitContoh){
-        hargaNormalPratinjau = await computeStayTarif(unitContoh, checkin, cek.malam);
-        hemat = await computeStayTarif(unitContoh, checkin, 1);
+        hargaNormalPratinjau = (await computeWebsiteStayPrice(unitContoh, checkin, cek.malam)).website;
+        hemat = (await computeWebsiteStayPrice(unitContoh, checkin, 1)).website;
         total = Math.max(0, hargaNormalPratinjau - hemat);
       }
     }
@@ -2504,7 +2561,9 @@ Deno.serve(async (req)=>{
     const {data:unitContoh} = await supabase.from('units')
       .select('id,tarif_harian,room_type_id').eq('room_type_id', roomTypeId).limit(1).maybeSingle();
     if(!unitContoh) return json({berlaku:false, alasan:'Tipe unit tidak tersedia'});
-    const hargaNormal = await computeStayTarif(unitContoh, checkin, nights);
+    // Pembandingnya harga website (sudah lebih murah dari Agoda), karena itu
+    // yang akan dibayar tamu tanpa kode -- sama dengan /public/bookings.
+    const hargaNormal = (await computeWebsiteStayPrice(unitContoh, checkin, nights)).website;
 
     const hasil = await hitungHargaPromo(promo, roomTypeId, checkin, checkout, nights, hargaNormal);
     if(!hasil.ok) return json({berlaku:false, alasan:hasil.alasan});
@@ -2611,10 +2670,12 @@ Deno.serve(async (req)=>{
     // -- bukan dengan membagi total per malam, karena tarif tiap malam bisa
     // berbeda (akhir pekan, high season). Menginap semalam berarti sisanya
     // nol, dan itu jatuh dengan sendirinya tanpa cabang khusus.
-    const hargaNormal = await computeStayTarif(freeUnit, tgl_checkin, nights);
+    // Harga website (computeWebsiteStayPrice), BUKAN harga Cloudbeds penuh --
+    // sama persis dengan yang tampil di /public/availability.
+    const hargaNormal = (await computeWebsiteStayPrice(freeUnit, tgl_checkin, nights)).website;
     let nilaiMalamGratis = 0;
     if(voucherTerpakai){
-      nilaiMalamGratis = await computeStayTarif(freeUnit, tgl_checkin, 1);
+      nilaiMalamGratis = (await computeWebsiteStayPrice(freeUnit, tgl_checkin, 1)).website;
     }
     // Tarif yang belum diatur hanya menggagalkan pemesanan berbayar. Untuk
     // menginap yang seluruhnya gratis tidak ada rupiah yang dipertaruhkan,
@@ -5920,7 +5981,8 @@ Deno.serve(async (req)=>{
 
   // Perkiraan harga untuk layar kasir/walk-in SEBELUM booking dibuat --
   // memanggil computeStayTarif yang SAMA dengan yang dipakai POST /bookings
-  // (staf) dan /public/bookings (loonars.id), supaya angka yang dilihat
+  // (staf); loonars.id memakai computeWebsiteStayPrice, yaitu harga yang sama
+  // dikurangi potongan website (lihat HARGA_WEBSITE_FAKTOR), supaya angka yang dilihat
   // kasir tidak pernah bisa berbeda dari yang benar-benar ditagih maupun
   // dari yang tamu lihat di loonars.id. Sebelum route ini ada, kasir
   // menghitung sendiri di browser pakai tarif_harian flat -- tidak pernah

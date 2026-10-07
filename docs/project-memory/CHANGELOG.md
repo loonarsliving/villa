@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-07 — Harga loonars.id = 82% harga Cloudbeds (selalu lebih murah dari Agoda) — menunggu persetujuan merge owner
+- villa-api `computeWebsiteStayPrice` (pengaman: >= 80% harga malam itu = yang dibayar Agoda, >= 82% batas bawah/ramp, <= harga normal); loonars.id menampilkan harga normal dicoret. Lihat CURRENT_STATE.md 2026-10-07.
+
 ### 2026-10-07 — Laporan mingguan WhatsApp ke investor
 - Cron baru `/api/cron/investor-weekly-report` (Rabu 16:00-16:59 WIB): revenue bersih/kotor, okupansi, porsi channel, booking baru, minggu depan, dan strategi KOL/target 80% akhir 2026 ke semua investor aktif dari 0822. Detail di CURRENT_STATE.md 2026-10-07.
 
