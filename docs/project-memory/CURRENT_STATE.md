@@ -2,6 +2,19 @@
 
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
+
+## 2026-10-07 — harga target malam tahun baru (owner-approved)
+
+Owner: "harga tahun baruku harusnya naik hingga 1 jutaan, jadi meskipun kena
+diskon dia tetap kuat". Sejak promo weekday menurunkan harga dasar, +40%
+malam 31 Des hanya menghasilkan Standard 702rb dan Sawah View 956rb.
+
+`NEW_YEARS_EVE_TARGET_BY_ROOM_TYPE_CODE` di `aiPricingEngine.ts`: harga
+minimal malam 31 Des = **Standard 1.000.000** (sama dengan max_rate-nya) dan
+**Sawah View 1.100.000** (sama dengan max_rate-nya). Persen tetap dipakai
+kalau hasilnya lebih tinggi. Kenaikannya bertahap lewat rem harian 15%
+(Standard 702 → 807 → 928 → 1.000rb dalam 3 malam). +4 tes.
+
 ## 2026-10-05 — Jumat lebih murah dari Sabtu + mesin belajar pola per hari (DI-MERGE #166, owner-approved)
 
 Owner: "untuk hari Jumat hampir 0 pemesanan ... harusnya mesin bisa melihat

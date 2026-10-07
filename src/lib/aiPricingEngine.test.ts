@@ -640,3 +640,22 @@ describe("pola hari dipelajari dari booking sendiri (owner 2026-10-05)", () => {
     expect(fri.comparableDates).toBe(3);
   });
 });
+
+describe("harga target malam tahun baru (owner 2026-10-07: naik hingga 1 jutaan)", () => {
+  const nye = () => fixedCalendarPeriodFor("2026-12-31");
+  it("lifts Standard New Year's Eve to Rp1.000.000 even from a low promo base", () => {
+    const d = decide({ targetDate: "2026-12-31", anchorRate: 500000, roomTypeCode: "standard", period: nye(), maxRate: 1000000 });
+    expect(d.decided_rate).toBe(1000000);
+    expect(d.reason_codes).toContain("new_years_eve_target");
+  });
+  it("lifts Sawah View to Rp1.100.000", () => {
+    expect(decide({ targetDate: "2026-12-31", anchorRate: 630000, roomTypeCode: "sawah_view", period: nye(), maxRate: 1100000 }).decided_rate).toBe(1100000);
+  });
+  it("still climbs gradually through the daily movement clamp", () => {
+    expect(decide({ targetDate: "2026-12-31", anchorRate: 500000, roomTypeCode: "standard", period: nye(), maxRate: 1000000, liveRate: 702000 }).decided_rate).toBe(807000);
+  });
+  it("only applies to 31 Dec", () => {
+    const d = decide({ targetDate: "2026-12-30", anchorRate: 500000, roomTypeCode: "standard", period: fixedCalendarPeriodFor("2026-12-30"), maxRate: 1000000 });
+    expect(d.reason_codes).not.toContain("new_years_eve_target");
+  });
+});
