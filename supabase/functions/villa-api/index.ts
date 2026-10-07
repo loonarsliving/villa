@@ -1130,19 +1130,34 @@ async function cloudbedsBacaRoomBlock(roomBlockID, padaTanggal){
   url.searchParams.set('roomBlockID', String(roomBlockID));
   url.searchParams.set('startDate', padaTanggal);
   url.searchParams.set('endDate', padaTanggal);
+  let body = null, status = 0;
   try{
     const res = await fetch(url, {headers:{'x-api-key':apiKey}, signal: AbortSignal.timeout(20000)});
-    const body = await res.json().catch(()=>null);
-    if(!res.ok || body?.success === false) return undefined;
-    // data bisa objek {roomBlocks:[...]} (sesuai spec) atau array per properti.
-    const wadah = Array.isArray(body?.data) ? body.data : [body?.data];
-    for(const w of wadah){
-      for(const blk of (w?.roomBlocks ?? [])){
-        if(String(blk.roomBlockID) === String(roomBlockID)) return blk;
+    status = res.status;
+    body = await res.json().catch(()=>null);
+    if(res.ok && body?.success !== false){
+      // data bisa objek {roomBlocks:[...]} (sesuai spec) atau array per properti.
+      const wadah = Array.isArray(body?.data) ? body.data : [body?.data];
+      for(const w of wadah){
+        for(const blk of (w?.roomBlocks ?? [])){
+          if(String(blk.roomBlockID) === String(roomBlockID)) return blk;
+        }
       }
+      return null;
     }
-    return null;
-  }catch{ return undefined; }
+  }catch(e){ body = {error: String(e)}; }
+
+  // Filter roomBlockID ditolak/gagal. Kasus nyata 7 Okt 2026 (A5): blok yang
+  // sudah tidak ada membuat jawaban gagal, dan dulu itu dibaca sebagai
+  // "Cloudbeds tidak bisa dibaca" sehingga Kamar Siap menolak membuka kamar.
+  console.error('getRoomBlocks?roomBlockID gagal', roomBlockID, padaTanggal, status, JSON.stringify(body)?.slice(0, 500));
+  if(/not\s*found|tidak ditemukan|does not exist/i.test(String(body?.message ?? body?.error ?? ''))) return null;
+  // Cadangan: baca semua blok pada tanggal itu dan cari ID-nya sendiri.
+  const semua = await cloudbedsBlokDalamRentang(padaTanggal, padaTanggal);
+  if(semua === null) return undefined;
+  const k = semua.find(x=>x.roomBlockID === String(roomBlockID));
+  if(!k) return null;
+  return {roomBlockID: k.roomBlockID, roomBlockType: k.tipe, roomBlockReason: k.alasan, startDate: k.startDate, endDate: k.endDate, rooms: k.rooms};
 }
 
 async function cloudbedsRoomTypeIdUntuk(roomID){
