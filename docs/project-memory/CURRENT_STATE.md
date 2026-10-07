@@ -3,6 +3,26 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-07 — Finance: menu "Checklist Dana Masuk" (/finance/checklist-dana)
+
+Permintaan owner: checklist manual dana yang sudah masuk dan belum, supaya
+finance bisa crosscheck dua arah dengan mutasi bank.
+
+- Halaman `/finance/checklist-dana` (menu Finance). Daftar per bulan
+  check-in: semua pemasukan yang sudah diakui (`isPemasukanDiakui`), angka
+  "seharusnya" = `finance_settlements.amount` (angka bersih), status
+  sudah/belum masuk, perkiraan cair, ringkasan per channel.
+- Tidak ada tabel baru: memakai `finance_settlements` yang sama dengan
+  "Mark as Received" di detail booking. Centang di dua tempat itu selalu
+  sama.
+- villa-api: `GET /finance/checklist-dana`, `POST
+  /finance/settlements/receive-bulk` (satu transfer OTA = beberapa
+  booking; jumlah diterima per booking = amount, MATCHED), `POST
+  /finance/settlements/unreceive` (batalkan centang, alasan wajib, nilai
+  lama di `finance_audit_log`).
+- Tidak menyentuh dasar dividen (`transactions` / `computeReport`) maupun
+  harga.
+
 ## 2026-10-07 — harga target malam tahun baru (owner-approved)
 
 Owner: "harga tahun baruku harusnya naik hingga 1 jutaan, jadi meskipun kena

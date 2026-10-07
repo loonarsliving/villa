@@ -4968,6 +4968,132 @@ Deno.serve(async (req)=>{
     return json(saved);
   }
 
+  // ── CHECKLIST DANA (owner 2026-10-07) ──────────────────────────────────
+  // "checklist manual dana yg masuk dan belum ... jd finance bisa crosscheck
+  // 2 arah": daftar semua pemasukan yang sudah diakui (tanggal check-in
+  // Cloudbeds sudah tiba) beserta angka bersih yang seharusnya masuk ke
+  // rekening, dan status centang manual finance. Arah 1: sistem -> bank
+  // (booking mana yang uangnya belum terlihat di mutasi). Arah 2: bank ->
+  // sistem (satu transfer OTA di mutasi = beberapa booking; finance memilih
+  // booking-booking itu dan totalnya dibandingkan dengan angka di mutasi).
+  // Memakai finance_settlements yang sudah ada -- tidak ada tabel baru.
+  if(path==='/finance/checklist-dana' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const { from, to } = financeDateRange();
+    const sumber = url.searchParams.get('sumber');
+    const { data: rows, error } = await supabase.from('bookings')
+      .select('id,unit_nomor,guest_nama,sumber,status,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_subtotal,cloudbeds_reservation_id')
+      .gte('tgl_checkin', from).lte('tgl_checkin', to)
+      .in('status', STATUS_PEMASUKAN_DIAKUI)
+      .order('tgl_checkin',{ascending:true}).limit(1000);
+    if(error) return err(error.message);
+    let bookings = (rows ?? []).filter(isPemasukanDiakui);
+    if(sumber) bookings = bookings.filter(b=>b.sumber===sumber);
+
+    const configMap = await getSettlementConfigMap();
+    const settlementByBooking = new Map();
+    for(let i=0; i<bookings.length; i+=100){
+      const chunk = bookings.slice(i, i+100);
+      await ensureFinanceSettlements(chunk, configMap);
+      const { data: settlements, error: sErr } = await supabase.from('finance_settlements').select('*').in('booking_id', chunk.map(b=>b.id));
+      if(sErr) return err(sErr.message);
+      for(const s of (settlements ?? [])) settlementByBooking.set(s.booking_id, s);
+    }
+
+    const items = bookings.map(b=>{
+      const s = settlementByBooking.get(b.id) ?? null;
+      const masuk = s?.settlement_status === 'RECEIVED';
+      return {
+        booking_id: b.id, unit_nomor: b.unit_nomor, guest_nama: b.guest_nama, sumber: b.sumber,
+        normalized_channel: normalizedChannel(b.sumber),
+        tgl_checkin: b.tgl_checkin, tgl_checkout: b.tgl_checkout, malam: Number(b.durasi_malam ?? 0),
+        kotor: pendapatanKotor(b),
+        seharusnya: s ? Number(s.amount) : pendapatanBersih(b),
+        cloudbeds_reservation_id: b.cloudbeds_reservation_id ?? null,
+        masuk,
+        settlement_status: s?.settlement_status ?? null,
+        expected_settlement_date: s?.expected_settlement_date ?? null,
+        amount_received: s?.amount_received != null ? Number(s.amount_received) : null,
+        received_date: s?.received_date ?? null,
+        bank_reference: s?.bank_reference ?? null,
+        variance_amount: s?.variance_amount != null ? Number(s.variance_amount) : null,
+        notes: s?.notes ?? null,
+      };
+    });
+
+    const today = todayWIB();
+    const per = new Map();
+    const totals = { seharusnya:0, diterima:0, belum:0, selisih:0, count:0, count_masuk:0, count_belum:0, count_lewat_jatuh_tempo:0 };
+    for(const it of items){
+      const k = it.sumber ?? '-';
+      if(!per.has(k)) per.set(k, { sumber:k, seharusnya:0, diterima:0, belum:0, count_masuk:0, count_belum:0 });
+      const p = per.get(k);
+      p.seharusnya += it.seharusnya; totals.seharusnya += it.seharusnya; totals.count++;
+      if(it.masuk){
+        p.diterima += it.amount_received ?? 0; p.count_masuk++;
+        totals.diterima += it.amount_received ?? 0; totals.count_masuk++;
+        totals.selisih += it.variance_amount ?? 0;
+      } else {
+        p.belum += it.seharusnya; p.count_belum++;
+        totals.belum += it.seharusnya; totals.count_belum++;
+        if(it.expected_settlement_date && it.expected_settlement_date < today) totals.count_lewat_jatuh_tempo++;
+      }
+    }
+    return json({ from, to, today, items, per_channel: [...per.values()].sort((a,b)=>b.seharusnya-a.seharusnya), totals });
+  }
+
+  // Centang banyak booking sekaligus sebagai "sudah masuk" -- untuk satu
+  // transfer OTA yang membayar beberapa booking. Jumlah diterima per
+  // booking = angka bersih yang seharusnya; kalau nilai di mutasi berbeda,
+  // finance mengoreksi per booking lewat /finance/settlements/receive.
+  if(path==='/finance/settlements/receive-bulk' && m==='POST'){
+    if(!isFinance) return forbidden();
+    const body = await req.json();
+    const ids = Array.isArray(body.booking_ids) ? body.booking_ids.filter(Boolean) : [];
+    if(!ids.length) return err('booking_ids wajib diisi');
+    if(ids.length > 200) return err('Maksimal 200 booking sekali centang');
+    if(!body.received_date) return err('received_date wajib diisi');
+    const { data: list, error } = await supabase.from('finance_settlements').select('*').in('booking_id', ids);
+    if(error) return err(error.message);
+    let updated = 0, skipped = 0;
+    for(const s of (list ?? [])){
+      if(s.settlement_status==='RECEIVED'){ skipped++; continue; }
+      const patch = {
+        settlement_status:'RECEIVED', amount_received: Number(s.amount), received_date: body.received_date,
+        bank_reference: body.bank_reference ?? null, notes: body.notes ?? s.notes ?? null,
+        reconciliation_status:'MATCHED', variance_amount: 0, updated_at: new Date().toISOString(),
+      };
+      const { data: saved, error: uErr } = await supabase.from('finance_settlements').update(patch).eq('id', s.id).select('*').single();
+      if(uErr) return err(uErr.message);
+      await writeFinanceAudit({ entity_type:'finance_settlement', entity_id: s.id, session, action:'mark_received_bulk', old_value: s, new_value: saved, reason: body.reason ?? null });
+      updated++;
+    }
+    return json({ updated, skipped, not_found: ids.length - (list ?? []).length });
+  }
+
+  // Batalkan centang "sudah masuk" (salah centang). Alasan wajib, tercatat
+  // di audit log beserta nilai lama.
+  if(path==='/finance/settlements/unreceive' && m==='POST'){
+    if(!isFinance) return forbidden();
+    const body = await req.json();
+    if(!body.booking_id) return err('booking_id wajib diisi');
+    const reason = String(body.reason ?? '').trim();
+    if(!reason) return err('Alasan pembatalan wajib diisi');
+    const { data: s } = await supabase.from('finance_settlements').select('*').eq('booking_id', body.booking_id).maybeSingle();
+    if(!s) return err('Settlement tidak ditemukan.',404);
+    if(s.settlement_status!=='RECEIVED') return err('Booking ini belum ditandai masuk.',400);
+    const today = todayWIB();
+    const patch = {
+      settlement_status: s.expected_settlement_date && s.expected_settlement_date <= today ? 'READY_TO_COLLECT' : 'PENDING',
+      amount_received: null, received_date: null, bank_reference: null,
+      reconciliation_status: null, variance_amount: null, updated_at: new Date().toISOString(),
+    };
+    const { data: saved, error } = await supabase.from('finance_settlements').update(patch).eq('id', s.id).select('*').single();
+    if(error) return err(error.message);
+    await writeFinanceAudit({ entity_type:'finance_settlement', entity_id: s.id, session, action:'unmark_received', old_value: s, new_value: saved, reason });
+    return json(saved);
+  }
+
   if(path==='/finance/audit-log' && m==='GET'){
     if(!isFinance) return forbidden();
     const limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit') ?? 50)));

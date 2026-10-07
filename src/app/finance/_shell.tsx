@@ -12,6 +12,7 @@ export function FinanceShell({ pageTitle, pageSub, children }: { pageTitle: stri
       title: "Finance",
       items: [
         { href: "/finance", label: "Ringkasan", icon: "◈" },
+        { href: "/finance/checklist-dana", label: "Checklist Dana Masuk", icon: "✓" },
         { href: "/finance/scenario", label: "What-If / Skenario", icon: "◆" },
         { href: "/finance/referral", label: "Fee Referral", icon: "%" },
         { href: "/finance/settlement-config", label: "Konfigurasi Settlement OTA", icon: "☰" },
