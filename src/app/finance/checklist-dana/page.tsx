@@ -324,7 +324,7 @@ export default function ChecklistDanaPage() {
             )}
             <div className="px-4 py-3 text-[10.5px] text-ink/35 border-t border-ink/[0.05] space-y-1">
               <div>
-                &quot;Seharusnya&quot; = angka bersih yang diterima villa (untuk OTA: harga kamar sebelum fee OTA dari Cloudbeds; untuk langsung:
+                &quot;Seharusnya&quot; = angka bersih yang diterima villa (untuk OTA: Deposit Amount Cloudbeds dikurangi komisi OTA di Konfigurasi Settlement OTA; untuk langsung:
                 total bayar). Booking yang tanggal check-in-nya belum tiba tidak ada di daftar ini.
               </div>
               <div>

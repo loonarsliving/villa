@@ -1716,7 +1716,11 @@ function outstandingForBooking(b, amount){
 async function getSettlementConfigMap(){
   const {data} = await supabase.from('finance_ota_settlement_config').select('*');
   const map = new Map();
-  for(const row of (data||[])) map.set(row.sumber, row);
+  KOMISI_OTA_PCT.clear();
+  for(const row of (data||[])){
+    map.set(row.sumber, row);
+    if(row.commission_pct != null) KOMISI_OTA_PCT.set(row.sumber, Number(row.commission_pct));
+  }
   return map;
 }
 
@@ -1879,13 +1883,29 @@ function isPemasukanDiakui(b){
  * bookings.cloudbeds_subtotal. Booking non-Cloudbeds (website, walk-in) tidak
  * punya fee OTA: bersih = kotor.
  */
+//
+// REVISI 2026-10-07 (owner: "benarkan, berarti komisi sesuai aslinya"):
+// Deposit Amount BELUM tentu yang diterima villa. Bukti:
+//  - Traveloka: transfer 7 Okt = Deposit Amount x 78% persis (komisi 22%).
+//  - Airbnb: email konfirmasi "Biaya layanan tuan rumah (15.5% + PPN)",
+//    1.300.000 -> diterima 1.076.264 (17,2105%).
+//  - Agoda: subTotal Cloudbeds = "Net rate" voucher Agoda (komisi sudah
+//    dipotong), jadi 0%.
+// Persentasenya disimpan per channel di
+// finance_ota_settlement_config.commission_pct (diisi owner/admin dari bukti
+// pembayaran, kosong = belum diketahui = 0). Dimuat oleh
+// getSettlementConfigMap(), yang dipanggil setiap endpoint finance sebelum
+// menghitung bersih.
+const KOMISI_OTA_PCT = new Map();
 function pendapatanKotor(b){ return Number(b.total_bayar ?? b.tarif ?? 0); }
 function pendapatanBersih(b){
   // Booking website yang diteruskan ke Cloudbeds juga punya harga Cloudbeds,
   // tapi yang berlaku adalah yang dibayar tamu di sini -- bukan harga
   // Cloudbeds (lihat cloudbedsReservationSync.ts soal booking milik sendiri).
   if(normalizedChannel(b.sumber) === 'DIRECT') return pendapatanKotor(b);
-  return b.cloudbeds_subtotal != null ? Number(b.cloudbeds_subtotal) : pendapatanKotor(b);
+  if(b.cloudbeds_subtotal == null) return pendapatanKotor(b);
+  const pct = KOMISI_OTA_PCT.get(b.sumber) ?? 0;
+  return Math.round(Number(b.cloudbeds_subtotal) * (1 - pct / 100));
 }
 
 /** Lazily creates a finance_settlements row for any booking that doesn't have one yet. Idempotent (unique booking_id, upsert ignoreDuplicates). */
@@ -1906,6 +1926,19 @@ async function ensureFinanceSettlements(bookings, configMap){
     };
   });
   await supabase.from('finance_settlements').upsert(rows, { onConflict: 'booking_id', ignoreDuplicates: true });
+
+  // Settlement yang belum diterima ikut angka bersih terbaru (mis. setelah
+  // komisi OTA dikoreksi). Yang sudah RECEIVED tidak disentuh.
+  const { data: existing } = await supabase.from('finance_settlements')
+    .select('id,booking_id,amount,settlement_status').in('booking_id', rows.map(r=>r.booking_id));
+  const amountByBooking = new Map(rows.map(r=>[r.booking_id, r.amount]));
+  for(const s of (existing ?? [])){
+    if(s.settlement_status === 'RECEIVED') continue;
+    const target = amountByBooking.get(s.booking_id);
+    if(target != null && Number(s.amount) !== Number(target)){
+      await supabase.from('finance_settlements').update({ amount: target, updated_at: new Date().toISOString() }).eq('id', s.id);
+    }
+  }
 
   // Bookings whose expected date has arrived move PENDING -> READY_TO_COLLECT.
   // Never touches PROCESSING/RECEIVED rows -- those are finance's own actions.
@@ -1967,6 +2000,7 @@ function addDaysStr(dateStr, n){
  * (tax_deduction: null), never silently treated as zero.
  */
 async function computeNetRevenueForRange(from, to){
+  await getSettlementConfigMap(); // memuat KOMISI_OTA_PCT untuk pendapatanBersih
   const { data: bookings } = await supabase.from('bookings')
     .select('sumber,total_bayar,tarif,cloudbeds_subtotal,durasi_malam,status')
     .gte('tgl_checkin', from).lte('tgl_checkin', to).lte('tgl_checkin', todayWIB())
@@ -4876,9 +4910,12 @@ Deno.serve(async (req)=>{
       currency: body.currency ?? 'IDR',
       effective_date: body.effective_date || null,
       notes: body.notes ?? null,
+      commission_pct: body.commission_pct === '' || body.commission_pct == null ? null : Number(body.commission_pct),
+      commission_source: body.commission_source ?? null,
       configured_by: session.uid,
       updated_at: new Date().toISOString(),
     };
+    if(patch.commission_pct != null && !(patch.commission_pct >= 0 && patch.commission_pct < 100)) return err('Komisi % harus antara 0 dan 100');
     const { data: saved, error } = await supabase.from('finance_ota_settlement_config').upsert(patch, { onConflict:'sumber' }).select('*').single();
     if(error) return err(error.message);
     await writeFinanceAudit({ entity_type:'finance_ota_settlement_config', entity_id: saved.id, session, action: existing?'update_settlement_config':'create_settlement_config', old_value: existing ?? null, new_value: saved, reason: body.reason ?? null });
