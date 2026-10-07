@@ -504,6 +504,10 @@ export interface FinanceOtaSettlementConfig {
   currency: string;
   effective_date: string | null;
   notes: string | null;
+  /** Komisi OTA (%) yang dipotong dari Deposit Amount Cloudbeds saat OTA mentransfer. Null = belum diketahui (dihitung 0). */
+  commission_pct: number | null;
+  /** Bukti asal angka komisi (mis. email pembayaran OTA). */
+  commission_source: string | null;
   configured_by: string | null;
   updated_at: string;
 }

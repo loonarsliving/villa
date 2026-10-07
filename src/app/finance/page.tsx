@@ -435,8 +435,9 @@ export default function FinancePage() {
                 </table>
               </div>
               <div className="px-4 py-3 text-[10px] text-ink/40 leading-relaxed">
-                Nilai = total seluruh masa inap, dicatat di tanggal check-in. Kotor = Grand Total Cloudbeds. Bersih = harga
-                kamar sebelum fee OTA (&quot;Deposit Amount&quot; di email reservasi Cloudbeds); potongan OTA = selisihnya.
+                Nilai = total seluruh masa inap, dicatat di tanggal check-in. Kotor = Grand Total Cloudbeds. Bersih = uang yang
+                ditransfer OTA: &quot;Deposit Amount&quot; Cloudbeds dikurangi komisi OTA per channel (Konfigurasi Settlement OTA);
+                potongan OTA = selisih kotor dan bersih. Channel yang komisinya belum diisi dihitung 0%.
                 Booking website/walk-in tidak punya fee OTA. Pajak/biaya bank tidak termasuk.
                 {channels.bersih_belum_tersedia > 0 && (
                   <span className="text-ruby-500">

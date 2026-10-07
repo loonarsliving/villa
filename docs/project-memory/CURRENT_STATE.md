@@ -29,6 +29,30 @@ dan porsi booking per channel, mulai 7 Okt 2026.
   minggu sebelumnya 30,8%; Agoda 65%, Booking.com 24%, Traveloka 8%,
   Airbnb 3%.
 
+## 2026-10-07 — Finance: bersih OTA = Deposit Amount dikurangi komisi asli per channel
+
+Bukti (dibaca dari Gmail owner): transfer Traveloka 7 Okt = tepat 78% dari
+Deposit Amount (komisi 22%); email konfirmasi Airbnb "biaya layanan tuan
+rumah 15,5% + PPN" (1.300.000 -> 1.076.264, 17,2105%); voucher Agoda "Net
+rate" = Deposit Amount Cloudbeds (0%, sudah net). Booking.com: belum ada
+bukti di inbox -> commission_pct null (dihitung 0%) sampai owner mengisi.
+
+- Skema (owner setuju 2026-10-07, SUDAH diterapkan):
+  `finance_ota_settlement_config.commission_pct` + `commission_source`.
+  Bisa diubah admin di /finance/settlement-config.
+- villa-api `pendapatanBersih()` = round(cloudbeds_subtotal x (1 - pct/100));
+  pct dimuat oleh `getSettlementConfigMap()`. Dipakai HANYA endpoint
+  /finance/* (summary, channel-breakdown, survival, checklist-dana,
+  settlement). `ensureFinanceSettlements` ikut memperbarui amount settlement
+  yang belum RECEIVED.
+- KEPUTUSAN OWNER: sisi investor TIDAK diubah. `villa_commit_checkin` tetap
+  memakai cloudbeds_subtotal (migrasi 20261005000002), transaksi
+  September/Oktober tidak dikoreksi. Alasan owner: investor menerima passive
+  tetap Rp5 jt/bulan selama 5 tahun; halaman investor untuk menunjukkan
+  pemasukan bisa melebihi itu, bukan dasar pembayaran. Akibatnya angka
+  pemasukan di investor (dari transactions) lebih tinggi dari "bersih" di
+  Finance untuk Traveloka/Airbnb -- itu disengaja.
+
 ## 2026-10-07 — Finance: menu "Checklist Dana Masuk" (/finance/checklist-dana)
 
 Permintaan owner: checklist manual dana yang sudah masuk dan belum, supaya

@@ -94,6 +94,7 @@ export default function SettlementConfigPage() {
                     <th className="px-3 py-2">Collection Method</th>
                     <th className="px-3 py-2">Jadwal</th>
                     <th className="px-3 py-2">Basis</th>
+                    <th className="px-3 py-2">Komisi</th>
                     <th className="px-3 py-2">Rekening Tujuan</th>
                     <th className="px-3 py-2">Berlaku Sejak</th>
                     <th className="px-3 py-2">Diubah</th>
@@ -122,6 +123,10 @@ export default function SettlementConfigPage() {
                             ? "sejak checkin"
                             : "sejak checkout"
                           : "—"}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        {r.commission_pct != null ? `${r.commission_pct}%` : <span className="text-ruby-400">Belum diisi</span>}
+                        {r.commission_source && <div className="text-ink/35 text-[10px] max-w-[220px]">{r.commission_source}</div>}
                       </td>
                       <td className="px-3 py-2.5">{r.destination_account_label ?? "—"}</td>
                       <td className="px-3 py-2.5">{r.effective_date ?? "—"}</td>
@@ -228,6 +233,18 @@ export default function SettlementConfigPage() {
                 </option>
               ))}
             </select>
+          </Field>
+          <Field label="Komisi OTA % (dipotong dari Deposit Amount Cloudbeds saat OTA transfer; kosong = belum diketahui)">
+            <input
+              className={inputCls}
+              type="number"
+              step="0.0001"
+              value={editing.commission_pct ?? ""}
+              onChange={(e) => setEditing({ ...editing, commission_pct: e.target.value === "" ? null : Number(e.target.value) })}
+            />
+          </Field>
+          <Field label="Bukti Komisi (mis. email pembayaran OTA tanggal ...)">
+            <input className={inputCls} value={editing.commission_source ?? ""} onChange={(e) => setEditing({ ...editing, commission_source: e.target.value })} />
           </Field>
           <Field label="Label Rekening Tujuan (mis. Mandiri ****1234 — jangan nomor lengkap)">
             <input className={inputCls} value={editing.destination_account_label ?? ""} onChange={(e) => setEditing({ ...editing, destination_account_label: e.target.value })} />
