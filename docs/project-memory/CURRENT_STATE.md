@@ -284,6 +284,17 @@ Temuan sampingan (belum diperbaiki, di luar lingkup): webhook Cloudbeds
 sync 10 menit. Booking website yang sudah didorong ke Cloudbeds bisa
 tertimpa tarif/sumber Cloudbeds oleh event webhook.
 
+## 2026-10-07 — Kamar Siap A5 gagal: "Cloudbeds tidak bisa dibaca"
+
+`getRoomBlocks?roomBlockID=` untuk blok A5 menjawab gagal, dan
+`cloudbedsBacaRoomBlock()` memperlakukan semua kegagalan sebagai "tidak
+terbaca" (undefined) sehingga Kamar Siap menolak membuka kamar. Sekarang:
+jawaban "not found" = blok sudah tidak ada (null); kegagalan lain dicoba
+ulang lewat pembacaan semua blok pada tanggal itu dan dicari ID-nya; jawaban
+mentah Cloudbeds dicatat ke log fungsi (`getRoomBlocks?roomBlockID gagal`)
+untuk diagnosis. Penyebab persis kegagalan A5 belum diketahui -- lihat log
+itu pada percobaan berikutnya.
+
 ## 2026-10-07 — ATURAN OWNER: ditutup hari ini → paling cepat dibuka besok
 
 Owner: *"kalau ditutup di hari itu minimal bukanya di hari besoknya"*. Ini
