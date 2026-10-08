@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-09 — WA info malam (kontak security) pukul 21.00 WIB
+- Cron `/cron/info-malam` + kiriman saat check-in di atas 21.00. Nomor security dari Mkhsistem (divisi Security, cabang Loonars Private Living). Sekali per booking. Lihat CURRENT_STATE.md.
+
 ### 2026-10-09 — Tipe kamar wajib dipilih di loonars.id
 - villa-api `POST /public/bookings` menolak tanpa `room_type`; loonars.id menonaktifkan tombol bayar sampai tipe dipilih dan menampilkan tipe di layar QRIS.
 

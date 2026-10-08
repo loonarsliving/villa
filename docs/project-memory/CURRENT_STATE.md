@@ -3,6 +3,32 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-09 — WA info malam: kontak security pukul 21.00 WIB
+
+Owner: setelah pukul 23.00 front office tidak ada, jadi kendala malam
+ditangani security. Tamu dikirimi WA berisi nomor security. Soal pemadaman
+PLN dipilih "Pilihan B": disebut singkat, ditegaskan sangat jarang, mohon
+maaf, genset sedang ditingkatkan. Kedua nomor security dicantumkan. Tamu
+yang check-in setelah pukul 21.00 dikirimi setelah check-in.
+
+- villa-api `POST /cron/info-malam` (`x-cron-secret`, pg_cron `0 14 * * *`
+  UTC = 21.00 WIB): booking `status='checkin'`, `tgl_checkin <= hari ini`,
+  `tgl_checkout > hari ini` atau null.
+- `/checkin` dan `/late-night/lunas`: kalau jam WIB >= 21 atau < 6, info
+  malam dikirim setelah WA PIN. Tidak pernah menggagalkan check-in.
+- Sekali per booking (`wa_messages_log.template_type='info_malam'`,
+  `status='sent'`): tamu yang menginap beberapa malam tidak dikirimi
+  berulang. Nomor unit sengaja tidak disebut (keputusan 2026-09-28).
+- Daftar security dibaca langsung dari Mkhsistem: `employees` aktif,
+  divisi Security, cabang "Loonars Private Living", didedup per nomor
+  (Bayu tercatat dua kali di sana). Per 9 Okt: Bayu (…1847) dan Finis
+  (…7996). Tanpa security bernomor, pesan TIDAK dikirim (cron menjawab 503).
+- Bahasa: nomor luar negeri -> Inggris (`bahasaDariNomorHp`), nomor
+  ditulis +62.
+- **Keterbatasan:** tamu Booking.com dan Traveloka di data 14 hari terakhir
+  tidak punya nomor WA (0/20), jadi tidak menerima pesan ini. Agoda 38/40,
+  Airbnb 4/5.
+
 ## 2026-10-09 — Tipe kamar wajib dipilih di loonars.id
 
 Owner: "wajibkan tipe kamar harus di pilih". Sebelumnya kartu tipe kamar di
