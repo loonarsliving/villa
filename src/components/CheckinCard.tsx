@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Modal, Btn } from "./Modal";
+import { Modal, Btn, inputCls } from "./Modal";
 import { fmtDate } from "@/lib/format";
 import { localApi } from "@/lib/api";
 import { useToast } from "@/lib/toast";
@@ -13,6 +13,29 @@ export interface CheckinCardGuest {
   tipe: string;
   checkinDate: string;
   checkoutDate: string | null;
+  /** Nomor WA yang sudah diketahui (dari OTA/booking), untuk mengisi awal kolom HP. */
+  guestHp?: string | null;
+}
+
+export interface CheckinCardResult {
+  ktpPhotoPath: string;
+  signatureDataUrl: string;
+  /** Nomor WhatsApp tamu yang dikonfirmasi/diisi resepsionis saat check-in. */
+  guestHp: string;
+}
+
+/**
+ * Nomor WA tamu wajib diisi saat check-in (owner 2026-10-09). Booking.com dan
+ * Traveloka tidak mengirim nomor tamu ke sistem, jadi tanpa kolom ini WA PIN
+ * pintu dan info malam (kontak security) tidak pernah sampai ke tamu mereka
+ * -- 0 dari 20 check-in dua OTA itu dalam 14 hari sebelum kolom ini ada.
+ * Longgar sengaja: cukup 9-15 digit, boleh diawali + (tamu luar negeri).
+ */
+export function nomorHpTamuValid(hp: string): boolean {
+  const t = hp.trim();
+  if (!/^\+?[0-9\s\-().]+$/.test(t)) return false;
+  const digit = t.replace(/\D/g, "");
+  return digit.length >= 9 && digit.length <= 15;
 }
 
 // Tata tertib & larangan Loonars Private Living, ditandatangani tamu saat
@@ -64,7 +87,7 @@ export function CheckinCard({
   open: boolean;
   guest: CheckinCardGuest | null;
   onClose: () => void;
-  onConfirm: (data: { ktpPhotoPath: string; signatureDataUrl: string }) => Promise<void>;
+  onConfirm: (data: CheckinCardResult) => Promise<void>;
 }) {
   const toast = useToast();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -83,6 +106,7 @@ export function CheckinCard({
   const [hasSignature, setHasSignature] = useState(false);
   const [agreed, setAgreed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [hp, setHp] = useState("");
 
   /**
    * Samakan ukuran buffer kanvas dengan ukuran tampilannya.
@@ -138,6 +162,7 @@ export function CheckinCard({
     setHasSignature(false);
     setAgreed(false);
     setSubmitting(false);
+    setHp(guest?.guestHp?.trim() ?? "");
     ktpUploadRef.current = null;
     const onResize = () => sizeCanvas(true);
     // Kanvas baru ada di DOM setelah modal dirender.
@@ -227,6 +252,10 @@ export function CheckinCard({
       toast("⚠", "Tunggu sebentar", "Foto KTP masih diproses.", "gold");
       return;
     }
+    if (!nomorHpTamuValid(hp)) {
+      toast("⚠", "Nomor WhatsApp wajib", "Isi nomor WhatsApp tamu yang aktif (untuk PIN pintu & kontak security malam).", "ruby");
+      return;
+    }
     if (!ktpDataUrl) {
       toast("⚠", "Foto KTP wajib", "Foto KTP/paspor tamu dulu sebelum check-in.", "ruby");
       return;
@@ -254,7 +283,7 @@ export function CheckinCard({
         ktpUploadRef.current = { dataUrl: ktpDataUrl, path };
       }
       const signatureDataUrl = canvasRef.current?.toDataURL("image/png") ?? "";
-      await onConfirm({ ktpPhotoPath: path, signatureDataUrl });
+      await onConfirm({ ktpPhotoPath: path, signatureDataUrl, guestHp: hp.trim() });
     } catch (e) {
       toast("⚠", "Gagal", e instanceof Error ? e.message : "Terjadi kesalahan.", "ruby");
     } finally {
@@ -287,6 +316,22 @@ export function CheckinCard({
           </div>
         </div>
       )}
+
+      <div className="mb-5">
+        <label className="block text-[9.5px] font-semibold text-ink/30 tracking-[0.12em] uppercase mb-1.5">Nomor WhatsApp Tamu</label>
+        <input
+          type="tel"
+          inputMode="tel"
+          autoComplete="tel"
+          value={hp}
+          onChange={(e) => setHp(e.target.value)}
+          placeholder="08xxxxxxxxxx atau +44…"
+          className={inputCls}
+        />
+        <p className="text-[10px] text-ink/40 mt-1">
+          Untuk mengirim PIN pintu dan kontak security malam. Pastikan nomor aktif di WhatsApp.
+        </p>
+      </div>
 
       <div className="mb-5">
         <label className="block text-[9.5px] font-semibold text-ink/30 tracking-[0.12em] uppercase mb-1.5">Foto KTP / Paspor</label>

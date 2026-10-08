@@ -6386,15 +6386,27 @@ Deno.serve(async (req)=>{
     if(status) q=q.eq('status',status);
     if(milikOwner) q=q.in('unit_id', milikOwner.length ? milikOwner : ['00000000-0000-0000-0000-000000000000']);
     else if(unit_id) q=q.eq('unit_id',unit_id);
+    // Nomor tamu ada di tabel guests, bukan bookings -- tanpa ini kartu
+    // check-in front desk tidak bisa mengisi awal kolom Nomor WhatsApp, bahkan
+    // untuk tamu Agoda yang nomornya sudah ada. HANYA untuk staf: investor
+    // (owner) juga membaca rute ini dan tidak perlu melihat nomor tamu.
+    const denganHp = async (rows)=>{
+      if(!isStaff || !rows.length) return rows;
+      const ids = [...new Set(rows.map(r=>r.guest_id).filter(Boolean))];
+      if(!ids.length) return rows;
+      const {data:gs} = await supabase.from('guests').select('id,hp').in('id', ids);
+      const hpById = new Map((gs ?? []).map(g=>[g.id, g.hp]));
+      return rows.map(r=>({...r, guest_hp: hpById.get(r.guest_id) ?? null}));
+    };
     if(date_from || date_to){
       const {data,error}=await q.order('tgl_checkin',{ascending:true});
       if(error) return err(error.message);
       const rows=(data??[]).filter(b=>datesOverlap(b.tgl_checkin, b.tgl_checkout, date_from ?? b.tgl_checkin, date_to ?? null));
-      return json(rows);
+      return json(await denganHp(rows));
     }
     const {data,error}=await q.order('created_at',{ascending:false}).limit(50);
     if(error) return err(error.message);
-    return json(data);
+    return json(await denganHp(data ?? []));
   }
   if(path==='/availability' && m==='GET'){
     if(!isStaff) return forbidden();
@@ -6550,10 +6562,29 @@ Deno.serve(async (req)=>{
 
     await notif(data.unit_id,'all','checkin',`Check-in — Unit ${data.unit_nomor}`,`${data.guest_nama}`,b.booking_id);
 
-    let guestPhone = b.guest_hp ?? null;
-    if(!guestPhone && data.guest_id){
-      const {data:g} = await supabase.from('guests').select('hp').eq('id',data.guest_id).single();
-      guestPhone = g?.hp ?? null;
+    // Nomor WA dari kartu check-in (wajib diisi sejak 2026-10-09) disimpan ke
+    // data tamu, supaya WA PIN dan info malam 21.00 sampai juga ke tamu OTA
+    // yang nomornya tidak dikirim (Booking.com, Traveloka). Pengecualian:
+    // booking website/investor yang sudah punya nomor -- nomor itu kunci
+    // tamu untuk membuka status & invoice di loonars.id, jadi tidak ditimpa.
+    let storedHp = null;
+    let sumberBooking = null;
+    if(data.guest_id){
+      const {data:g} = await supabase.from('guests').select('hp').eq('id',data.guest_id).maybeSingle();
+      storedHp = g?.hp ?? null;
+    }
+    const hpInput = String(b.guest_hp ?? '').trim();
+    const hpDigit = hpInput.replace(/\D/g,'');
+    const hpInputValid = /^\+?[0-9\s\-().]+$/.test(hpInput) && hpDigit.length >= 9 && hpDigit.length <= 15;
+    let guestPhone = hpInputValid ? hpInput : storedHp;
+    if(hpInputValid && data.guest_id && hpInput !== (storedHp ?? '').trim()){
+      const {data:bkSumber} = await supabase.from('bookings').select('sumber').eq('id', b.booking_id).maybeSingle();
+      sumberBooking = bkSumber?.sumber ?? null;
+      const kunciWebsite = SUMBER_BOOKING_WEBSITE.includes(sumberBooking) && !!storedHp;
+      if(!kunciWebsite){
+        const {error:hpErr} = await supabase.from('guests').update({hp: hpInput}).eq('id', data.guest_id);
+        if(hpErr) console.error('[checkin] nomor tamu gagal disimpan', hpErr.message);
+      }
     }
     // Nomor unit SENGAJA tidak disebut di pesan ke tamu (owner 2026-09-28):
     // untuk booking Airbnb, unit_nomor tercatat di sini kadang sudah tidak
