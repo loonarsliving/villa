@@ -545,6 +545,103 @@ function bahasaDariNomorHp(hp){
   return (d.startsWith('62') || d.startsWith('0')) ? 'id' : 'en';
 }
 
+// ── Info malam: kontak security setelah resepsionis pulang ─────────────
+// Owner 2026-10-09: front office tidak ada lagi setelah pukul 23.00, jadi
+// kendala malam hari ditangani security. Tiap pukul 21.00 WIB tamu yang
+// menginap malam itu dikirimi nomor security (cron /cron/info-malam); tamu
+// yang check-in SETELAH pukul 21.00 dikirimi tepat setelah check-in. Isi
+// soal pemadaman listrik = "Pilihan B" yang dipilih owner (disebut singkat,
+// ditegaskan sangat jarang). SEKALI per booking: tamu yang menginap
+// beberapa malam tidak dikirimi berulang setiap malam.
+const INFO_MALAM_JAM = 21;          // WIB: cron & batas awal "check-in malam"
+const INFO_MALAM_SAMPAI_JAM = 6;    // check-in sebelum 06.00 WIB masih dianggap malam
+
+/** Jam (0-23) saat ini di WIB. */
+function jamSekarangWIB(){
+  return Number(new Date().toLocaleString('en-GB', {timeZone:'Asia/Jakarta', hour:'2-digit', hourCycle:'h23'}));
+}
+function sedangMalamWIB(){
+  const j = jamSekarangWIB();
+  return j >= INFO_MALAM_JAM || j < INFO_MALAM_SAMPAI_JAM;
+}
+
+/**
+ * Security aktif cabang Loonars Private Living, dibaca langsung dari data
+ * karyawan Mkhsistem (project Supabase yang sama) -- satu sumber yang sama
+ * dengan penerusan "Komplain -> Security" yang disetujui owner 2026-10-05,
+ * jadi pergantian security di Mkhsistem otomatis ikut ke pesan tamu.
+ * Didedup per nomor: satu orang bisa tercatat dua kali di sana.
+ */
+async function daftarSecurityMalam(){
+  const {data:cabang} = await supabase.from('branches').select('id').eq('name','Loonars Private Living');
+  const {data:divisi} = await supabase.from('divisions').select('id').ilike('name','security');
+  if(!cabang?.length || !divisi?.length) return [];
+  const {data, error} = await supabase.from('employees').select('full_name,phone')
+    .in('branch_id', cabang.map(c=>c.id)).in('division_id', divisi.map(d=>d.id))
+    .eq('is_active', true).is('deleted_at', null).order('full_name');
+  if(error){ console.error('[info-malam] daftar security tidak terbaca:', error.message); return []; }
+  const hasil = [];
+  const sudah = new Set();
+  for(const e of data ?? []){
+    const digit = String(e.phone ?? '').replace(/\D/g,'');
+    if(digit.length < 9 || sudah.has(digit)) continue;
+    sudah.add(digit);
+    const depan = String(e.full_name ?? '').trim().split(/\s+/)[0] ?? '';
+    const nama = depan ? depan[0].toUpperCase() + depan.slice(1).toLowerCase() : 'Security';
+    // Nomor lokal 08... untuk tamu Indonesia, +62 8... untuk tamu luar negeri.
+    const lokal = digit.startsWith('62') ? '0' + digit.slice(2) : digit;
+    const internasional = '+62 ' + lokal.replace(/^0/,'');
+    hasil.push({nama, lokal, internasional});
+  }
+  return hasil;
+}
+
+function teksInfoMalam({nama, security, bahasa}){
+  if(bahasa === 'en'){
+    return `Good evening ${nama || 'there'} 🌙\n\n`+
+      `We hope you're having a restful stay at Loonars Private Living.\n\n`+
+      `Our front desk is on duty until 11 PM (WIB). After that, if you need any help at all, please contact our Security team (24 hours):\n`+
+      security.map(s=>`• ${s.nama}: ${s.internasional}`).join('\n')+`\n\n`+
+      `For your information, power outages from the state electricity company (PLN) are very rare in our area. Should one occur, we sincerely apologize for the inconvenience and kindly ask for your patience, as our backup power panel (generator) is currently being upgraded.\n\n`+
+      `Have a good night's rest 🙏`;
+  }
+  return `Selamat malam Kak${nama ? ' ' + nama : ''} 🌙\n\n`+
+    `Semoga istirahatnya nyaman di Loonars Private Living.\n\n`+
+    `Resepsionis kami bertugas sampai pukul 23.00 WIB. Setelah itu, kalau ada kendala atau butuh bantuan apa pun, silakan hubungi Security kami (24 jam):\n`+
+    security.map(s=>`• ${s.nama}: ${s.lokal}`).join('\n')+`\n\n`+
+    `Sebagai informasi, pemadaman listrik dari PLN di area kami sangat jarang terjadi. Kalau sampai terjadi, kami mohon maaf atas ketidaknyamanannya dan mohon kesediaan Kakak untuk menunggu sebentar, karena panel listrik cadangan (genset) kami sedang dalam peningkatan.\n\n`+
+    `Selamat beristirahat 🙏`;
+}
+
+/**
+ * Kirim info malam ke tamu satu booking, sekali saja per booking. Nomor unit
+ * sengaja tidak disebut (keputusan owner 2026-09-28, lihat /checkin).
+ * Mengembalikan 'terkirim' | 'sudah' | 'tanpa_hp' | 'tanpa_security' | 'gagal'.
+ */
+async function kirimInfoMalam(booking, securityTersedia = null){
+  const {data:sudah} = await supabase.from('wa_messages_log')
+    .select('id').eq('booking_id', booking.id).eq('template_type','info_malam').eq('status','sent').limit(1);
+  if(sudah?.length) return 'sudah';
+
+  let hp = null;
+  if(booking.guest_id){
+    const {data:g} = await supabase.from('guests').select('hp').eq('id', booking.guest_id).maybeSingle();
+    hp = g?.hp ?? null;
+  }
+  if(!hp) return 'tanpa_hp';
+
+  const security = securityTersedia ?? await daftarSecurityMalam();
+  if(!security.length){
+    // Lebih baik tidak mengirim apa pun daripada menyuruh tamu menghubungi
+    // security tanpa nomor.
+    console.error('[info-malam] tidak ada security aktif bernomor -- pesan tidak dikirim');
+    return 'tanpa_security';
+  }
+  const ok = await sendWa(hp, teksInfoMalam({nama: booking.guest_nama, security, bahasa: bahasaDariNomorHp(hp)}),
+    {booking_id: booking.id, unit_id: booking.unit_id, template_type:'info_malam'});
+  return ok ? 'terkirim' : 'gagal';
+}
+
 /** "YYYY-MM-DD" (tanggal kalender, bukan jam) -> "5 Okt" / "5 Oct", tahun opsional. */
 function tanggalSingkat(iso, bahasa, denganTahun){
   const d = new Date(`${iso}T00:00:00Z`);
@@ -4200,6 +4297,32 @@ Deno.serve(async (req)=>{
     return json({diingatkan, expired: expired.length, bookings: expired});
   }
 
+  // Info malam pukul 21.00 WIB (pg_cron '0 14 * * *' UTC): kontak security
+  // untuk semua tamu yang sudah check-in dan menginap malam ini.
+  if(path==='/cron/info-malam' && m==='POST'){
+    const cron = await getSetting('cron');
+    const provided = req.headers.get('x-cron-secret') ?? '';
+    if(!cron.secret) return err('Cron belum dikonfigurasi (integration_settings.cron.secret)',503);
+    if(!await secretsMatch(provided, cron.secret)) return err('Unauthorized',401);
+
+    const hariIni = todayWIB();
+    const {data:menginap, error} = await supabase.from('bookings')
+      .select('id,unit_id,guest_id,guest_nama,tgl_checkout')
+      .eq('status','checkin').lte('tgl_checkin', hariIni)
+      .or(`tgl_checkout.gt.${hariIni},tgl_checkout.is.null`);
+    if(error) return err(error.message);
+
+    const security = await daftarSecurityMalam();
+    if(!security.length) return err('Tidak ada security aktif bernomor di Mkhsistem (cabang Loonars Private Living)', 503);
+
+    const hasil = {terkirim:0, sudah:0, tanpa_hp:0, gagal:0};
+    for(const bk of menginap ?? []){
+      const r = await kirimInfoMalam(bk, security);
+      if(r in hasil) hasil[r]++;
+    }
+    return json({success:true, tamu: (menginap ?? []).length, ...hasil, security: security.map(s=>s.nama)});
+  }
+
   if(path==='/cron/cleaning-calls' && m==='POST'){
     const cron = await getSetting('cron');
     const provided = req.headers.get('x-cron-secret') ?? '';
@@ -4597,6 +4720,12 @@ Deno.serve(async (req)=>{
     const wa_terkirim = await sendWa(hp,
       `Halo ${data.guest_nama}, selamat datang di Loonars Private Living!\nKode PIN pintu Anda: *${data.pin_kode}*\nCheck-out paling lambat pukul ${String(LATE_NIGHT_JAM_SELESAI).padStart(2,'0')}.00 WIB. Mohon jaga kerahasiaan kode ini. Terima kasih.`,
       {booking_id: bk.id, unit_id: data.unit_id, template_type:'pin_checkin'});
+    // Late night selalu check-in di jam malam (01.00-09.00 WIB); yang sebelum
+    // 06.00 ikut dikirimi kontak security, sama seperti check-in biasa.
+    if(sedangMalamWIB()){
+      try { await kirimInfoMalam({id:bk.id, unit_id:data.unit_id, guest_id:data.guest_id, guest_nama:data.guest_nama}); }
+      catch(e){ console.error('[info-malam] late night', e?.message ?? e); }
+    }
     return json({success:true, pin_kode: data.pin_kode, unit_nomor: data.unit_nomor, wa_terkirim: !!wa_terkirim});
   }
 
@@ -6436,6 +6565,13 @@ Deno.serve(async (req)=>{
     await sendWa(guestPhone,
       `Halo ${data.guest_nama}, selamat datang di Loonars Private Living!\nKode PIN pintu Anda: *${data.pin_kode}*\nMohon jaga kerahasiaan kode ini selama menginap. Terima kasih.`,
       {booking_id:b.booking_id, unit_id:data.unit_id, template_type:'pin_checkin'});
+
+    // Check-in setelah pukul 21.00 WIB terlewat dari kiriman cron info malam,
+    // jadi dikirim di sini (owner 2026-10-09). Tidak pernah menggagalkan check-in.
+    if(sedangMalamWIB()){
+      try { await kirimInfoMalam({id:b.booking_id, unit_id:data.unit_id, guest_id:data.guest_id, guest_nama:data.guest_nama}); }
+      catch(e){ console.error('[info-malam] check-in', e?.message ?? e); }
+    }
 
     return json({success:true, pin_kode:data.pin_kode});
   }
