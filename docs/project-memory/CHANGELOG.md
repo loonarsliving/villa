@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-09 — Nomor WhatsApp tamu wajib di kartu check-in
+- Kolom wajib di `CheckinCard`, disimpan ke `guests.hp` saat check-in (kecuali menimpa nomor booking website). `GET /bookings` membawa `guest_hp` untuk staf. Lihat CURRENT_STATE.md.
+
 ### 2026-10-09 — WA info malam (kontak security) pukul 21.00 WIB
 - Cron `/cron/info-malam` + kiriman saat check-in di atas 21.00. Nomor security dari Mkhsistem (divisi Security, cabang Loonars Private Living). Sekali per booking. Lihat CURRENT_STATE.md.
 

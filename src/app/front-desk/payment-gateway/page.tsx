@@ -11,7 +11,7 @@ import { addDaysISO, defaultCheckout, nightsBetween, validateStayRange } from "@
 import { Card, CardHeader, CardBody, Loading, Badge } from "@/components/Card";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
 import { StatCard } from "@/components/StatCard";
-import { CheckinCard } from "@/components/CheckinCard";
+import { CheckinCard, type CheckinCardResult } from "@/components/CheckinCard";
 import type { Booking, Unit, UnitAvailability, WalkinKategori, WalkinPayment, WalkinStatus } from "@/lib/types";
 import { loadQrisImage, saveQrisImage, clearQrisImage } from "@/lib/walkin";
 import { pdfFirstPageToPngDataUrl } from "@/lib/pdfToImage";
@@ -127,6 +127,7 @@ export default function PaymentGatewayPage() {
     bookingId: string;
     ktpPhotoPath: string;
     signatureDataUrl: string;
+    guestHp: string;
   } | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -456,7 +457,7 @@ export default function PaymentGatewayPage() {
               unit_id: payment.unit_id,
               unit_nomor: payment.unit_nomor,
               guest_nama: payment.guest_nama,
-              guest_hp: payment.guest_hp,
+              guest_hp: capturedKtpSig.guestHp || payment.guest_hp,
               tipe: payment.tipe,
               total_bayar: payment.jumlah,
               checkin_by: user?.nama || "Admin",
@@ -492,7 +493,7 @@ export default function PaymentGatewayPage() {
     }
   }
 
-  async function handleCheckinCardConfirm(data: { ktpPhotoPath: string; signatureDataUrl: string }) {
+  async function handleCheckinCardConfirm(data: CheckinCardResult) {
     if (checkinCardMode === "new" && pendingVillaForm) {
       try {
         // tarif/total_bayar sengaja TIDAK dikirim: villa-api selalu
@@ -508,7 +509,7 @@ export default function PaymentGatewayPage() {
           sumber: "walk-in",
           tgl_checkin: pendingVillaForm.checkin,
           tgl_checkout: pendingVillaForm.checkout,
-          guest_hp: pendingVillaForm.guest_hp || undefined,
+          guest_hp: data.guestHp || pendingVillaForm.guest_hp || undefined,
         });
         setVillaBookings((prev) => [booking, ...prev]);
         setCapturedKtpSig({ bookingId: booking.id, ...data });
@@ -525,7 +526,7 @@ export default function PaymentGatewayPage() {
           unit_id: pendingCheckin.unit_id,
           unit_nomor: pendingCheckin.unit_nomor,
           guest_nama: pendingCheckin.guest_nama,
-          guest_hp: pendingCheckin.guest_hp,
+          guest_hp: data.guestHp,
           tipe: pendingCheckin.tipe,
           total_bayar: pendingCheckin.jumlah,
           checkin_by: user?.nama || "Admin",
@@ -911,6 +912,7 @@ export default function PaymentGatewayPage() {
                 tipe: pendingVillaForm.tipe,
                 checkinDate: pendingVillaForm.checkin,
                 checkoutDate: pendingVillaForm.checkout || null,
+                guestHp: pendingVillaForm.guest_hp || null,
               }
             : pendingCheckin
               ? {
@@ -921,6 +923,7 @@ export default function PaymentGatewayPage() {
                   // ini yang dibaca dan ditandatangani tamu.
                   checkinDate: pendingCheckin.tgl_checkin ?? todayISO(),
                   checkoutDate: pendingCheckin.tgl_checkout ?? null,
+                  guestHp: pendingCheckin.guest_hp ?? null,
                 }
               : null
         }

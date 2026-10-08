@@ -3,6 +3,27 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-09 — Nomor WhatsApp tamu wajib di kartu check-in
+
+Owner: "tambahkan di form checkin nomor tlp tamu pada saat checkin". Kartu
+check-in sebelumnya hanya berisi KTP dan tanda tangan; nomor diambil dari
+data booking. Booking.com dan Traveloka tidak mengirim nomor tamu, jadi 0 dari
+20 check-in mereka dalam 14 hari terakhir menerima WA PIN pintu, dan info
+malam juga tidak akan sampai.
+
+- `CheckinCard`: kolom "Nomor WhatsApp Tamu", wajib diisi (`nomorHpTamuValid`:
+  9-15 digit, boleh diawali +), terisi awal dari nomor yang sudah ada.
+  Dipakai di front desk dan payment gateway (walk-in baru dan booking yang
+  sudah ada).
+- villa-api `GET /bookings`: untuk staf saja, setiap baris kini membawa
+  `guest_hp` dari tabel guests. Investor tidak melihat nomor tamu.
+  Sebelumnya `guest_hp` di front desk selalu kosong.
+- villa-api `/checkin`: nomor dari kartu dipakai untuk WA PIN dan disimpan ke
+  `guests.hp`, sehingga cron info malam 21.00 juga memakainya. Pengecualian:
+  booking website/investor yang sudah punya nomor tidak ditimpa, karena
+  nomor itu kunci tamu untuk membuka status & invoice di loonars.id.
+- Diuji: tsc bersih, 216 tes lulus (2 baru), `next build` berhasil.
+
 ## 2026-10-09 — WA info malam: kontak security pukul 21.00 WIB
 
 Owner: setelah pukul 23.00 front office tidak ada, jadi kendala malam

@@ -10,7 +10,7 @@ import { fmtCurrencyFull, fmtDate, fmtDateTime, fmtFullDate, todayISO } from "@/
 import { Card, CardHeader, Loading } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
-import { CheckinCard, type CheckinCardGuest } from "@/components/CheckinCard";
+import { CheckinCard, type CheckinCardGuest, type CheckinCardResult } from "@/components/CheckinCard";
 import type { Booking, Summary, Unit, Notification } from "@/lib/types";
 
 const statusColor: Record<string, string> = {
@@ -133,7 +133,7 @@ export default function FrontDeskPage() {
     setCheckinCardOpen(true);
   }
 
-  async function finalizeCheckin(data: { ktpPhotoPath: string; signatureDataUrl: string }) {
+  async function finalizeCheckin(data: CheckinCardResult) {
     if (!pendingCheckin || busy) return;
     setBusy(true);
     try {
@@ -142,7 +142,9 @@ export default function FrontDeskPage() {
         unit_id: pendingCheckin.unit_id,
         unit_nomor: pendingCheckin.unit_nomor,
         guest_nama: pendingCheckin.guest_nama,
-        guest_hp: pendingCheckin.guest_hp,
+        // Nomor yang dikonfirmasi/diisi di kartu check-in -- villa-api
+        // menyimpannya ke data tamu (OTA seperti Booking.com tidak mengirimnya).
+        guest_hp: data.guestHp,
         tipe: pendingCheckin.tipe,
         total_bayar: pendingCheckin.total_bayar,
         checkin_by: user?.nama || "Staff",
@@ -481,6 +483,7 @@ export default function FrontDeskPage() {
                 tipe: pendingCheckin.tipe,
                 checkinDate: pendingCheckin.checkinDate,
                 checkoutDate: pendingCheckin.checkoutDate,
+                guestHp: pendingCheckin.guest_hp ?? null,
               } satisfies CheckinCardGuest)
             : null
         }
