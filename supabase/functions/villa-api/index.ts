@@ -126,7 +126,13 @@ function paymentCode(bookingId){
 async function generateKodeUnikPembayaran(){
   const {data:pending} = await supabase.from('bookings')
     .select('total_bayar').in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran');
-  const dipakai = new Set((pending??[]).map(b=>Number(b.total_bayar)%1000));
+  // Booking yang baru kedaluwarsa juga dihindari: email BTN untuk booking
+  // itu masih bisa masuk terlambat dan menghidupkannya kembali (lihat
+  // tryConfirmBookingByNominal), jadi nominalnya belum boleh dipakai ulang.
+  const {data:baruKedaluwarsa} = await supabase.from('bookings')
+    .select('total_bayar').in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','batal')
+    .gt('created_at', new Date(Date.now() - BATAS_HIDUP_KEMBALI_JAM*3600*1000).toISOString());
+  const dipakai = new Set([...(pending??[]), ...(baruKedaluwarsa??[])].map(b=>Number(b.total_bayar)%1000));
   for(let coba=0; coba<20; coba++){
     const kandidat = 100 + Math.floor(Math.random()*900);
     if(!dipakai.has(kandidat)) return kandidat;
@@ -153,8 +159,27 @@ async function tryConfirmBookingByNominal(nominal, onlyBookingId){
     .select('id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,total_bayar,created_at,invoice_no,cloudbeds_reservation_id,adults,children')
     .in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran').eq('total_bayar', nominal);
   if(onlyBookingId) q = q.eq('id', onlyBookingId);
-  const {data:pendingSama} = await q;
+  let {data:pendingSama} = await q;
+
+  // Tamu membayar di menit ke-14, email BTN baru masuk di menit ke-17 --
+  // dengan tahanan 15 menit ini kejadian biasa. Booking yang dibatalkan
+  // MESIN (bukan staf) masih dihidupkan kembali oleh emailnya, sama seperti
+  // balasan "LUNAS <kode>" di /bridge/confirm-payment. Hanya yang dibuat
+  // dalam BATAS_HIDUP_KEMBALI_JAM terakhir: kode unik booking lama boleh
+  // dipakai ulang setelah itu (generateKodeUnikPembayaran).
+  let dihidupkan = false;
+  if(!pendingSama?.length){
+    let qx = supabase.from('bookings')
+      .select('id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,total_bayar,created_at,invoice_no,cloudbeds_reservation_id,adults,children,catatan')
+      .in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','batal').eq('total_bayar', nominal)
+      .gt('created_at', new Date(Date.now() - BATAS_HIDUP_KEMBALI_JAM*3600*1000).toISOString());
+    if(onlyBookingId) qx = qx.eq('id', onlyBookingId);
+    const {data:batal} = await qx;
+    pendingSama = (batal ?? []).filter(b=>String(b.catatan ?? '').includes(EXPIRED_HOLD_MARK));
+    dihidupkan = pendingSama.length > 0;
+  }
   if(!pendingSama?.length) return {matched:false};
+  const statusAsal = dihidupkan ? 'batal' : 'menunggu_pembayaran';
 
   if(!onlyBookingId && pendingSama.length > 1){
     await notif(null, 'all', 'transfer', 'Email pembayaran ambigu -- perlu konfirmasi manual',
@@ -166,14 +191,14 @@ async function tryConfirmBookingByNominal(nominal, onlyBookingId){
   const invoice_no = booking.invoice_no ?? invoiceNoFor(booking);
   const kunci = ()=>supabase.from('bookings')
     .update({status:'terjadwal', bukti_pembayaran_at:new Date().toISOString(), invoice_no})
-    .eq('id', booking.id).eq('status','menunggu_pembayaran').select('id');
+    .eq('id', booking.id).eq('status', statusAsal).select('id');
   let {data:terkunci, error:lockErr} = await kunci();
 
   // Unit keburu terisi booking lain (mis. OTA masuk selama tamu memegang
   // QRIS): tamu sudah membayar untuk TIPE kamar ini, jadi coba dulu unit
   // setipe yang masih kosong sebelum menyerah ke konfirmasi manual.
   if(lockErr?.code === '23P01'){
-    const baru = await pindahkanKeUnitSetipe({...booking, status:'menunggu_pembayaran'});
+    const baru = await pindahkanKeUnitSetipe({...booking, status: statusAsal});
     if(baru){
       booking = {...booking, unit_id: baru.id, unit_nomor: baru.nomor};
       ({data:terkunci, error:lockErr} = await kunci());
@@ -198,7 +223,7 @@ async function tryConfirmBookingByNominal(nominal, onlyBookingId){
   }
 
   await notif(null, 'all', 'transfer', `Pembayaran dikonfirmasi otomatis -- Unit ${booking.unit_nomor} terkunci`,
-    `Booking ${String(booking.id).slice(0,8)} (${booking.tgl_checkin} s/d ${booking.tgl_checkout}) dikonfirmasi lunas otomatis dari email BTN QRIS (Rp ${Math.round(nominal).toLocaleString('id-ID')}), unit sudah masuk kalender.`, booking.id);
+    `Booking ${String(booking.id).slice(0,8)} (${booking.tgl_checkin} s/d ${booking.tgl_checkout}) dikonfirmasi lunas otomatis dari email BTN QRIS (Rp ${Math.round(nominal).toLocaleString('id-ID')}), unit sudah masuk kalender.${dihidupkan ? ` Booking ini sempat kedaluwarsa lewat ${PENDING_PAYMENT_HOLD_MINUTES} menit dan dihidupkan kembali oleh email pembayarannya.` : ''}`, booking.id);
   await pushBookingToCloudbeds({...booking, status:'terjadwal'});
   return {matched:true, booking_id:booking.id, unit_nomor:booking.unit_nomor, nominal};
 }
@@ -464,7 +489,12 @@ function scanPaymentInboxBersama(cfg){
  * tetap 'menunggu_pembayaran' selamanya dan halaman tamu tetap menampilkan
  * QRIS seolah unitnya masih ditahan. Sekarang pembatalannya nyata.
  */
-const PENDING_PAYMENT_HOLD_MINUTES = 60;
+//
+// Diturunkan dari 60 ke 15 menit atas instruksi owner 2026-10-08 ("60 menit
+// trllu lama kasih waktu 15 menit sj"), setelah booking yang belum dibayar
+// mulai benar-benar menahan unit (lihat bookingWebsiteMenahan): tahanan
+// sejam terlalu lama mengunci kamar dari tamu lain.
+const PENDING_PAYMENT_HOLD_MINUTES = 15;
 
 /**
  * Sumber booking yang dibuat tamu sendiri lewat loonars.id dan dibayar lewat
@@ -488,6 +518,13 @@ const SUMBER_BOOKING_WEBSITE = ['website', 'investor'];
 const EXPIRED_HOLD_MARK = '[Kedaluwarsa otomatis]';
 
 /**
+ * Berapa lama setelah dibuat sebuah booking yang kedaluwarsa otomatis masih
+ * bisa dihidupkan kembali oleh email BTN dengan nominal persisnya. Selama
+ * itu kode unik nominalnya juga tidak dibagikan ke booking baru.
+ */
+const BATAS_HIDUP_KEMBALI_JAM = 24;
+
+/**
  * Pengingat pembayaran WA untuk booking website yang QRIS-nya belum
  * diselesaikan (owner 2026-09-28: "buat ai wa mereka untuk menyelesaikan
  * pembayaran dan dapatkan fasilitas2 menarik lainya" -- teks TETAP,
@@ -499,7 +536,8 @@ const EXPIRED_HOLD_MARK = '[Kedaluwarsa otomatis]';
  * Dikirim SEKALI, separuh jalan menuju PENDING_PAYMENT_HOLD_MINUTES, supaya
  * tamu masih sempat menyelesaikan sebelum unit dilepas otomatis.
  */
-const PAYMENT_REMINDER_AT_MINUTES = 30;
+// 7 menit = kira-kira separuh dari tahanan 15 menit (dulu 30 dari 60).
+const PAYMENT_REMINDER_AT_MINUTES = 7;
 
 /** Nomor Indonesia (62.../08...) -> id, lainnya -> en. Sama seperti logika di villa (src/lib/otaWelcomeText.ts). */
 function bahasaDariNomorHp(hp){
@@ -2903,7 +2941,8 @@ Deno.serve(async (req)=>{
     if(unitsErr) return err(unitsErr.message);
     if(!candidateUnits?.length) return err('Tipe unit tidak tersedia', 404);
 
-    // Unit yang sedang ditahan tamu website lain (QRIS-nya belum lewat 1 jam)
+    // Unit yang sedang ditahan tamu website lain (QRIS-nya belum lewat
+    // PENDING_PAYMENT_HOLD_MINUTES)
     // ikut dihitung penuh -- tanpa ini dua tamu bisa memegang QRIS untuk
     // unit dan malam yang sama (kejadian B4, 8 Okt 2026).
     const conflicts = await unitTidakBisaDijualWebsite(candidateUnits.map(u=>u.id), tgl_checkin, tgl_checkout);
@@ -4103,7 +4142,11 @@ Deno.serve(async (req)=>{
     const reminderCutoff = new Date(Date.now() - PAYMENT_REMINDER_AT_MINUTES*60*1000).toISOString();
     const {data:pendingUntukDiingatkan} = await supabase.from('bookings')
       .select('id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,created_at')
-      .in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran').lte('created_at', reminderCutoff);
+      .in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran').lte('created_at', reminderCutoff)
+      // Hanya yang tahanannya belum habis: cron ini jalan tiap 5 menit, jadi
+      // tanpa batas ini booking menit ke-16 masih bisa diingatkan "dilepas
+      // pukul X" untuk jam yang sudah lewat, lalu dibatalkan detik itu juga.
+      .gt('created_at', new Date(Date.now() - PENDING_PAYMENT_HOLD_MINUTES*60*1000).toISOString());
 
     let diingatkan = 0;
     for(const bk of pendingUntukDiingatkan ?? []){

@@ -3,6 +3,32 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-08 (malam) — Tahanan booking website 60 → 15 menit
+
+Owner: "Saya rasa 60 menit trllu lama kasih waktu 15 menit sj".
+
+- villa-api `PENDING_PAYMENT_HOLD_MINUTES` 60 → 15. Dipakai oleh tahanan
+  unit, pembatalan otomatis (cron tiap 5 menit, jadi praktiknya batal di
+  menit 15-20; tahanan unit sendiri lepas tepat di menit 15), dan hitung
+  mundur di halaman tamu (`hold_expires_at`/`hold_minutes`).
+- Pengingat WA pembayaran 30 → 7 menit (kira-kira separuh, sama seperti
+  sebelumnya). Hanya dikirim selama tahanan belum habis, supaya tidak
+  menyebut jam "dilepas pukul X" yang sudah lewat.
+- **Email BTN yang telat kini menghidupkan kembali booking yang kedaluwarsa
+  otomatis**, seperti balasan "LUNAS" yang sudah lebih dulu bisa. Batasnya
+  `BATAS_HIDUP_KEMBALI_JAM` = 24 jam sejak dibuat, hanya untuk yang
+  bertanda `[Kedaluwarsa otomatis]` (yang dibatalkan staf tidak). Booking
+  pending dengan nominal sama didahulukan. Kode unik nominal booking
+  website yang batal dalam 24 jam tidak dibagikan ke booking baru.
+  Alasannya: dengan 15 menit, tamu yang membayar di menit ke-14 dan
+  emailnya masuk di menit ke-17 akan sering terjadi.
+- Kalender front desk (`src/app/front-desk/booking/page.tsx`) disamakan ke
+  15 menit. loonars.id: layar kedaluwarsa tidak lagi menulis "1 jam",
+  sekarang memakai `hold_minutes` dari server.
+- Diuji: 16 skenario dengan Supabase tiruan (termasuk menit 14/16, email
+  telat, batal oleh staf, lewat 24 jam, nominal sama dengan pending, dan
+  unit terisi saat dihidupkan).
+
 ## 2026-10-08 — QRIS tidak keluar untuk kamar penuh + setiap halaman QRIS memicu cek email penuh — LIVE (villa #182, loonars #17, owner: "Setuju")
 
 Owner (8 Okt malam): "Seharusnya jgan kluarkan qris kalau kamar sdh penuh,
