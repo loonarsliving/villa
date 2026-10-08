@@ -4543,7 +4543,7 @@ Deno.serve(async (req)=>{
     if(!hp) return err('Nomor WhatsApp wajib diisi');
 
     const {data:booking} = await supabase.from('bookings')
-      .select('id,guest_id,sumber,status').eq('id',booking_id).maybeSingle();
+      .select('id,guest_id,sumber,status,catatan,created_at').eq('id',booking_id).maybeSingle();
     if(!booking) return err('Booking tidak ditemukan', 404);
     if(!SUMBER_BOOKING_WEBSITE.includes(booking.sumber)) return err('Booking ini tidak bisa dicek lewat jalur ini', 403);
 
@@ -4554,9 +4554,17 @@ Deno.serve(async (req)=>{
     }
     if(!guestHp || guestHp.trim() !== hp) return err('Nomor WhatsApp tidak cocok dengan booking ini', 403);
 
+    // Booking yang kedaluwarsa OTOMATIS masih bisa dihidupkan kembali oleh
+    // email BTN yang telat masuk (tryConfirmBookingByNominal, <= 24 jam), dan
+    // halaman tamu tetap memantau di layar "Kedaluwarsa" -- jadi pemicu dari
+    // halaman itu tetap memeriksa email, tidak menunggu cron 5 menitan.
+    const kedaluwarsaMasihBisaHidup = booking.status === 'batal'
+      && String(booking.catatan ?? '').includes(EXPIRED_HOLD_MARK)
+      && Date.now() - Date.parse(booking.created_at) < BATAS_HIDUP_KEMBALI_JAM*3600*1000;
+
     // Sudah lunas/batal duluan (misalnya oleh cron latar belakang atau balasan
     // WA manual owner) -- tidak perlu login IMAP sama sekali.
-    if(booking.status !== 'menunggu_pembayaran'){
+    if(booking.status !== 'menunggu_pembayaran' && !kedaluwarsaMasihBisaHidup){
       return json({success:true, checked:false, confirmed: booking.status === 'terjadwal'});
     }
 
