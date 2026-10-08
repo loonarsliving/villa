@@ -3,6 +3,22 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-09 — Konfirmasi lebih cepat saat tamu kembali ke halaman QRIS + email telat
+
+- loonars.id (`BookingForm`): saat tab kembali terlihat (`visibilitychange`,
+  biasanya tamu kembali dari aplikasi m-banking), email langsung diperiksa
+  lalu status langsung dicek, tanpa menunggu giliran 20 dan 10 detik.
+  Layar "Kedaluwarsa" kini memberi tahu tamu yang sudah membayar untuk
+  membiarkan halaman terbuka, karena booking aktif kembali otomatis saat
+  email BTN masuk. Halaman memang tetap memantau di layar itu.
+- villa-api `/public/bookings/check-payment`: tetap memindai inbox untuk
+  booking yang kedaluwarsa otomatis (≤ `BATAS_HIDUP_KEMBALI_JAM`). Sebelumnya
+  berhenti begitu status `batal`, sehingga kebangkitan hanya lewat cron 5
+  menitan. Aturan konfirmasi tidak berubah.
+- SOP kalau email BTN tidak pernah masuk: owner mengecek mutasi BTN untuk
+  nominal persisnya, lalu membalas `LUNAS <kode>` (berlaku juga untuk booking
+  yang sudah kedaluwarsa).
+
 ## 2026-10-09 — Nomor WhatsApp tamu wajib di kartu check-in
 
 Owner: "tambahkan di form checkin nomor tlp tamu pada saat checkin". Kartu
