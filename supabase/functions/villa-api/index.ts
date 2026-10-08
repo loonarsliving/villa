@@ -2894,6 +2894,11 @@ Deno.serve(async (req)=>{
     const children = Number.isFinite(Number(b.children)) ? Math.trunc(Number(b.children)) : 0;
 
     if(nama.length<2) return err('Nama wajib diisi');
+    // Tipe kamar wajib (owner 2026-10-09: "wajibkan tipe kamar harus di
+    // pilih"). Tanpa tipe, unit kosong pertama menurut nomor yang diberikan --
+    // hampir selalu Standard -- dan malam 8 Okt dua tamu yang jelas ingin
+    // Sawah View (Mahira, Didik) sama-sama mendapat B3 Standard.
+    if(!room_type) return err('Silakan pilih tipe kamar (Standard atau Sawah View) terlebih dahulu.');
     if(!/^[0-9+][0-9+\-\s]{7,}$/.test(hp)) return err('Nomor WhatsApp tidak valid');
     // Wajib, pilihan owner 2026-09-12. Cloudbeds mewajibkan guestEmail dan
     // sampai sekarang diisi alamat sintetis; sekarang alamat tamu yang asli
