@@ -162,11 +162,29 @@ async function tryConfirmBookingByNominal(nominal, onlyBookingId){
     return {ambigu:true, nominal, jumlah_booking: pendingSama.length};
   }
 
-  const booking = pendingSama[0];
+  let booking = pendingSama[0];
   const invoice_no = booking.invoice_no ?? invoiceNoFor(booking);
-  const {error:lockErr} = await supabase.from('bookings')
+  const kunci = ()=>supabase.from('bookings')
     .update({status:'terjadwal', bukti_pembayaran_at:new Date().toISOString(), invoice_no})
-    .eq('id', booking.id).eq('status','menunggu_pembayaran');
+    .eq('id', booking.id).eq('status','menunggu_pembayaran').select('id');
+  let {data:terkunci, error:lockErr} = await kunci();
+
+  // Unit keburu terisi booking lain (mis. OTA masuk selama tamu memegang
+  // QRIS): tamu sudah membayar untuk TIPE kamar ini, jadi coba dulu unit
+  // setipe yang masih kosong sebelum menyerah ke konfirmasi manual.
+  if(lockErr?.code === '23P01'){
+    const baru = await pindahkanKeUnitSetipe({...booking, status:'menunggu_pembayaran'});
+    if(baru){
+      booking = {...booking, unit_id: baru.id, unit_nomor: baru.nomor};
+      ({data:terkunci, error:lockErr} = await kunci());
+    }
+  }
+
+  // Nol baris = booking ini sudah dikunci duluan oleh pemindaian lain yang
+  // berjalan bersamaan (cron dan halaman tamu bisa membaca email yang sama
+  // pada detik yang sama). Jangan kirim notifikasi / dorong ke Cloudbeds
+  // untuk kedua kalinya.
+  if(!lockErr && !terkunci?.length) return {matched:false};
 
   if(lockErr){
     if(lockErr.code !== '23P01') return {matched:false};
@@ -416,6 +434,24 @@ async function scanPaymentInbox(cfg, {onlyBookingId} = {}){
   }
 
   return {diperiksa, dikonfirmasi, ambigu, gagal};
+}
+
+/**
+ * Pemindaian inbox penuh yang dibagi bersama. Sekarang setiap halaman QRIS
+ * yang terbuka memicu pemindaian penuh (tiap 20 detik per tamu) di samping
+ * cron, jadi permintaan yang datang selagi pemindaian lain masih berjalan
+ * di isolate yang sama ikut menunggu hasil yang itu, bukan login IMAP
+ * sendiri. Pemindaian yang berjalan di isolate berbeda tetap aman:
+ * tryConfirmBookingByNominal hanya mengunci booking yang statusnya masih
+ * 'menunggu_pembayaran', jadi email yang sama tidak bisa mengonfirmasi dua
+ * kali.
+ */
+let pemindaianBerjalan = null;
+function scanPaymentInboxBersama(cfg){
+  if(!pemindaianBerjalan){
+    pemindaianBerjalan = scanPaymentInbox(cfg).finally(()=>{ pemindaianBerjalan = null; });
+  }
+  return pemindaianBerjalan;
 }
 
 /**
@@ -900,6 +936,96 @@ function findConflicts(bookings, checkin, checkout){
     }
   }
   return map;
+}
+
+/**
+ * Booking website yang sedang MENAHAN unit: masih 'menunggu_pembayaran' dan
+ * belum lewat PENDING_PAYMENT_HOLD_MINUTES.
+ *
+ * Owner 2026-10-08: "Seharusnya jgan kluarkan qris kalau kamar sdh penuh".
+ * Sebelum ini booking yang belum dibayar tidak menahan apa pun -- halaman
+ * tamu menulis "unit sedang kami tahan", tapi /public/availability dan
+ * /public/bookings hanya melihat 'terjadwal'/'checkin'. Malam itu dua tamu
+ * mendapat QRIS untuk unit B4 tanggal yang sama (22:08 dan 22:11 WIB); yang
+ * membayar duluan dapat unitnya, yang kedua kalau ikut membayar akan
+ * kehilangan unit setelah uangnya masuk.
+ *
+ * Batas waktunya dihitung dari created_at, sama persis dengan pembatalan
+ * otomatis di /cron/expire-pending-bookings, jadi tahanan lepas tepat
+ * ketika booking-nya memang sudah tidak bisa dibayar lagi -- tidak perlu
+ * menunggu cron berikutnya.
+ */
+async function bookingWebsiteMenahan(unitIds){
+  const cutoff = new Date(Date.now() - PENDING_PAYMENT_HOLD_MINUTES*60*1000).toISOString();
+  let q = supabase.from('bookings').select('id,unit_id,tgl_checkin,tgl_checkout,guest_nama')
+    .in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran').gt('created_at', cutoff);
+  if(unitIds) q = q.in('unit_id', unitIds);
+  const {data, error} = await q;
+  if(error) console.error('[tahanan-website] gagal dibaca:', error.message);
+  return data ?? [];
+}
+
+/**
+ * Unit yang tidak boleh diberikan ke booking website baru untuk tanggal
+ * ini: terisi booking terkunci, ditahan booking website lain yang belum
+ * kedaluwarsa, atau ditutup (maintenance / blok Cloudbeds). Satu sumber
+ * untuk /public/availability, /public/bookings, dan pemindahan unit di
+ * bawah, supaya ketiganya tidak pernah berbeda pendapat soal "penuh".
+ * kecualiBookingId: booking yang sedang dipindah tidak menahan dirinya sendiri.
+ */
+async function unitTidakBisaDijualWebsite(unitIds, checkin, checkout, kecualiBookingId = null){
+  let q = supabase.from('bookings').select('id,unit_id,tgl_checkin,tgl_checkout,guest_nama')
+    .in('status', ['terjadwal','checkin']);
+  if(unitIds) q = q.in('unit_id', unitIds);
+  const {data:terkunci} = await q;
+  const ditahan = await bookingWebsiteMenahan(unitIds);
+  const semua = [...(terkunci ?? []), ...ditahan].filter(bk=>bk.id !== kecualiBookingId);
+  const conflicts = findConflicts(semua, checkin, checkout);
+  for(const id of (await unitMaintenanceBentrok(checkin, checkout)).keys()) conflicts.set(id, 'maintenance');
+  return conflicts;
+}
+
+/**
+ * Unit booking website yang belum dibayar ternyata sudah terisi (biasanya
+ * booking OTA dari Cloudbeds yang masuk selama tamu memegang QRIS, karena
+ * tahanan website belum dikirim ke Cloudbeds). Pindahkan ke unit lain yang
+ * SETIPE dan masih kosong -- tamu memesan tipe kamar, bukan nomor unit, dan
+ * total_bayar (dengan kode uniknya) TIDAK diubah, jadi email BTN tetap
+ * cocok. Mengembalikan unit baru, atau null kalau tipe itu sudah penuh.
+ */
+async function pindahkanKeUnitSetipe(booking){
+  const {data:unitLama} = await supabase.from('units').select('room_type_id').eq('id', booking.unit_id).maybeSingle();
+  if(!unitLama?.room_type_id) return null;
+  const {data:kandidat} = await supabase.from('units').select('id,nomor')
+    .eq('room_type_id', unitLama.room_type_id).neq('id', booking.unit_id).order('nomor');
+  if(!kandidat?.length) return null;
+  const penuh = await unitTidakBisaDijualWebsite(kandidat.map(u=>u.id), booking.tgl_checkin, booking.tgl_checkout, booking.id);
+  const kosong = kandidat.find(u=>!penuh.has(u.id));
+  if(!kosong) return null;
+  const {data:moved, error} = await supabase.from('bookings')
+    .update({unit_id: kosong.id, unit_nomor: kosong.nomor})
+    .eq('id', booking.id).eq('unit_id', booking.unit_id).eq('status', booking.status).select('id');
+  if(error || !moved?.length) return null;
+  await notif(kosong.id, 'all', 'booking', `Booking website dipindah ke Unit ${kosong.nomor}`,
+    `Booking ${String(booking.id).slice(0,8)} (${booking.tgl_checkin} s/d ${booking.tgl_checkout}) dipindah otomatis dari Unit ${booking.unit_nomor} ke Unit ${kosong.nomor} karena unit lamanya sudah terisi booking lain. Tipe kamar dan nominal pembayaran tidak berubah.`, booking.id);
+  return kosong;
+}
+
+/**
+ * Apakah unit booking website yang belum dibayar masih benar-benar kosong
+ * untuk tanggalnya. Kalau sudah terisi, coba pindahkan ke unit setipe.
+ * Dipakai halaman tamu (lewat /public/bookings/status) supaya QRIS tidak
+ * lagi ditampilkan untuk kamar yang sudah tidak bisa diberikan.
+ */
+async function pastikanUnitBookingWebsite(booking){
+  const {data:terkunci} = await supabase.from('bookings').select('id,unit_id,tgl_checkin,tgl_checkout,guest_nama')
+    .eq('unit_id', booking.unit_id).in('status', ['terjadwal','checkin']).neq('id', booking.id);
+  const bentrok = findConflicts(terkunci ?? [], booking.tgl_checkin, booking.tgl_checkout).has(booking.unit_id)
+    || (await unitMaintenanceBentrok(booking.tgl_checkin, booking.tgl_checkout)).has(booking.unit_id);
+  if(!bentrok) return {tersedia:true, unit_nomor: booking.unit_nomor};
+  const baru = await pindahkanKeUnitSetipe(booking);
+  if(baru) return {tersedia:true, unit_nomor: baru.nomor, dipindah:true};
+  return {tersedia:false, unit_nomor: booking.unit_nomor};
 }
 
 // ── LATE NIGHT BOOKING (role late_night) ────────────────────────────────
@@ -2553,11 +2679,9 @@ Deno.serve(async (req)=>{
     const {data:roomTypes} = await supabase.from('villa_room_types').select('id,code,name').eq('active',true);
     const rtById = new Map((roomTypes??[]).map(r=>[r.id,r]));
 
-    const {data:bookings} = await supabase.from('bookings').select('unit_id,tgl_checkin,tgl_checkout').in('status',['terjadwal','checkin']);
-    const conflicts = findConflicts(bookings??[], checkin, checkout);
-    // Unit yang ditutup manager (Kamar Maintenance) tidak dijual di loonars.id
-    // juga, bukan hanya di OTA -- jalur ini tidak lewat Cloudbeds.
-    for(const id of (await unitMaintenanceBentrok(checkin, checkout)).keys()) conflicts.set(id, 'maintenance');
+    // Terkunci + ditahan booking website yang belum dibayar + ditutup
+    // (Kamar Maintenance / blok Cloudbeds) -- lihat unitTidakBisaDijualWebsite.
+    const conflicts = await unitTidakBisaDijualWebsite(null, checkin, checkout);
     const nights = Math.max(1, Math.round((new Date(checkout).getTime() - new Date(checkin).getTime())/86400000));
 
     const byType = new Map();
@@ -2779,12 +2903,10 @@ Deno.serve(async (req)=>{
     if(unitsErr) return err(unitsErr.message);
     if(!candidateUnits?.length) return err('Tipe unit tidak tersedia', 404);
 
-    const {data:existingBookings} = await supabase.from('bookings')
-      .select('unit_id,tgl_checkin,tgl_checkout')
-      .in('unit_id', candidateUnits.map(u=>u.id))
-      .in('status', ['terjadwal','checkin']);
-    const conflicts = findConflicts(existingBookings??[], tgl_checkin, tgl_checkout);
-    for(const id of (await unitMaintenanceBentrok(tgl_checkin, tgl_checkout)).keys()) conflicts.set(id, 'maintenance');
+    // Unit yang sedang ditahan tamu website lain (QRIS-nya belum lewat 1 jam)
+    // ikut dihitung penuh -- tanpa ini dua tamu bisa memegang QRIS untuk
+    // unit dan malam yang sama (kejadian B4, 8 Okt 2026).
+    const conflicts = await unitTidakBisaDijualWebsite(candidateUnits.map(u=>u.id), tgl_checkin, tgl_checkout);
     const freeUnit = candidateUnits.find(u=>!conflicts.has(u.id));
     if(!freeUnit) return err('Maaf, villa sudah penuh untuk tanggal yang dipilih. Silakan pilih tanggal lain atau hubungi kami di WhatsApp.', 409);
 
@@ -3005,7 +3127,7 @@ Deno.serve(async (req)=>{
     if(!hp) return err('Nomor WhatsApp wajib diisi');
 
     const {data:booking} = await supabase.from('bookings')
-      .select('id,guest_id,sumber,status,invoice_no,catatan,created_at').eq('id',booking_id).maybeSingle();
+      .select('id,guest_id,sumber,status,invoice_no,catatan,created_at,unit_id,unit_nomor,tgl_checkin,tgl_checkout').eq('id',booking_id).maybeSingle();
     if(!booking) return err('Booking tidak ditemukan', 404);
     if(!SUMBER_BOOKING_WEBSITE.includes(booking.sumber)) return err('Booking ini tidak bisa dicek lewat jalur ini', 403);
 
@@ -3029,8 +3151,20 @@ Deno.serve(async (req)=>{
       ? new Date(created + PENDING_PAYMENT_HOLD_MINUTES*60*1000).toISOString()
       : null;
 
+    // QRIS hanya boleh tampil kalau unitnya masih bisa diberikan (owner
+    // 2026-10-08). Kalau unit sudah terisi booking lain, dipindah ke unit
+    // setipe yang kosong; kalau tipe itu sudah penuh, unit_tersedia=false
+    // dan halaman tamu menyembunyikan QRIS supaya tamu tidak membayar
+    // kamar yang tidak bisa kami berikan.
+    let unit = {tersedia:true, unit_nomor: booking.unit_nomor};
+    if(booking.status === 'menunggu_pembayaran' && booking.unit_id){
+      unit = await pastikanUnitBookingWebsite(booking);
+    }
+
     return json({
       status: booking.status,
+      unit_nomor: unit.unit_nomor,
+      unit_tersedia: unit.tersedia,
       confirmed: booking.status === 'terjadwal',
       cancelled: booking.status === 'batal',
       expired: booking.status === 'batal' && String(booking.catatan ?? '').includes(EXPIRED_HOLD_MARK),
@@ -4217,7 +4351,7 @@ Deno.serve(async (req)=>{
       return err('Email pembayaran belum dikonfigurasi (integration_settings.payment_email: host, user, password)',503);
     }
 
-    const hasil = await scanPaymentInbox(cfg);
+    const hasil = await scanPaymentInboxBersama(cfg);
     if(hasil.gagal) return err(`Gagal membaca email: ${hasil.gagal}`, 502);
     return json({success:true, diperiksa:hasil.diperiksa, dikonfirmasi:hasil.dikonfirmasi, ambigu:hasil.ambigu});
   }
@@ -4263,7 +4397,15 @@ Deno.serve(async (req)=>{
       return json({success:true, checked:false, confirmed:false});
     }
 
-    const hasil = await scanPaymentInbox(cfg, {onlyBookingId: booking_id});
+    // Pemindaian PENUH, sama dengan cron (owner 2026-10-08: "setiap
+    // penampilan qris harus cron terpicu"). Dulu pemicu dari halaman tamu
+    // hanya mencocokkan email ke booking tamu itu sendiri, jadi pembayaran
+    // tamu A yang halamannya sudah ditutup baru terbaca di giliran cron 5
+    // menit berikutnya walaupun halaman QRIS tamu B sedang terbuka (kejadian
+    // 8 Okt: email 697.206 menunggu sampai cron 22:15). Ini aman karena
+    // yang mengunci booking tetap HANYA email BTN dengan nominal persis --
+    // tamu yang memicu tidak bisa memilih booking mana yang dikonfirmasi.
+    const hasil = await scanPaymentInboxBersama(cfg);
     if(hasil.gagal){
       // Tetap diam untuk tamu, tapi harus terlihat di log -- kegagalan
       // senyap di sini yang membuat email otomatis mati 2 minggu tanpa
@@ -4271,7 +4413,7 @@ Deno.serve(async (req)=>{
       console.error(`[check-payment] booking ${booking_id.slice(0,8)}: ${hasil.gagal}`);
       return json({success:true, checked:false, confirmed:false});
     }
-    return json({success:true, checked:true, confirmed: hasil.dikonfirmasi.length>0});
+    return json({success:true, checked:true, confirmed: hasil.dikonfirmasi.some(d=>d.booking_id===booking_id)});
   }
 
   const session = await requireAuth(req);

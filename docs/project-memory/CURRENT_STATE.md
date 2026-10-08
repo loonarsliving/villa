@@ -3,6 +3,59 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-08 — QRIS tidak keluar untuk kamar penuh + setiap halaman QRIS memicu cek email penuh (BELUM MERGE, menunggu owner)
+
+Owner (8 Okt malam): "Seharusnya jgan kluarkan qris kalau kamar sdh penuh,
+dan baiknya ada pemicu unttuk pgecekan cron, contohnya setiap penampilan
+qris harus cron trpicu dstu".
+
+**Kejadian yang memicunya (diverifikasi dari DB + log, 8 Okt).** Mahira
+memesan B4 10-11 Okt pukul 22:08 WIB (Rp 697.206). Didik memesan B4 tanggal
+yang sama pukul 22:11 (Rp 697.526), karena booking `menunggu_pembayaran`
+tidak menahan unit apa pun: `/public/availability` dan `/public/bookings`
+hanya melihat `terjadwal`/`checkin`, padahal halaman tamu menulis "unit
+sedang kami tahan". Email BTN Mahira masuk antara 22:10 dan 22:15. Halaman
+Mahira sudah ditutup pukul 22:12, dan pemicu dari halaman tamu hanya
+mencocokkan pembayaran milik tamu itu sendiri. Akibatnya email itu baru
+terbaca oleh cron 22:15 (`diperiksa:1`, B4 terkunci).
+
+**Perubahan villa-api** (branch `claude/qris-hold-unit-trigger-cek`):
+- `bookingWebsiteMenahan` + `unitTidakBisaDijualWebsite`: booking website
+  `menunggu_pembayaran` yang belum lewat `PENDING_PAYMENT_HOLD_MINUTES`
+  (60 menit dari `created_at`, sama dengan pembatalan otomatis) dihitung
+  menahan unit di `/public/availability` dan `/public/bookings`.
+- `/public/bookings/status` untuk booking yang belum dibayar: kalau unitnya
+  sudah terisi booking terkunci atau ditutup, `pindahkanKeUnitSetipe` mencoba
+  unit kosong yang setipe. `total_bayar` tidak berubah, jadi email BTN tetap
+  cocok. Kalau tipe itu penuh, respons `unit_tersedia:false`. Respons juga
+  kini membawa `unit_nomor`.
+- `/public/bookings/check-payment` sekarang memindai inbox PENUH (sama
+  dengan cron) lewat `scanPaymentInboxBersama`. Pemindaian yang berjalan
+  bersamaan di satu isolate digabung. `confirmed` hanya true kalau booking
+  pemicu sendiri yang terkunci.
+- `tryConfirmBookingByNominal`: update kunci kini `.select('id')`. Nol baris
+  (dikunci duluan oleh pemindai lain) berarti tidak ada notifikasi atau push
+  Cloudbeds kedua. Saat `23P01`, booking dicoba dipindah ke unit setipe
+  sebelum jatuh ke notifikasi KONFLIK.
+
+**Perubahan loonars.id** (repo `loonars`, `components/booking/BookingForm.tsx`):
+kalau `unit_tersedia === false`, layar QRIS diganti layar "Kamar Sudah
+Penuh, jangan lakukan pembayaran". Kalau `unit_nomor` berubah, nomor unit
+di layar dan localStorage ikut diperbarui.
+
+**Diuji:** 10 skenario dengan Supabase tiruan (tahanan, kedaluwarsa 60
+menit, tanggal checkout bebas, pindah unit, tipe penuh, dua pemindai
+bersamaan, bayar setelah unit terisi). Syntax villa-api lolos
+`node --experimental-strip-types --check`; BookingForm lolos `tsc`
+(tanpa node_modules). Belum diuji ke Supabase/IMAP sungguhan.
+
+**Belum ditangani (sengaja, di luar permintaan):** tahanan website tidak
+dikirim ke Cloudbeds, jadi OTA masih bisa menjual unit yang sedang
+ditahan. Yang menangani itu adalah pemindahan unit di atas. Booking
+kasir/staf (`POST /bookings`) juga tidak melihat tahanan website. Tamu yang
+memesan ulang dengan tipe berbeda membuat booking lamanya tetap menahan
+unit sampai 60 menit. Cron `check-payment-email` tetap tiap 5 menit.
+
 ## 2026-10-07 — Harga loonars.id selalu lebih murah dari Agoda (BELUM MERGE, menunggu owner)
 - Owner: "harga direct upayakan selalu menang dari agoda", "tp jgan sampai harga kt trllu murah".
 - Data nyata (8 booking Agoda terakhir, harga dari `villa_rate_history` saat dipesan): Agoda membayar villa **tepat 80%** harga Cloudbeds; tamu Agoda melihat ±85% (promo 15%). Sebelumnya loonars.id menjual 100% harga Cloudbeds -- paling mahal dari semua kanal kecuali Airbnb (116%, markup channel di Cloudbeds).
