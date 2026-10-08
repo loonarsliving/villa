@@ -60,7 +60,8 @@ const toneClass: Record<string, string> = {
  * only ever dropped 'batal'. (villa-api's own comment claims these do not
  * appear in the staff calendar; that claim was simply wrong.)
  */
-const PENDING_PAYMENT_HOLD_MINUTES = 60;
+// Disamakan dengan villa-api (15 menit sejak 2026-10-08, sebelumnya 60).
+const PENDING_PAYMENT_HOLD_MINUTES = 15;
 
 function isVisibleOnCalendar(b: Booking, now: number): boolean {
   if (b.status === "batal") return false;
