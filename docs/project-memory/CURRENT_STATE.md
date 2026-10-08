@@ -3,7 +3,7 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
-## 2026-10-08 (malam) — Tahanan booking website 60 → 15 menit
+## 2026-10-08 (malam) — Tahanan booking website 60 → 15 menit — LIVE (villa #184 → villa-api v118, loonars #18; owner: "Ya setuju", termasuk email telat menghidupkan booking)
 
 Owner: "Saya rasa 60 menit trllu lama kasih waktu 15 menit sj".
 

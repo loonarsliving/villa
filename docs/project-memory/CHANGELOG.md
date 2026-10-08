@@ -4,7 +4,7 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
-### 2026-10-08 (malam) — Tahanan booking website 15 menit (dari 60)
+### 2026-10-08 (malam) — Tahanan booking website 15 menit (dari 60) — LIVE (villa #184, loonars #18)
 - Pengingat WA di menit 7. Email BTN yang telat menghidupkan kembali booking yang kedaluwarsa otomatis (≤ 24 jam). Kalender front desk dan teks loonars.id disamakan. Lihat CURRENT_STATE.md.
 
 ### 2026-10-08 — Booking website yang belum dibayar menahan unit; setiap halaman QRIS memicu cek email penuh — LIVE (villa #182, loonars #17)
