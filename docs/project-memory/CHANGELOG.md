@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-09 — Tipe kamar wajib dipilih di loonars.id
+- villa-api `POST /public/bookings` menolak tanpa `room_type`; loonars.id menonaktifkan tombol bayar sampai tipe dipilih dan menampilkan tipe di layar QRIS.
+
 ### 2026-10-08 (malam) — Tahanan booking website 15 menit (dari 60) — LIVE (villa #184, loonars #18)
 - Pengingat WA di menit 7. Email BTN yang telat menghidupkan kembali booking yang kedaluwarsa otomatis (≤ 24 jam). Kalender front desk dan teks loonars.id disamakan. Lihat CURRENT_STATE.md.
 

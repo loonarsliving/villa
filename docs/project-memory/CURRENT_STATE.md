@@ -3,6 +3,22 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-09 — Tipe kamar wajib dipilih di loonars.id
+
+Owner: "wajibkan tipe kamar harus di pilih". Sebelumnya kartu tipe kamar di
+loonars.id boleh tidak dipilih. Tanpa tipe, `POST /public/bookings` memberi
+unit kosong pertama menurut nomor, yang hampir selalu Standard. Malam 8 Okt
+Mahira (catatan booking: "View Pemandangan Sawah") dan Didik ("ini yang with
+view kan?") sama-sama mendapat B3 Standard. Tipe yang dipilih tamu tidak
+disimpan, jadi ini disimpulkan dari polanya, bukan dibuktikan.
+
+- villa-api: `POST /public/bookings` menolak tanpa `room_type` (400, "Silakan
+  pilih tipe kamar"). Satu-satunya pemanggil endpoint ini adalah loonars.id.
+- loonars.id: label "Tipe Unit *"; tombol "Pilih Tipe Kamar Dulu" nonaktif
+  sampai tipe dipilih; layar QRIS dan teks WA menampilkan "Unit B3 ·
+  Standard" (nama tipe ditempel di sisi klien, `tipe_nama`).
+- Bukan perubahan harga.
+
 ## 2026-10-08 (malam) — Tahanan booking website 60 → 15 menit — LIVE (villa #184 → villa-api v118, loonars #18; owner: "Ya setuju", termasuk email telat menghidupkan booking)
 
 Owner: "Saya rasa 60 menit trllu lama kasih waktu 15 menit sj".
