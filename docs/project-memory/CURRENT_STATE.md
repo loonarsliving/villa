@@ -3,7 +3,7 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
-## 2026-10-08 — QRIS tidak keluar untuk kamar penuh + setiap halaman QRIS memicu cek email penuh (BELUM MERGE, menunggu owner)
+## 2026-10-08 — QRIS tidak keluar untuk kamar penuh + setiap halaman QRIS memicu cek email penuh — LIVE (villa #182, loonars #17, owner: "Setuju")
 
 Owner (8 Okt malam): "Seharusnya jgan kluarkan qris kalau kamar sdh penuh,
 dan baiknya ada pemicu unttuk pgecekan cron, contohnya setiap penampilan
@@ -55,6 +55,15 @@ ditahan. Yang menangani itu adalah pemindahan unit di atas. Booking
 kasir/staf (`POST /bookings`) juga tidak melihat tahanan website. Tamu yang
 memesan ulang dengan tipe berbeda membuat booking lamanya tetap menahan
 unit sampai 60 menit. Cron `check-payment-email` tetap tiap 5 menit.
+
+**Rilis:** owner menyetujui merge ("Setuju") setelah penjelasan. villa #182
+di-merge, workflow deploy hijau, villa-api live **v117** (keempat fungsi baru
+ada di source live, diperiksa lewat Supabase MCP). Cron
+`check-payment-email` 22:30 WIB tetap menjawab 200. loonars #17 di-merge
+(preview Vercel hijau). Booking Didik (`2deb9158`, B4 10-11 Okt) yang
+dibuat sebelum rilis masih menunggu pembayaran saat rilis: begitu
+halamannya memanggil status, villa-api memindahkannya ke Sawah View yang
+kosong, atau menyembunyikan QRIS kalau tipe itu penuh.
 
 ## 2026-10-07 — Harga loonars.id selalu lebih murah dari Agoda (BELUM MERGE, menunggu owner)
 - Owner: "harga direct upayakan selalu menang dari agoda", "tp jgan sampai harga kt trllu murah".

@@ -4,7 +4,7 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
-### 2026-10-08 — Booking website yang belum dibayar menahan unit; setiap halaman QRIS memicu cek email penuh — menunggu persetujuan merge owner
+### 2026-10-08 — Booking website yang belum dibayar menahan unit; setiap halaman QRIS memicu cek email penuh — LIVE (villa #182, loonars #17)
 - villa-api: tahanan 60 menit di `/public/availability` + `/public/bookings`; `/public/bookings/status` memindah ke unit setipe atau `unit_tersedia:false`; `/public/bookings/check-payment` memindai inbox penuh; penguncian dari email tidak lagi bisa dobel. loonars.id: QRIS disembunyikan kalau kamar penuh. Lihat CURRENT_STATE.md 2026-10-08.
 
 ### 2026-10-07 — Harga loonars.id = 82% harga Cloudbeds (selalu lebih murah dari Agoda) — menunggu persetujuan merge owner
