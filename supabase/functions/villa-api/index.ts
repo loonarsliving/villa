@@ -1781,6 +1781,15 @@ function kodeKolAcak(){
  * +628xx dianggap sama.
  */
 async function pengirimBerwenang(sender, {ownerSaja=false}={}){
+  // Tanpa sender = Mkhsistem (nomor utama 0822). Ia sudah memegang rahasia
+  // jembatan DAN memeriksa sendiri bahwa pengirimnya owner
+  // (Mkhsistem lib/ai/domains/villa-payment-confirmation.ts isVillaOwner),
+  // tapi tidak meneruskan nomornya. Menolaknya mematikan LUNAS/PROMO lewat
+  // 0822 -- itu yang terjadi 2026-10-09 sampai perbaikan ini. Webhook WA
+  // villa sendiri SELALU mengirim sender, jadi celah tamu-mengirim-LUNAS
+  // di perangkat villa tetap tertutup. Perintah KOL (ownerSaja) tetap
+  // mewajibkan sender.
+  if(sender === undefined || sender === null) return !ownerSaja;
   const d = String(sender ?? '').replace(/[^0-9]/g,'');
   if(d.length < 8) return false;
   const sama = (hp) => {
