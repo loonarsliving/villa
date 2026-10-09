@@ -470,6 +470,18 @@ Temuan sampingan (belum diperbaiki, di luar lingkup): webhook Cloudbeds
 sync 10 menit. Booking website yang sudah didorong ke Cloudbeds bisa
 tertimpa tarif/sumber Cloudbeds oleh event webhook.
 
+## 2026-10-09 — CCTV di menu manager (lihat saja)
+
+Owner: *"tambahkan cctv di menu manager ini"*. Role `manager` kini punya
+`/manager/cctv`: daftar kamera aktif + live-view EZUIKit (sama dengan
+/admin/cctv, ukuran mengikuti lebar layar HP). Kelola kamera dan laporan
+checkpoint AI tetap khusus admin. villa-api: `GET /manager/cctv/cameras`
+(manager/admin, hanya `is_active`). `/api/cctv/token` kini memeriksa sesi
+lewat `/manager/whoami` (manager ATAU admin) memakai `periksaTokenManager`
+(3 keadaan: 401 ditolak / 503 tidak bisa diperiksa). Konsekuensi yang
+sudah melekat pada EZUIKit: access token akun EZVIZ ikut sampai ke browser
+manager, sama seperti admin.
+
 ## 2026-10-07 — Kamar Siap A5 gagal: "Cloudbeds tidak bisa dibaca"
 
 `getRoomBlocks?roomBlockID=` untuk blok A5 menjawab gagal, dan

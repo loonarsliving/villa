@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isAdminToken } from "@/lib/villaApiAuth";
+import { periksaTokenManager } from "@/lib/villaApiAuth";
 import { getAccessToken } from "@/lib/ezviz";
 
 export const runtime = "nodejs";
@@ -11,12 +11,17 @@ export const dynamic = "force-dynamic";
  * architecture requires this (accessToken is passed straight into
  * EZUIKitPlayer client-side), there's no way to keep it purely server-side
  * while still using their official player. Only the account-level token
- * leaves this server; EZVIZ_APP_KEY/SECRET never do. Admin-gated per
- * owner's explicit access decision for the CCTV feature.
+ * leaves this server; EZVIZ_APP_KEY/SECRET never do. Admin AND manager
+ * (owner 9 Okt 2026 added CCTV to the manager menu, view-only) -- checked
+ * through villa-api's /manager/whoami, which accepts both roles.
  */
 export async function GET(request: Request) {
   const token = request.headers.get("x-villa-token") ?? "";
-  if (!token || !(await isAdminToken(token))) {
+  const hasil = token ? await periksaTokenManager(token) : "ditolak";
+  if (hasil === "gagal-periksa") {
+    return NextResponse.json({ error: "Sesi tidak bisa diperiksa sekarang, coba lagi" }, { status: 503 });
+  }
+  if (hasil !== "lolos") {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
