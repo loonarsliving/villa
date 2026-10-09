@@ -3,6 +3,25 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-09 (malam) — Sinkronisasi Cloudbeds tidak lagi membuat tamu baru tiap kali jalan
+
+Ditemukan saat mengecek kiriman pertama WA info malam (21.00, 9 Okt):
+7 tamu menginap, 3 terkirim, 4 tanpa nomor. Keempatnya tamu Traveloka yang
+check-in hari itu lewat kartu check-in baru. WA PIN mereka terkirim ke nomor
+yang diisi resepsionis, tapi `guests.hp` booking-nya kosong.
+
+**Penyebab (bug lama):** Traveloka tidak mengirim nomor maupun email tamu
+lewat Cloudbeds. Sinkronisasi (`cloudbedsReservationSync.ts`) dan webhook
+Cloudbeds mencari tamu hanya lewat nomor/email, jadi setiap kali jalan
+mereka membuat baris `guests` kosong baru dan memindahkan
+`bookings.guest_id` ke baris itu. Nomor dari check-in tertinggal di baris
+lama. Per 9 Okt, satu nama tamu Traveloka sudah punya 491 baris `guests`.
+
+**Perbaikan:** booking yang sudah ada (`cloudbeds_reservation_id` sama)
+memakai `guest_id`-nya sendiri. Pencocokan nomor/email dan pembuatan tamu
+baru hanya untuk reservasi baru. Nomor/email dari OTA tetap mengisi kolom
+yang kosong. Baris duplikat lama BELUM dihapus (menunggu keputusan owner).
+
 ## 2026-10-09 — Konfirmasi lebih cepat saat tamu kembali ke halaman QRIS + email telat
 
 - loonars.id (`BookingForm`): saat tab kembali terlihat (`visibilitychange`,
