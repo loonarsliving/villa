@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { periksaTokenStaf } from "@/lib/villaApiAuth";
+import { periksaTokenChat } from "@/lib/villaApiAuth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: Request) {
   const token = request.headers.get("x-villa-token") ?? "";
-  const sesi = token ? await periksaTokenStaf(token) : "ditolak";
+  const sesi = token ? await periksaTokenChat(token) : "ditolak";
   if (sesi === "gagal-periksa") {
     return NextResponse.json(
       { error: "Sesi tidak bisa diperiksa sekarang — jaringan atau villa-api sedang terganggu. Coba lagi sebentar lagi." },

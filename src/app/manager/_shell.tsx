@@ -3,9 +3,11 @@
 import type { ReactNode } from "react";
 import { DashboardShell, type NavSection } from "@/components/DashboardShell";
 import { useAuth } from "@/lib/auth";
+import { useChatUnreadPoll } from "@/lib/hooks";
 
 export function ManagerShell({ pageTitle, pageSub, children }: { pageTitle: string; pageSub?: string; children: ReactNode }) {
   const { user } = useAuth();
+  const { unreadCount: chatUnread } = useChatUnreadPoll();
 
   const sections: NavSection[] = [
     {
@@ -13,6 +15,7 @@ export function ManagerShell({ pageTitle, pageSub, children }: { pageTitle: stri
       items: [
         { href: "/manager", label: "Kesiapan Kamar", icon: "✓" },
         { href: "/manager/riwayat", label: "Riwayat Cek", icon: "☰" },
+        { href: "/manager/chat", label: "Chat", icon: "◉", badge: chatUnread },
         { href: "/manager/cctv", label: "CCTV", icon: "◍" },
       ],
     },

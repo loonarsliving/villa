@@ -470,6 +470,18 @@ Temuan sampingan (belum diperbaiki, di luar lingkup): webhook Cloudbeds
 sync 10 menit. Booking website yang sudah didorong ke Cloudbeds bisa
 tertimpa tarif/sumber Cloudbeds oleh event webhook.
 
+## 2026-10-09 — Chat WhatsApp di menu manager
+
+Owner: *"fitur chat juga bawa ke dashboard Beca"*. `/manager/chat`
+me-re-export halaman `/front-desk/chat` (satu kode); halaman itu memilih
+ManagerShell untuk role manager. Menu manager punya "Chat" dengan badge
+belum-dibaca. Semua `/api/chat/conversations/*` kini memakai
+`periksaTokenChat()`: staf (via `/summary`) atau, kalau ditolak, manager
+(via `/manager/whoami`) -- perlu dua langkah karena villa-api mengunci
+manager hanya ke `/manager/*`. Manager bisa membaca, membalas (tercatat
+atas namanya), mengubah bahasa, dan memakai draf AI, sama seperti
+resepsionis.
+
 ## 2026-10-09 — CCTV di menu manager (lihat saja)
 
 Owner: *"tambahkan cctv di menu manager ini"*. Role `manager` kini punya
