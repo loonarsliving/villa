@@ -30,6 +30,15 @@ const LUNAS_RE = /^\s*lunas\s+([0-9a-f]{6})\s*$/i;
 const PROMO_RE = /^\s*promo\s+([0-9a-f]{6})\s*$/i;
 const TOLAK_RE = /^\s*(?:tolak|batal)\s+([0-9a-f]{6})\s*$/i;
 const BERHENTI_RE = /^\s*(?:berhenti|stop|unsubscribe)\s*$/i;
+/**
+ * Kupon KOL (owner 2026-10-09), hanya dari nomor owner -- dicek villa-api:
+ *   "KOL @akun 2"            -> kupon 2 malam gratis untuk @akun (angka opsional, bawaan 1)
+ *   "KOL LIST"               -> daftar kupon
+ *   "KOL BATAL KOL-ABC123"   -> matikan kupon yang belum dipakai
+ */
+const KOL_LIST_RE = /^\s*kol\s+list\s*$/i;
+const KOL_BATAL_RE = /^\s*kol\s+batal\s+(kol-[a-z0-9]{6})\s*$/i;
+const KOL_BUAT_RE = /^\s*kol\s+(?!list\s*$|batal\s)(.+?)(?:\s+(\d{1,2}))?\s*$/i;
 /** Caption foto bukti transfer dividen: kode unit saja, mis. "A2", "C10". */
 const UNIT_CODE_RE = /^\s*([A-Za-z]\d{1,2}|TETAP)\s*$/i;
 
@@ -56,6 +65,67 @@ async function callBridge(path: string, body: unknown, secret: string): Promise<
 function rupiah(n: unknown): string {
   const v = Number(n);
   return Number.isFinite(v) ? `Rp ${Math.round(v).toLocaleString("id-ID")}` : "-";
+}
+
+function tanggalId(iso: unknown): string {
+  const s = String(iso ?? "");
+  const d = new Date(`${s.slice(0, 10)}T00:00:00Z`);
+  return Number.isNaN(d.getTime())
+    ? s
+    : d.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+}
+
+/** Perintah KOL. null = bukan owner (diam, sama seperti perintah lain). */
+async function jalankanPerintahKol(
+  sender: string,
+  cmd: { kolList: boolean; kolBatal: RegExpMatchArray | null; kolBuat: RegExpMatchArray | null },
+  secret: string,
+): Promise<string | null> {
+  if (cmd.kolList) {
+    const b = await callBridge("/bridge/kol", { aksi: "list", sender }, secret);
+    if (b?.reason === "bukan_owner") return null;
+    if (!b || b.success !== true) return "Daftar kupon KOL gagal diambil: server villa tidak bisa dihubungi.";
+    const kupon = (b.kupon as Array<Record<string, unknown>>) ?? [];
+    if (!kupon.length) return "Belum ada kupon KOL.\n\nBuat dengan: KOL @akun 2";
+    const baris = kupon.map((k) => {
+      const d = k.dipakai as Record<string, unknown> | null;
+      const status = d
+        ? `✅ dipakai ${d.guest_nama ?? "-"}, unit ${d.unit_nomor ?? "-"}, ${tanggalId(d.tgl_checkin)}`
+        : k.aktif !== true
+          ? "⛔ dibatalkan"
+          : String(k.berlaku_sampai ?? "") < new Date().toISOString().slice(0, 10)
+            ? "⌛ kedaluwarsa"
+            : `🟢 belum dipakai, s/d ${tanggalId(k.berlaku_sampai)}`;
+      return `${k.kode} · ${k.untuk} · ${k.malam_gratis} malam\n   ${status}`;
+    });
+    return `Kupon KOL (30 terbaru)\n\n${baris.join("\n")}`;
+  }
+
+  if (cmd.kolBatal) {
+    const kode = cmd.kolBatal[1].toUpperCase();
+    const b = await callBridge("/bridge/kol", { aksi: "batal", kode, sender }, secret);
+    if (b?.reason === "bukan_owner") return null;
+    if (!b) return `Gagal membatalkan ${kode}: server villa tidak bisa dihubungi.`;
+    if (b.success === true) return `Kupon ${kode} dibatalkan. Kode ini sudah tidak bisa dipakai di loonars.id.`;
+    if (b.reason === "sudah_dipakai") return `Kupon ${kode} sudah dipakai untuk booking, jadi tidak dibatalkan. Batalkan bookingnya dulu dari front desk kalau memang perlu.`;
+    return `Kupon ${kode} tidak ditemukan.`;
+  }
+
+  const m = cmd.kolBuat!;
+  const untuk = m[1].trim();
+  const malam = m[2] ? Number(m[2]) : 1;
+  const b = await callBridge("/bridge/kol", { aksi: "buat", untuk, malam, sender }, secret);
+  if (b?.reason === "bukan_owner") return null;
+  if (!b) return "Kupon KOL gagal dibuat: server villa tidak bisa dihubungi.";
+  if (b.reason === "malam_tidak_wajar") return "Jumlah malam gratis harus 1 sampai 7.\n\nContoh: KOL @akun 2";
+  if (b.reason === "untuk_kosong") return "Tulis nama atau akun KOL-nya.\n\nContoh: KOL @akun 2";
+  if (b.success !== true) return `Kupon KOL gagal dibuat (${b.detail ?? b.reason ?? "sebab tidak diketahui"}).`;
+  const k = b.kupon as Record<string, unknown>;
+  return (
+    `Kupon KOL dibuat ✅\n\nKode: ${k.kode}\nUntuk: ${k.untuk} · ${k.malam_gratis} malam gratis\n` +
+    `Checkin paling lambat: ${tanggalId(k.berlaku_sampai)}\n\n` +
+    `Sekali pakai. Masukkan di loonars.id, kolom Kode Promo. Tetap hanya bisa dipakai kalau ada kamar kosong di tanggal itu.`
+  );
 }
 
 export async function POST(request: Request) {
@@ -98,6 +168,9 @@ export async function POST(request: Request) {
   const promo = text.match(PROMO_RE);
   const tolak = text.match(TOLAK_RE);
   const berhenti = BERHENTI_RE.test(text);
+  const kolList = KOL_LIST_RE.test(text);
+  const kolBatal = text.match(KOL_BATAL_RE);
+  const kolBuat = !kolList && !kolBatal ? text.match(KOL_BUAT_RE) : null;
   // Foto bukti transfer dividen: caption-nya kode unit saja (mis. "A2").
   const unitCode = inbound.mediaUrl ? text.match(UNIT_CODE_RE) : null;
 
@@ -105,7 +178,7 @@ export async function POST(request: Request) {
   // membalas setiap pesan tamu dengan sesuatu akan lebih membingungkan
   // daripada diam. (Tapi sudah TERSIMPAN di atas -- resepsionis tetap
   // bisa melihat dan membalasnya sendiri lewat halaman Chat.)
-  if (!lunas && !promo && !tolak && !berhenti && !unitCode) {
+  if (!lunas && !promo && !tolak && !berhenti && !unitCode && !kolList && !kolBatal && !kolBuat) {
     return NextResponse.json({ ok: true, skipped: "bukan perintah yang dikenali" });
   }
 
@@ -133,8 +206,12 @@ export async function POST(request: Request) {
         : "Baik, permintaan Anda kami catat. Kalau masih menerima pesan dari kami, mohon balas sekali lagi ya.";
   } else if (lunas) {
     const kode = lunas[1].toUpperCase();
-    const b = await callBridge("/bridge/confirm-payment", { code: kode }, secret);
-    if (!b) reply = `Konfirmasi gagal: server villa tidak bisa dihubungi. Kode ${kode} belum diproses.`;
+    const b = await callBridge("/bridge/confirm-payment", { code: kode, sender: inbound.sender }, secret);
+    // Bukan nomor owner/admin: diam saja, pesannya tetap tercatat di Chat
+    // seperti pesan biasa. Membalas "tidak berwenang" hanya memberi tahu
+    // bahwa perintah semacam ini ada.
+    if (b?.reason === "bukan_pengirim_berwenang") reply = null;
+    else if (!b) reply = `Konfirmasi gagal: server villa tidak bisa dihubungi. Kode ${kode} belum diproses.`;
     else if (b.success === true && b.already_confirmed === true)
       reply = `Kode ${kode} sudah dikonfirmasi sebelumnya — unit ${b.unit_nomor ?? "-"} atas nama ${b.guest_nama ?? "-"} sudah terkunci.`;
     else if (b.success === true)
@@ -149,8 +226,8 @@ export async function POST(request: Request) {
     else reply = `Kode ${kode} tidak ditemukan di booking yang menunggu pembayaran. Mohon cek lagi kodenya.`;
   } else if (tolak) {
     const kode = tolak[1].toUpperCase();
-    const b = await callBridge("/bridge/promo-reject", { kode }, secret);
-    reply =
+    const b = await callBridge("/bridge/promo-reject", { kode, sender: inbound.sender }, secret);
+    reply = b?.reason === "bukan_pengirim_berwenang" ? null :
       b?.success === true
         ? `Baik, usulan promo ${kode} dibatalkan. Tidak ada pesan yang dikirim ke tamu.`
         : b?.reason === "sudah_terkirim"
@@ -158,8 +235,9 @@ export async function POST(request: Request) {
           : `Usulan ${kode} tidak ditemukan. Mohon cek lagi kodenya.`;
   } else if (promo) {
     const kode = promo[1].toUpperCase();
-    const b = await callBridge("/bridge/promo-approve", { kode }, secret);
-    if (!b) reply = `Gagal memproses ${kode}: server villa tidak bisa dihubungi. Belum ada pesan yang dikirim ke tamu.`;
+    const b = await callBridge("/bridge/promo-approve", { kode, sender: inbound.sender }, secret);
+    if (b?.reason === "bukan_pengirim_berwenang") reply = null;
+    else if (!b) reply = `Gagal memproses ${kode}: server villa tidak bisa dihubungi. Belum ada pesan yang dikirim ke tamu.`;
     else if (b.success === true && b.already_sent === true) reply = `Usulan ${kode} sudah dikirim sebelumnya.`;
     else if (b.success === true) {
       const terkirim = Number(b.terkirim ?? 0);
@@ -183,6 +261,10 @@ export async function POST(request: Request) {
       };
       reply = alasan[String(b.reason ?? "")] ?? `Kode ${kode} tidak bisa diproses.`;
     }
+  }
+
+  if (kolList || kolBatal || kolBuat) {
+    reply = await jalankanPerintahKol(inbound.sender, { kolList, kolBatal, kolBuat }, secret);
   }
 
   if (reply) {

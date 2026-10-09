@@ -506,7 +506,7 @@ const PENDING_PAYMENT_HOLD_MINUTES = 15;
  * mencari 'website', sehingga booking investor yang belum lunas tidak
  * pernah terkonfirmasi otomatis dan tidak pernah kedaluwarsa (2026-10-04).
  */
-const SUMBER_BOOKING_WEBSITE = ['website', 'investor'];
+const SUMBER_BOOKING_WEBSITE = ['website', 'investor', 'kol'];
 
 /**
  * Penanda di kolom catatan untuk booking yang dibatalkan oleh mesin, bukan
@@ -1713,7 +1713,85 @@ async function periksaVoucherInvestor(kode, tgl_checkin, tgl_checkout){
   const ramai = (musim ?? []).find(r => Number(r.suggested_adjustment_pct ?? 0) > 0);
   if(ramai) return {ok:false, alasan:`Malam gratis tidak berlaku di periode ramai (${ramai.label}).`};
 
-  return {ok:true, voucher:v, pemilik, malam};
+  return {ok:true, jenis:'investor', voucher:v, pemilik, malam, malam_gratis:1};
+}
+
+/**
+ * Kupon KOL (owner 2026-10-09): menginap gratis untuk barter konten.
+ *
+ * Bentuknya sengaja sama dengan hasil periksaVoucherInvestor (voucher.id,
+ * voucher.kode, pemilik.nama, malam) supaya /public/voucher dan
+ * /public/bookings memakai satu jalur untuk keduanya. Bedanya: jumlah malam
+ * gratis per kupon, dan TIDAK ada larangan weekend/high season -- owner
+ * sendiri yang memilih siapa yang mendapat kupon. Ketersediaan kamar tetap
+ * dijaga jalur booking biasa (unit kosong + exclusion constraint), bukan
+ * di sini.
+ */
+async function periksaKuponKol(kode, tgl_checkin, tgl_checkout){
+  const bersih = String(kode ?? '').trim().toUpperCase();
+  if(!/^KOL-[A-Z0-9]{6}$/.test(bersih)) return {ok:false, alasan:'Format kode tidak dikenali.'};
+
+  const {data:k} = await supabase.from('villa_kol_vouchers')
+    .select('id,kode,untuk,malam_gratis,berlaku_sampai,aktif').eq('kode', bersih).maybeSingle();
+  if(!k) return {ok:false, alasan:'Kode tidak ditemukan.'};
+  if(k.aktif !== true) return {ok:false, alasan:'Kode ini sudah tidak berlaku.'};
+
+  const {data:dipakai} = await supabase.from('bookings')
+    .select('id,tgl_checkin').eq('kol_voucher_id', k.id).neq('status','batal').limit(1);
+  if(dipakai && dipakai.length) return {ok:false, alasan:`Kode ini sudah dipakai untuk menginap ${dipakai[0].tgl_checkin}.`};
+
+  if(!isValidDateStr(tgl_checkin)) return {ok:false, alasan:'Tanggal checkin tidak valid.'};
+  if(!isValidDateStr(tgl_checkout)) return {ok:false, alasan:'Tanggal checkout tidak valid.'};
+  const malam = Math.round((new Date(tgl_checkout).getTime() - new Date(tgl_checkin).getTime())/86400000);
+  if(malam < 1) return {ok:false, alasan:'Tanggal menginap tidak valid.'};
+
+  // Berlaku sampai = tanggal CHECKIN terakhir yang boleh, bukan tanggal pakai
+  // kodenya: kupon yang dipesan hari ini untuk menginap 5 bulan lagi tidak
+  // boleh lolos hanya karena diketik sebelum kedaluwarsa.
+  if(tgl_checkin > String(k.berlaku_sampai)) return {ok:false, alasan:`Kode ini hanya berlaku untuk checkin sampai ${k.berlaku_sampai}.`};
+  if(tgl_checkin < todayWIB()) return {ok:false, alasan:'Tanggal checkin sudah lewat.'};
+
+  return {ok:true, jenis:'kol', voucher:{id:k.id, kode:k.kode}, pemilik:{nama:k.untuk}, malam, malam_gratis:Number(k.malam_gratis)};
+}
+
+/** Satu pintu untuk semua kode menginap gratis: investor atau KOL. */
+async function periksaKodeGratis(kode, tgl_checkin, tgl_checkout){
+  const bersih = String(kode ?? '').trim().toUpperCase();
+  return bersih.startsWith('KOL-')
+    ? periksaKuponKol(bersih, tgl_checkin, tgl_checkout)
+    : periksaVoucherInvestor(bersih, tgl_checkin, tgl_checkout);
+}
+
+/** Kode kupon KOL baru: KOL- + 6 karakter tanpa O/0/I/1 (dibacakan & diketik ulang di HP). */
+function kodeKolAcak(){
+  const huruf = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const buf = new Uint32Array(6);
+  crypto.getRandomValues(buf);
+  return 'KOL-' + Array.from(buf, n => huruf[n % huruf.length]).join('');
+}
+
+/**
+ * Apakah nomor WA pengirim perintah boleh menjalankannya.
+ *
+ * Sampai 2026-10-09 perintah LUNAS/PROMO/TOLAK dari WA dijalankan untuk
+ * nomor SIAPA PUN -- dan kode LUNAS hanyalah 6 karakter terakhir booking_id
+ * yang tersimpan di HP tamu sendiri, jadi tamu bisa "melunasi" bookingnya
+ * tanpa membayar. Sekarang: nomor owner (villa_notify.owner_hp), dan kecuali
+ * ownerSaja, admin aktif. Dicocokkan 9 digit terakhir supaya 08xx / 628xx /
+ * +628xx dianggap sama.
+ */
+async function pengirimBerwenang(sender, {ownerSaja=false}={}){
+  const d = String(sender ?? '').replace(/[^0-9]/g,'');
+  if(d.length < 8) return false;
+  const sama = (hp) => {
+    const h = String(hp ?? '').replace(/[^0-9]/g,'');
+    return h.length >= 8 && h.slice(-9) === d.slice(-9);
+  };
+  const notify = await getSetting('villa_notify');
+  if(sama(notify?.owner_hp)) return true;
+  if(ownerSaja) return false;
+  const {data:admins} = await supabase.from('villa_users').select('hp').eq('role','admin').eq('is_active',true);
+  return (admins ?? []).some(a => sama(a.hp));
 }
 
 async function computeStayTarif(unit, tgl_checkin, nights){
@@ -2119,6 +2197,8 @@ function normalizedChannel(sumber){
   if(s==='late-night') return 'DIRECT';
   // Menginap investor lewat loonars.id: sisa malamnya dibayar langsung ke QRIS villa.
   if(s==='investor') return 'DIRECT';
+  // Kupon KOL lewat loonars.id: malam di luar jatah gratis dibayar ke QRIS villa.
+  if(s==='kol') return 'DIRECT';
   if(s==='booking.com') return 'BOOKING_COM';
   if(s==='agoda') return 'AGODA';
   if(s==='airbnb') return 'AIRBNB';
@@ -2889,8 +2969,9 @@ Deno.serve(async (req)=>{
     const checkin = url.searchParams.get('checkin') ?? '';
     const checkout = url.searchParams.get('checkout') ?? '';
     if(!kode) return err('Kode wajib diisi');
-    const cek = await periksaVoucherInvestor(kode, checkin, checkout);
+    const cek = await periksaKodeGratis(kode, checkin, checkout);
     if(!cek.ok) return json({berlaku:false, alasan:cek.alasan});
+    const malamGratis = Math.min(cek.malam_gratis, cek.malam);
 
     // Nilai malam gratisnya ikut dihitung kalau tipe unitnya sudah dipilih,
     // supaya ringkasan harga di form menampilkan angka yang sama dengan yang
@@ -2904,17 +2985,17 @@ Deno.serve(async (req)=>{
         : {data:null};
       if(unitContoh){
         hargaNormalPratinjau = (await computeWebsiteStayPrice(unitContoh, checkin, cek.malam)).website;
-        hemat = (await computeWebsiteStayPrice(unitContoh, checkin, 1)).website;
+        hemat = (await computeWebsiteStayPrice(unitContoh, checkin, malamGratis)).website;
         total = Math.max(0, hargaNormalPratinjau - hemat);
       }
     }
 
     return json({
-      berlaku:true, malam:cek.malam, malam_gratis:1,
+      berlaku:true, malam:cek.malam, malam_gratis:malamGratis,
       harga_normal:hargaNormalPratinjau, hemat, total,
-      keterangan: cek.malam > 1
-        ? 'Malam pertama gratis. Malam selanjutnya dibayar seperti biasa.'
-        : 'Menginap gratis 1 malam. Tidak ada yang perlu dibayar.',
+      keterangan: cek.malam > malamGratis
+        ? `${malamGratis === 1 ? 'Malam pertama' : `${malamGratis} malam pertama`} gratis. Malam selanjutnya dibayar seperti biasa.`
+        : `Menginap gratis ${cek.malam} malam. Tidak ada yang perlu dibayar.`,
     });
   }
 
@@ -3017,7 +3098,7 @@ Deno.serve(async (req)=>{
     let voucherTerpakai = null;
     if(voucher_code){
       if(promo_code) return err('Kode promo dan kode menginap gratis tidak bisa dipakai bersamaan', 409);
-      const cek = await periksaVoucherInvestor(voucher_code, tgl_checkin, tgl_checkout);
+      const cek = await periksaKodeGratis(voucher_code, tgl_checkin, tgl_checkout);
       if(!cek.ok) return err(cek.alasan, 409);
       voucherTerpakai = cek;
     }
@@ -3062,12 +3143,14 @@ Deno.serve(async (req)=>{
     const hargaNormal = (await computeWebsiteStayPrice(freeUnit, tgl_checkin, nights)).website;
     let nilaiMalamGratis = 0;
     if(voucherTerpakai){
-      nilaiMalamGratis = (await computeWebsiteStayPrice(freeUnit, tgl_checkin, 1)).website;
+      nilaiMalamGratis = (await computeWebsiteStayPrice(freeUnit, tgl_checkin, Math.min(voucherTerpakai.malam_gratis, nights))).website;
     }
+    const isKol = voucherTerpakai?.jenis === 'kol';
+    const malamGratisDipakai = voucherTerpakai ? Math.min(voucherTerpakai.malam_gratis, nights) : 0;
     // Tarif yang belum diatur hanya menggagalkan pemesanan berbayar. Untuk
     // menginap yang seluruhnya gratis tidak ada rupiah yang dipertaruhkan,
     // jadi tidak ada alasan menolaknya.
-    const seluruhnyaGratis = !!voucherTerpakai && nights === 1;
+    const seluruhnyaGratis = !!voucherTerpakai && nights <= voucherTerpakai.malam_gratis;
     if(!seluruhnyaGratis && hargaNormal<=0) return err('Tarif unit belum diatur, hubungi kami langsung', 409);
 
     // Promo, kalau tamu membawa kodenya. Harganya dihitung ulang DI SINI --
@@ -3133,14 +3216,18 @@ Deno.serve(async (req)=>{
     const {data:booking, error:bookErr} = await supabase.from('bookings').insert(
       seluruhnyaGratis ? {
         unit_id: freeUnit.id, unit_nomor: freeUnit.nomor, guest_id: g?.id ?? null, guest_nama: nama,
-        tipe: 'harian', sumber: 'investor', tgl_checkin, tgl_checkout,
+        tipe: 'harian', sumber: isKol ? 'kol' : 'investor', tgl_checkin, tgl_checkout,
         durasi_malam: nights, checkin_time: '14:00:00', adults, children,
         tarif: 0, total_bayar: 0, status: 'terjadwal',
-        voucher_id: voucherTerpakai.voucher.id, is_free_stay: true,
-        catatan: `[Menginap gratis investor] Kode ${voucherTerpakai.voucher.kode} atas nama ${voucherTerpakai.pemilik.nama}. Tidak masuk laporan keuangan, dividen, maupun hitungan okupansi.${catatan ? ` -- ${catatan}` : ''}`,
+        voucher_id: isKol ? null : voucherTerpakai.voucher.id,
+        kol_voucher_id: isKol ? voucherTerpakai.voucher.id : null,
+        is_free_stay: true,
+        catatan: isKol
+          ? `[Kupon KOL] Kode ${voucherTerpakai.voucher.kode} untuk ${voucherTerpakai.pemilik.nama} -- ${nights} malam gratis (barter konten). Tidak masuk laporan keuangan, dividen, maupun hitungan okupansi.${catatan ? ` -- ${catatan}` : ''}`
+          : `[Menginap gratis investor] Kode ${voucherTerpakai.voucher.kode} atas nama ${voucherTerpakai.pemilik.nama}. Tidak masuk laporan keuangan, dividen, maupun hitungan okupansi.${catatan ? ` -- ${catatan}` : ''}`,
       } : {
         unit_id: freeUnit.id, unit_nomor: freeUnit.nomor, guest_id: g?.id ?? null, guest_nama: nama,
-        tipe: 'harian', sumber: voucherTerpakai ? 'investor' : 'website', tgl_checkin, tgl_checkout,
+        tipe: 'harian', sumber: voucherTerpakai ? (isKol ? 'kol' : 'investor') : 'website', tgl_checkin, tgl_checkout,
         durasi_malam: nights, checkin_time: '14:00:00', adults, children,
         tarif: computedTarif, total_bayar: totalDitagih, status: 'menunggu_pembayaran',
         // Menginap lebih dari semalam bukan menginap gratis: hanya SATU
@@ -3149,10 +3236,13 @@ Deno.serve(async (req)=>{
         // dibayar memang pendapatan sungguhan dan harus ikut terhitung.
         // voucher_id tetap dipasang supaya kodenya tercoret dan tidak bisa
         // dipakai dua kali.
-        voucher_id: voucherTerpakai ? voucherTerpakai.voucher.id : null,
+        voucher_id: voucherTerpakai && !isKol ? voucherTerpakai.voucher.id : null,
+        kol_voucher_id: isKol ? voucherTerpakai.voucher.id : null,
         is_free_stay: false,
         catatan: referralTerpakai
           ? `[Website] Referral ${referralTerpakai.ref.kode} (${referralTerpakai.ref.employee_nama}) -- fee karyawan ${referralTerpakai.hasil.fee_persen}% Rp ${Math.round(referralTerpakai.hasil.fee).toLocaleString('id-ID')} setelah lunas. Harga tamu normal.${catatan ? ` -- ${catatan}` : ''}`
+          : isKol
+          ? `[Kupon KOL] Kode ${voucherTerpakai.voucher.kode} untuk ${voucherTerpakai.pemilik.nama} -- ${malamGratisDipakai} malam pertama gratis (Rp ${Math.round(nilaiMalamGratis).toLocaleString('id-ID')}), sisanya dibayar.${catatan ? ` -- ${catatan}` : ''}`
           : voucherTerpakai
           ? `[Menginap investor] Kode ${voucherTerpakai.voucher.kode} atas nama ${voucherTerpakai.pemilik.nama} -- malam pertama gratis (Rp ${Math.round(nilaiMalamGratis).toLocaleString('id-ID')}), sisanya dibayar.${catatan ? ` -- ${catatan}` : ''}`
           : (catatan ? `[Website] ${catatan}` : '[Website] Booking mandiri dari loonars.id -- menunggu bukti pembayaran QRIS.'),
@@ -3215,17 +3305,18 @@ Deno.serve(async (req)=>{
     // tabrakan dengan tamu berbayar dijelaskan).
     if(seluruhnyaGratis){
       await pushBookingToCloudbeds(booking);
-      await notif(freeUnit.id, 'all', 'booking', `Menginap gratis investor -- Unit ${freeUnit.nomor}`,
-        `${nama} (${hp}) - ${tgl_checkin} s/d ${tgl_checkout} - kode ${voucherTerpakai.voucher.kode} atas nama ${voucherTerpakai.pemilik.nama}. Unit terkunci; tidak masuk pendapatan, dividen, maupun okupansi.`, booking.id);
+      const labelGratis = isKol ? 'Kupon KOL' : 'Menginap gratis investor';
+      await notif(freeUnit.id, 'all', 'booking', `${labelGratis} -- Unit ${freeUnit.nomor}`,
+        `${nama} (${hp}) - ${tgl_checkin} s/d ${tgl_checkout} - kode ${voucherTerpakai.voucher.kode} ${isKol ? 'untuk' : 'atas nama'} ${voucherTerpakai.pemilik.nama}. Unit terkunci; tidak masuk pendapatan, dividen, maupun okupansi.`, booking.id);
       const notifyVoucher = await getSetting('villa_notify');
       await sendWa(notifyVoucher?.owner_hp ?? null,
-        `Menginap gratis investor\n\n${voucherTerpakai.pemilik.nama}\nKode ${voucherTerpakai.voucher.kode}\nUnit ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (1 malam)\n\nUnit sudah terkunci di kalender. Tidak dihitung sebagai pendapatan, dividen, atau okupansi.`,
-        {booking_id: booking.id, unit_id: freeUnit.id, template_type:'investor_free_stay'});
+        `${labelGratis}\n\n${isKol ? `${nama} (${hp})\nKupon untuk ${voucherTerpakai.pemilik.nama}` : voucherTerpakai.pemilik.nama}\nKode ${voucherTerpakai.voucher.kode}\nUnit ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\n\nUnit sudah terkunci di kalender. Tidak dihitung sebagai pendapatan, dividen, atau okupansi.`,
+        {booking_id: booking.id, unit_id: freeUnit.id, template_type: isKol ? 'kol_free_stay' : 'investor_free_stay'});
       return json({
         booking_id: booking.id, unit_nomor: freeUnit.nomor,
         tgl_checkin, tgl_checkout, durasi_malam: nights,
         tarif: 0, total_bayar: 0, status: booking.status,
-        menginap_gratis: {kode: voucherTerpakai.voucher.kode, atas_nama: voucherTerpakai.pemilik.nama},
+        menginap_gratis: {kode: voucherTerpakai.voucher.kode, atas_nama: isKol ? null : voucherTerpakai.pemilik.nama, malam_gratis: nights},
         promo: null,
       }, 201);
     }
@@ -3244,7 +3335,7 @@ Deno.serve(async (req)=>{
     // ditampilkan ke tamu, supaya keduanya melihat angka yang sama persis.
     const notifySetting = await getSetting('villa_notify');
     await sendWa(notifySetting?.owner_hp ?? null,
-      `Booking baru dari website\n\n${nama} (${hp})\nUnit ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\nTotal (dengan kode unik): Rp ${Math.round(totalDitagih).toLocaleString('id-ID')}${promoTerpakai ? `\nPromo ${promoTerpakai.promo.kode} (normal Rp ${Math.round(promoTerpakai.hasil.harga_normal).toLocaleString('id-ID')})` : ''}${referralTerpakai ? `\nReferral ${referralTerpakai.ref.kode} (${referralTerpakai.ref.employee_nama}) -- fee karyawan ${referralTerpakai.hasil.fee_persen}% Rp ${Math.round(referralTerpakai.hasil.fee).toLocaleString('id-ID')} setelah lunas` : ''}${voucherTerpakai ? `\nKode investor ${voucherTerpakai.voucher.kode} (${voucherTerpakai.pemilik.nama}) -- malam pertama gratis Rp ${Math.round(nilaiMalamGratis).toLocaleString('id-ID')}` : ''}\n\nKalau dana sudah masuk, sistem akan mengonfirmasi otomatis lewat email. Kalau belum juga terkonfirmasi, balas:\nLUNAS ${kode}`,
+      `Booking baru dari website\n\n${nama} (${hp})\nUnit ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\nTotal (dengan kode unik): Rp ${Math.round(totalDitagih).toLocaleString('id-ID')}${promoTerpakai ? `\nPromo ${promoTerpakai.promo.kode} (normal Rp ${Math.round(promoTerpakai.hasil.harga_normal).toLocaleString('id-ID')})` : ''}${referralTerpakai ? `\nReferral ${referralTerpakai.ref.kode} (${referralTerpakai.ref.employee_nama}) -- fee karyawan ${referralTerpakai.hasil.fee_persen}% Rp ${Math.round(referralTerpakai.hasil.fee).toLocaleString('id-ID')} setelah lunas` : ''}${voucherTerpakai ? `\n${isKol ? 'Kupon KOL' : 'Kode investor'} ${voucherTerpakai.voucher.kode} (${voucherTerpakai.pemilik.nama}) -- ${malamGratisDipakai} malam pertama gratis Rp ${Math.round(nilaiMalamGratis).toLocaleString('id-ID')}` : ''}\n\nKalau dana sudah masuk, sistem akan mengonfirmasi otomatis lewat email. Kalau belum juga terkonfirmasi, balas:\nLUNAS ${kode}`,
       {booking_id: booking.id, unit_id: freeUnit.id, template_type:'website_booking_awaiting_payment'});
 
     return json({
@@ -3252,7 +3343,7 @@ Deno.serve(async (req)=>{
       tgl_checkin, tgl_checkout, durasi_malam: nights,
       tarif: computedTarif, total_bayar: totalDitagih, kode_unik: kodeUnik, status: booking.status,
       promo: promoTerpakai ? {kode: promoTerpakai.promo.kode, nama: promoTerpakai.promo.nama, harga_normal: promoTerpakai.hasil.harga_normal, hemat: promoTerpakai.hasil.hemat} : null,
-      menginap_gratis: voucherTerpakai ? {kode: voucherTerpakai.voucher.kode, malam_gratis: 1, hemat: nilaiMalamGratis} : null,
+      menginap_gratis: voucherTerpakai ? {kode: voucherTerpakai.voucher.kode, malam_gratis: malamGratisDipakai, hemat: nilaiMalamGratis} : null,
       referral: referralTerpakai ? {kode: referralTerpakai.ref.kode} : null,
     }, 201);
   }
@@ -3458,6 +3549,7 @@ Deno.serve(async (req)=>{
     if(!await secretsMatch(provided, bridge.secret)) return err('Unauthorized',401);
 
     const b = await req.json().catch(()=>null);
+    if(!await pengirimBerwenang(b?.sender)) return json({success:false, reason:'bukan_pengirim_berwenang'});
     const code = String(b?.code ?? '').trim().toUpperCase();
     if(!/^[0-9A-F]{6}$/.test(code)) return json({success:false, reason:'invalid_code'});
 
@@ -3727,12 +3819,69 @@ Deno.serve(async (req)=>{
 
   // Owner membalas "PROMO <kode>". Baru di sinilah daftar penerimanya
   // diserahkan untuk dikirim.
+  // Kupon KOL lewat WA (owner 2026-10-09). HANYA nomor owner -- bukan admin:
+  // ini menciptakan kamar gratis, dan owner yang meminta aksesnya.
+  //   {aksi:'buat', untuk, malam}  -> kupon baru, berlaku 3 bulan
+  //   {aksi:'list'}                -> kupon aktif + yang sudah dipakai
+  //   {aksi:'batal', kode}         -> matikan kupon yang belum dipakai
+  if(path==='/bridge/kol' && m==='POST'){
+    const bridge = await getVercelBridge();
+    if(!bridge.secret) return err('Jembatan belum dikonfigurasi',503);
+    if(!await secretsMatch(req.headers.get('x-internal-secret') ?? '', bridge.secret)) return err('Unauthorized',401);
+    const b = await req.json().catch(()=>null);
+    if(!await pengirimBerwenang(b?.sender, {ownerSaja:true})) return json({success:false, reason:'bukan_owner'});
+
+    if(b?.aksi === 'buat'){
+      const untuk = String(b?.untuk ?? '').trim().slice(0, 80);
+      const malam = Math.trunc(Number(b?.malam ?? 1));
+      if(untuk.length < 2) return json({success:false, reason:'untuk_kosong'});
+      if(!(malam >= 1 && malam <= 7)) return json({success:false, reason:'malam_tidak_wajar'});
+      const batas = new Date(`${todayWIB()}T00:00:00Z`);
+      batas.setUTCMonth(batas.getUTCMonth() + 3);
+      const berlaku_sampai = batas.toISOString().slice(0,10);
+      for(let coba = 0; coba < 10; coba++){
+        const {data, error} = await supabase.from('villa_kol_vouchers')
+          .insert({kode: kodeKolAcak(), untuk, malam_gratis: malam, berlaku_sampai, dibuat_lewat: 'wa'})
+          .select('kode,untuk,malam_gratis,berlaku_sampai').single();
+        if(!error) return json({success:true, kupon:data});
+        if(error.code !== '23505') return json({success:false, reason:'gagal_simpan', detail:error.message});
+      }
+      return json({success:false, reason:'gagal_simpan', detail:'kode bentrok terus'});
+    }
+
+    if(b?.aksi === 'list'){
+      const {data:kupon} = await supabase.from('villa_kol_vouchers')
+        .select('id,kode,untuk,malam_gratis,berlaku_sampai,aktif,created_at')
+        .order('created_at', {ascending:false}).limit(30);
+      const ids = (kupon ?? []).map(k => k.id);
+      const {data:pakai} = ids.length
+        ? await supabase.from('bookings').select('kol_voucher_id,guest_nama,unit_nomor,tgl_checkin,tgl_checkout,status')
+            .in('kol_voucher_id', ids).neq('status','batal')
+        : {data:[]};
+      const byId = new Map((pakai ?? []).map(p => [p.kol_voucher_id, p]));
+      return json({success:true, kupon:(kupon ?? []).map(k => ({...k, dipakai: byId.get(k.id) ?? null}))});
+    }
+
+    if(b?.aksi === 'batal'){
+      const kode = String(b?.kode ?? '').trim().toUpperCase();
+      const {data:k} = await supabase.from('villa_kol_vouchers').select('id,aktif').eq('kode', kode).maybeSingle();
+      if(!k) return json({success:false, reason:'not_found'});
+      const {data:pakai} = await supabase.from('bookings').select('id').eq('kol_voucher_id', k.id).neq('status','batal').limit(1);
+      if(pakai && pakai.length) return json({success:false, reason:'sudah_dipakai'});
+      await supabase.from('villa_kol_vouchers').update({aktif:false}).eq('id', k.id);
+      return json({success:true, kode});
+    }
+
+    return json({success:false, reason:'aksi_tidak_dikenal'});
+  }
+
   if(path==='/bridge/promo-approve' && m==='POST'){
     const bridge = await getVercelBridge();
     if(!bridge.secret) return err('Jembatan belum dikonfigurasi',503);
     if(!await secretsMatch(req.headers.get('x-internal-secret') ?? '', bridge.secret)) return err('Unauthorized',401);
 
     const b = await req.json().catch(()=>null);
+    if(!await pengirimBerwenang(b?.sender)) return json({success:false, reason:'bukan_pengirim_berwenang'});
     const kode = String(b?.kode ?? '').trim().toUpperCase();
     if(!/^[0-9A-F]{6}$/.test(kode)) return json({success:false, reason:'invalid_code'});
 
@@ -3911,6 +4060,7 @@ Deno.serve(async (req)=>{
     if(!bridge.secret) return err('Jembatan belum dikonfigurasi',503);
     if(!await secretsMatch(req.headers.get('x-internal-secret') ?? '', bridge.secret)) return err('Unauthorized',401);
     const b = await req.json().catch(()=>null);
+    if(!await pengirimBerwenang(b?.sender)) return json({success:false, reason:'bukan_pengirim_berwenang'});
     const kode = String(b?.kode ?? '').trim().toUpperCase();
     if(!/^[0-9A-F]{6}$/.test(kode)) return json({success:false, reason:'invalid_code'});
     const {data:batch} = await supabase.from('villa_promo_batches').select('id,status').eq('kode_konfirmasi', kode).maybeSingle();
