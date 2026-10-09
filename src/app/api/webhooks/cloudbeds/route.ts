@@ -221,8 +221,20 @@ export async function POST(request: Request) {
         // phone number instead of inserting a duplicate. Guests with no
         // phone on file still get a fresh row each time (no reliable key
         // to dedupe on without one), matching prior behavior for that case.
+        // Booking yang sudah ada tetap memakai tamunya sendiri. Tanpa ini
+        // setiap event untuk tamu tanpa nomor (Traveloka) membuat baris
+        // guests baru dan memindahkan booking ke sana, sehingga nomor WA yang
+        // diisi resepsionis saat check-in tertinggal di baris lama.
         let guestId: string | null = null;
-        if (guestHp) {
+        if (reservationId) {
+          const { data: bookingLama } = await supabase
+            .from("bookings")
+            .select("guest_id")
+            .eq("cloudbeds_reservation_id", reservationId)
+            .maybeSingle();
+          guestId = bookingLama?.guest_id ?? null;
+        }
+        if (!guestId && guestHp) {
           const { data: existingGuest } = await supabase.from("guests").select("id").eq("hp", guestHp).limit(1).maybeSingle();
           guestId = existingGuest?.id ?? null;
         }

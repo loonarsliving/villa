@@ -186,15 +186,22 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
   // Status yang SUDAH ada di sini, supaya check-in/check-out dari meja depan
   // tidak ditarik mundur oleh salinan Cloudbeds.
   const statusSaatIni = new Map<string, string>();
+  // Tamu yang SUDAH tertaut ke booking ini. Dipakai ulang apa adanya: tamu
+  // Traveloka datang tanpa nomor maupun email, jadi tanpa ini setiap sync
+  // membuat baris guests kosong baru dan memindahkan booking ke sana --
+  // nomor WA yang diisi resepsionis saat check-in tertinggal di baris lama
+  // (9 Okt 2026: satu tamu sudah punya 491 baris, WA info malam tidak sampai).
+  const guestIdSaatIni = new Map<string, string>();
   if (reservationIds.length > 0) {
     const { data: existing } = await supabase
       .from("bookings")
-      .select("cloudbeds_reservation_id, sumber, catatan, status")
+      .select("cloudbeds_reservation_id, sumber, catatan, status, guest_id")
       .in("cloudbeds_reservation_id", reservationIds);
     for (const b of existing ?? []) {
       if (!b.cloudbeds_reservation_id) continue;
       const id = String(b.cloudbeds_reservation_id);
       if (b.status) statusSaatIni.set(id, String(b.status));
+      if (b.guest_id) guestIdSaatIni.set(id, String(b.guest_id));
       if (dibuatDiSini(b.sumber, b.catatan)) ownReservationIds.add(id);
     }
   }
@@ -263,8 +270,8 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
     const guestEmail = typeof rawEmail === "string" && rawEmail.includes("@") ? rawEmail.trim() : null;
 
     try {
-      let guestId: string | null = null;
-      if (guestHp) {
+      let guestId: string | null = guestIdSaatIni.get(resv.reservationID) ?? null;
+      if (!guestId && guestHp) {
         const { data: existingGuest } = await supabase.from("guests").select("id").eq("hp", guestHp).limit(1).maybeSingle();
         guestId = existingGuest?.id ?? null;
       }
