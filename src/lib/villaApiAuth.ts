@@ -41,6 +41,11 @@ export function periksaTokenAdmin(token: string): Promise<HasilPeriksaToken> {
   return periksaToken(token, "/admin/overview");
 }
 
+/** Manager ATAU admin — lewat endpoint villa-api yang khusus modul manager. */
+export function periksaTokenManager(token: string): Promise<HasilPeriksaToken> {
+  return periksaToken(token, "/manager/whoami");
+}
+
 /** Admin ATAU resepsionis — lewat endpoint villa-api yang khusus staf. */
 export function periksaTokenStaf(token: string): Promise<HasilPeriksaToken> {
   return periksaToken(token, "/summary");

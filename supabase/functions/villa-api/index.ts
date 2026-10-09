@@ -4940,6 +4940,18 @@ Deno.serve(async (req)=>{
     return json({ ok:true, role: session.role });
   }
 
+  // CCTV untuk manager (owner 9 Okt 2026: "tambahkan cctv di menu manager").
+  // Hanya kamera aktif, hanya yang perlu untuk live-view. Kelola kamera dan
+  // laporan checkpoint AI tetap khusus admin (/admin/cctv/*).
+  if(path==='/manager/cctv/cameras' && m==='GET'){
+    if(!isManager) return forbidden();
+    const {data,error} = await supabase.from('cctv_cameras')
+      .select('id,nama,zona,deskripsi,ezviz_serial,ezviz_channel_no,ezviz_verification_code,is_active')
+      .eq('is_active', true).order('nama');
+    if(error) return err(error.message);
+    return json(data);
+  }
+
   if(path==='/manager/kamar' && m==='GET'){
     if(!isManager) return forbidden();
     const hariIni = todayWIB();
