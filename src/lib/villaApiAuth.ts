@@ -77,3 +77,15 @@ export async function isStaffToken(token: string): Promise<boolean> {
 export async function isFinanceToken(token: string): Promise<boolean> {
   return tokenPasses(token, "/finance/whoami");
 }
+
+/**
+ * Siapa saja yang boleh memakai Chat WhatsApp: resepsionis, admin, dan
+ * manager (owner 9 Okt 2026: "fitur chat juga bawa ke dashboard Beca").
+ * Manager dikunci villa-api hanya ke /manager/*, jadi /summary menolaknya --
+ * karena itu dicoba lewat /manager/whoami kalau pemeriksaan staf menolak.
+ */
+export async function periksaTokenChat(token: string): Promise<HasilPeriksaToken> {
+  const staf = await periksaTokenStaf(token);
+  if (staf !== "ditolak") return staf;
+  return periksaTokenManager(token);
+}

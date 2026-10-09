@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { AdminShell } from "../../admin/_shell";
 import { FrontDeskShell } from "../_shell";
+import { ManagerShell } from "../../manager/_shell";
 import { ApiError, localApi } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
@@ -312,7 +313,7 @@ export default function ChatPage() {
     kirim({ ...p, status: "mengirim" });
   }
 
-  const Shell = user?.role === "admin" ? AdminShell : FrontDeskShell;
+  const Shell = user?.role === "admin" ? AdminShell : user?.role === "manager" ? ManagerShell : FrontDeskShell;
 
   if (!user) {
     return (
