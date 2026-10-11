@@ -69,9 +69,12 @@ export default function InvestorHomePage() {
         </div>
       </section>
 
-      <div className="flex justify-center">
+      <div className="flex flex-col items-center">
         <Link href="/investor/pendapatan" className="text-[12.5px] text-blue-700 font-medium py-2">
           Lihat rincian pendapatan →
+        </Link>
+        <Link href="/investor/pertumbuhan" className="text-[12.5px] text-blue-700 font-medium py-2">
+          Lihat pertumbuhan Loonars →
         </Link>
       </div>
     </AppHome>
