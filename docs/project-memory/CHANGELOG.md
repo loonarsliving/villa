@@ -4,10 +4,12 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-11 — Laporan mingguan WA investor: pendapatan setelah potongan marketing
+- "Pendapatan bersih (kotor X, sudah dikurangi fee OTA)" diganti satu baris "Pendapatan villa" = total_bayar booking check-in minggu itu × (1 − integration_settings.finance.marketing_pct, default 0,275), sama dengan dashboard investor. Tidak menyebut kotor / fee OTA / marketing.
+
 ### 2026-10-11 — Investor: pendapatan ditampilkan setelah potongan marketing, baris Marketing & rincian OTA dihapus
 - Owner: baris "Marketing 27,5%" membuat investor salah kaprah (dikira biaya di luar potongan OTA). Pendapatan villa di semua tampilan investor (beranda, Pendapatan, Opex, Pertumbuhan, PDF) kini = gross_revenue − marketing_amount (`src/lib/investorPendapatan.ts`); kartu "Rincian Potongan per Platform OTA" dihapus dari halaman investor.
 - HANYA tampilan: computeReport()/rumus beku PHASE0-BASELINE §2 tidak berubah, angka net/pool/bagian investor identik.
-- Belum diselaraskan: laporan mingguan WA investor masih memakai "pendapatan bersih" berbasis cloudbeds_subtotal (basis berbeda).
 
 ### 2026-10-11 — Tanda baca notifikasi per investor + halaman Pertumbuhan Loonars
 - Lihat CURRENT_STATE.md 2026-10-11.
