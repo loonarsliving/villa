@@ -3,6 +3,12 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-11 — Investor bisa mengunduh Laporan Bulanan (PDF) + halaman yang macet untuk skema tetap
+- Keluhan investor: tidak bisa mengunduh laporan. Penyebab: tombol "⬇ PDF" di `/investor/laporan` hanya `<div>` tanpa aksi sejak awal.
+- Sekarang tombolnya memanggil `GET /report?periode=YYYY-MM` lalu membuat PDF di browser (`src/lib/simplePdf.ts`, penulis PDF teks tanpa dependensi; isi di `src/lib/investorReportPdf.ts`). Isinya sama dengan "Alur Bagi Hasil" di halaman Pendapatan, angka apa adanya dari villa-api, tidak ada rumus baru. Bulan berjalan juga bisa diunduh, ditandai "angka sementara".
+- `/investor/pendapatan` dan `/investor/opex` menunggu `user.unit_id` sebelum memuat, sehingga akun tanpa unit fisik (Bu Mega, "Pemasukan Tetap") berputar selamanya. Syarat itu dihapus: villa-api `/report` mengabaikan `unit_id` untuk role owner dan memakai sesi. `/investor/notifikasi` juga tidak pernah menandai terbaca untuk akun itu; sudah diperbaiki. Kegagalan muat kini tampil sebagai pesan, bukan "Rp 0".
+- BELUM diubah (villa-api, perlu keputusan owner): `GET /notifications` untuk investor mengabaikan `unit_id`, jadi setiap investor melihat notifikasi check-in/checkout SEMUA unit (termasuk nama tamu) di halaman berjudul "Notifikasi Unit Anda"; dan `PATCH /notifications/read` menandai terbaca secara global, sehingga satu investor membuka halaman notifikasi menghapus badge semua investor.
+
 ## 2026-10-11 — Kamar view (Sawah View) dipertahankan harganya mulai pesan 12 Okt (owner-approved: "Ya bawa ke production")
 - Owner 2026-10-07: "mulai minggu depan kt pakai strategi mempertahankan harga kamar dgan view, jd yg kena promo2 itu adalah kamar non view, bgtu jga di ota".
 - villa-api `kamarViewDilindungi` (`KODE_KAMAR_VIEW = ['sawah_view']`, mulai tanggal pesan WIB `2026-10-12`): Sawah View di loonars.id = harga normal mesin harga (tanpa potongan website 82%) dan kode promo ditolak ("Promo berlaku untuk kamar Standard"). Standard tidak berubah. Mesin harga AI tidak diubah (owner belum memutuskan lantai 630rb; dibiarkan).

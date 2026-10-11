@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-11 — Unduh PDF Laporan Bulanan investor + halaman investor skema tetap tidak macet lagi
+- Lihat CURRENT_STATE.md 2026-10-11.
+
 ### 2026-10-11 — Sawah View tanpa potongan website & tanpa kode promo mulai pesan 12 Okt — owner-approved
 - Lihat CURRENT_STATE.md 2026-10-11.
 

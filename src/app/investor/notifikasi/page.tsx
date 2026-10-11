@@ -14,7 +14,9 @@ export default function NotifikasiPage() {
   const { notifications, refresh } = useNotifPoll(`unit_id=${unitId}&role=owner`, "is_read_owner");
 
   useEffect(() => {
-    if (!unitId) return;
+    // Tanpa syarat unitId: investor tanpa unit fisik (skema pemasukan tetap)
+    // dulu tidak pernah menandai notifikasinya terbaca, jadi badge merahnya
+    // menyala terus.
     api.patch("/notifications/read", { role: "owner" }).then(refresh);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [unitId]);
