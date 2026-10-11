@@ -48,7 +48,7 @@ describe("porsi", () => {
 
 describe("hitungLaporan", () => {
   const p = { mulai: "2026-09-30", akhir: "2026-10-06" };
-  it("bersih memakai cloudbeds_subtotal untuk OTA, kotor untuk website", () => {
+  it("pendapatan = total_bayar dikurangi potongan pemasaran, untuk semua channel", () => {
     const l = hitungLaporan(
       [
         bk({ sumber: "booking.com", total_bayar: 515142.5, cloudbeds_subtotal: 447950 }),
@@ -60,8 +60,7 @@ describe("hitungLaporan", () => {
       p,
       wib,
     );
-    expect(l.bersih).toBe(447950 + 600000);
-    expect(l.kotor).toBe(515142.5 + 600000);
+    expect(l.pendapatan).toBeCloseTo((515142.5 + 600000) * 0.725, 6);
     expect(l.jumlahCheckin).toBe(2);
     expect(l.malamTerisi).toBe(2);
     expect(l.malamTerisiMingguDepan).toBe(1);
@@ -87,7 +86,8 @@ describe("teksLaporan", () => {
     const l = hitungLaporan([bk({})], 13, { mulai: "2026-09-30", akhir: "2026-10-06" }, wib);
     const t = teksLaporan(l);
     expect(t).toContain("Minggu ke-1: 30 Sep – 6 Okt 2026");
-    expect(t).toContain("Rp500.000");
+    expect(t).toContain("Pendapatan villa: *Rp362.500*");
+    expect(t).not.toMatch(/fee OTA|kotor|marketing/i);
     expect(t).toContain("Agoda: 100% (1 booking)");
     expect(t).toContain("KOL");
     expect(t).toContain("okupansi 80% di akhir 2026");

@@ -4,7 +4,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { todayISO } from "./format";
 import { kirimDariNomorUtama } from "./mkhsistemWa";
 import { addDaysISO } from "./stayDates";
-import { geser, hitungLaporan, periodeMingguLalu, teksLaporan, type BookingRingkas } from "./investorWeeklyReportText";
+import {
+  MARKETING_PCT_DEFAULT,
+  geser,
+  hitungLaporan,
+  periodeMingguLalu,
+  teksLaporan,
+  type BookingRingkas,
+} from "./investorWeeklyReportText";
 
 /**
  * Laporan mingguan WhatsApp ke semua investor aktif (villa_users role
@@ -59,8 +66,13 @@ export async function kirimLaporanMingguanInvestor(
     .gt("tgl_checkin", akhirPlus1);
   if (eN) throw new Error(`gagal membaca booking baru: ${eN.message}`);
 
+  // Tarif potongan pemasaran yang sama dengan computeReport() villa-api.
+  const { data: fin } = await supabase.from("integration_settings").select("value").eq("key", "finance").maybeSingle();
+  const mp = (fin?.value as { marketing_pct?: unknown } | null)?.marketing_pct;
+  const marketingPct = typeof mp === "number" ? mp : MARKETING_PCT_DEFAULT;
+
   const semua = [...(bookings ?? []), ...(baru ?? [])] as BookingRingkas[];
-  const laporan = hitungLaporan(semua, jumlahUnit ?? 0, p, (iso) => todayISO(new Date(iso)));
+  const laporan = hitungLaporan(semua, jumlahUnit ?? 0, p, (iso) => todayISO(new Date(iso)), marketingPct);
   const pesan = teksLaporan(laporan);
 
   const { data: investor, error: eI } = await supabase

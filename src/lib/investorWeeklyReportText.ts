@@ -8,8 +8,11 @@ import { addDaysISO } from "./stayDates";
  * Aturannya disamakan dengan villa-api, bukan dikarang ulang:
  * - pemasukan diakui = status terjadwal/checkin/checkout dan tanggal
  *   check-in jatuh di minggu laporan (isPemasukanDiakui, 2026-10-05);
- * - bersih = cloudbeds_subtotal untuk booking OTA, = kotor untuk DIRECT
- *   (pendapatanBersih / normalizedChannel).
+ * - pendapatan = total_bayar dikurangi potongan pemasaran (marketing_pct,
+ *   sama dengan computeReport villa-api) -- angka yang sama dengan
+ *   "Pendapatan villa" di dashboard investor (lib/investorPendapatan.ts).
+ *   Owner 2026-10-11: investor hanya melihat omzet setelah potongan
+ *   marketing; fee OTA / marketing tidak disebut.
  * Okupansi = malam-kamar terisi / (jumlah unit x 7 malam).
  */
 
@@ -66,10 +69,8 @@ function kotor(b: BookingRingkas): number {
   return Number(b.total_bayar ?? 0) || 0;
 }
 
-function bersih(b: BookingRingkas): number {
-  if (SUMBER_DIRECT.has(String(b.sumber ?? "").toLowerCase())) return kotor(b);
-  return b.cloudbeds_subtotal != null ? Number(b.cloudbeds_subtotal) || 0 : kotor(b);
-}
+/** Default sama dengan computeReport() bila integration_settings.finance.marketing_pct kosong. */
+export const MARKETING_PCT_DEFAULT = 0.275;
 
 function dihitung(b: BookingRingkas): boolean {
   return (STATUS_DIHITUNG as readonly string[]).includes(b.status);
@@ -117,8 +118,8 @@ export interface LaporanMingguan {
   periode: Periode;
   mingguKe: number;
   jumlahUnit: number;
-  kotor: number;
-  bersih: number;
+  /** Omzet setelah potongan pemasaran -- satu-satunya angka pendapatan yang dikirim ke investor. */
+  pendapatan: number;
   malamTerisi: number;
   okupansi: number;
   okupansiMingguSebelumnya: number;
@@ -140,6 +141,7 @@ export function hitungLaporan(
   jumlahUnit: number,
   p: Periode,
   createdAtWIB: (iso: string) => string,
+  marketingPct: number = MARKETING_PCT_DEFAULT,
 ): LaporanMingguan {
   const kapasitas = jumlahUnit * 7;
   const sebelum = geser(p, -7);
@@ -161,8 +163,7 @@ export function hitungLaporan(
     periode: p,
     mingguKe: Math.max(1, Math.round((Date.parse(p.akhir) - Date.parse(MINGGU_PERTAMA_AKHIR)) / (7 * 86400000)) + 1),
     jumlahUnit,
-    kotor: checkinMingguIni.reduce((s, b) => s + kotor(b), 0),
-    bersih: checkinMingguIni.reduce((s, b) => s + bersih(b), 0),
+    pendapatan: checkinMingguIni.reduce((s, b) => s + kotor(b), 0) * (1 - marketingPct),
     malamTerisi,
     okupansi: pct(malamTerisi),
     okupansiMingguSebelumnya: pct(malamSebelum),
@@ -218,8 +219,7 @@ export function teksLaporan(l: LaporanMingguan): string {
 
   baris.push(
     "📊 *Kinerja Minggu Ini*",
-    `• Pendapatan bersih: *${rp(l.bersih)}*`,
-    `  (kotor ${rp(l.kotor)}, sudah dikurangi fee OTA)`,
+    `• Pendapatan villa: *${rp(l.pendapatan)}*`,
     `• Okupansi: *${persen1(l.okupansi)}* (${l.malamTerisi} dari ${l.jumlahUnit * 7} malam-kamar, ${l.jumlahUnit} unit)`,
     `• Minggu sebelumnya: ${persen1(l.okupansiMingguSebelumnya)}. *${arah}*`,
     `• Tamu check-in: ${l.jumlahCheckin} booking`,
