@@ -6869,12 +6869,27 @@ Deno.serve(async (req)=>{
     if(unit_id) q=q.or(`unit_id.eq.${unit_id},unit_id.is.null`);
     const {data,error}=await q;
     if(error) return err(error.message);
+    // Status terbaca per investor (migrasi 20261011000001): is_read_owner
+    // dihitung dari batas-terbaca akun ini. Akun yang belum pernah membuka
+    // Notifikasi sejak kolom itu ada (NULL) tetap memakai kolom lama.
+    if(isOwner){
+      const {data:me} = await supabase.from('villa_users').select('notif_dibaca_sampai').eq('id', session.uid).maybeSingle();
+      const batas = me?.notif_dibaca_sampai ? new Date(me.notif_dibaca_sampai).getTime() : null;
+      if(batas !== null){
+        return json((data ?? []).map(n => ({...n, is_read_owner: new Date(n.created_at).getTime() <= batas})));
+      }
+    }
     return json(data);
   }
   if(path==='/notifications/read' && m==='PATCH'){
-    // Catatan: is_read_owner adalah satu kolom untuk semua investor, jadi
-    // satu investor membuka Notifikasi menandai terbaca untuk semuanya.
-    // Status terbaca per investor butuh perubahan skema -- menunggu owner.
+    // Investor: hanya akun ini yang ditandai sudah membaca. Dulu kolom
+    // bersama is_read_owner yang diubah, sehingga satu investor membuka
+    // Notifikasi menghapus badge merah semua investor.
+    if(isOwner){
+      const {error} = await supabase.from('villa_users').update({notif_dibaca_sampai: new Date().toISOString()}).eq('id', session.uid);
+      if(error) return err(error.message);
+      return json({success:true});
+    }
     const {role}=await req.json();
     const field=role==='owner'?'is_read_owner':role==='admin'?'is_read_admin':'is_read_staff';
     await supabase.from('notifications').update({[field]:true}).eq(field,false);

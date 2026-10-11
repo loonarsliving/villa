@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-11 — Tanda baca notifikasi per investor + halaman Pertumbuhan Loonars
+- Lihat CURRENT_STATE.md 2026-10-11.
+
 ### 2026-10-11 — villa-api: notifikasi investor kembali menampilkan semua unit (koreksi owner)
 - Pembatasan per unit dari PR #197 dikembalikan; bagi hasil kumulatif, tidak per unit.
 
