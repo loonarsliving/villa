@@ -7,6 +7,7 @@ import { AppHome, type TabItem } from "@/components/AppHome";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { fmtCurrency, currentPeriod } from "@/lib/format";
+import { pendapatanInvestor } from "@/lib/investorPendapatan";
 import type { Report } from "@/lib/types";
 
 /**
@@ -64,7 +65,7 @@ export default function InvestorHomePage() {
           </div>
         </div>
         <div className="grid grid-cols-2 border-t border-slate-100">
-          <AngkaKecil label="Pendapatan villa" nilai={report?.gross_revenue} />
+          <AngkaKecil label="Pendapatan villa" nilai={report ? pendapatanInvestor(report) : undefined} />
           <AngkaKecil label="Laba bersih" nilai={report?.net ?? report?.gross_profit} garisKiri />
         </div>
       </section>

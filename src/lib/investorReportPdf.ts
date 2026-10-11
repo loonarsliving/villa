@@ -1,5 +1,6 @@
 import { fmtCurrencyFull } from "./format";
 import { A4_WIDTH, buildPdf, type PdfItem } from "./simplePdf";
+import { pendapatanInvestor } from "./investorPendapatan";
 import type { Report } from "./types";
 
 /**
@@ -12,18 +13,16 @@ import type { Report } from "./types";
  * dan pembagian antar-investor tidak ditampilkan, sama seperti dashboard.
  */
 export function investorReportLines(report: Report): { label: string; value: string; bold?: boolean }[] {
-  const g = report.gross_revenue || 0;
-  const opexPct = Math.round((report.opex_pct ?? 0.25) * 100);
-  const mkPct = Math.round((report.marketing_pct ?? 0.275) * 100);
+  // Pendapatan sudah setelah potongan pemasaran/OTA (lihat investorPendapatan.ts).
+  const pendapatan = pendapatanInvestor(report);
   const net = report.net ?? report.gross_profit ?? 0;
   const pengelola = report.pengelola_amount ?? report.loonars_amount ?? 0;
   const tetap = report.pemasukan_tetap ?? null;
   const bagianAnda = report.bagian_anda ?? report.per_investor_amount ?? 0;
 
   return [
-    { label: "Pendapatan Seluruh Villa", value: fmtCurrencyFull(g), bold: true },
-    { label: `Opex (${opexPct}% dari omzet)`, value: `- ${fmtCurrencyFull(report.opex_per_unit)}` },
-    { label: `Marketing (${mkPct}% dari omzet)`, value: `- ${fmtCurrencyFull(report.marketing_amount)}` },
+    { label: "Pendapatan Seluruh Villa", value: fmtCurrencyFull(pendapatan), bold: true },
+    { label: "Opex (sesuai akad)", value: `- ${fmtCurrencyFull(report.opex_per_unit)}` },
     { label: "Net Profit", value: fmtCurrencyFull(net), bold: true },
     { label: "Pool Investor (70%)", value: fmtCurrencyFull(report.owner_amount) },
     { label: "Loonars (30%)", value: fmtCurrencyFull(pengelola) },

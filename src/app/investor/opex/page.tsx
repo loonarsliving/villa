@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { fmtCurrency, currentPeriod, periodLabel } from "@/lib/format";
 import { Card, CardHeader, CardBody, Loading } from "@/components/Card";
+import { pendapatanInvestor } from "@/lib/investorPendapatan";
 import type { Report } from "@/lib/types";
 
 export default function OpexPage() {
@@ -28,8 +29,6 @@ export default function OpexPage() {
       .finally(() => setLoading(false));
   }, [unitId]);
 
-  const pct = Math.round((report?.opex_pct ?? 0.25) * 100);
-
   return (
     <InvestorShell pageTitle="Rincian Opex" pageSub="Biaya operasional properti">
       <Card>
@@ -41,14 +40,10 @@ export default function OpexPage() {
             <div className="text-[11.5px] text-ruby-500">{galat}</div>
           ) : (
             <>
-              <div className="flex items-baseline gap-3 mb-4">
-                <div className="font-serif text-4xl font-light text-gold-500">{pct}%</div>
-                <div className="text-xs text-ink/40">dari omzet kotor seluruh villa — dibekukan sesuai akad</div>
-              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-base-800 border border-ink/[0.08] rounded p-4">
-                  <div className="text-[9px] text-ink/30 uppercase tracking-wide">Gross Revenue</div>
-                  <div className="font-serif text-xl font-light text-ink mt-1">{fmtCurrency(report?.gross_revenue)}</div>
+                  <div className="text-[9px] text-ink/30 uppercase tracking-wide">Pendapatan Villa</div>
+                  <div className="font-serif text-xl font-light text-ink mt-1">{fmtCurrency(pendapatanInvestor(report))}</div>
                 </div>
                 <div className="bg-gold-500/10 border border-gold-500/25 rounded p-4">
                   <div className="text-[9px] text-gold-500 uppercase tracking-wide">Opex Seluruh Villa</div>
@@ -56,8 +51,8 @@ export default function OpexPage() {
                 </div>
               </div>
               <div className="text-[11px] text-ink/30 leading-relaxed mt-5 bg-base-800 border-l-2 border-gold-500/40 rounded-r p-3.5">
-                Opex properti tidak lagi dihitung dari rincian biaya aktual bulanan, melainkan tetap {pct}% dari omzet kotor
-                seluruh villa sesuai kesepakatan (akad) yang berlaku — sehingga jumlahnya konsisten dan mudah diprediksi setiap bulan.
+                Opex properti tidak dihitung dari rincian biaya aktual bulanan, melainkan tetap sesuai kesepakatan (akad) yang
+                berlaku — sehingga jumlahnya konsisten dan mudah diprediksi setiap bulan.
               </div>
             </>
           )}
