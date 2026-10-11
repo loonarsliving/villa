@@ -1,3 +1,4 @@
+import { pendapatanInvestor } from "./investorPendapatan";
 import type { Report } from "./types";
 
 /**
@@ -32,12 +33,13 @@ export function buildGrowthRows(
     .map((m, i) => ({ m, r: reports[i] }))
     .sort((a, b) => a.m.period.localeCompare(b.m.period));
 
-  const first = rows.findIndex(({ r }) => (r?.gross_revenue ?? 0) > 0);
+  const first = rows.findIndex(({ r }) => pendapatanInvestor(r) > 0);
   if (first < 0) return [];
 
   const out: GrowthRow[] = [];
   for (const { m, r } of rows.slice(first)) {
-    const gross = r?.gross_revenue ?? 0;
+    // Pendapatan setelah potongan pemasaran/OTA, sama dengan halaman Pendapatan.
+    const gross = pendapatanInvestor(r);
     const prev = out.at(-1);
     const berjalan = m.period === currentPeriod;
     out.push({

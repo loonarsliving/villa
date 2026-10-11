@@ -7,26 +7,13 @@ import { api } from "@/lib/api";
 import { fmtCurrency, currentPeriod, periodLabel } from "@/lib/format";
 import { Card, CardHeader, Loading } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
-import type { Report, OtaBreakdown } from "@/lib/types";
-
-const SUMBER_LABEL: Record<string, string> = {
-  "airbnb": "Airbnb",
-  "booking.com": "Booking.com",
-  "agoda": "Agoda",
-  "tiket": "Tiket.com",
-  "cloudbeds": "Cloudbeds (OTA lain/belum teridentifikasi)",
-  "walk-in": "Walk-in / Langsung",
-  "website": "Website Loonars",
-  "whatsapp": "WhatsApp",
-  "late-night": "Late Night",
-  "other": "Lainnya",
-};
+import { pendapatanInvestor } from "@/lib/investorPendapatan";
+import type { Report } from "@/lib/types";
 
 export default function PendapatanPage() {
   const { user } = useAuth();
   const unitId = user?.unit_id || "";
   const [report, setReport] = useState<Report | null>(null);
-  const [ota, setOta] = useState<OtaBreakdown | null>(null);
   const [loading, setLoading] = useState(true);
   const [galat, setGalat] = useState<string | null>(null);
 
@@ -34,23 +21,19 @@ export default function PendapatanPage() {
     // villa-api mengabaikan unit_id untuk investor dan memakai sesi login,
     // jadi investor tanpa unit fisik (skema pemasukan tetap) tetap dimuat --
     // dulu halaman ini menunggu unitId selamanya dan spinner tak pernah hilang.
-    Promise.all([
-      api.get<Report>(`/report?unit_id=${unitId}&periode=${currentPeriod()}`),
-      api.get<OtaBreakdown>(`/report/ota-breakdown?periode=${currentPeriod()}`),
-    ])
-      .then(([r, o]) => {
-        setReport(r);
-        setOta(o);
-      })
+    api
+      .get<Report>(`/report?unit_id=${unitId}&periode=${currentPeriod()}`)
+      .then(setReport)
       // Tanpa catch, kegagalan jaringan tampil sebagai "Rp 0" -- terbaca
       // seolah villa tidak berpendapatan sama sekali.
       .catch((e: unknown) => setGalat(e instanceof Error ? e.message : "Gagal memuat data."))
       .finally(() => setLoading(false));
   }, [unitId]);
 
-  const g = report?.gross_revenue || 0;
+  // Pendapatan sudah setelah potongan pemasaran/OTA; baris marketing tidak
+  // ditampilkan (owner 2026-10-11, lihat lib/investorPendapatan.ts).
+  const g = pendapatanInvestor(report);
   const o = report?.opex_per_unit || 0;
-  const mk = report?.marketing_amount || 0;
   const gp = report?.net ?? report?.gross_profit ?? 0;
   const ow = report?.owner_amount || 0;
   const lo = report?.pengelola_amount ?? report?.loonars_amount ?? 0;
@@ -60,13 +43,10 @@ export default function PendapatanPage() {
   // memang bukan angka yang dia terima.
   const pemasukanTetap = report?.pemasukan_tetap ?? null;
   const bagianAnda = report?.bagian_anda ?? perInvestor;
-  const opexPct = Math.round((report?.opex_pct ?? 0.25) * 100);
-  const mkPct = Math.round((report?.marketing_pct ?? 0.275) * 100);
 
   const rows: [string, number, string, boolean?, boolean?, boolean?][] = [
     ["Pendapatan Seluruh Villa", 100, fmtCurrency(g), false, true],
-    [`Opex (${opexPct}% dari omzet)`, Math.round((o / g || 0) * 100), `− ${fmtCurrency(o)}`, true],
-    [`Marketing (${mkPct}% dari omzet)`, Math.round((mk / g || 0) * 100), `− ${fmtCurrency(mk)}`, true],
+    ["Opex (sesuai akad)", Math.round((o / g || 0) * 100), `− ${fmtCurrency(o)}`, true],
     ["Net Profit", Math.round((gp / g || 0) * 100), fmtCurrency(gp), false, true],
     ["Pool Investor (70%)", 70, fmtCurrency(ow), false, false, true],
     ["Loonars (30%)", 30, fmtCurrency(lo), false],
@@ -79,8 +59,8 @@ export default function PendapatanPage() {
     <InvestorShell pageTitle="Pendapatan" pageSub="Pemasukan seluruh villa dan hak Anda">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3.5">
         <StatCard label={pemasukanTetap !== null ? "Pemasukan Anda" : "Bagian Anda"} value={fmtCurrency(bagianAnda)} accent="sage" />
-        <StatCard label="Gross Revenue" value={fmtCurrency(g)} sub="Seluruh villa" />
-        <StatCard label="Opex + Marketing" value={fmtCurrency(o + mk)} sub={`${opexPct}% + ${mkPct}%`} accent="gold" />
+        <StatCard label="Pendapatan Villa" value={fmtCurrency(g)} sub="Seluruh villa" />
+        <StatCard label="Opex" value={fmtCurrency(o)} sub="Sesuai akad" accent="gold" />
         <StatCard label="Net Profit" value={fmtCurrency(gp)} />
       </div>
       <Card>
@@ -118,47 +98,6 @@ export default function PendapatanPage() {
         )}
       </Card>
 
-      <Card className="mt-3.5">
-        <CardHeader
-          title="Rincian Potongan per Platform OTA"
-          subtitle={
-            ota?.commission_source === "cloudbeds_live"
-              ? `${periodLabel()} — persen komisi diambil langsung dari data Cloudbeds`
-              : `${periodLabel()} — belum bisa ambil % komisi dari Cloudbeds (key belum aktif)`
-          }
-        />
-        {loading ? (
-          <Loading />
-        ) : !ota || ota.sources.length === 0 ? (
-          <div className="px-4 sm:px-5 py-4 text-[11px] text-ink/40">Belum ada pendapatan tercatat bulan ini.</div>
-        ) : (
-          <>
-            {ota.sources.map((s) => (
-              <div key={s.sumber} className="flex items-center px-4 sm:px-5 py-2.5 border-b border-ink/[0.05] last:border-0 text-xs">
-                <div className="flex-1 min-w-0">
-                  <div className="text-ink/80">{SUMBER_LABEL[s.sumber] ?? s.sumber}</div>
-                  <div className="text-[10px] text-ink/30 mt-0.5">
-                    {s.commission_pct > 0 ? `Komisi ${s.commission_pct}%` : "Tanpa komisi (langsung)"}
-                  </div>
-                </div>
-                <div className="text-right shrink-0">
-                  <div className="font-mono text-[11.5px] text-ink/80">{fmtCurrency(s.gross)}</div>
-                  {s.commission_amount > 0 && (
-                    <div className="font-mono text-[10px] text-ruby-400">− {fmtCurrency(s.commission_amount)}</div>
-                  )}
-                </div>
-              </div>
-            ))}
-            <div className="flex items-center px-4 sm:px-5 py-3 bg-gold-500/10 text-xs">
-              <div className="flex-1 font-medium text-ink/80">Total setelah potongan OTA</div>
-              <div className="text-right">
-                <div className="font-mono text-[11.5px] font-semibold text-gold-500">{fmtCurrency(ota.total_net)}</div>
-                <div className="font-mono text-[10px] text-ink/30">dari {fmtCurrency(ota.total_gross)} kotor</div>
-              </div>
-            </div>
-          </>
-        )}
-      </Card>
     </InvestorShell>
   );
 }

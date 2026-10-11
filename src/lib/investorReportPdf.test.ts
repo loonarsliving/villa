@@ -30,7 +30,8 @@ function text(bytes: Uint8Array): string {
 describe("investorReportLines", () => {
   it("menampilkan angka server apa adanya, termasuk Bagian Anda", () => {
     const lines = investorReportLines(base);
-    expect(lines[0]).toMatchObject({ label: "Pendapatan Seluruh Villa", value: "Rp 100.000.000" });
+    expect(lines[0]).toMatchObject({ label: "Pendapatan Seluruh Villa", value: "Rp 72.500.000" });
+    expect(lines.map((l) => l.label).join(" ")).not.toMatch(/marketing/i);
     expect(lines.at(-1)).toMatchObject({ label: "Bagian Anda", value: "Rp 2.557.692" });
   });
 
