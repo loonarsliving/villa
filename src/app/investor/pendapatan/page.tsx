@@ -28,9 +28,12 @@ export default function PendapatanPage() {
   const [report, setReport] = useState<Report | null>(null);
   const [ota, setOta] = useState<OtaBreakdown | null>(null);
   const [loading, setLoading] = useState(true);
+  const [galat, setGalat] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!unitId) return;
+    // villa-api mengabaikan unit_id untuk investor dan memakai sesi login,
+    // jadi investor tanpa unit fisik (skema pemasukan tetap) tetap dimuat --
+    // dulu halaman ini menunggu unitId selamanya dan spinner tak pernah hilang.
     Promise.all([
       api.get<Report>(`/report?unit_id=${unitId}&periode=${currentPeriod()}`),
       api.get<OtaBreakdown>(`/report/ota-breakdown?periode=${currentPeriod()}`),
@@ -39,6 +42,9 @@ export default function PendapatanPage() {
         setReport(r);
         setOta(o);
       })
+      // Tanpa catch, kegagalan jaringan tampil sebagai "Rp 0" -- terbaca
+      // seolah villa tidak berpendapatan sama sekali.
+      .catch((e: unknown) => setGalat(e instanceof Error ? e.message : "Gagal memuat data."))
       .finally(() => setLoading(false));
   }, [unitId]);
 
@@ -88,6 +94,8 @@ export default function PendapatanPage() {
         />
         {loading ? (
           <Loading />
+        ) : galat ? (
+          <div className="px-4 sm:px-5 py-4 text-[11.5px] text-ruby-500">{galat}</div>
         ) : (
           rows.map(([lbl, pct, val, isCost, isTot, isGold], i) => (
             <div key={i} className={`flex items-center px-4 sm:px-5 py-2.5 border-b border-ink/[0.05] last:border-0 text-xs ${isTot ? "bg-gold-500/10" : ""}`}>

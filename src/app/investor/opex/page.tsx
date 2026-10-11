@@ -13,12 +13,18 @@ export default function OpexPage() {
   const unitId = user?.unit_id || "";
   const [report, setReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
+  const [galat, setGalat] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!unitId) return;
+    // villa-api mengabaikan unit_id untuk investor dan memakai sesi login,
+    // jadi investor tanpa unit fisik (skema pemasukan tetap) tetap dimuat --
+    // dulu halaman ini menunggu unitId selamanya dan spinner tak pernah hilang.
     api
       .get<Report>(`/report?unit_id=${unitId}&periode=${currentPeriod()}`)
       .then(setReport)
+      // Tanpa catch, kegagalan jaringan tampil sebagai "Rp 0" -- terbaca
+      // seolah villa tidak berpendapatan sama sekali.
+      .catch((e: unknown) => setGalat(e instanceof Error ? e.message : "Gagal memuat data."))
       .finally(() => setLoading(false));
   }, [unitId]);
 
@@ -31,6 +37,8 @@ export default function OpexPage() {
         <CardBody>
           {loading ? (
             <Loading />
+          ) : galat ? (
+            <div className="text-[11.5px] text-ruby-500">{galat}</div>
           ) : (
             <>
               <div className="flex items-baseline gap-3 mb-4">
