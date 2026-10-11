@@ -6859,9 +6859,23 @@ Deno.serve(async (req)=>{
   }
 
   if(path==='/notifications' && m==='GET'){
+    // Investor hanya melihat notifikasi unit miliknya (owner 2026-10-11).
+    // Dulu unit_id diabaikan untuk investor TANPA penyaring pengganti, jadi
+    // setiap investor melihat check-in/checkout seluruh villa -- termasuk
+    // nama tamu unit orang lain -- di halaman "Notifikasi Unit Anda".
+    // Notifikasi tanpa unit_id (booking kedaluwarsa, pembayaran otomatis)
+    // juga menyebut unit dan nama tamu lain, jadi ikut tidak ditampilkan.
+    if(isOwner){
+      const ids = await unitIdsForSession(session);
+      if(!ids.length) return json([]);
+      const {data,error}=await supabase.from('notifications').select('*')
+        .in('target_role',['owner','all']).in('unit_id',ids)
+        .order('created_at',{ascending:false}).limit(30);
+      if(error) return err(error.message);
+      return json(data);
+    }
     const role=url.searchParams.get('role')??'all';
-    let unit_id=url.searchParams.get('unit_id');
-    if(isOwner) unit_id = undefined;
+    const unit_id=url.searchParams.get('unit_id');
     let q=supabase.from('notifications').select('*').in('target_role',[role,'all']).order('created_at',{ascending:false}).limit(30);
     if(unit_id) q=q.or(`unit_id.eq.${unit_id},unit_id.is.null`);
     const {data,error}=await q;
@@ -6869,6 +6883,14 @@ Deno.serve(async (req)=>{
     return json(data);
   }
   if(path==='/notifications/read' && m==='PATCH'){
+    // Investor: hanya menandai notifikasi unitnya sendiri. Dulu satu investor
+    // membuka halaman Notifikasi menandai SEMUA notifikasi terbaca, sehingga
+    // badge merah di akun investor lain ikut hilang.
+    if(isOwner){
+      const ids = await unitIdsForSession(session);
+      if(ids.length) await supabase.from('notifications').update({is_read_owner:true}).eq('is_read_owner',false).in('unit_id',ids);
+      return json({success:true});
+    }
     const {role}=await req.json();
     const field=role==='owner'?'is_read_owner':role==='admin'?'is_read_admin':'is_read_staff';
     await supabase.from('notifications').update({[field]:true}).eq(field,false);
