@@ -642,6 +642,57 @@ async function kirimInfoMalam(booking, securityTersedia = null){
   return ok ? 'terkirim' : 'gagal';
 }
 
+// ── Ajakan pesan langsung saat checkout ────────────────────────────────
+// Owner 2026-10-13: "Sy ingin orng lebih banyak melalui direct booking, karna
+// lewat agoda pencairannya 1 bulan trllu lama". Tamu yang checkout dikirimi
+// ucapan terima kasih + ajakan memesan langsung di loonars.id untuk kunjungan
+// berikutnya. Dikirim ke nomor WhatsApp yang tamu berikan sendiri di kartu
+// check-in -- BUKAN lewat chat OTA (Agoda/Booking melarang mengajak tamu
+// pindah lewat sistem pesan mereka).
+//
+// Sengaja tanpa kode promo: harga website sudah lebih murah dari OTA (lihat
+// computeWebsiteStayPrice), dan kode promo dijepit ke min_rate sehingga di
+// hari sepi tidak lebih murah dari harga website. Menginap gratis (investor,
+// KOL) dan late night tidak dikirimi.
+const SUMBER_TANPA_AJAKAN_DIRECT = ['late-night', 'investor', 'kol'];
+
+function teksAjakPesanDirect({nama, bahasa}){
+  if(bahasa === 'en'){
+    return `Thank you for staying with us at Loonars Private Living, ${nama || 'dear guest'} 🙏\n\n`+
+      `We hope you enjoyed your stay and have a safe journey onward.\n\n`+
+      `Whenever you'd like to come back, book directly at loonars.id — our website price is usually lower than on travel apps, and payment is easy via QRIS.\n\n`+
+      `👉 https://loonars.id\n\n`+
+      `We look forward to welcoming you again 🌿`;
+  }
+  return `Terima kasih sudah menginap di Loonars Private Living, Kak${nama ? ' ' + nama : ''} 🙏\n\n`+
+    `Semoga istirahatnya menyenangkan dan perjalanan Kakak selanjutnya lancar.\n\n`+
+    `Kalau suatu saat ingin menginap lagi, pesan langsung saja di loonars.id ya Kak — harga di website kami biasanya lebih hemat dibanding aplikasi travel, dan pembayarannya mudah lewat QRIS.\n\n`+
+    `👉 https://loonars.id\n\n`+
+    `Kami tunggu kedatangan Kakak berikutnya 🌿`;
+}
+
+/** Sekali per booking. 'terkirim' | 'sudah' | 'dilewati' | 'tanpa_hp' | 'gagal'. */
+async function kirimAjakPesanDirect(bookingId){
+  const {data:bk} = await supabase.from('bookings')
+    .select('id,unit_id,guest_id,guest_nama,sumber,is_free_stay').eq('id', bookingId).maybeSingle();
+  if(!bk || bk.is_free_stay || SUMBER_TANPA_AJAKAN_DIRECT.includes(bk.sumber)) return 'dilewati';
+
+  const {data:sudah} = await supabase.from('wa_messages_log')
+    .select('id').eq('booking_id', bk.id).eq('template_type','ajak_pesan_direct').eq('status','sent').limit(1);
+  if(sudah?.length) return 'sudah';
+
+  let hp = null;
+  if(bk.guest_id){
+    const {data:g} = await supabase.from('guests').select('hp').eq('id', bk.guest_id).maybeSingle();
+    hp = g?.hp ?? null;
+  }
+  if(!hp) return 'tanpa_hp';
+
+  const ok = await sendWa(hp, teksAjakPesanDirect({nama: bk.guest_nama, bahasa: bahasaDariNomorHp(hp)}),
+    {booking_id: bk.id, unit_id: bk.unit_id, template_type:'ajak_pesan_direct'});
+  return ok ? 'terkirim' : 'gagal';
+}
+
 /** "YYYY-MM-DD" (tanggal kalender, bukan jam) -> "5 Okt" / "5 Oct", tahun opsional. */
 function tanggalSingkat(iso, bahasa, denganTahun){
   const d = new Date(`${iso}T00:00:00Z`);
@@ -6824,6 +6875,10 @@ Deno.serve(async (req)=>{
     }
 
     await notif(data.unit_id,'all','checkout',`Checkout — Unit ${data.unit_nomor}`,`${data.guest_nama} sudah checkout. Housekeeping dijadwalkan.`,b.booking_id);
+    // Ajakan pesan langsung di loonars.id. Gagal kirim tidak boleh
+    // menggagalkan checkout yang sudah tercatat.
+    try { await kirimAjakPesanDirect(b.booking_id); }
+    catch(e){ console.error('[ajak-direct] checkout', e?.message ?? e); }
     return json({success:true});
   }
 
