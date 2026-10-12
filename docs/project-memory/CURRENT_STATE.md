@@ -3,6 +3,10 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-13 — Harga website Standard mengikuti harga Agoda dikurangi Rp20-50 rb (BELUM MERGE, menunggu owner)
+- Owner 2026-10-13: "Soal website ttp lihat brapa harga agoda menjual kamar dan turunkan 20-50 ribu dri harga agoda". Owner memasang Base Rate Adjustment Standard: Agoda +100.000, Booking.com +70.000; Traveloka & Airbnb tidak.
+- villa-api `aturanHargaWebsite`/`hargaWebsiteSemalam`: Standard = (harga mesin + 100rb) x 0,85 dikurangi 5% (dijepit 20-50rb), bulat ke bawah Rp1.000; pengaman tidak di bawah yang dibayar Agoda (80% x (harga mesin + 100rb)) dan tidak di atas harga mesin. Angka tambahan/promo Agoda bisa diubah tanpa deploy lewat integration_settings 'harga_website_agoda' (default di kode). Sawah View tetap harga mesin; tipe lain tetap aturan 82%.
+
 ## 2026-10-13 — Batas bawah Standard Rp500 rb + WA ajakan pesan langsung saat checkout
 - Owner 2026-10-13: "naikkn batas bawah di 500 ribu untuk kamar standart". Diubah langsung di data (bukan kode): `villa_room_types.min_rate` Standard 450000 -> 500000, dan `integration_settings.villa_floor_ramp.room_types.standard.from` 450000 -> 500000 (tetap menuju 550000). Diubah 13 Okt 00.08 WIB, sebelum run harga malam itu. Sawah View tidak berubah.
 - Harga website (82%) di malam sepi ikut naik ke ~Rp412 rb; owner belum memutuskan apakah website juga minimal 500 rb.

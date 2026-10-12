@@ -1918,11 +1918,48 @@ function kamarViewDilindungi(roomTypeCode){
   return KODE_KAMAR_VIEW.includes(String(roomTypeCode ?? '')) && todayWIB() >= KAMAR_VIEW_TANPA_PROMO_MULAI;
 }
 
-async function batasBawahWebsitePerMalam(roomTypeId){
-  if(!roomTypeId) return 0;
+/**
+ * Kamar Standard: harga website mengikuti harga Agoda (owner 2026-10-13:
+ * "ttp lihat brapa harga agoda menjual kamar dan turunkan 20-50 ribu dri
+ * harga agoda").
+ *
+ * Harga tamu Agoda (termasuk pajak, sebelum kupon AGODASPONSORED yang
+ * dibiayai Agoda sendiri dan tidak bisa kita ketahui) =
+ *   (harga mesin + Base Rate Adjustment Agoda di Cloudbeds) x (1 - promo Agoda).
+ * Rumus ini cocok persis dengan screenshot owner 13 Okt: 519.000 x 0,85 / 1,1
+ * = 401.046 (Agoda menampilkan harga tanpa pajak 10%).
+ *
+ * Website = harga Agoda dikurangi 5% (dijepit Rp20-50 rb), dibulatkan ke
+ * bawah ke Rp1.000. Pengaman: tidak di bawah yang dibayar Agoda ke villa (80%
+ * dari harga mesin + tambahan Agoda, terbukti dari booking Sawah 10 & 14 Okt)
+ * dan tidak di atas harga mesin.
+ *
+ * Tambahan dan promo Agoda diatur owner di Cloudbeds/Agoda, BUKAN di sini.
+ * Kalau owner mengubahnya, ubah juga integration_settings 'harga_website_agoda'
+ * (tanpa baris itu dipakai default di bawah).
+ */
+const HARGA_WEBSITE_AGODA_DEFAULT = {
+  promo_pct: 15,
+  tambahan: {standard: 100000},
+  selisih_pct: 5, selisih_min: 20000, selisih_max: 50000,
+};
+
+/** Aturan harga website satu tipe unit: 'normal' (kamar view), 'agoda', atau 'faktor' (82%). */
+async function aturanHargaWebsite(roomTypeId){
+  if(!roomTypeId) return {jenis:'faktor', lantai:0};
   const {data:rt} = await supabase.from('villa_room_types').select('code,min_rate').eq('id', roomTypeId).maybeSingle();
-  // Tanpa potongan: lantai = tak terhingga, dijepit ke harga normal di hargaWebsiteSemalam.
-  if(kamarViewDilindungi(rt?.code)) return Infinity;
+  if(kamarViewDilindungi(rt?.code)) return {jenis:'normal'};
+
+  const agoda = {...HARGA_WEBSITE_AGODA_DEFAULT, ...(await getSetting('harga_website_agoda'))};
+  const tambahan = rt?.code ? agoda.tambahan?.[rt.code] : undefined;
+  if(tambahan !== undefined && tambahan !== null && Number.isFinite(Number(tambahan))){
+    return {
+      jenis:'agoda', tambahan:Number(tambahan), promo:Number(agoda.promo_pct)/100,
+      selisihPct:Number(agoda.selisih_pct), selisihMin:Number(agoda.selisih_min), selisihMax:Number(agoda.selisih_max),
+    };
+  }
+
+  // Tipe unit lain: aturan lama 82%, tidak di bawah 82% batas bawah (ikut ramp).
   let lantai = Number(rt?.min_rate ?? 0);
   const ramp = await getSetting('villa_floor_ramp');
   const cfg = rt?.code ? ramp?.room_types?.[rt.code] : null;
@@ -1930,22 +1967,31 @@ async function batasBawahWebsitePerMalam(roomTypeId){
     const p = Math.max(0, Math.min(1, Number(ramp.progress)));
     lantai = Math.max(lantai, Math.round((Number(cfg.from) + (Number(cfg.to) - Number(cfg.from)) * p) / 1000) * 1000);
   }
-  return Math.round(lantai * HARGA_WEBSITE_FAKTOR / 1000) * 1000;
+  return {jenis:'faktor', lantai: Math.round(lantai * HARGA_WEBSITE_FAKTOR / 1000) * 1000};
 }
 
-function hargaWebsiteSemalam(normal, lantaiWebsite){
+function hargaWebsiteSemalam(normal, aturan){
   if(!(normal > 0)) return normal;
+  if(aturan.jenis === 'normal') return normal;
+  if(aturan.jenis === 'agoda'){
+    const dikirimKeAgoda = normal + aturan.tambahan;
+    const hargaTamuAgoda = dikirimKeAgoda * (1 - aturan.promo);
+    const selisih = Math.min(aturan.selisihMax, Math.max(aturan.selisihMin, Math.round(hargaTamuAgoda * aturan.selisihPct / 100)));
+    const website = Math.floor((hargaTamuAgoda - selisih) / 1000) * 1000;
+    const dibayarAgoda = Math.ceil(dikirimKeAgoda * HARGA_WEBSITE_MIN_FAKTOR_AGODA / 1000) * 1000;
+    return Math.min(normal, Math.max(website, dibayarAgoda));
+  }
   const diskon = Math.floor(normal * HARGA_WEBSITE_FAKTOR / 1000) * 1000;
   const minAgoda = Math.ceil(normal * HARGA_WEBSITE_MIN_FAKTOR_AGODA / 1000) * 1000;
-  return Math.min(normal, Math.max(diskon, minAgoda, lantaiWebsite));
+  return Math.min(normal, Math.max(diskon, minAgoda, aturan.lantai));
 }
 
 /** {normal, website} untuk satu masa menginap di loonars.id. */
 async function computeWebsiteStayPrice(unit, tgl_checkin, nights){
   const perMalam = await stayNightRates(unit, tgl_checkin, nights);
-  const lantaiWebsite = await batasBawahWebsitePerMalam(unit.room_type_id);
+  const aturan = await aturanHargaWebsite(unit.room_type_id);
   const normal = perMalam.reduce((a,b)=>a+b, 0);
-  const website = perMalam.reduce((a,r)=>a + hargaWebsiteSemalam(r, lantaiWebsite), 0);
+  const website = perMalam.reduce((a,r)=>a + hargaWebsiteSemalam(r, aturan), 0);
   return {normal, website};
 }
 
