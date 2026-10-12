@@ -483,6 +483,20 @@ Temuan sampingan (belum diperbaiki, di luar lingkup): webhook Cloudbeds
 sync 10 menit. Booking website yang sudah didorong ke Cloudbeds bisa
 tertimpa tarif/sumber Cloudbeds oleh event webhook.
 
+## 2026-10-12 — Iklan tidak masuk Chat resepsionis
+
+Owner minta pesan dari iklan tidak masuk resepsionis. Kasus nyata: lead iklan
+Meta (properti/investasi Mkhsistem) menulis "Hello! Can I get more info on this?
+profit sharing usaha sewa villa di Ciwidey bisa?" -- lolos karena kata "sewa
+villa", disapa sebagai tamu Loonars, dan dibalas resepsionis. Payload WhaCenter
+untuk klik iklan itu tidak membawa `ad_reply` sama sekali, jadi penandanya teks
+bawaan iklan (`dariIklan`, `src/lib/waChat.ts`). Aturan baru di
+`bolehMasukResepsionis()`: pesan iklan tidak pernah membuka percakapan baru di
+resepsionis (walau menyebut sewa villa atau nomornya ada di `guests`); nomor
+yang sudah punya percakapan tetap lolos. Karena `villa: false`, Mkhsistem
+memproses lead itu lewat jalur iklan/sales seperti biasa. Data 60 hari: dari
+~40 pesan iklan di 0822, hanya kasus ini yang pernah masuk resepsionis.
+
 ## 2026-10-09 — Chat WhatsApp di menu manager
 
 Owner: *"fitur chat juga bawa ke dashboard Beca"*. `/manager/chat`

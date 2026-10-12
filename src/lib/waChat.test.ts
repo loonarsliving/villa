@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { akhiranNomor, cukupUntukMenebakBahasa, dariTombolWebsite, menyebutSewaVilla, pilihBookingTerbaik, teksSapaanPertama } from "./waChat";
+import { akhiranNomor, cukupUntukMenebakBahasa, dariIklan, dariTombolWebsite, menyebutSewaVilla, pilihBookingTerbaik, teksSapaanPertama } from "./waChat";
 
 describe("cukupUntukMenebakBahasa", () => {
   it("jawaban pendek tidak dipakai menebak bahasa (tamu Indonesia yang menjawab 'ok')", () => {
@@ -136,5 +136,23 @@ describe("pilihBookingTerbaik", () => {
       { id: "b2", status: "menunggu_pembayaran" },
     ]);
     expect(r).toEqual({ bookingId: null, statusTamu: "prospek" });
+  });
+});
+
+describe("dariIklan", () => {
+  it("teks bawaan iklan Click-to-WhatsApp Meta dikenali (Inggris dan Indonesia)", () => {
+    expect(dariIklan("Hello! Can I get more info on this?")).toBe(true);
+    expect(dariIklan("Halo! Bisakah saya mendapatkan info selengkapnya tentang ini?")).toBe(true);
+    expect(dariIklan("Halo! Bisakah saya mendapatkan info selengkapnya tentang ini?  LOKASI LENGKAPNYA DI MANA ?")).toBe(true);
+  });
+  it("kasus nyata 2026-10-12: iklan + 'sewa villa' tetap iklan, walau menyebutSewaVilla juga true", () => {
+    const t = "Hello! Can I get more info on this? profit sharing usaha sewa villa di Ciwidey bisa?";
+    expect(dariIklan(t)).toBe(true);
+    expect(menyebutSewaVilla(t)).toBe(true);
+  });
+  it("pertanyaan tamu biasa dan teks tombol website bukan iklan", () => {
+    expect(dariIklan("Halo, saya ingin tanya soal menginap di Loonars Private Living Yogyakarta")).toBe(false);
+    expect(dariIklan("Can I get more info on the pool?")).toBe(false);
+    expect(dariIklan("Mau tanya info selengkapnya tentang ini kak, harga per malam berapa?")).toBe(false);
   });
 });

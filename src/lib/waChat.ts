@@ -88,6 +88,25 @@ export function menyebutSewaVilla(teks: string): boolean {
 }
 
 /**
+ * Teks bawaan WhatsApp saat orang menekan iklan Click-to-WhatsApp Meta (bahasa
+ * Inggris dan Indonesia, persis seperti tercatat di ai_conversations). Iklan di
+ * nomor 0822 adalah iklan properti/investasi Mkhsistem, jadi pesannya milik tim
+ * sales, bukan resepsionis -- walau penanya menambahkan "sewa villa" (kasus nyata
+ * 2026-10-12: "Hello! Can I get more info on this? profit sharing usaha sewa villa
+ * di Ciwidey bisa?" masuk Chat dan disapa sebagai tamu). Penanda iklan dari
+ * WhaCenter (`ad_reply`) tidak bisa diandalkan karena sering kosong, jadi teksnya
+ * yang dipakai.
+ */
+const PENANDA_IKLAN: RegExp[] = [
+  /^\s*(hello|hi|halo)\W*\s*can i get more info(rmation)? on this\b/i,
+  /^\s*(halo|hai|hello)\W*\s*bisakah saya mendapatkan info(rmasi)? (selengkapnya|lebih lanjut) tentang ini\b/i,
+];
+
+export function dariIklan(teks: string): boolean {
+  return PENANDA_IKLAN.some((re) => re.test(teks));
+}
+
+/**
  * Pesan yang dibuka dari tombol WhatsApp Private Living di loonars.id: semua
  * teks tombol itu diawali "Halo" lalu segera menyebut "Loonars (Private) Living".
  * Dipakai untuk karyawan/kontraktor: mereka hanya masuk Chat resepsionis kalau
@@ -151,6 +170,12 @@ export async function kirimSapaanPertamaAman(
  * sebagai tamu. Tanpa ini, "tamu yang menginap di A2 komplain" dari owner akan
  * masuk ke layar resepsionis dan owner dikirimi sapaan tamu.
  *
+ * Pesan dari iklan Meta (dariIklan) tidak pernah membuka percakapan baru di
+ * resepsionis, walau menyebut sewa villa atau nomornya pernah jadi tamu -- iklan
+ * itu urusan sales Mkhsistem (permintaan owner 2026-10-12). Hanya nomor yang
+ * SUDAH punya percakapan resepsionis yang tetap lolos, supaya obrolan yang
+ * sedang berjalan tidak terputus.
+ *
  * Keputusan ini juga dipakai Mkhsistem: kalau lolos, Mkhsistem tidak membalas
  * dengan AI. Kalau database gagal dibaca, pesan TIDAK diloloskan: chat bisnis
  * lain lebih tidak boleh bocor ke resepsionis, dan aslinya tetap tersimpan di
@@ -158,12 +183,14 @@ export async function kirimSapaanPertamaAman(
  */
 export async function bolehMasukResepsionis(supabase: SupabaseClient, phoneMentah: string, teks: string): Promise<boolean> {
   if (await orangDalamMkhsistem(supabase, phoneMentah)) return dariTombolWebsite(teks);
-  if (menyebutSewaVilla(teks)) return true;
+  const iklan = dariIklan(teks);
+  if (!iklan && menyebutSewaVilla(teks)) return true;
 
   const phone = nomorKanonik(phoneMentah);
   const { data: existing, error: convError } = await supabase.from("wa_conversations").select("id").eq("phone", phone).maybeSingle();
   if (convError) console.error("[waChat] gagal memeriksa percakapan lama", convError.message);
   if (existing) return true;
+  if (iklan) return false;
 
   const { data: guests, error: guestError } = await supabase.from("guests").select("hp").not("hp", "is", null).neq("hp", "");
   if (guestError) console.error("[waChat] gagal memeriksa data tamu", guestError.message);
