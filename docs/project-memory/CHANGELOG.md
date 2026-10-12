@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-13 — WA ajakan pesan langsung di loonars.id saat checkout; batas bawah Standard 500 rb (data)
+- Lihat CURRENT_STATE.md 2026-10-13.
+
 ### 2026-10-12 — Pesan dari iklan Meta tidak lagi masuk Chat resepsionis
 - `bolehMasukResepsionis()` kini menolak pesan pembuka iklan Click-to-WhatsApp ("Hello! Can I get more info on this?" / "Halo! Bisakah saya mendapatkan info selengkapnya tentang ini?", `dariIklan` di `src/lib/waChat.ts`) walau menyebut "sewa villa" atau nomornya tamu lama; hanya nomor yang sudah punya percakapan resepsionis tetap lolos. Pemicu: lead iklan "profit sharing usaha sewa villa di Ciwidey" masuk Chat dan disapa sebagai tamu. Lihat CURRENT_STATE.md 2026-10-12.
 

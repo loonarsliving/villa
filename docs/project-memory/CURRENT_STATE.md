@@ -3,6 +3,13 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-13 — Batas bawah Standard Rp500 rb + WA ajakan pesan langsung saat checkout
+- Owner 2026-10-13: "naikkn batas bawah di 500 ribu untuk kamar standart". Diubah langsung di data (bukan kode): `villa_room_types.min_rate` Standard 450000 -> 500000, dan `integration_settings.villa_floor_ramp.room_types.standard.from` 450000 -> 500000 (tetap menuju 550000). Diubah 13 Okt 00.08 WIB, sebelum run harga malam itu. Sawah View tidak berubah.
+- Harga website (82%) di malam sepi ikut naik ke ~Rp412 rb; owner belum memutuskan apakah website juga minimal 500 rb.
+- Owner berencana memasang Base Rate Adjustment +Rp100.000 untuk Standard khusus Agoda di Cloudbeds Distribution (Agoda mencairkan dana 30 hari setelah checkout; Booking/Traveloka mingguan; website QRIS langsung). Tidak bisa diatur dari sistem ini. Catatan: penyesuaian per channel baru terkirim ke OTA saat harga tanggal itu dikirim ulang (run malam / Full Sync).
+- Koreksi pemahaman Agoda (dari screenshot owner 13 Okt): harga tamu Agoda = harga Cloudbeds x 0,85 (promo owner) / 1,1 (tampil tanpa pajak), kadang dikurangi kupon AGODASPONSORED yang dibiayai Agoda; villa tetap menerima 80% harga Cloudbeds. Jadi Agoda bisa tampil lebih murah dari website karena kupon Agoda.
+- villa-api `kirimAjakPesanDirect` (dipanggil dari POST /checkout, sekali per booking, template `ajak_pesan_direct`): ucapan terima kasih + ajakan pesan langsung di loonars.id ke nomor WA tamu (guests.hp), bahasa id/en dari nomor. Tidak untuk late-night, investor, KOL, atau menginap gratis. Tanpa kode promo. Gagal kirim tidak menggagalkan checkout.
+
 ## 2026-10-11 — Investor bisa mengunduh Laporan Bulanan (PDF) + halaman yang macet untuk skema tetap
 - Keluhan investor: tidak bisa mengunduh laporan. Penyebab: tombol "⬇ PDF" di `/investor/laporan` hanya `<div>` tanpa aksi sejak awal.
 - Sekarang tombolnya memanggil `GET /report?periode=YYYY-MM` lalu membuat PDF di browser (`src/lib/simplePdf.ts`, penulis PDF teks tanpa dependensi; isi di `src/lib/investorReportPdf.ts`). Isinya sama dengan "Alur Bagi Hasil" di halaman Pendapatan, angka apa adanya dari villa-api, tidak ada rumus baru. Bulan berjalan juga bisa diunduh, ditandai "angka sementara".
