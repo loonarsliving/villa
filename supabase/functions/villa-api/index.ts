@@ -203,6 +203,53 @@ async function notifPaketResepsionis(booking){
     `${booking.guest_nama ?? 'Tamu'} sudah lunas dan memesan add-on: ${booking.paket_dekorasi}. Check-in ${booking.tgl_checkin}, Unit ${booking.unit_nomor}. Siapkan sebelum tamu datang (isi paket: loonars.id/private-living#paket).`, booking.id);
 }
 
+/**
+ * Pesanan add-on terpisah (tabel addon_orders, owner 2026-10-13 "Setuju, A"):
+ * tamu yang sudah booking -- termasuk lewat OTA -- memesan BBQ sendiri lewat
+ * loonars.id/bbq dan membayar dengan QRIS yang sama. Tidak memegang unit dan
+ * bukan pendapatan kamar. Pesanan yang belum dibayar tidak dibatalkan oleh
+ * cron; ia cukup berhenti dianggap hidup setelah BATAS_BAYAR_ADDON_JAM
+ * (tidak lagi dicocokkan ke email dan kode uniknya boleh dipakai ulang).
+ */
+const BATAS_BAYAR_ADDON_JAM = 24;
+function batasHidupAddonIso(){ return new Date(Date.now() - BATAS_BAYAR_ADDON_JAM*3600*1000).toISOString(); }
+function invoiceNoAddon(order){
+  const ymd = todayWIB(new Date(order.created_at)).replace(/-/g,'');
+  return `INV-AO-${ymd}-${String(order.id).slice(0,8).toUpperCase()}`;
+}
+
+/**
+ * Menandai pesanan add-on lunas (dari email BTN atau balasan LUNAS) dan
+ * memberi tahu resepsionis. Hanya baris yang masih menunggu pembayaran yang
+ * berubah, jadi dua pemindaian bersamaan tidak memberi notifikasi dua kali.
+ */
+async function lunaskanAddonOrder(order){
+  const invoice_no = order.invoice_no ?? invoiceNoAddon(order);
+  const {data:ok} = await supabase.from('addon_orders')
+    .update({status:'lunas', paid_at:new Date().toISOString(), invoice_no})
+    .eq('id', order.id).eq('status','menunggu_pembayaran').select('id');
+  if(!ok?.length) return {matched:false};
+  const qty = Number(order.qty ?? 1);
+  await notif(null, 'receptionist', 'booking', `🔥 Siapkan ${order.item}${qty > 1 ? ` x${qty}` : ''} -- ${order.tanggal}`,
+    `${order.guest_nama} (${order.hp}) sudah lunas memesan ${order.item}${qty > 1 ? ` x${qty}` : ''} untuk tanggal ${order.tanggal}. Menginap: ${order.info_menginap || '-'}.${order.catatan ? ` Catatan: ${order.catatan}.` : ''} Pesanan ${paymentCode(order.id)} -- cocokkan dengan tamu yang menginap.`, null);
+  return {matched:true, addon_order_id: order.id, nominal: Number(order.total_bayar), invoice_no};
+}
+
+/** Padanan tryConfirmBookingByNominal untuk tabel addon_orders. */
+async function tryConfirmAddonOrderByNominal(nominal, onlyOrderId){
+  let q = supabase.from('addon_orders').select('*')
+    .eq('status','menunggu_pembayaran').eq('total_bayar', nominal).gt('created_at', batasHidupAddonIso());
+  if(onlyOrderId) q = q.eq('id', onlyOrderId);
+  const {data:rows} = await q;
+  if(!rows?.length) return {matched:false};
+  if(!onlyOrderId && rows.length > 1){
+    await notif(null, 'all', 'transfer', 'Email pembayaran ambigu -- perlu konfirmasi manual',
+      `Email BTN QRIS Rp ${Math.round(nominal).toLocaleString('id-ID')} cocok dengan ${rows.length} pesanan add-on sekaligus -- tidak dikonfirmasi otomatis. Mohon balas LUNAS <kode> untuk pesanan yang benar.`, null);
+    return {ambigu:true, nominal, jumlah_booking: rows.length};
+  }
+  return await lunaskanAddonOrder(rows[0]);
+}
+
 async function generateKodeUnikPembayaran(){
   const {data:pending} = await supabase.from('bookings')
     .select('total_bayar,harga_paket').in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran');
@@ -212,7 +259,14 @@ async function generateKodeUnikPembayaran(){
   const {data:baruKedaluwarsa} = await supabase.from('bookings')
     .select('total_bayar,harga_paket').in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','batal')
     .gt('created_at', new Date(Date.now() - BATAS_HIDUP_KEMBALI_JAM*3600*1000).toISOString());
-  const dipakai = new Set([...(pending??[]), ...(baruKedaluwarsa??[])].map(b=>tagihanTamu(b)%1000));
+  // Pesanan add-on yang masih hidup memakai QRIS yang sama, jadi kode
+  // uniknya juga tidak boleh bentrok.
+  const {data:addonHidup} = await supabase.from('addon_orders')
+    .select('total_bayar').eq('status','menunggu_pembayaran').gt('created_at', batasHidupAddonIso());
+  const dipakai = new Set([
+    ...[...(pending??[]), ...(baruKedaluwarsa??[])].map(b=>tagihanTamu(b)%1000),
+    ...(addonHidup ?? []).map(o=>Number(o.total_bayar)%1000),
+  ]);
   for(let coba=0; coba<20; coba++){
     const kandidat = 100 + Math.floor(Math.random()*900);
     if(!dipakai.has(kandidat)) return kandidat;
@@ -523,7 +577,11 @@ async function scanPaymentInbox(cfg, {onlyBookingId} = {}){
         continue;
       }
 
-      const hasil = await tryConfirmBookingByNominal(nominal, onlyBookingId);
+      let hasil = await tryConfirmBookingByNominal(nominal, onlyBookingId);
+      // Bukan booking kamar? Mungkin pesanan add-on terpisah (BBQ).
+      if(!onlyBookingId && !hasil.matched && !hasil.ambigu){
+        hasil = await tryConfirmAddonOrderByNominal(nominal, null);
+      }
       if(onlyBookingId){
         // Hanya tandai dibaca kalau memang cocok ke booking ini -- kalau
         // tidak, jangan disentuh (lihat komentar di atas fungsi ini).
@@ -3837,6 +3895,20 @@ Deno.serve(async (req)=>{
         .select('id,unit_nomor,guest_nama,invoice_no,status').in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','terjadwal');
       const done = (already ?? []).find(x => paymentCode(x.id) === code) ?? null;
       if(done) return json({success:true, already_confirmed:true, unit_nomor:done.unit_nomor, guest_nama:done.guest_nama, invoice_no:done.invoice_no});
+
+      // Pesanan add-on terpisah (BBQ) memakai kode LUNAS yang sama.
+      const {data:addon} = await supabase.from('addon_orders').select('*')
+        .in('status',['menunggu_pembayaran','lunas']).gt('created_at', new Date(Date.now() - 7*24*3600*1000).toISOString());
+      const order = (addon ?? []).find(o => paymentCode(o.id) === code) ?? null;
+      if(order){
+        const ringkas = {jenis:'addon', unit_nomor:'-', guest_nama:order.guest_nama, tgl_checkin:order.tanggal, tgl_checkout:order.tanggal,
+          total_bayar:Number(order.total_bayar), item:`${order.item}${Number(order.qty) > 1 ? ` x${order.qty}` : ''}`};
+        if(order.status === 'lunas') return json({success:true, already_confirmed:true, ...ringkas, invoice_no:order.invoice_no});
+        const hasil = await lunaskanAddonOrder(order);
+        if(hasil.matched) return json({success:true, revived:false, ...ringkas, invoice_no:hasil.invoice_no});
+        const {data:baru} = await supabase.from('addon_orders').select('invoice_no').eq('id', order.id).maybeSingle();
+        return json({success:true, already_confirmed:true, ...ringkas, invoice_no:baru?.invoice_no ?? null});
+      }
       return json({success:false, reason:'not_found'});
     }
 
@@ -5003,6 +5075,92 @@ Deno.serve(async (req)=>{
       return json({success:true, checked:false, confirmed:false});
     }
     return json({success:true, checked:true, confirmed: hasil.dikonfirmasi.some(d=>d.booking_id===booking_id)});
+  }
+
+  // ---- Pesanan add-on terpisah (BBQ) dari loonars.id/bbq ----
+  if(path==='/public/addon-orders' && m==='POST'){
+    const b = await req.json().catch(()=>null);
+    if(!b) return err('Body tidak valid');
+    const nama = String(b.nama??'').trim();
+    const hp = String(b.hp??'').trim();
+    const tanggal = b.tanggal;
+    const qty = Number.isFinite(Number(b.qty)) ? Math.trunc(Number(b.qty)) : 0;
+    const info_menginap = String(b.info_menginap??'').trim().slice(0, 200);
+    const catatan = String(b.catatan??'').trim().slice(0, 500);
+    if(String(b.item??'bbq') !== 'bbq') return err('Item tidak dikenali');
+    if(nama.length<2) return err('Nama wajib diisi');
+    if(!/^[0-9+][0-9+\-\s]{7,}$/.test(hp)) return err('Nomor WhatsApp tidak valid');
+    if(!isValidDateStr(tanggal)) return err('Tanggal tidak valid');
+    if(info_menginap.length<2) return err('Isi nama di booking atau nomor unit, supaya kami bisa mencocokkan pesanan Anda.');
+    if(qty < 1 || qty > BBQ_MAKS) return err(`Jumlah paket BBQ 1 sampai ${BBQ_MAKS}`);
+    const hariSebelum = Math.round((new Date(tanggal).getTime() - new Date(todayWIB()).getTime())/86400000);
+    if(hariSebelum < BBQ_MIN_HARI_SEBELUM_CHECKIN) return err('BBQ harus dipesan paling lambat H-1. Untuk hari ini, silakan hubungi kami via WhatsApp.', 409);
+    if(hariSebelum > 180) return err('Tanggal terlalu jauh, maksimal 6 bulan dari sekarang.');
+
+    const harga = ADDON_BBQ.harga * qty;
+    const kode_unik = await generateKodeUnikPembayaran();
+    const {data:order, error:oErr} = await supabase.from('addon_orders').insert({
+      item: ADDON_BBQ.nama, qty, harga, kode_unik, total_bayar: harga + kode_unik,
+      guest_nama: nama, hp, tanggal, info_menginap, catatan: catatan || null,
+    }).select().single();
+    if(oErr || !order) return err(oErr?.message ?? 'Gagal membuat pesanan');
+
+    const kode = paymentCode(order.id);
+    const notifySetting = await getSetting('villa_notify');
+    await sendWa(notifySetting?.owner_hp ?? null,
+      `Pesanan BBQ baru dari website\n\n${nama} (${hp})\n${ADDON_BBQ.nama}${qty > 1 ? ` x${qty}` : ''}\nTanggal ${tanggal}\nMenginap: ${info_menginap}${catatan ? `\nCatatan: ${catatan}` : ''}\nTotal (dengan kode unik): Rp ${Math.round(harga + kode_unik).toLocaleString('id-ID')}\n\nBalas "LUNAS ${kode}" kalau dana sudah masuk tapi belum terkonfirmasi otomatis.`,
+      {template_type:'addon_order_awaiting_payment'});
+
+    return json({
+      order_id: order.id, item: order.item, qty, harga, kode_unik, total_bayar: harga + kode_unik,
+      tanggal, info_menginap, status: order.status, created_at: order.created_at, batas_bayar_jam: BATAS_BAYAR_ADDON_JAM,
+    }, 201);
+  }
+
+  // Status, pemicu cek email, dan invoice pesanan add-on. Nomor WA pemesan
+  // jadi kuncinya, sama seperti endpoint booking.
+  const ambilAddonOrder = async (order_id, hp) => {
+    if(!/^[0-9a-f-]{36}$/i.test(order_id)) return {gagal: err('order_id tidak valid')};
+    if(!hp) return {gagal: err('Nomor WhatsApp wajib diisi')};
+    const {data:order} = await supabase.from('addon_orders').select('*').eq('id', order_id).maybeSingle();
+    if(!order) return {gagal: err('Pesanan tidak ditemukan', 404)};
+    if(String(order.hp).trim() !== hp) return {gagal: err('Nomor WhatsApp tidak cocok dengan pesanan ini', 403)};
+    return {order};
+  };
+  const addonKedaluwarsa = (o) => o.status === 'menunggu_pembayaran' && Date.parse(o.created_at) < Date.now() - BATAS_BAYAR_ADDON_JAM*3600*1000;
+
+  if(path==='/public/addon-orders/status' && m==='GET'){
+    const {order, gagal} = await ambilAddonOrder(url.searchParams.get('order_id') ?? '', (url.searchParams.get('hp') ?? '').trim());
+    if(gagal) return gagal;
+    return json({status: order.status, confirmed: order.status === 'lunas', expired: addonKedaluwarsa(order) || order.status === 'batal', invoice_no: order.invoice_no ?? null});
+  }
+
+  if(path==='/public/addon-orders/check-payment' && m==='POST'){
+    const b = await req.json().catch(()=>null);
+    const {order, gagal} = await ambilAddonOrder(String(b?.order_id ?? '').trim(), String(b?.hp ?? '').trim());
+    if(gagal) return gagal;
+    if(order.status !== 'menunggu_pembayaran' || addonKedaluwarsa(order)) return json({success:true, checked:false, confirmed: order.status === 'lunas'});
+    const cfg = await getSetting('payment_email');
+    if(!cfg.host || !cfg.user || !cfg.password) return json({success:true, checked:false, confirmed:false});
+    const hasil = await scanPaymentInboxBersama(cfg);
+    if(hasil.gagal){
+      console.error(`[addon check-payment] ${order.id.slice(0,8)}: ${hasil.gagal}`);
+      return json({success:true, checked:false, confirmed:false});
+    }
+    return json({success:true, checked:true, confirmed: hasil.dikonfirmasi.some(d=>d.addon_order_id===order.id)});
+  }
+
+  if(path==='/public/addon-orders/invoice' && m==='GET'){
+    const {order, gagal} = await ambilAddonOrder(url.searchParams.get('order_id') ?? '', (url.searchParams.get('hp') ?? '').trim());
+    if(gagal) return gagal;
+    if(order.status !== 'lunas' || !order.invoice_no) return err('Pesanan ini belum lunas', 409);
+    const qty = Number(order.qty);
+    return json({
+      invoice_no: order.invoice_no, order_id: order.id, guest_nama: order.guest_nama, guest_hp: order.hp,
+      tanggal: order.tanggal, info_menginap: order.info_menginap,
+      items: [{nama: `${order.item}${qty > 1 ? ` x${qty}` : ''}`, jumlah: Number(order.harga)}],
+      kode_unik: Number(order.kode_unik), total_bayar: Number(order.total_bayar), paid_at: order.paid_at,
+    });
   }
 
   const session = await requireAuth(req);

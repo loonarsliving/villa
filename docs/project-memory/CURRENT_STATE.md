@@ -3,6 +3,12 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-13 — Pesanan BBQ terpisah lewat loonars.id/bbq (owner: "Setuju, A")
+- Tabel baru `addon_orders` (migrasi `20261013000002_addon_orders.sql`, sudah diterapkan): pesanan add-on yang TIDAK terikat booking kamar — tidak memegang unit, tidak masuk kalender, bukan pendapatan kamar/investor. Pilihan A: siapa pun boleh memesan; tamu mengisi `info_menginap` (nama di booking / unit) dan resepsionis yang mencocokkan.
+- villa-api (publik, sebelum requireAuth): `POST /public/addon-orders` (item 'bbq', qty 1-3, tanggal ≥ H-1, harga dari `ADDON_BBQ`, kode unik dari `generateKodeUnikPembayaran` yang kini juga menghindari addon_orders hidup), `GET /public/addon-orders/status`, `POST /public/addon-orders/check-payment` (pemindaian inbox penuh), `GET /public/addon-orders/invoice`. Kunci = nomor WA pemesan. WA ke owner_hp saat pesanan dibuat (dengan kode LUNAS).
+- Pembayaran: `scanPaymentInbox` mencoba `tryConfirmAddonOrderByNominal` bila nominal email tidak cocok ke booking; `/bridge/confirm-payment` (LUNAS <kode>) mencari addon_orders bila kode tidak cocok ke booking dan membalas `jenis:'addon'` (teks balasan di `src/app/api/wa/webhook/route.ts`). Lunas → notifikasi `target_role='receptionist'` "🔥 Siapkan BBQ Family Package …". Pesanan belum dibayar tidak dibatalkan cron; setelah `BATAS_BAYAR_ADDON_JAM` (24) tidak lagi dicocokkan dan dianggap kedaluwarsa oleh endpoint status.
+- Belum ada daftar addon_orders di dashboard; staf melihatnya lewat notifikasi Front Desk dan WA owner.
+
 ## 2026-10-13 — Add-on BBQ Family Package Rp300.000 (owner: "tambahkan add on baru yaitu bbq sperti di foto")
 - villa-api: `ADDON_BBQ` (300.000/paket, untuk 3-4 orang), body `bbq` = jumlah 1-3, bisa digabung dengan satu paket dekorasi; BBQ minimal H-1 (`BBQ_MIN_HARI_SEBELUM_CHECKIN`, owner 2026-10-13 "BBQ cukup H-1 saja"), paket dekorasi tetap H-2. Tanpa kolom baru: semua add-on digabung di `bookings.paket_dekorasi` (mis. "Honeymoon Medium + BBQ Family Package x2") dan `harga_paket` (jumlahnya). `rincianAddon()` memecahnya per item untuk invoice (`addons[]` di respons booking & invoice); kalau tidak cocok dengan katalog, satu baris dengan total apa adanya.
 - Diverifikasi dengan harness lokal (villa-api asli dibundel esbuild + DB tiruan di memori, 17 skenario: booking, H-2, nominal email BTN, LUNAS manual, invoice, notifikasi resepsionis, total_bayar tanpa add-on). Harness tidak disimpan di repo.
