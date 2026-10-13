@@ -123,16 +123,48 @@ function paymentCode(bookingId){
  * dari satu kandidat dan membiarkan owner mengonfirmasi manual lewat
  * WhatsApp seperti biasa, bukan mengonfirmasi booking yang salah.
  */
+/**
+ * Paket dekorasi add-on untuk booking website (owner 2026-10-13). Harga
+ * dihitung DI SINI, tidak pernah dipercaya dari browser. Daftar yang sama
+ * ditampilkan di loonars.id (lib/paketDekorasi.ts di repo loonars) -- kalau
+ * harga berubah, ubah keduanya.
+ *
+ * Harga paket disimpan di bookings.harga_paket, TERPISAH dari tarif dan
+ * total_bayar: pendapatan paket bukan pendapatan kamar dan tidak dibagi ke
+ * investor (owner: "Pendapatan paket tidak include ke investor"). Semua
+ * laporan pendapatan/dividen membaca total_bayar, jadi tidak tersentuh.
+ */
+const PAKET_DEKORASI = {
+  'birthday-basic':      {nama: 'Birthday Basic',      harga: 250000},
+  'birthday-medium':     {nama: 'Birthday Medium',     harga: 550000},
+  'birthday-luxury':     {nama: 'Birthday Luxury',     harga: 1000000},
+  'honeymoon-basic':     {nama: 'Honeymoon Basic',     harga: 300000},
+  'honeymoon-medium':    {nama: 'Honeymoon Medium',    harga: 650000},
+  'honeymoon-luxury':    {nama: 'Honeymoon Luxury',    harga: 1000000},
+  'anniversary-basic':   {nama: 'Anniversary Basic',   harga: 300000},
+  'anniversary-medium':  {nama: 'Anniversary Medium',  harga: 600000},
+  'anniversary-luxury':  {nama: 'Anniversary Luxury',  harga: 1000000},
+};
+// Paket harus dipesan paling lambat H-2 sebelum check-in (ketentuan owner).
+const PAKET_MIN_HARI_SEBELUM_CHECKIN = 2;
+
+/**
+ * Nominal yang ditagih ke tamu lewat QRIS: total_bayar (harga kamar + kode
+ * unik) ditambah paket dekorasi. Inilah angka yang tampil di layar QRIS dan
+ * yang dicocokkan ke email BTN.
+ */
+function tagihanTamu(b){ return Number(b.total_bayar ?? b.tarif ?? 0) + Number(b.harga_paket ?? 0); }
+
 async function generateKodeUnikPembayaran(){
   const {data:pending} = await supabase.from('bookings')
-    .select('total_bayar').in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran');
+    .select('total_bayar,harga_paket').in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran');
   // Booking yang baru kedaluwarsa juga dihindari: email BTN untuk booking
   // itu masih bisa masuk terlambat dan menghidupkannya kembali (lihat
   // tryConfirmBookingByNominal), jadi nominalnya belum boleh dipakai ulang.
   const {data:baruKedaluwarsa} = await supabase.from('bookings')
-    .select('total_bayar').in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','batal')
+    .select('total_bayar,harga_paket').in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','batal')
     .gt('created_at', new Date(Date.now() - BATAS_HIDUP_KEMBALI_JAM*3600*1000).toISOString());
-  const dipakai = new Set([...(pending??[]), ...(baruKedaluwarsa??[])].map(b=>Number(b.total_bayar)%1000));
+  const dipakai = new Set([...(pending??[]), ...(baruKedaluwarsa??[])].map(b=>tagihanTamu(b)%1000));
   for(let coba=0; coba<20; coba++){
     const kandidat = 100 + Math.floor(Math.random()*900);
     if(!dipakai.has(kandidat)) return kandidat;
@@ -156,10 +188,13 @@ async function tryConfirmBookingByNominal(nominal, onlyBookingId){
     // cloudbeds_reservation_id WAJIB ikut supaya pushBookingToCloudbeds di
     // bawah tahu booking ini sudah pernah didorong (kalau ada) dan tidak
     // membuat reservasi Cloudbeds kedua untuk booking yang sama.
-    .select('id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,total_bayar,created_at,invoice_no,cloudbeds_reservation_id,adults,children')
-    .in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran').eq('total_bayar', nominal);
+    // Nominal email = total_bayar + harga_paket (tagihanTamu), jadi
+    // disaring di sini, bukan dengan .eq('total_bayar', nominal).
+    .select('id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,total_bayar,harga_paket,paket_dekorasi,created_at,invoice_no,cloudbeds_reservation_id,adults,children')
+    .in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran').lte('total_bayar', nominal);
   if(onlyBookingId) q = q.eq('id', onlyBookingId);
   let {data:pendingSama} = await q;
+  pendingSama = (pendingSama ?? []).filter(b=>tagihanTamu(b) === Number(nominal));
 
   // Tamu membayar di menit ke-14, email BTN baru masuk di menit ke-17 --
   // dengan tahanan 15 menit ini kejadian biasa. Booking yang dibatalkan
@@ -170,12 +205,12 @@ async function tryConfirmBookingByNominal(nominal, onlyBookingId){
   let dihidupkan = false;
   if(!pendingSama?.length){
     let qx = supabase.from('bookings')
-      .select('id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,total_bayar,created_at,invoice_no,cloudbeds_reservation_id,adults,children,catatan')
-      .in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','batal').eq('total_bayar', nominal)
+      .select('id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,total_bayar,harga_paket,paket_dekorasi,created_at,invoice_no,cloudbeds_reservation_id,adults,children,catatan')
+      .in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','batal').lte('total_bayar', nominal)
       .gt('created_at', new Date(Date.now() - BATAS_HIDUP_KEMBALI_JAM*3600*1000).toISOString());
     if(onlyBookingId) qx = qx.eq('id', onlyBookingId);
     const {data:batal} = await qx;
-    pendingSama = (batal ?? []).filter(b=>String(b.catatan ?? '').includes(EXPIRED_HOLD_MARK));
+    pendingSama = (batal ?? []).filter(b=>tagihanTamu(b) === Number(nominal) && String(b.catatan ?? '').includes(EXPIRED_HOLD_MARK));
     dihidupkan = pendingSama.length > 0;
   }
   if(!pendingSama?.length) return {matched:false};
@@ -223,7 +258,7 @@ async function tryConfirmBookingByNominal(nominal, onlyBookingId){
   }
 
   await notif(null, 'all', 'transfer', `Pembayaran dikonfirmasi otomatis -- Unit ${booking.unit_nomor} terkunci`,
-    `Booking ${String(booking.id).slice(0,8)} (${booking.tgl_checkin} s/d ${booking.tgl_checkout}) dikonfirmasi lunas otomatis dari email BTN QRIS (Rp ${Math.round(nominal).toLocaleString('id-ID')}), unit sudah masuk kalender.${dihidupkan ? ` Booking ini sempat kedaluwarsa lewat ${PENDING_PAYMENT_HOLD_MINUTES} menit dan dihidupkan kembali oleh email pembayarannya.` : ''}`, booking.id);
+    `Booking ${String(booking.id).slice(0,8)} (${booking.tgl_checkin} s/d ${booking.tgl_checkout}) dikonfirmasi lunas otomatis dari email BTN QRIS (Rp ${Math.round(nominal).toLocaleString('id-ID')}), unit sudah masuk kalender.${booking.paket_dekorasi ? ` Termasuk paket dekorasi ${booking.paket_dekorasi} (Rp ${Math.round(Number(booking.harga_paket)).toLocaleString('id-ID')}) -- mohon disiapkan sebelum tamu check-in.` : ''}${dihidupkan ? ` Booking ini sempat kedaluwarsa lewat ${PENDING_PAYMENT_HOLD_MINUTES} menit dan dihidupkan kembali oleh email pembayarannya.` : ''}`, booking.id);
   await pushBookingToCloudbeds({...booking, status:'terjadwal'});
   return {matched:true, booking_id:booking.id, unit_nomor:booking.unit_nomor, nominal};
 }
@@ -3196,6 +3231,7 @@ Deno.serve(async (req)=>{
     const promo_code = String(b.promo_code??'').trim().toUpperCase() || null;
     const voucher_code = String(b.voucher_code??'').trim().toUpperCase() || null;
     const referral_code = String(b.referral_code??'').trim().toUpperCase() || null;
+    const paket_kode = String(b.paket??'').trim().toLowerCase() || null;
 
     // Jumlah tamu. Cloudbeds minta adults[] dan children[] per tipe kamar,
     // dan sebelum ini villa-api mengirim angka tetap 1 dewasa 0 anak untuk
@@ -3224,6 +3260,15 @@ Deno.serve(async (req)=>{
     if(!isValidDateStr(tgl_checkin)) return err('Tanggal checkin tidak valid');
     if(!isValidDateStr(tgl_checkout)) return err('Tanggal checkout tidak valid');
     if(new Date(tgl_checkout) <= new Date(tgl_checkin)) return err('Tanggal checkout harus setelah checkin');
+
+    // Paket dekorasi (opsional). Harga dari PAKET_DEKORASI, bukan dari body.
+    const paket = paket_kode ? PAKET_DEKORASI[paket_kode] ?? null : null;
+    if(paket_kode && !paket) return err('Paket dekorasi tidak dikenali');
+    if(paket){
+      const hariSebelum = Math.round((new Date(tgl_checkin).getTime() - new Date(todayWIB()).getTime())/86400000);
+      if(hariSebelum < PAKET_MIN_HARI_SEBELUM_CHECKIN) return err('Paket dekorasi harus dipesan paling lambat H-2 sebelum check-in. Untuk check-in lebih cepat, silakan hubungi kami via WhatsApp.', 409);
+    }
+    const hargaPaket = paket ? paket.harga : 0;
 
     // Voucher investor diperiksa SEBELUM unit dicari: menolak setelah unit
     // terpilih berarti sempat ada baris booking yang dibuat lalu harus
@@ -3286,6 +3331,9 @@ Deno.serve(async (req)=>{
     // jadi tidak ada alasan menolaknya.
     const seluruhnyaGratis = !!voucherTerpakai && nights <= voucherTerpakai.malam_gratis;
     if(!seluruhnyaGratis && hargaNormal<=0) return err('Tarif unit belum diatur, hubungi kami langsung', 409);
+    // Menginap gratis tidak melewati QRIS sama sekali, jadi tidak ada jalan
+    // untuk menagih paketnya di sini.
+    if(seluruhnyaGratis && paket) return err('Paket dekorasi untuk menginap gratis dipesan lewat WhatsApp, ya. Hapus pilihan paket untuk melanjutkan.', 409);
 
     // Promo, kalau tamu membawa kodenya. Harganya dihitung ulang DI SINI --
     // bukan dipercaya dari yang dikirim browser -- oleh fungsi yang sama
@@ -3373,13 +3421,16 @@ Deno.serve(async (req)=>{
         voucher_id: voucherTerpakai && !isKol ? voucherTerpakai.voucher.id : null,
         kol_voucher_id: isKol ? voucherTerpakai.voucher.id : null,
         is_free_stay: false,
-        catatan: referralTerpakai
+        paket_dekorasi: paket ? paket.nama : null,
+        harga_paket: hargaPaket,
+        catatan: (referralTerpakai
           ? `[Website] Referral ${referralTerpakai.ref.kode} (${referralTerpakai.ref.employee_nama}) -- fee karyawan ${referralTerpakai.hasil.fee_persen}% Rp ${Math.round(referralTerpakai.hasil.fee).toLocaleString('id-ID')} setelah lunas. Harga tamu normal.${catatan ? ` -- ${catatan}` : ''}`
           : isKol
           ? `[Kupon KOL] Kode ${voucherTerpakai.voucher.kode} untuk ${voucherTerpakai.pemilik.nama} -- ${malamGratisDipakai} malam pertama gratis (Rp ${Math.round(nilaiMalamGratis).toLocaleString('id-ID')}), sisanya dibayar.${catatan ? ` -- ${catatan}` : ''}`
           : voucherTerpakai
           ? `[Menginap investor] Kode ${voucherTerpakai.voucher.kode} atas nama ${voucherTerpakai.pemilik.nama} -- malam pertama gratis (Rp ${Math.round(nilaiMalamGratis).toLocaleString('id-ID')}), sisanya dibayar.${catatan ? ` -- ${catatan}` : ''}`
-          : (catatan ? `[Website] ${catatan}` : '[Website] Booking mandiri dari loonars.id -- menunggu bukti pembayaran QRIS.'),
+          : (catatan ? `[Website] ${catatan}` : '[Website] Booking mandiri dari loonars.id -- menunggu bukti pembayaran QRIS.'))
+          + (paket ? ` [Paket dekorasi] ${paket.nama} Rp ${paket.harga.toLocaleString('id-ID')} -- siapkan sebelum check-in.` : ''),
       }
     ).select().single();
     if(bookErr){
@@ -3457,7 +3508,7 @@ Deno.serve(async (req)=>{
 
     const kode = paymentCode(booking.id);
     await notif(freeUnit.id, 'all', 'booking', `Booking baru dari Website (menunggu pembayaran) -- Unit ${freeUnit.nomor}`,
-      `${nama} (${hp}) - ${tgl_checkin} s/d ${tgl_checkout} - Rp ${Math.round(totalDitagih).toLocaleString('id-ID')} -- unit belum terkunci, menunggu konfirmasi pembayaran (kode ${kode})`, booking.id);
+      `${nama} (${hp}) - ${tgl_checkin} s/d ${tgl_checkout} - Rp ${Math.round(totalDitagih + hargaPaket).toLocaleString('id-ID')}${paket ? ` (termasuk paket dekorasi ${paket.nama})` : ''} -- unit belum terkunci, menunggu konfirmasi pembayaran (kode ${kode})`, booking.id);
 
     // WA ke owner supaya dia bisa mengunci unit hanya dengan membalas kode
     // ini begitu notifikasi QRIS masuk di HP-nya. Nomornya dari
@@ -3469,13 +3520,16 @@ Deno.serve(async (req)=>{
     // ditampilkan ke tamu, supaya keduanya melihat angka yang sama persis.
     const notifySetting = await getSetting('villa_notify');
     await sendWa(notifySetting?.owner_hp ?? null,
-      `Booking baru dari website\n\n${nama} (${hp})\nUnit ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\nTotal (dengan kode unik): Rp ${Math.round(totalDitagih).toLocaleString('id-ID')}${promoTerpakai ? `\nPromo ${promoTerpakai.promo.kode} (normal Rp ${Math.round(promoTerpakai.hasil.harga_normal).toLocaleString('id-ID')})` : ''}${referralTerpakai ? `\nReferral ${referralTerpakai.ref.kode} (${referralTerpakai.ref.employee_nama}) -- fee karyawan ${referralTerpakai.hasil.fee_persen}% Rp ${Math.round(referralTerpakai.hasil.fee).toLocaleString('id-ID')} setelah lunas` : ''}${voucherTerpakai ? `\n${isKol ? 'Kupon KOL' : 'Kode investor'} ${voucherTerpakai.voucher.kode} (${voucherTerpakai.pemilik.nama}) -- ${malamGratisDipakai} malam pertama gratis Rp ${Math.round(nilaiMalamGratis).toLocaleString('id-ID')}` : ''}\n\nKalau dana sudah masuk, sistem akan mengonfirmasi otomatis lewat email. Kalau belum juga terkonfirmasi, balas:\nLUNAS ${kode}`,
+      `Booking baru dari website\n\n${nama} (${hp})\nUnit ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\n${paket ? `Paket dekorasi: ${paket.nama} (Rp ${paket.harga.toLocaleString('id-ID')})\n` : ''}Total (dengan kode unik): Rp ${Math.round(totalDitagih + hargaPaket).toLocaleString('id-ID')}${promoTerpakai ? `\nPromo ${promoTerpakai.promo.kode} (normal Rp ${Math.round(promoTerpakai.hasil.harga_normal).toLocaleString('id-ID')})` : ''}${referralTerpakai ? `\nReferral ${referralTerpakai.ref.kode} (${referralTerpakai.ref.employee_nama}) -- fee karyawan ${referralTerpakai.hasil.fee_persen}% Rp ${Math.round(referralTerpakai.hasil.fee).toLocaleString('id-ID')} setelah lunas` : ''}${voucherTerpakai ? `\n${isKol ? 'Kupon KOL' : 'Kode investor'} ${voucherTerpakai.voucher.kode} (${voucherTerpakai.pemilik.nama}) -- ${malamGratisDipakai} malam pertama gratis Rp ${Math.round(nilaiMalamGratis).toLocaleString('id-ID')}` : ''}\n\nKalau dana sudah masuk, sistem akan mengonfirmasi otomatis lewat email. Kalau belum juga terkonfirmasi, balas:\nLUNAS ${kode}`,
       {booking_id: booking.id, unit_id: freeUnit.id, template_type:'website_booking_awaiting_payment'});
 
     return json({
       booking_id: booking.id, unit_nomor: freeUnit.nomor,
       tgl_checkin, tgl_checkout, durasi_malam: nights,
-      tarif: computedTarif, total_bayar: totalDitagih, kode_unik: kodeUnik, status: booking.status,
+      // total_bayar di respons = yang harus ditransfer tamu (termasuk paket).
+      // Di database total_bayar tetap harga kamar + kode unik saja.
+      tarif: computedTarif, total_bayar: totalDitagih + hargaPaket, kode_unik: kodeUnik, status: booking.status,
+      paket_dekorasi: paket ? paket.nama : null, harga_paket: hargaPaket,
       promo: promoTerpakai ? {kode: promoTerpakai.promo.kode, nama: promoTerpakai.promo.nama, harga_normal: promoTerpakai.hasil.harga_normal, hemat: promoTerpakai.hasil.hemat} : null,
       menginap_gratis: voucherTerpakai ? {kode: voucherTerpakai.voucher.kode, malam_gratis: malamGratisDipakai, hemat: nilaiMalamGratis} : null,
       referral: referralTerpakai ? {kode: referralTerpakai.ref.kode} : null,
@@ -3690,7 +3744,7 @@ Deno.serve(async (req)=>{
     // adults/children ikut dibawa: pushBookingToCloudbeds membacanya dari
     // objek booking ini, jadi kolom yang tidak di-select akan diam-diam
     // jatuh ke default 1 dewasa 0 anak -- persis bug yang sedang diperbaiki.
-    const SELECT_COLS = 'id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,total_bayar,created_at,status,invoice_no,cloudbeds_reservation_id,catatan,adults,children';
+    const SELECT_COLS = 'id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,total_bayar,harga_paket,paket_dekorasi,created_at,status,invoice_no,cloudbeds_reservation_id,catatan,adults,children';
 
     const {data:pending} = await supabase.from('bookings')
       .select(SELECT_COLS)
@@ -3760,7 +3814,8 @@ Deno.serve(async (req)=>{
     return json({
       success:true, revived, unit_nomor:booking.unit_nomor, guest_nama:booking.guest_nama,
       tgl_checkin:booking.tgl_checkin, tgl_checkout:booking.tgl_checkout,
-      total_bayar:booking.total_bayar, invoice_no,
+      total_bayar:tagihanTamu(booking), invoice_no,
+      paket_dekorasi:booking.paket_dekorasi ?? null,
     });
   }
 
@@ -4251,7 +4306,7 @@ Deno.serve(async (req)=>{
     const hp = (url.searchParams.get('hp') ?? '').trim();
     if(!/^[0-9a-f-]{36}$/i.test(booking_id)) return err('booking_id tidak valid');
     const {data:booking} = await supabase.from('bookings')
-      .select('id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,durasi_malam,tarif,total_bayar,status,invoice_no,bukti_pembayaran_at,created_at')
+      .select('id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,durasi_malam,tarif,total_bayar,harga_paket,paket_dekorasi,status,invoice_no,bukti_pembayaran_at,created_at')
       .eq('id', booking_id).maybeSingle();
     if(!booking) return err('Booking tidak ditemukan', 404);
     let guestHp = null;
@@ -4270,8 +4325,15 @@ Deno.serve(async (req)=>{
       tgl_checkin: booking.tgl_checkin,
       tgl_checkout: booking.tgl_checkout,
       durasi_malam: booking.durasi_malam,
+      // Invoice memisahkan kamar dan paket (permintaan owner 2026-10-13):
+      // tarif = harga kamar seluruh menginap, kode_unik = selisih total_bayar
+      // dan tarif, harga_paket = paket dekorasi, total_bayar = semua yang
+      // dibayar tamu.
       tarif: Number(booking.tarif),
-      total_bayar: Number(booking.total_bayar ?? booking.tarif),
+      kode_unik: Math.max(0, Number(booking.total_bayar ?? booking.tarif) - Number(booking.tarif)),
+      paket_dekorasi: booking.paket_dekorasi ?? null,
+      harga_paket: Number(booking.harga_paket ?? 0),
+      total_bayar: tagihanTamu(booking),
       paid_at: booking.bukti_pembayaran_at,
       created_at: booking.created_at,
     });
