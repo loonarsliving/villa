@@ -11,6 +11,7 @@ import { Card, CardHeader, Loading } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
 import { CheckinCard, type CheckinCardGuest, type CheckinCardResult } from "@/components/CheckinCard";
+import { HandoverHarian } from "@/components/HandoverHarian";
 import type { Booking, Summary, Unit, Notification } from "@/lib/types";
 
 const statusColor: Record<string, string> = {
@@ -290,6 +291,7 @@ export default function FrontDeskPage() {
                   ))}
                 </div>
               )}
+              <HandoverHarian refreshKey={units.length + (sum?.occupied ?? 0) + (sum?.checkin_today ?? 0)} />
             </div>
           </Card>
           <Card>
