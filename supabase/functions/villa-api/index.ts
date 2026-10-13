@@ -7252,6 +7252,29 @@ Deno.serve(async (req)=>{
     return json({success:true});
   }
 
+  // Daftar pesanan add-on terpisah (BBQ dari loonars.id/bbq) untuk Front
+  // Desk (owner 2026-10-13: "buatkan daftar pesanan BBQ di Front Desk").
+  // Hanya baca. filter: 'lunas' (default, yang perlu disiapkan),
+  // 'menunggu' (belum bayar & masih bisa dibayar), 'semua'.
+  if(path==='/addon-orders' && m==='GET'){
+    if(!isStaff) return forbidden();
+    const filter = url.searchParams.get('filter') ?? 'lunas';
+    const dari = url.searchParams.get('dari');
+    let q = supabase.from('addon_orders').select('*')
+      .order('tanggal', {ascending:true}).order('created_at', {ascending:true}).limit(300);
+    if(dari && isValidDateStr(dari)) q = q.gte('tanggal', dari);
+    if(filter === 'lunas') q = q.eq('status','lunas');
+    else if(filter === 'menunggu') q = q.eq('status','menunggu_pembayaran').gt('created_at', batasHidupAddonIso());
+    const {data, error} = await q;
+    if(error) return err(error.message);
+    const batas = Date.now() - BATAS_BAYAR_ADDON_JAM*3600*1000;
+    return json((data ?? []).map(o => ({
+      ...o,
+      kode: paymentCode(o.id),
+      kedaluwarsa: o.status === 'menunggu_pembayaran' && Date.parse(o.created_at) < batas,
+    })));
+  }
+
   if(path==='/notifications' && m==='GET'){
     // Investor melihat notifikasi SEMUA unit (owner 2026-10-11: "smua
     // pembagian kan komulatif jdi tidak menunjuk unit") -- bagi hasil
