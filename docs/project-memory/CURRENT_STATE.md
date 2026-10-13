@@ -5,7 +5,7 @@ _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 ## 2026-10-13 — Front Desk: Jadwal Tamu Hari Ini untuk serah terima shift
 - Owner 2026-10-13: di bawah blok kamar harus ada nama tamu dan jadwal check-in/check-out, supaya handover shift tidak perlu laporan manual "Jadwal Check-In Guest" di grup WA.
-- `src/components/HandoverHarian.tsx` di kartu Peta Unit (`/front-desk`): tiga kolom In House / Check-out / Check-in dari `GET /bookings?date_from=kemarin&date_to=besok` (tanpa perubahan villa-api), status hari ini (Belum datang, Sudah check-in, Belum/Sudah check-out, Terlambat, Tidak datang), penanda 🎉 paket, muat ulang tiap 60 detik dan setelah check-in/out. Tombol "📋 Salin untuk WA" menyalin teks dengan format laporan lama. Logika di `src/lib/handover.ts` (+5 tes vitest).
+- `src/components/HandoverHarian.tsx` di kartu Peta Unit (`/front-desk`): tiga kolom "Menginap (lanjut)" / "Check-out hari ini" / "Check-in hari ini" (judul diperjelas atas permintaan owner) dari `GET /bookings?date_from=kemarin&date_to=besok` (tanpa perubahan villa-api), status hari ini (Belum datang, Sudah check-in, Belum/Sudah check-out, Terlambat, Tidak datang), penanda 🎉 paket, muat ulang tiap 60 detik dan setelah check-in/out. Tombol "📋 Salin untuk WA" menyalin teks dengan format laporan lama. Logika di `src/lib/handover.ts` (+5 tes vitest).
 
 ## 2026-10-13 — Pesanan BBQ terpisah lewat loonars.id/bbq (owner: "Setuju, A")
 - Tabel baru `addon_orders` (migrasi `20261013000002_addon_orders.sql`, sudah diterapkan): pesanan add-on yang TIDAK terikat booking kamar — tidak memegang unit, tidak masuk kalender, bukan pendapatan kamar/investor. Pilihan A: siapa pun boleh memesan; tamu mengisi `info_menginap` (nama di booking / unit) dan resepsionis yang mencocokkan.

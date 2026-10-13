@@ -81,10 +81,10 @@ export function handoverText(h: Handover, judulTanggal: string): string {
   };
   return [
     `*Jadwal Check-In Guest — ${judulTanggal}*`,
-    blok("In House", h.inHouse),
+    blok("Menginap (lanjut)", h.inHouse),
     "———",
-    blok("Check-out", h.checkout),
+    blok("Check-out hari ini", h.checkout),
     "———",
-    blok("Check-in", h.checkin),
+    blok("Check-in hari ini", h.checkin),
   ].join("\n\n");
 }
