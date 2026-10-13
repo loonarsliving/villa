@@ -3,6 +3,11 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-13 — Sawah View di website = harga OTA dikurangi Rp50 rb (BELUM MERGE, menunggu owner)
+- Owner 2026-10-13: "angka itu harusnya di sawah view buat lebih murah jga 50 ribu di banding ota".
+- villa-api `aturanHargaWebsite`: aturan Agoda dicek sebelum perlindungan kamar view; `selisih_tetap` per tipe unit di integration_settings 'harga_website_agoda'. Setelah merge, set `tambahan.sawah_view = 150000` dan `selisih_tetap.sawah_view = 50000`. Pengaman tetap: tidak di bawah yang dibayar Agoda (80% x (harga mesin + 150rb)) dan tidak di atas harga mesin, jadi di hari biasa selisihnya ~37-43rb, akhir pekan 50rb. Kode promo tetap ditolak untuk Sawah.
+- Per 13 Okt: `harga_website_agoda.tambahan.standard = 70000` (Agoda & Booking.com Standard ternyata +70rb, terbukti dari harga Agoda 19 Okt dan booking Booking.com 13 Okt).
+
 ## 2026-10-13 — Harga website Standard mengikuti harga Agoda dikurangi Rp20-50 rb (BELUM MERGE, menunggu owner)
 - Owner 2026-10-13: "Soal website ttp lihat brapa harga agoda menjual kamar dan turunkan 20-50 ribu dri harga agoda". Owner memasang Base Rate Adjustment Standard: Agoda +100.000, Booking.com +70.000; Traveloka & Airbnb tidak.
 - villa-api `aturanHargaWebsite`/`hargaWebsiteSemalam`: Standard = (harga mesin + 100rb) x 0,85 dikurangi 5% (dijepit 20-50rb), bulat ke bawah Rp1.000; pengaman tidak di bawah yang dibayar Agoda (80% x (harga mesin + 100rb)) dan tidak di atas harga mesin. Angka tambahan/promo Agoda bisa diubah tanpa deploy lewat integration_settings 'harga_website_agoda' (default di kode). Sawah View tetap harga mesin; tipe lain tetap aturan 82%.

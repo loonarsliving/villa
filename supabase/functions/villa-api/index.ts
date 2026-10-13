@@ -1948,16 +1948,24 @@ const HARGA_WEBSITE_AGODA_DEFAULT = {
 async function aturanHargaWebsite(roomTypeId){
   if(!roomTypeId) return {jenis:'faktor', lantai:0};
   const {data:rt} = await supabase.from('villa_room_types').select('code,min_rate').eq('id', roomTypeId).maybeSingle();
-  if(kamarViewDilindungi(rt?.code)) return {jenis:'normal'};
 
+  // Dicek SEBELUM perlindungan kamar view: owner 2026-10-13 meminta Sawah View
+  // di website juga "lebih murah 50 ribu dibanding ota". Harga website tetap
+  // tidak pernah di atas harga mesin dan tidak di bawah yang dibayar Agoda;
+  // kode promo tetap ditolak untuk kamar view (hitungHargaPromo).
   const agoda = {...HARGA_WEBSITE_AGODA_DEFAULT, ...(await getSetting('harga_website_agoda'))};
   const tambahan = rt?.code ? agoda.tambahan?.[rt.code] : undefined;
   if(tambahan !== undefined && tambahan !== null && Number.isFinite(Number(tambahan))){
+    // selisih_tetap: selisih rupiah pasti per tipe unit (mis. Sawah View 50.000),
+    // menggantikan aturan 5% dijepit 20-50 rb.
+    const tetap = rt?.code ? Number(agoda.selisih_tetap?.[rt.code]) : NaN;
     return {
       jenis:'agoda', tambahan:Number(tambahan), promo:Number(agoda.promo_pct)/100,
       selisihPct:Number(agoda.selisih_pct), selisihMin:Number(agoda.selisih_min), selisihMax:Number(agoda.selisih_max),
+      selisihTetap: Number.isFinite(tetap) && tetap > 0 ? tetap : null,
     };
   }
+  if(kamarViewDilindungi(rt?.code)) return {jenis:'normal'};
 
   // Tipe unit lain: aturan lama 82%, tidak di bawah 82% batas bawah (ikut ramp).
   let lantai = Number(rt?.min_rate ?? 0);
@@ -1976,7 +1984,8 @@ function hargaWebsiteSemalam(normal, aturan){
   if(aturan.jenis === 'agoda'){
     const dikirimKeAgoda = normal + aturan.tambahan;
     const hargaTamuAgoda = dikirimKeAgoda * (1 - aturan.promo);
-    const selisih = Math.min(aturan.selisihMax, Math.max(aturan.selisihMin, Math.round(hargaTamuAgoda * aturan.selisihPct / 100)));
+    const selisih = aturan.selisihTetap
+      ?? Math.min(aturan.selisihMax, Math.max(aturan.selisihMin, Math.round(hargaTamuAgoda * aturan.selisihPct / 100)));
     const website = Math.floor((hargaTamuAgoda - selisih) / 1000) * 1000;
     const dibayarAgoda = Math.ceil(dikirimKeAgoda * HARGA_WEBSITE_MIN_FAKTOR_AGODA / 1000) * 1000;
     return Math.min(normal, Math.max(website, dibayarAgoda));
