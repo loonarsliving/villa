@@ -61,6 +61,28 @@ const FRIDAY_SURCHARGE_BY_ROOM_TYPE_CODE: Record<string, number> = {
 };
 
 /**
+ * Tambahan akhir pekan ikut membaca okupansi (owner 2026-10-13: "atur mesin
+ * agar harga jumat dan sabtu tidak trllu tinggi karna okupansi agak kurng").
+ * Sebelumnya tambahan Jumat/Sabtu dipasang PENUH berapa pun isinya, jadi
+ * Sabtu 24 Okt tetap Rp750.000 dengan Standard baru terisi 1 dari 10.
+ *
+ * Dalam WEEKEND_SURCHARGE_WINDOW_DAYS hari sebelum menginap, tambahan itu
+ * diskalakan menurut okupansi malam itu: 0% terisi -> separuh tambahan,
+ * WEEKEND_SURCHARGE_FULL_OCC_PCT ke atas -> penuh, di antaranya linier.
+ * Lebih jauh dari jendela itu tetap penuh (terlalu dini menilai), dan
+ * periode musim (Natal-Tahun Baru, high season) tidak disentuh.
+ */
+const WEEKEND_SURCHARGE_WINDOW_DAYS = 21;
+const WEEKEND_SURCHARGE_FULL_OCC_PCT = 50;
+const WEEKEND_SURCHARGE_MIN_SHARE = 0.5;
+
+export function weekendSurchargeShare(occupancyPct: number, daysToArrival: number, inSeasonPeriod: boolean): number {
+  if (inSeasonPeriod || daysToArrival > WEEKEND_SURCHARGE_WINDOW_DAYS) return 1;
+  const occShare = Math.max(0, Math.min(1, occupancyPct / WEEKEND_SURCHARGE_FULL_OCC_PCT));
+  return WEEKEND_SURCHARGE_MIN_SHARE + (1 - WEEKEND_SURCHARGE_MIN_SHARE) * occShare;
+}
+
+/**
  * Pola permintaan per hari, DIPELAJARI dari malam yang sudah lewat (owner
  * 2026-10-05: "harusnya mesin bisa melihat lemahnya bookingan dan mencari
  * solusi untuk itu"). Beyond dan PriceLabs memperbarui pola hari-dalam-
@@ -1296,9 +1318,13 @@ export function decideRateForDate(input: DateDecisionInput): DatePriceDecision {
     const code = input.roomTypeCode ?? "";
     const isFriday = new Date(`${targetDate}T00:00:00Z`).getUTCDay() === 5;
     const fridaySurcharge = isFriday ? FRIDAY_SURCHARGE_BY_ROOM_TYPE_CODE[code] : undefined;
-    decidedRate += fridaySurcharge ?? WEEKEND_SURCHARGE_BY_ROOM_TYPE_CODE[code] ?? DEFAULT_WEEKEND_SURCHARGE;
+    const fullSurcharge = fridaySurcharge ?? WEEKEND_SURCHARGE_BY_ROOM_TYPE_CODE[code] ?? DEFAULT_WEEKEND_SURCHARGE;
+    const inSeasonPeriod = period !== null && (Number(period.suggested_adjustment_pct) || 0) > 0;
+    const share = weekendSurchargeShare(occupancyPct, daysToArrival, inSeasonPeriod);
+    decidedRate += Math.round(fullSurcharge * share);
     reasonCodes.push("weekend");
     if (fridaySurcharge !== undefined) reasonCodes.push("friday_rate");
+    if (share < 1) reasonCodes.push("weekend_surcharge_reduced_low_occupancy");
   }
 
   // The owner's own rate plan: base rate plus the weekend pattern, before
@@ -1627,6 +1653,7 @@ function narrateDecision(codes: string[], guardrail: DatePriceDecision["guardrai
   else if (has("market_interest_down")) parts.push("sedikit diturunkan karena minat pencarian villa sedang turun");
 
   if (has("friday_rate")) parts.push("tambahan Jumat lebih kecil dari Sabtu karena Jumat lebih sepi");
+  if (has("weekend_surcharge_reduced_low_occupancy")) parts.push("tambahan akhir pekan dikurangi karena akhir pekan ini masih sepi");
   if (has("day_of_week_weak")) parts.push("sedikit diturunkan karena hari ini terbukti lebih sepi dari hari lain");
   else if (has("day_of_week_strong")) parts.push("sedikit dinaikkan karena hari ini terbukti lebih laku dari hari lain");
   if (has("search_demand_high")) parts.push("sedikit dinaikkan karena tanggal ini banyak dicari di website");

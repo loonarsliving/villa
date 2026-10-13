@@ -3,6 +3,10 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-13 — Tambahan akhir pekan ikut membaca okupansi (BELUM MERGE, menunggu owner)
+- Owner: "atur mesin agar harga jumat dan sabtu tidak trllu tinggi karna okupansi agak kurng". Sebelumnya tambahan akhir pekan (Standard Sabtu +250rb, Jumat +100rb; Sawah +220rb) selalu penuh; Sabtu 24 Okt tetap 750rb dengan Standard terisi 1/10.
+- `weekendSurchargeShare` di aiPricingEngine.ts: dalam 21 hari sebelum menginap, tambahan diskalakan dengan okupansi malam itu (0% -> 50% tambahan, >=50% terisi -> penuh, linier). Lebih jauh dari 21 hari dan periode musim (adjustment > 0) tetap penuh. Reason code `weekend_surcharge_reduced_low_occupancy`.
+
 ## 2026-10-13 (malam) — Pengaturan harga website & OTA terkini (data, bukan kode)
 - `integration_settings.harga_website_agoda` (dibaca villa-api `aturanHargaWebsite`): Standard `tambahan.standard = 0` (website = 85% harga mesin - 5% dijepit 20-50rb, tidak di bawah 80% harga mesin -> ~405rb malam sepi); Sawah `tambahan.sawah_view = 150000`, `selisih_tetap.sawah_view = 50000`. Diubah atas permintaan owner ("cba dulu sesuaikan") karena Agoda tampil ~371rb sebelum pajak untuk 14 Okt.
 - Base Rate Adjustment di Cloudbeds Distribution (diatur owner sendiri): Agoda Standard +150rb lalu direncanakan +250rb, Sawah +200rb; kalender YCS 13 Okt mengonfirmasi 19 Okt = 652rb (502+150). Booking.com: owner bilang +70rb, tapi booking 13 Okt siang menunjukkan +20rb yang terpakai -- belum terjelaskan.

@@ -80,6 +80,20 @@ describe("anchor and weekend", () => {
     expect(d.decided_rate).toBe(850000);
   });
 
+  it("halves the Saturday surcharge for an empty weekend close to arrival (owner 2026-10-13)", () => {
+    // Sabtu 750rb dengan Standard terisi 0% dan tinggal 10 hari: +125rb, bukan +250rb.
+    const d = decide({ targetDate: "2026-09-19", anchorRate: 500000, minRate: 500000, roomTypeCode: "standard", occupancyPct: 0, daysToArrival: 10, settings: { ...settings, low_occupancy_adjustment_pct: 0 } });
+    expect(d.decided_rate).toBe(625000);
+    expect(d.reason_codes).toContain("weekend_surcharge_reduced_low_occupancy");
+  });
+
+  it("keeps the full weekend surcharge when the weekend is half full, or still far away", () => {
+    const half = decide({ targetDate: "2026-09-19", anchorRate: 500000, minRate: 500000, roomTypeCode: "standard", occupancyPct: 50, daysToArrival: 10, settings: { ...settings, low_occupancy_adjustment_pct: 0 } });
+    expect(half.reason_codes).not.toContain("weekend_surcharge_reduced_low_occupancy");
+    const far = decide({ targetDate: "2026-09-19", anchorRate: 500000, minRate: 500000, roomTypeCode: "standard", occupancyPct: 0, daysToArrival: 60 });
+    expect(far.reason_codes).not.toContain("weekend_surcharge_reduced_low_occupancy");
+  });
+
   it("falls back to the Rp100.000 surcharge for a room type with no override", () => {
     const d = decide({ targetDate: FRIDAY, roomTypeCode: "some_future_room_type" });
     expect(d.decided_rate).toBe(750000);
