@@ -47,6 +47,8 @@ export interface Booking {
   tgl_checkout: string | null;
   tarif: number;
   total_bayar: number | null;
+  // Paket dekorasi add-on dari loonars.id (null = tanpa paket).
+  paket_dekorasi?: string | null;
   created_at: string;
   pin_kode?: string | null;
 }

@@ -244,9 +244,10 @@ export default function BookingCalendarPage() {
                                   onClick={() => setDokumenBookingId(b.id)}
                                   style={{ position: "absolute", left: `${leftPct}%`, width: `calc(${widthPct}% - 4px)`, marginLeft: 2, top: 0, bottom: 0 }}
                                   className={`rounded px-2 text-left text-[9.5px] truncate border ${toneClass[b.status] || toneClass.terjadwal}`}
-                                  title={`${b.guest_nama} — Unit ${b.unit_nomor}`}
+                                  title={`${b.guest_nama} — Unit ${b.unit_nomor}${b.paket_dekorasi ? ` — Paket ${b.paket_dekorasi}` : ""}`}
                                 >
                                   {b.sumber === "cloudbeds" ? "☁ " : ""}
+                                  {b.paket_dekorasi ? "🎉 " : ""}
                                   {b.guest_nama}
                                 </button>
                               );

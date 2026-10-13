@@ -18,7 +18,7 @@ export function FrontDeskShell({
   children: ReactNode;
 }) {
   const { user } = useAuth();
-  const { unreadCount } = useNotifPoll("role=all", "is_read_staff");
+  const { unreadCount } = useNotifPoll("role=receptionist", "is_read_staff");
   const { unreadCount: chatUnread } = useChatUnreadPoll();
 
   const sections: NavSection[] = [

@@ -8,7 +8,7 @@ import { fmtDate } from "@/lib/format";
 import { Card, CardHeader, Loading } from "@/components/Card";
 
 export default function FrontDeskNotifPage() {
-  const { notifications, refresh } = useNotifPoll("role=all", "is_read_staff");
+  const { notifications, refresh } = useNotifPoll("role=receptionist", "is_read_staff");
 
   useEffect(() => {
     api.patch("/notifications/read", { role: "receptionist" }).then(refresh);
