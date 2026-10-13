@@ -155,6 +155,19 @@ const PAKET_MIN_HARI_SEBELUM_CHECKIN = 2;
  */
 function tagihanTamu(b){ return Number(b.total_bayar ?? b.tarif ?? 0) + Number(b.harga_paket ?? 0); }
 
+/**
+ * Pemberitahuan paket dekorasi untuk RESEPSIONIS saja (target_role
+ * 'receptionist'; Front Desk memuat receptionist + all). Sengaja bukan 'all':
+ * akun investor ikut membaca 'all', dan paket bukan pendapatan mereka (owner
+ * 2026-10-13). Tanpa harga -- resepsionis cukup tahu apa yang disiapkan.
+ * Dipanggil dari kedua jalur lunas: email BTN otomatis dan balasan LUNAS.
+ */
+async function notifPaketResepsionis(booking){
+  if(!booking?.paket_dekorasi) return;
+  await notif(booking.unit_id ?? null, 'receptionist', 'booking', `🎉 Siapkan paket ${booking.paket_dekorasi} -- Unit ${booking.unit_nomor}`,
+    `${booking.guest_nama ?? 'Tamu'} sudah lunas dan memesan paket dekorasi ${booking.paket_dekorasi}. Check-in ${booking.tgl_checkin}, Unit ${booking.unit_nomor}. Siapkan dekorasinya sebelum tamu datang (isi paket: loonars.id/private-living#paket).`, booking.id);
+}
+
 async function generateKodeUnikPembayaran(){
   const {data:pending} = await supabase.from('bookings')
     .select('total_bayar,harga_paket').in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran');
@@ -258,7 +271,8 @@ async function tryConfirmBookingByNominal(nominal, onlyBookingId){
   }
 
   await notif(null, 'all', 'transfer', `Pembayaran dikonfirmasi otomatis -- Unit ${booking.unit_nomor} terkunci`,
-    `Booking ${String(booking.id).slice(0,8)} (${booking.tgl_checkin} s/d ${booking.tgl_checkout}) dikonfirmasi lunas otomatis dari email BTN QRIS (Rp ${Math.round(nominal).toLocaleString('id-ID')}), unit sudah masuk kalender.${booking.paket_dekorasi ? ` Termasuk paket dekorasi ${booking.paket_dekorasi} (Rp ${Math.round(Number(booking.harga_paket)).toLocaleString('id-ID')}) -- mohon disiapkan sebelum tamu check-in.` : ''}${dihidupkan ? ` Booking ini sempat kedaluwarsa lewat ${PENDING_PAYMENT_HOLD_MINUTES} menit dan dihidupkan kembali oleh email pembayarannya.` : ''}`, booking.id);
+    `Booking ${String(booking.id).slice(0,8)} (${booking.tgl_checkin} s/d ${booking.tgl_checkout}) dikonfirmasi lunas otomatis dari email BTN QRIS (Rp ${Math.round(Number(booking.total_bayar ?? nominal)).toLocaleString('id-ID')}), unit sudah masuk kalender.${dihidupkan ? ` Booking ini sempat kedaluwarsa lewat ${PENDING_PAYMENT_HOLD_MINUTES} menit dan dihidupkan kembali oleh email pembayarannya.` : ''}`, booking.id);
+  await notifPaketResepsionis(booking);
   await pushBookingToCloudbeds({...booking, status:'terjadwal'});
   return {matched:true, booking_id:booking.id, unit_nomor:booking.unit_nomor, nominal};
 }
@@ -3508,7 +3522,7 @@ Deno.serve(async (req)=>{
 
     const kode = paymentCode(booking.id);
     await notif(freeUnit.id, 'all', 'booking', `Booking baru dari Website (menunggu pembayaran) -- Unit ${freeUnit.nomor}`,
-      `${nama} (${hp}) - ${tgl_checkin} s/d ${tgl_checkout} - Rp ${Math.round(totalDitagih + hargaPaket).toLocaleString('id-ID')}${paket ? ` (termasuk paket dekorasi ${paket.nama})` : ''} -- unit belum terkunci, menunggu konfirmasi pembayaran (kode ${kode})`, booking.id);
+      `${nama} (${hp}) - ${tgl_checkin} s/d ${tgl_checkout} - Rp ${Math.round(totalDitagih).toLocaleString('id-ID')} -- unit belum terkunci, menunggu konfirmasi pembayaran (kode ${kode})`, booking.id);
 
     // WA ke owner supaya dia bisa mengunci unit hanya dengan membalas kode
     // ini begitu notifikasi QRIS masuk di HP-nya. Nomornya dari
@@ -3809,6 +3823,7 @@ Deno.serve(async (req)=>{
     // booking is 'menunggu_pembayaran' and holds nothing, so pushing then
     // would block real OTA inventory on an unpaid hold and leave a junk
     // reservation in Cloudbeds whenever a guest walked away.
+    await notifPaketResepsionis(booking);
     await pushBookingToCloudbeds({...booking, status:'terjadwal'});
 
     return json({

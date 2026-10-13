@@ -66,7 +66,7 @@ export default function FrontDeskPage() {
       const [s, u, n] = await Promise.all([
         api.get<Summary>("/summary"),
         api.get<Unit[]>("/units"),
-        api.get<Notification[]>("/notifications?role=all"),
+        api.get<Notification[]>("/notifications?role=receptionist"),
       ]);
       setSum(s);
       setUnits(u || []);
@@ -434,6 +434,11 @@ export default function FrontDeskPage() {
                         <div className="text-[9.5px] text-ink/30 mt-0.5">
                           Unit {bk.unit_nomor} · {fmtDate(bk.tgl_checkin)} · {bk.sumber === "cloudbeds" ? "☁ Cloudbeds" : bk.sumber}
                         </div>
+                        {bk.paket_dekorasi && (
+                          <div className="mt-1 inline-block text-[9px] font-semibold text-gold-700 bg-gold-500/15 border border-gold-500/30 rounded px-1.5 py-0.5">
+                            🎉 Paket {bk.paket_dekorasi}
+                          </div>
+                        )}
                       </div>
                       <div className="text-[10.5px] text-ink/50 shrink-0">{fmtCurrencyFull(bk.total_bayar ?? bk.tarif)}</div>
                     </button>
