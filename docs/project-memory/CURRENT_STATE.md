@@ -3,6 +3,13 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-13 — Paket dekorasi sebagai add-on booking website, dibayar lewat QRIS (owner-approved: "Ya bawa ke production")
+- Owner 2026-10-13: paket Birthday/Honeymoon/Anniversary (Basic/Medium/Luxury) adalah add-on berbayar di luar tarif kamar; "Pendapatan paket tidak include ke investor"; invoice tamu memisahkan harga kamar dan paket.
+- Kolom baru `bookings.paket_dekorasi` (text) + `bookings.harga_paket` (numeric, default 0) — migrasi `20261013000001_paket_dekorasi_booking.sql`, sudah diterapkan.
+- villa-api: katalog `PAKET_DEKORASI` (harga dihitung server dari kode, mis. `honeymoon-medium`), minimal H-2 sebelum check-in, ditolak untuk menginap seluruhnya gratis. `tarif`/`total_bayar` TIDAK memuat paket, jadi laporan/dividen/okupansi tidak berubah. Tagihan QRIS = `tagihanTamu()` = total_bayar + harga_paket; kode unik dan pencocokan email BTN memakai angka ini. Respons POST /public/bookings, /bridge/confirm-payment, dan /public/bookings/invoice mengirim total_bayar = tagihan penuh plus rincian (tarif, kode_unik, paket_dekorasi, harga_paket). Paket juga ditulis ke `catatan` dan notifikasi lunas supaya staf menyiapkannya.
+- Daftar harga yang sama ada di repo loonars (`lib/paketDekorasi.ts`); kalau harga berubah, ubah keduanya.
+- Halaman kasir front-desk masih menampilkan total_bayar (tanpa paket) untuk booking website; informatif saja karena sudah lunas online.
+
 ## 2026-10-13 — Sawah View di website = harga OTA dikurangi Rp50 rb (BELUM MERGE, menunggu owner)
 - Owner 2026-10-13: "angka itu harusnya di sawah view buat lebih murah jga 50 ribu di banding ota".
 - villa-api `aturanHargaWebsite`: aturan Agoda dicek sebelum perlindungan kamar view; `selisih_tetap` per tipe unit di integration_settings 'harga_website_agoda'. Setelah merge, set `tambahan.sawah_view = 150000` dan `selisih_tetap.sawah_view = 50000`. Pengaman tetap: tidak di bawah yang dibayar Agoda (80% x (harga mesin + 150rb)) dan tidak di atas harga mesin, jadi di hari biasa selisihnya ~37-43rb, akhir pekan 50rb. Kode promo tetap ditolak untuk Sawah.
