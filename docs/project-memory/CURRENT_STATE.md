@@ -3,6 +3,11 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-13 (malam) — Pengaturan harga website & OTA terkini (data, bukan kode)
+- `integration_settings.harga_website_agoda` (dibaca villa-api `aturanHargaWebsite`): Standard `tambahan.standard = 0` (website = 85% harga mesin - 5% dijepit 20-50rb, tidak di bawah 80% harga mesin -> ~405rb malam sepi); Sawah `tambahan.sawah_view = 150000`, `selisih_tetap.sawah_view = 50000`. Diubah atas permintaan owner ("cba dulu sesuaikan") karena Agoda tampil ~371rb sebelum pajak untuk 14 Okt.
+- Base Rate Adjustment di Cloudbeds Distribution (diatur owner sendiri): Agoda Standard +150rb lalu direncanakan +250rb, Sawah +200rb; kalender YCS 13 Okt mengonfirmasi 19 Okt = 652rb (502+150). Booking.com: owner bilang +70rb, tapi booking 13 Okt siang menunjukkan +20rb yang terpakai -- belum terjelaskan.
+- YCS Promosi: Aktif (0). Diskon yang terlihat di aplikasi Agoda (label -15%, ~20% tambahan, kupon AGODASPONSORED) berasal dari Agoda sendiri, diduga penyesuaian harga terhadap channel lain. Belum terbukti apakah memotong bagian villa; dicek dari cloudbeds_subtotal booking Agoda berikutnya (selama ini selalu 80% dari harga yang diterima Agoda).
+
 ## 2026-10-13 — Check-out otomatis jam 13.00 WIB (owner: "jika dia tidak perpanjang otomatiskan checkout aja")
 - villa-api `POST /cron/auto-checkout` (x-cron-secret), pg_cron `villa-auto-checkout` '0 6 * * *' (= 13.00 WIB, migrasi `20261013000003_cron_auto_checkout.sql`). Booking `status='checkin'` dengan `tgl_checkout` hari ini (setelah `AUTO_CHECKOUT_JAM_WIB`=13) → check-out penuh lewat `villa_commit_checkout` (unit 'dirty', tugas housekeeping, notifikasi, WA ajakan pesan langsung), kecuali unit sudah ditempati booking lain berstatus checkin → status saja. `tgl_checkout` lebih lama (data lama / cron terlewat) → status saja ditutup, tanpa unit/housekeeping/WA. Catatan booking dipertahankan + penanda "[Check-out otomatis …]". Perpanjangan = ubah tgl_checkout sebelum 13.00.
 - Pendapatan tidak berubah (checkin & checkout sama-sama STATUS_PEMASUKAN_DIAKUI). Saat dipasang ada 19 booking 'checkin' yang tgl_checkout-nya sudah lewat (tertua 27 Sep); semuanya dirapikan pada jalan pertama.
