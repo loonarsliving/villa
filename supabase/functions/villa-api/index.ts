@@ -883,6 +883,8 @@ function teksPengingatPembayaran({nama, unit, checkin, checkout, batasWaktu, bah
  * WIB.
  */
 const WIB_TZ = 'Asia/Jakarta';
+// Jam check-out otomatis untuk tamu yang tidak diperpanjang (owner 2026-10-13).
+const AUTO_CHECKOUT_JAM_WIB = 13;
 function todayWIB(d = new Date()){ return d.toLocaleDateString('en-CA', {timeZone: WIB_TZ}); }
 function monthWIB(d = new Date()){ return todayWIB(d).slice(0,7); }
 /** Tanggal terakhir bulan berjalan, mis. "2026-09-30" -- dipakai sebagai batas atas default halaman Finance (lihat financeDateRange), supaya booking yang checkin belakangan di bulan yang sama (sudah pasti, belum checkin) tetap terhitung, bukan cuma yang sudah lewat hari ini. */
@@ -4993,6 +4995,74 @@ Deno.serve(async (req)=>{
   // secret lain di sistem ini (cron.secret, vercel_bridge.secret). Import
   // library IMAP-nya sengaja dynamic (bukan di atas file) supaya cold
   // start rute lain tidak ikut menanggung biaya memuatnya.
+  // Check-out otomatis (owner 2026-10-13: "jika dia tidak perpanjang
+  // otomatiskan checkout aja", dipilih jam 13.00 WIB di hari check-out).
+  // Dijalankan pg_cron 'villa-auto-checkout' tiap hari 06.00 UTC = 13.00 WIB.
+  // Perpanjangan cukup dicatat sebagai tgl_checkout yang baru sebelum jam 13.
+  //  - tgl_checkout hari ini (setelah 13.00): check-out penuh lewat
+  //    villa_commit_checkout yang sama
+  //    dengan tombol Front Desk -- unit jadi 'dirty', tugas housekeeping,
+  //    notifikasi, WA ajakan pesan langsung. Kecuali unitnya sudah ditempati
+  //    tamu lain yang check-in: status booking saja yang ditutup.
+  //  - lebih lama dari itu (data lama yang lupa di-check-out, atau cron
+  //    sempat terlewat): status saja yang ditutup, tanpa mengubah unit,
+  //    housekeeping, atau WA ke tamu -- kamarnya mungkin sudah dibersihkan.
+  // Pendapatan tidak berubah: 'checkin' dan 'checkout' sama-sama diakui
+  // (STATUS_PEMASUKAN_DIAKUI).
+  if(path==='/cron/auto-checkout' && m==='POST'){
+    const cron = await getSetting('cron');
+    const provided = req.headers.get('x-cron-secret') ?? '';
+    if(!cron.secret) return err('Cron belum dikonfigurasi (integration_settings.cron.secret)',503);
+    if(!await secretsMatch(provided, cron.secret)) return err('Unauthorized',401);
+
+    const hariIni = todayWIB();
+    const jamWib = Number(new Date().toLocaleString('en-US', {timeZone: WIB_TZ, hour: '2-digit', hour12: false})) % 24;
+    const sudahLewatJam = jamWib >= AUTO_CHECKOUT_JAM_WIB;
+
+    const {data:kandidat, error:kErr} = await supabase.from('bookings')
+      .select('id,unit_id,unit_nomor,guest_nama,tgl_checkout,catatan')
+      .eq('status','checkin').not('tgl_checkout','is',null).lte('tgl_checkout', hariIni);
+    if(kErr) return err(kErr.message);
+
+    const penuh = [], diam = [], gagal = [];
+    for(const bk of kandidat ?? []){
+      if(bk.tgl_checkout === hariIni && !sudahLewatJam) continue;
+      const catatanBaru = (label) => `${bk.catatan ? `${bk.catatan} ` : ''}${label}`.trim();
+      let unitDitempatiLain = false;
+      if(bk.unit_id){
+        const {data:lain} = await supabase.from('bookings').select('id')
+          .eq('unit_id', bk.unit_id).eq('status','checkin').neq('id', bk.id).limit(1);
+        unitDitempatiLain = !!lain?.length;
+      }
+      const baruSaja = bk.tgl_checkout === hariIni;
+      if(baruSaja && !unitDitempatiLain){
+        const {error} = await supabase.rpc('villa_commit_checkout', {
+          p_booking_id: bk.id, p_checkout_by: 'otomatis',
+          p_kondisi: catatanBaru(`[Check-out otomatis ${AUTO_CHECKOUT_JAM_WIB}.00]`),
+        });
+        if(error){ gagal.push({id: bk.id, alasan: error.message}); continue; }
+        await notif(bk.unit_id, 'all', 'checkout', `Checkout — Unit ${bk.unit_nomor}`, `${bk.guest_nama} di-check-out otomatis (jam ${AUTO_CHECKOUT_JAM_WIB}.00). Housekeeping dijadwalkan.`, bk.id);
+        try { await kirimAjakPesanDirect(bk.id); } catch(e){ console.error('[ajak-direct] auto-checkout', e?.message ?? e); }
+        penuh.push(bk);
+      } else {
+        const {data:ok, error} = await supabase.from('bookings').update({
+          status: 'checkout', checkout_at: new Date().toISOString(), checkout_by: 'otomatis',
+          catatan: catatanBaru(unitDitempatiLain && baruSaja
+            ? '[Check-out otomatis: unit sudah ditempati tamu berikutnya]'
+            : '[Check-out otomatis: data lama dirapikan]'),
+        }).eq('id', bk.id).eq('status','checkin').select('id');
+        if(error){ gagal.push({id: bk.id, alasan: error.message}); continue; }
+        if(ok?.length) diam.push(bk);
+      }
+    }
+
+    if(penuh.length){
+      await notif(null, 'receptionist', 'checkout', `Check-out otomatis ${AUTO_CHECKOUT_JAM_WIB}.00 -- ${penuh.length} unit`,
+        `${penuh.map(b=>`${b.unit_nomor} ${b.guest_nama}`).join(', ')} tidak diperpanjang dan sudah di-check-out otomatis. Unit ditandai perlu dibersihkan.`, null);
+    }
+    return json({success:true, penuh: penuh.map(b=>b.id), dirapikan: diam.map(b=>b.id), gagal});
+  }
+
   if(path==='/cron/check-payment-email' && m==='POST'){
     const cron = await getSetting('cron');
     const provided = req.headers.get('x-cron-secret') ?? '';

@@ -3,6 +3,11 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-13 — Check-out otomatis jam 13.00 WIB (owner: "jika dia tidak perpanjang otomatiskan checkout aja")
+- villa-api `POST /cron/auto-checkout` (x-cron-secret), pg_cron `villa-auto-checkout` '0 6 * * *' (= 13.00 WIB, migrasi `20261013000003_cron_auto_checkout.sql`). Booking `status='checkin'` dengan `tgl_checkout` hari ini (setelah `AUTO_CHECKOUT_JAM_WIB`=13) → check-out penuh lewat `villa_commit_checkout` (unit 'dirty', tugas housekeeping, notifikasi, WA ajakan pesan langsung), kecuali unit sudah ditempati booking lain berstatus checkin → status saja. `tgl_checkout` lebih lama (data lama / cron terlewat) → status saja ditutup, tanpa unit/housekeeping/WA. Catatan booking dipertahankan + penanda "[Check-out otomatis …]". Perpanjangan = ubah tgl_checkout sebelum 13.00.
+- Pendapatan tidak berubah (checkin & checkout sama-sama STATUS_PEMASUKAN_DIAKUI). Saat dipasang ada 19 booking 'checkin' yang tgl_checkout-nya sudah lewat (tertua 27 Sep); semuanya dirapikan pada jalan pertama.
+- Catatan: `villa_commit_checkout` menimpa `bookings.catatan` dengan p_kondisi (perilaku lama tombol Check-Out Front Desk); jalur otomatis mengirim catatan lama + penanda supaya tidak hilang.
+
 ## 2026-10-13 — Front Desk: Jadwal Tamu Hari Ini untuk serah terima shift
 - Owner 2026-10-13: di bawah blok kamar harus ada nama tamu dan jadwal check-in/check-out, supaya handover shift tidak perlu laporan manual "Jadwal Check-In Guest" di grup WA.
 - `src/components/HandoverHarian.tsx` di kartu Peta Unit (`/front-desk`): tiga kolom "Menginap (lanjut)" / "Check-out hari ini" / "Check-in hari ini" (judul diperjelas atas permintaan owner) dari `GET /bookings?date_from=kemarin&date_to=besok` (tanpa perubahan villa-api), status hari ini (Belum datang, Sudah check-in, Belum/Sudah check-out, Terlambat, Tidak datang), penanda 🎉 paket, muat ulang tiap 60 detik dan setelah check-in/out. Tombol "📋 Salin untuk WA" menyalin teks dengan format laporan lama. Logika di `src/lib/handover.ts` (+5 tes vitest).
