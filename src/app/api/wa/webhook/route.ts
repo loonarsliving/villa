@@ -212,6 +212,14 @@ export async function POST(request: Request) {
     // bahwa perintah semacam ini ada.
     if (b?.reason === "bukan_pengirim_berwenang") reply = null;
     else if (!b) reply = `Konfirmasi gagal: server villa tidak bisa dihubungi. Kode ${kode} belum diproses.`;
+    else if (b.success === true && b.jenis === "addon" && b.already_confirmed === true)
+      reply = `Kode ${kode} sudah dikonfirmasi sebelumnya — pesanan ${b.item ?? "add-on"} atas nama ${b.guest_nama ?? "-"} sudah lunas.`;
+    else if (b.success === true && b.jenis === "addon")
+      // Pesanan add-on terpisah (BBQ dari loonars.id/bbq): tidak ada unit
+      // yang dikunci, resepsionis diberi tahu lewat notifikasi Front Desk.
+      reply =
+        `Siap, pembayaran dikonfirmasi.\n\n${b.guest_nama ?? "-"}\n${b.item ?? "Add-on"} untuk ${b.tgl_checkin ?? "-"}\n${rupiah(b.total_bayar)}\n\n` +
+        `Resepsionis sudah diberi tahu dan invoice ${b.invoice_no ?? "-"} sudah bisa dicetak tamu.`;
     else if (b.success === true && b.already_confirmed === true)
       reply = `Kode ${kode} sudah dikonfirmasi sebelumnya — unit ${b.unit_nomor ?? "-"} atas nama ${b.guest_nama ?? "-"} sudah terkunci.`;
     else if (b.success === true)
