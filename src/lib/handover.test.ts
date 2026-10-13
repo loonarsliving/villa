@@ -47,7 +47,7 @@ describe("rentangTanggal & handoverText", () => {
   });
   it("membuat teks siap tempel", () => {
     const t = handoverText(buildHandover([bk({ guest_nama: "Dia", unit_nomor: "A1", paket_dekorasi: "Honeymoon Medium" })], "2026-10-13"), "Sel, 13 Okt");
-    expect(t).toContain("*In House*\nTanggal 12-14 Okt\nDia (A1)\n🎉 Honeymoon Medium");
-    expect(t).toContain("*Check-in*\n-");
+    expect(t).toContain("*Menginap (lanjut)*\nTanggal 12-14 Okt\nDia (A1)\n🎉 Honeymoon Medium");
+    expect(t).toContain("*Check-in hari ini*\n-");
   });
 });

@@ -72,9 +72,9 @@ export function HandoverHarian({ refreshKey = 0 }: { refreshKey?: number }) {
         <div className="text-[11px] text-ink/30 py-3">Memuat jadwal tamu…</div>
       ) : (
         <div className="grid sm:grid-cols-3 gap-3">
-          <Kolom judul="In House" warna="bg-gold-500" items={data.inHouse} kosong="Tidak ada tamu menginap" />
-          <Kolom judul="Check-out" warna="bg-ruby-500" items={data.checkout} kosong="Tidak ada check-out" />
-          <Kolom judul="Check-in" warna="bg-azure-500" items={data.checkin} kosong="Tidak ada check-in" />
+          <Kolom judul="Menginap (lanjut)" warna="bg-gold-500" items={data.inHouse} kosong="Tidak ada tamu yang lanjut menginap" />
+          <Kolom judul="Check-out hari ini" warna="bg-ruby-500" items={data.checkout} kosong="Tidak ada check-out hari ini" />
+          <Kolom judul="Check-in hari ini" warna="bg-azure-500" items={data.checkin} kosong="Tidak ada check-in hari ini" />
         </div>
       )}
     </div>
