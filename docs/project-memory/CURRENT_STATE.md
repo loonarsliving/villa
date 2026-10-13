@@ -4,7 +4,7 @@ _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
 ## 2026-10-13 — Add-on BBQ Family Package Rp300.000 (owner: "tambahkan add on baru yaitu bbq sperti di foto")
-- villa-api: `ADDON_BBQ` (300.000/paket, untuk 3-4 orang), body `bbq` = jumlah 1-3, bisa digabung dengan satu paket dekorasi; minimal H-2 seperti paket dekorasi (bisa diubah di `PAKET_MIN_HARI_SEBELUM_CHECKIN`). Tanpa kolom baru: semua add-on digabung di `bookings.paket_dekorasi` (mis. "Honeymoon Medium + BBQ Family Package x2") dan `harga_paket` (jumlahnya). `rincianAddon()` memecahnya per item untuk invoice (`addons[]` di respons booking & invoice); kalau tidak cocok dengan katalog, satu baris dengan total apa adanya.
+- villa-api: `ADDON_BBQ` (300.000/paket, untuk 3-4 orang), body `bbq` = jumlah 1-3, bisa digabung dengan satu paket dekorasi; BBQ minimal H-1 (`BBQ_MIN_HARI_SEBELUM_CHECKIN`, owner 2026-10-13 "BBQ cukup H-1 saja"), paket dekorasi tetap H-2. Tanpa kolom baru: semua add-on digabung di `bookings.paket_dekorasi` (mis. "Honeymoon Medium + BBQ Family Package x2") dan `harga_paket` (jumlahnya). `rincianAddon()` memecahnya per item untuk invoice (`addons[]` di respons booking & invoice); kalau tidak cocok dengan katalog, satu baris dengan total apa adanya.
 - Diverifikasi dengan harness lokal (villa-api asli dibundel esbuild + DB tiruan di memori, 17 skenario: booking, H-2, nominal email BTN, LUNAS manual, invoice, notifikasi resepsionis, total_bayar tanpa add-on). Harness tidak disimpan di repo.
 
 ## 2026-10-13 — Paket dekorasi sebagai add-on booking website, dibayar lewat QRIS (owner-approved: "Ya bawa ke production")

@@ -150,9 +150,10 @@ const PAKET_DEKORASI = {
 // booking (satu paket untuk 3-4 orang).
 const ADDON_BBQ = {nama: 'BBQ Family Package', harga: 300000};
 const BBQ_MAKS = 3;
-// Paket dan BBQ harus dipesan paling lambat H-2 sebelum check-in (ketentuan
-// owner untuk paket dekorasi; BBQ disamakan supaya bahan sempat dibeli).
+// Paket dekorasi dipesan paling lambat H-2 sebelum check-in; BBQ cukup H-1
+// (owner 2026-10-13: "BBQ cukup H-1 saja").
 const PAKET_MIN_HARI_SEBELUM_CHECKIN = 2;
+const BBQ_MIN_HARI_SEBELUM_CHECKIN = 1;
 
 /**
  * bookings.paket_dekorasi menyimpan SEMUA add-on sebagai teks, mis.
@@ -3325,7 +3326,8 @@ Deno.serve(async (req)=>{
       : null;
     if(paket){
       const hariSebelum = Math.round((new Date(tgl_checkin).getTime() - new Date(todayWIB()).getTime())/86400000);
-      if(hariSebelum < PAKET_MIN_HARI_SEBELUM_CHECKIN) return err('Paket dekorasi dan BBQ harus dipesan paling lambat H-2 sebelum check-in. Untuk check-in lebih cepat, silakan hubungi kami via WhatsApp.', 409);
+      if(paketDek && hariSebelum < PAKET_MIN_HARI_SEBELUM_CHECKIN) return err('Paket dekorasi harus dipesan paling lambat H-2 sebelum check-in. Untuk check-in lebih cepat, silakan hubungi kami via WhatsApp.', 409);
+      if(bbq_qty > 0 && hariSebelum < BBQ_MIN_HARI_SEBELUM_CHECKIN) return err('BBQ harus dipesan paling lambat H-1 sebelum check-in. Untuk hari ini, silakan hubungi kami via WhatsApp.', 409);
     }
     const hargaPaket = paket ? paket.harga : 0;
 
