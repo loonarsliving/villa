@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hitungLaporan, malamKamar, periodeMingguLalu, porsi, teksLaporan, type BookingRingkas } from "./investorWeeklyReportText";
+import { hitungLaporan, malamKamar, pendapatanPerMinggu, periodeMingguLalu, porsi, strategiUntuk, teksLaporan, type BookingRingkas } from "./investorWeeklyReportText";
 
 function bk(o: Partial<BookingRingkas>): BookingRingkas {
   return {
@@ -82,14 +82,14 @@ describe("hitungLaporan", () => {
 });
 
 describe("teksLaporan", () => {
-  it("memuat angka utama dan strategi KOL", () => {
+  it("memuat angka utama dan target", () => {
     const l = hitungLaporan([bk({})], 13, { mulai: "2026-09-30", akhir: "2026-10-06" }, wib);
     const t = teksLaporan(l);
     expect(t).toContain("Minggu ke-1: 30 Sep – 6 Okt 2026");
-    expect(t).toContain("Pendapatan villa: *Rp362.500*");
+    expect(t).toContain("Pendapatan villa minggu ini: *Rp362.500*");
     expect(t).not.toMatch(/fee OTA|kotor|marketing/i);
     expect(t).toContain("Agoda: 100% (1 booking)");
-    expect(t).toContain("KOL");
+    expect(t).not.toContain("Total Pendapatan");
     expect(t).toContain("okupansi 80% di akhir 2026");
     expect(t).not.toMatch(/airbnb.*rencana/i);
   });
@@ -98,5 +98,64 @@ describe("teksLaporan", () => {
     const t = teksLaporan(l);
     expect(t).toContain("Minggu ke-2");
     expect(t).not.toContain("Mulai minggu ini");
+  });
+});
+
+describe("pendapatan kumulatif", () => {
+  const p3 = { mulai: "2026-10-14", akhir: "2026-10-20" };
+  const data = [
+    bk({ tgl_checkin: "2026-09-30", tgl_checkout: "2026-10-01", total_bayar: 1_000_000 }),
+    bk({ tgl_checkin: "2026-10-13", tgl_checkout: "2026-10-14", total_bayar: 2_000_000 }),
+    bk({ tgl_checkin: "2026-10-20", tgl_checkout: "2026-10-21", total_bayar: 4_000_000 }),
+    bk({ tgl_checkin: "2026-10-15", tgl_checkout: "2026-10-16", status: "batal", total_bayar: 9_000_000 }),
+  ];
+  it("per minggu sejak minggu ke-1, rumus yang sama", () => {
+    const pm = pendapatanPerMinggu(data, p3, 0.275);
+    expect(pm.map((m) => [m.mingguKe, m.mulai, m.akhir])).toEqual([
+      [1, "2026-09-30", "2026-10-06"],
+      [2, "2026-10-07", "2026-10-13"],
+      [3, "2026-10-14", "2026-10-20"],
+    ]);
+    expect(pm.map((m) => m.pendapatan)).toEqual([725_000, 1_450_000, 2_900_000]);
+  });
+  it("teks memuat minggu ini, rincian, total, dan catatan potongan OTA di minggu ke-3", () => {
+    const l = hitungLaporan(data, 13, p3, wib);
+    l.perMinggu = pendapatanPerMinggu(data, p3);
+    const t = teksLaporan(l);
+    expect(t).toContain("Pendapatan villa minggu ini: *Rp2.900.000*");
+    expect(t).toContain("Total Pendapatan 3 Minggu* (30 Sep – 20 Okt)");
+    expect(t).toContain("• Minggu ke-1: Rp725.000");
+    expect(t).toContain("*Total: Rp5.075.000*");
+    expect(t).toContain("potongan OTA");
+    expect(t).not.toMatch(/marketing/i);
+  });
+  it("catatan penyesuaian hanya sekali, dan rincian disembunyikan setelah 4 minggu", () => {
+    const p5 = { mulai: "2026-10-28", akhir: "2026-11-03" };
+    const l = hitungLaporan(data, 13, p5, wib);
+    l.perMinggu = pendapatanPerMinggu(data, p5);
+    const t = teksLaporan(l);
+    expect(t).toContain("Total Pendapatan 5 Minggu");
+    expect(t).not.toContain("Minggu ke-1:");
+    expect(t).not.toContain("potongan OTA");
+  });
+});
+
+describe("strategi mingguan", () => {
+  const p = { mulai: "2026-10-14", akhir: "2026-10-20" };
+  it("hanya dipakai untuk minggu yang sama", () => {
+    expect(strategiUntuk(p, { minggu_akhir: "2026-10-20", poin: ["A", " ", "B"] })).toEqual(["A", "B"]);
+    expect(strategiUntuk(p, { minggu_akhir: "2026-10-13", poin: ["lama"] })).toEqual([]);
+    expect(strategiUntuk(p, null)).toEqual([]);
+  });
+  it("tanpa strategi disetujui: bagian strategi hilang, target tetap", () => {
+    const t = teksLaporan(hitungLaporan([], 13, p, wib));
+    expect(t).not.toContain("Strategi yang Kami Jalankan");
+    expect(t).not.toContain("KOL");
+    expect(t).toContain("okupansi 80% di akhir 2026");
+  });
+  it("dengan strategi disetujui", () => {
+    const l = hitungLaporan([], 13, p, wib);
+    l.strategi = ["Paket BBQ keluarga diluncurkan."];
+    expect(teksLaporan(l)).toContain("🚀 *Strategi yang Kami Jalankan Minggu Ini*\n• Paket BBQ keluarga diluncurkan.");
   });
 });

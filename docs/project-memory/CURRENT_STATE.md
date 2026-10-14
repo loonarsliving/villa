@@ -260,6 +260,30 @@ kosong, atau menyembunyikan QRIS kalau tipe itu penuh.
 - loonars.id: harga normal tampil dicoret + "Harga khusus website · lebih hemat dari OTA".
 - Promo kode (`hitungHargaPromo`, dijepit ke min_rate) kini hampir selalu "harga normal sudah lebih murah" karena pembandingnya harga website.
 
+## 2026-10-14 — Laporan mingguan investor: total kumulatif + strategi mingguan yang disetujui owner
+
+Owner setelah laporan minggu ke-2: (1) tetap tampilkan pendapatan minggu ini,
+tapi di bawahnya ada total keseluruhan sejak minggu pertama supaya investor
+tidak bingung; (2) strategi harus menjelaskan yang sedang dijalankan, tidak
+boleh kalimat yang sama dengan minggu sebelumnya.
+
+- Bagian "💰 Total Pendapatan N Minggu": `pendapatanPerMinggu()` menghitung
+  ulang setiap minggu sejak 30 Sep dengan rumus yang sama (check-in di minggu
+  itu, total_bayar x (1 - potongan)). Rincian per minggu tampil selama <= 4
+  minggu, setelah itu total saja.
+- Angka minggu ke-1 yang dikirim 7 Okt (Rp23.106.817, setelah fee OTA)
+  berbeda dari rumus sekarang (Rp17.885.492). Keputusan owner: total memakai
+  rumus sekarang + satu catatan di laporan minggu ke-3 (20 Okt) bahwa minggu
+  ke-1 disesuaikan "setelah potongan OTA". **Owner: jangan pernah menyebut
+  "marketing" ke investor; sebut potongan OTA.**
+- Strategi: tidak lagi teks tetap. Dibaca dari `integration_settings`
+  key `laporan_investor_strategi` = `{minggu_akhir, poin[]}`, hanya bila
+  `minggu_akhir` = malam terakhir minggu laporan. Alur (pilihan owner): tiap
+  Rabu pagi Claude menyusun draf dari kegiatan yang benar-benar berjalan
+  minggu itu, owner menyetujui, Claude menyimpannya. Belum disetujui saat
+  cron jalan = bagian strategi tidak tampil (hanya "🎯 Target" okupansi 80%
+  akhir 2026). Jangan mengarang strategi.
+
 ## 2026-10-07 — Laporan mingguan WhatsApp ke investor (tiap Rabu 16:00-16:59 WIB)
 
 Permintaan owner: tiap 7 hari kirim WA ke investor berisi revenue, okupansi,

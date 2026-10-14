@@ -20,14 +20,43 @@ export const STATUS_DIHITUNG = ["terjadwal", "checkin", "checkout"] as const;
 const SUMBER_DIRECT = new Set(["walk-in", "website", "whatsapp", "google", "late-night", "investor"]);
 
 /** Minggu pertama laporan (owner mulai mengirim 7 Okt 2026). */
+export const MINGGU_PERTAMA_MULAI = "2026-09-30";
 export const MINGGU_PERTAMA_AKHIR = "2026-10-06";
 
-/** Teks strategi dari owner (2026-10-07). Ganti di sini kalau owner minta. */
-export const TEKS_STRATEGI = [
-  "• Kerja sama promosi dengan KOL (influencer) masih terus berjalan.",
-  "• Program barter menginap dengan KOL untuk sementara belum kami lanjutkan, karena Loonars masih dalam masa soft opening.",
-  "• Kami terus meningkatkan kualitas pelayanan Loonars untuk mencapai target *okupansi 80% di akhir 2026*.",
-].join("\n");
+/**
+ * Laporan minggu ke-1 terkirim dengan angka setelah fee OTA (Rp23.106.817);
+ * sejak 11 Okt rumusnya pendapatan setelah potongan (sama dengan dashboard
+ * investor), jadi minggu ke-1 di rincian kumulatif tampil lebih kecil.
+ * Owner 2026-10-14: beri catatan, sebut "potongan OTA", JANGAN "marketing".
+ * Hanya di laporan pertama yang memuat total kumulatif (minggu ke-3).
+ */
+export const CATATAN_PENYESUAIAN_MINGGU_AKHIR = "2026-10-20";
+const CATATAN_PENYESUAIAN =
+  "_Catatan: angka minggu ke-1 kami sesuaikan dengan perhitungan setelah potongan OTA, sama dengan dashboard investor, sehingga berbeda dari laporan pertama._";
+
+/** Rincian per minggu hanya ditampilkan selama jumlah minggu masih sedikit. */
+const MAKS_RINCIAN_MINGGU = 4;
+
+/**
+ * Strategi minggu ini (owner 2026-10-14: "jangan bahasa yang sama dari minggu
+ * sebelumnya"). Disusun Claude dari kegiatan yang benar-benar berjalan,
+ * DISETUJUI owner, lalu disimpan di integration_settings
+ * 'laporan_investor_strategi' = {minggu_akhir, poin[]}. Hanya dipakai bila
+ * minggu_akhir sama dengan minggu laporan; kalau belum ada yang disetujui,
+ * bagian strategi tidak ditampilkan -- teks minggu lalu tidak diulang.
+ */
+export interface StrategiMingguan {
+  minggu_akhir: string;
+  poin: string[];
+}
+
+export function strategiUntuk(p: Periode, s: unknown): string[] {
+  const v = s as Partial<StrategiMingguan> | null;
+  if (!v || v.minggu_akhir !== p.akhir || !Array.isArray(v.poin)) return [];
+  return v.poin.map((x) => String(x).trim()).filter(Boolean);
+}
+
+export const TEKS_TARGET = "Kami terus meningkatkan kualitas pelayanan Loonars untuk mencapai target *okupansi 80% di akhir 2026*.";
 
 export interface BookingRingkas {
   sumber: string | null;
@@ -71,6 +100,34 @@ function kotor(b: BookingRingkas): number {
 
 /** Default sama dengan computeReport() bila integration_settings.finance.marketing_pct kosong. */
 export const MARKETING_PCT_DEFAULT = 0.275;
+
+export function mingguKeDari(akhir: string): number {
+  return Math.max(1, Math.round((Date.parse(akhir) - Date.parse(MINGGU_PERTAMA_AKHIR)) / (7 * 86400000)) + 1);
+}
+
+export interface PendapatanMinggu {
+  mingguKe: number;
+  mulai: string;
+  akhir: string;
+  pendapatan: number;
+}
+
+/**
+ * Pendapatan tiap minggu sejak minggu ke-1 sampai minggu laporan, dengan
+ * rumus yang sama (check-in di minggu itu, total_bayar x (1 - potongan)).
+ * bookings: booking ber-check-in MINGGU_PERTAMA_MULAI..p.akhir.
+ */
+export function pendapatanPerMinggu(bookings: BookingRingkas[], p: Periode, marketingPct: number = MARKETING_PCT_DEFAULT): PendapatanMinggu[] {
+  const hasil: PendapatanMinggu[] = [];
+  for (let akhir = MINGGU_PERTAMA_AKHIR; akhir <= p.akhir; akhir = addDaysISO(akhir, 7)) {
+    const mulai = addDaysISO(akhir, -6);
+    const kotorMinggu = bookings
+      .filter((b) => dihitung(b) && b.tgl_checkin >= mulai && b.tgl_checkin <= akhir)
+      .reduce((s, b) => s + kotor(b), 0);
+    hasil.push({ mingguKe: mingguKeDari(akhir), mulai, akhir, pendapatan: kotorMinggu * (1 - marketingPct) });
+  }
+  return hasil;
+}
 
 function dihitung(b: BookingRingkas): boolean {
   return (STATUS_DIHITUNG as readonly string[]).includes(b.status);
@@ -129,6 +186,10 @@ export interface LaporanMingguan {
   channelBookingBaru: PorsiChannel[];
   malamTerisiMingguDepan: number;
   okupansiMingguDepan: number;
+  /** Diisi pemanggil (pendapatanPerMinggu); kosong = bagian kumulatif tidak ditampilkan. */
+  perMinggu?: PendapatanMinggu[];
+  /** Poin strategi yang disetujui owner untuk minggu ini (strategiUntuk). */
+  strategi?: string[];
 }
 
 /**
@@ -161,7 +222,7 @@ export function hitungLaporan(
 
   return {
     periode: p,
-    mingguKe: Math.max(1, Math.round((Date.parse(p.akhir) - Date.parse(MINGGU_PERTAMA_AKHIR)) / (7 * 86400000)) + 1),
+    mingguKe: mingguKeDari(p.akhir),
     jumlahUnit,
     pendapatan: checkinMingguIni.reduce((s, b) => s + kotor(b), 0) * (1 - marketingPct),
     malamTerisi,
@@ -189,6 +250,20 @@ function rp(n: number): string {
 
 function persen1(n: number): string {
   return `${n.toLocaleString("id-ID", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+}
+
+function bagianKumulatif(l: LaporanMingguan): string[] {
+  const pm = l.perMinggu ?? [];
+  if (pm.length < 2) return [];
+  const total = pm.reduce((s, m) => s + m.pendapatan, 0);
+  const baris = [`💰 *Total Pendapatan ${pm.length} Minggu* (${tglPendek(pm[0].mulai)} – ${tglPendek(pm[pm.length - 1].akhir)})`];
+  if (pm.length <= MAKS_RINCIAN_MINGGU) {
+    for (const m of pm) baris.push(`• Minggu ke-${m.mingguKe}: ${rp(m.pendapatan)}`);
+  }
+  baris.push(`• *Total: ${rp(total)}*`);
+  if (l.periode.akhir === CATATAN_PENYESUAIAN_MINGGU_AKHIR) baris.push(CATATAN_PENYESUAIAN);
+  baris.push("");
+  return baris;
 }
 
 export function teksLaporan(l: LaporanMingguan): string {
@@ -219,11 +294,12 @@ export function teksLaporan(l: LaporanMingguan): string {
 
   baris.push(
     "📊 *Kinerja Minggu Ini*",
-    `• Pendapatan villa: *${rp(l.pendapatan)}*`,
+    `• Pendapatan villa minggu ini: *${rp(l.pendapatan)}*`,
     `• Okupansi: *${persen1(l.okupansi)}* (${l.malamTerisi} dari ${l.jumlahUnit * 7} malam-kamar, ${l.jumlahUnit} unit)`,
     `• Minggu sebelumnya: ${persen1(l.okupansiMingguSebelumnya)}. *${arah}*`,
     `• Tamu check-in: ${l.jumlahCheckin} booking`,
     "",
+    ...bagianKumulatif(l),
     "🌐 *Booking per Channel* (tamu yang check-in minggu ini)",
     ...(l.channelCheckin.length
       ? l.channelCheckin.map((c) => `• ${c.channel}: ${c.persen}% (${c.jumlah} booking)`)
@@ -235,8 +311,9 @@ export function teksLaporan(l: LaporanMingguan): string {
     `📅 *Minggu depan (${tglPendek(depan.mulai)}–${tglPendek(depan.akhir)})*`,
     `Sudah terisi ${l.malamTerisiMingguDepan} malam-kamar (${Math.round(l.okupansiMingguDepan)}%), dan booking masih terus masuk.`,
     "",
-    "🚀 *Strategi & Target*",
-    TEKS_STRATEGI,
+    ...(l.strategi?.length ? ["🚀 *Strategi yang Kami Jalankan Minggu Ini*", ...l.strategi.map((x) => `• ${x}`), ""] : []),
+    "🎯 *Target*",
+    TEKS_TARGET,
     "",
     "Terima kasih atas kepercayaan Bapak/Ibu. Kami akan terus melaporkan perkembangannya setiap minggu.",
     "",
