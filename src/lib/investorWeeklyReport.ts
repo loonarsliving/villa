@@ -6,9 +6,13 @@ import { kirimDariNomorUtama } from "./mkhsistemWa";
 import { addDaysISO } from "./stayDates";
 import {
   MARKETING_PCT_DEFAULT,
+  MINGGU_PERTAMA_MULAI,
+  STATUS_DIHITUNG,
   geser,
   hitungLaporan,
+  pendapatanPerMinggu,
   periodeMingguLalu,
+  strategiUntuk,
   teksLaporan,
   type BookingRingkas,
 } from "./investorWeeklyReportText";
@@ -71,8 +75,22 @@ export async function kirimLaporanMingguanInvestor(
   const mp = (fin?.value as { marketing_pct?: unknown } | null)?.marketing_pct;
   const marketingPct = typeof mp === "number" ? mp : MARKETING_PCT_DEFAULT;
 
+  // Total kumulatif sejak minggu ke-1 (owner 2026-10-14), rumus yang sama.
+  const { data: sejakAwal, error: eK } = await supabase
+    .from("bookings")
+    .select("sumber, status, unit_nomor, tgl_checkin, tgl_checkout, total_bayar, cloudbeds_subtotal, created_at")
+    .in("status", STATUS_DIHITUNG as unknown as string[])
+    .gte("tgl_checkin", MINGGU_PERTAMA_MULAI)
+    .lte("tgl_checkin", p.akhir);
+  if (eK) throw new Error(`gagal membaca booking kumulatif: ${eK.message}`);
+
+  // Strategi yang disetujui owner untuk minggu ini (lihat strategiUntuk).
+  const { data: strat } = await supabase.from("integration_settings").select("value").eq("key", "laporan_investor_strategi").maybeSingle();
+
   const semua = [...(bookings ?? []), ...(baru ?? [])] as BookingRingkas[];
   const laporan = hitungLaporan(semua, jumlahUnit ?? 0, p, (iso) => todayISO(new Date(iso)), marketingPct);
+  laporan.perMinggu = pendapatanPerMinggu((sejakAwal ?? []) as BookingRingkas[], p, marketingPct);
+  laporan.strategi = strategiUntuk(p, strat?.value ?? null);
   const pesan = teksLaporan(laporan);
 
   const { data: investor, error: eI } = await supabase
