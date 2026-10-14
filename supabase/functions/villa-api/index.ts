@@ -232,6 +232,7 @@ async function lunaskanAddonOrder(order){
   const qty = Number(order.qty ?? 1);
   await notif(null, 'receptionist', 'booking', `🔥 Siapkan ${order.item}${qty > 1 ? ` x${qty}` : ''} -- ${order.tanggal}`,
     `${order.guest_nama} (${order.hp}) sudah lunas memesan ${order.item}${qty > 1 ? ` x${qty}` : ''} untuk tanggal ${order.tanggal}. Menginap: ${order.info_menginap || '-'}.${order.catatan ? ` Catatan: ${order.catatan}.` : ''} Pesanan ${paymentCode(order.id)} -- cocokkan dengan tamu yang menginap.`, null);
+  await kirimTerimaKasihAddon(order, invoice_no);
   return {matched:true, addon_order_id: order.id, nominal: Number(order.total_bayar), invoice_no};
 }
 
@@ -362,6 +363,7 @@ async function tryConfirmBookingByNominal(nominal, onlyBookingId){
   await notif(null, 'all', 'transfer', `Pembayaran dikonfirmasi otomatis -- Unit ${booking.unit_nomor} terkunci`,
     `Booking ${String(booking.id).slice(0,8)} (${booking.tgl_checkin} s/d ${booking.tgl_checkout}) dikonfirmasi lunas otomatis dari email BTN QRIS (Rp ${Math.round(Number(booking.total_bayar ?? nominal)).toLocaleString('id-ID')}), unit sudah masuk kalender.${dihidupkan ? ` Booking ini sempat kedaluwarsa lewat ${PENDING_PAYMENT_HOLD_MINUTES} menit dan dihidupkan kembali oleh email pembayarannya.` : ''}`, booking.id);
   await notifPaketResepsionis(booking);
+  await kirimTerimaKasihLunas(booking.id);
   await pushBookingToCloudbeds({...booking, status:'terjadwal'});
   return {matched:true, booking_id:booking.id, unit_nomor:booking.unit_nomor, nominal};
 }
@@ -833,6 +835,72 @@ async function kirimAjakPesanDirect(bookingId){
   const ok = await sendWa(hp, teksAjakPesanDirect({nama: bk.guest_nama, bahasa: bahasaDariNomorHp(hp)}),
     {booking_id: bk.id, unit_id: bk.unit_id, template_type:'ajak_pesan_direct'});
   return ok ? 'terkirim' : 'gagal';
+}
+
+/**
+ * WA selamat & terima kasih ke tamu begitu pembayaran QRIS booking website
+ * terkonfirmasi (owner 2026-10-14: "ktika dia berhasil qris harusnya dia
+ * dikirim wa selamat dan trimakasih sdh memesan"). Dipanggil dari kedua jalur
+ * lunas (email BTN dan balasan LUNAS). Sekali per booking lewat
+ * wa_messages_log. Tidak menjanjikan apa pun di luar yang dibayar (tanpa
+ * sarapan gratis -- aturan owner 2026-10-09).
+ */
+function teksTerimaKasihLunas({nama, bahasa, checkin, checkout, unit, addon, total, invoice}){
+  const rentang = `${tanggalSingkat(checkin, bahasa, false)} – ${tanggalSingkat(checkout, bahasa, true)}`;
+  const rp = `Rp ${Math.round(Number(total ?? 0)).toLocaleString('id-ID')}`;
+  if(bahasa === 'en'){
+    return `Hi ${nama || 'there'} 👋\n\n`+
+      `Congratulations, your payment has been received! Thank you for booking Loonars Private Living Yogyakarta 🎉\n\n`+
+      `Stay: ${rentang}${unit ? `\nVilla: ${unit}` : ''}${addon ? `\nAdd-on: ${addon}` : ''}\nTotal paid: ${rp}${invoice ? `\nInvoice: ${invoice}` : ''}\n\n`+
+      `Check-in from 14.00, check-out by 12.00. Your invoice can be downloaded on the loonars.id booking page. `+
+      `If you have any questions, just reply to this message. See you soon at Loonars! 🌿`;
+  }
+  return `Halo Kak${nama ? ` ${nama}` : ''} 👋\n\n`+
+    `Selamat, pembayaran Kakak sudah kami terima! Terima kasih sudah memesan di Loonars Private Living Yogyakarta 🎉\n\n`+
+    `Menginap: ${rentang}${unit ? `\nVilla: ${unit}` : ''}${addon ? `\nAdd-on: ${addon}` : ''}\nTotal dibayar: ${rp}${invoice ? `\nNo. invoice: ${invoice}` : ''}\n\n`+
+    `Check-in mulai pukul 14.00, check-out paling lambat 12.00. Invoice bisa diunduh di halaman pemesanan loonars.id. `+
+    `Kalau ada pertanyaan, silakan balas pesan ini ya. Sampai jumpa di Loonars! 🌿`;
+}
+
+async function kirimTerimaKasihLunas(bookingId){
+  try {
+    const {data:bk} = await supabase.from('bookings')
+      .select('id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,total_bayar,tarif,harga_paket,paket_dekorasi,invoice_no')
+      .eq('id', bookingId).maybeSingle();
+    if(!bk?.guest_id) return 'tanpa_tamu';
+    const {data:sudah} = await supabase.from('wa_messages_log').select('id')
+      .eq('booking_id', bk.id).eq('template_type','booking_paid_thanks').eq('status','sent').limit(1);
+    if(sudah?.length) return 'sudah';
+    const {data:g} = await supabase.from('guests').select('hp').eq('id', bk.guest_id).maybeSingle();
+    if(!g?.hp) return 'tanpa_hp';
+    const bahasa = bahasaDariNomorHp(g.hp);
+    const teks = teksTerimaKasihLunas({
+      nama: bk.guest_nama, bahasa, checkin: bk.tgl_checkin, checkout: bk.tgl_checkout,
+      unit: bk.unit_nomor, addon: bk.paket_dekorasi, total: tagihanTamu(bk), invoice: bk.invoice_no,
+    });
+    return (await sendWa(g.hp, teks, {booking_id: bk.id, unit_id: bk.unit_id, template_type:'booking_paid_thanks'})) ? 'terkirim' : 'gagal';
+  } catch(e){
+    // Ucapan terima kasih tidak boleh menggagalkan konfirmasi pembayaran.
+    console.error('[terima-kasih-lunas]', e?.message ?? e);
+    return 'gagal';
+  }
+}
+
+/** Padanan untuk pesanan add-on terpisah (BBQ dari loonars.id/bbq). */
+async function kirimTerimaKasihAddon(order, invoice_no){
+  try {
+    const bahasa = bahasaDariNomorHp(order.hp);
+    const qty = Number(order.qty ?? 1);
+    const item = `${order.item}${qty > 1 ? ` x${qty}` : ''}`;
+    const rp = `Rp ${Math.round(Number(order.total_bayar ?? 0)).toLocaleString('id-ID')}`;
+    const tgl = tanggalSingkat(order.tanggal, bahasa, true);
+    const teks = bahasa === 'en'
+      ? `Hi ${order.guest_nama || 'there'} 👋\n\nYour payment has been received, thank you for ordering ${item} at Loonars Private Living 🔥\n\nDate: ${tgl}\nTotal paid: ${rp}\nInvoice: ${invoice_no}\n\nOur team will prepare it on that day. If you have any questions, just reply to this message 🌿`
+      : `Halo Kak ${order.guest_nama || ''} 👋\n\nSelamat, pembayaran Kakak sudah kami terima! Terima kasih sudah memesan ${item} di Loonars Private Living 🔥\n\nTanggal: ${tgl}\nTotal dibayar: ${rp}\nNo. invoice: ${invoice_no}\n\nTim kami akan menyiapkannya di tanggal tersebut. Kalau ada pertanyaan, silakan balas pesan ini ya 🌿`;
+    await sendWa(order.hp, teks, {template_type:'addon_order_paid_thanks'});
+  } catch(e){
+    console.error('[terima-kasih-addon]', e?.message ?? e);
+  }
 }
 
 /** "YYYY-MM-DD" (tanggal kalender, bukan jam) -> "5 Okt" / "5 Oct", tahun opsional. */
@@ -3946,6 +4014,7 @@ Deno.serve(async (req)=>{
     // would block real OTA inventory on an unpaid hold and leave a junk
     // reservation in Cloudbeds whenever a guest walked away.
     await notifPaketResepsionis(booking);
+    await kirimTerimaKasihLunas(booking.id);
     await pushBookingToCloudbeds({...booking, status:'terjadwal'});
 
     return json({
