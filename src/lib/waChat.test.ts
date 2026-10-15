@@ -139,6 +139,21 @@ describe("pilihBookingTerbaik", () => {
   });
 });
 
+describe("menyebutSewaVilla -- penanya yang masih tanya-tanya (2026-10-15)", () => {
+  it("masuk resepsionis", () => {
+    expect(menyebutSewaVilla("kak villanya ada?")).toBe(true);
+    expect(menyebutSewaVilla("minta pricelist dong")).toBe(true);
+    expect(menyebutSewaVilla("Price list nya berapa ya kak")).toBe(true);
+    expect(menyebutSewaVilla("jam check in jam berapa?")).toBe(true);
+    expect(menyebutSewaVilla("weekend ini masih kosong?")).toBe(true);
+  });
+  it("jual-beli properti tetap ke sales", () => {
+    expect(menyebutSewaVilla("pricelist rumah subsidi ada?")).toBe(false);
+    expect(menyebutSewaVilla("minat investasi villa, profit sharing gimana")).toBe(false);
+    expect(menyebutSewaVilla("Rumah tipe 36 DP berapa?")).toBe(false);
+  });
+});
+
 describe("dariIklan", () => {
   it("teks bawaan iklan Click-to-WhatsApp Meta dikenali (Inggris dan Indonesia)", () => {
     expect(dariIklan("Hello! Can I get more info on this?")).toBe(true);
