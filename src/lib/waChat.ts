@@ -83,8 +83,41 @@ const PENANDA_SEWA_VILLA: RegExp[] = [
   /\bsewa\s+villa\b/i,
 ];
 
+/**
+ * Penanda longgar untuk tamu yang masih bertanya-tanya (permintaan owner
+ * 2026-10-15, supaya owner tidak membalas satu per satu): kata "villa", minta
+ * pricelist/tarif, check-in/out, ketersediaan kamar, weekend, reservasi, fasilitas.
+ * Karena "villa"/"booking"/"harga" juga dipakai calon pembeli properti di nomor
+ * yang sama, penanda ini TIDAK berlaku kalau pesan juga berbau jual-beli properti
+ * (PENANDA_PROPERTI) -- pesan seperti itu tetap milik sales.
+ */
+const PENANDA_TANYA_VILLA: RegExp[] = [
+  /\bvilla(nya)?\b/i,
+  /\bprice\s?list(nya)?\b/i,
+  /\bdaftar\s+(harga|tarif)\b/i,
+  /\b(list|info)\s+(harga|tarif)\b/i,
+  /\btarif\b/i,
+  /\bcheck[\s-]?(in|out)\b/i,
+  /\bche?k\s?(in|out)\b/i,
+  /\b(kamar|room)\s+(kosong|tersedia|available)\b/i,
+  /\b(available|availability|ketersediaan)\b/i,
+  /\b(weekend|weekday|long\s?weekend)\b/i,
+  /\b(reservasi|reservation)\b/i,
+  /\b(extra\s?bed|kolam\s+renang|private\s+pool|bbq)\b/i,
+  /\bbooking\b/i,
+];
+
+const PENANDA_PROPERTI: RegExp[] = [
+  /\b(beli|membeli|dibeli|jual|dijual|jualan)\b/i,
+  /\b(investasi|investor|invest|profit\s?sharing|bagi\s?hasil|dividen)\b/i,
+  /\b(kpr|cicil|cicilan|angsuran|dp|uang\s+muka|booking\s+fee|kavling|tanah|subsidi|sertifikat|shm|rumah)\b/i,
+  /\b(tipe|type)\s?\d+/i,
+];
+
 export function menyebutSewaVilla(teks: string): boolean {
-  return PENANDA_SEWA_VILLA.some((re) => re.test(teks));
+  if (PENANDA_SEWA_VILLA.some((re) => re.test(teks))) return true;
+  if (PENANDA_PROPERTI.some((re) => re.test(teks))) return false;
+  return PENANDA_TANYA_VILLA.some((re) => re.test(teks));
 }
 
 /**
@@ -182,6 +215,10 @@ export async function kirimSapaanPertamaAman(
  * Mkhsistem.
  */
 export async function bolehMasukResepsionis(supabase: SupabaseClient, phoneMentah: string, teks: string): Promise<boolean> {
+  // Pelanggan daftar refund (mkc_refund_customers) dilayani Bella (Refund & Customer
+  // Relation) lewat Mkhsistem /refund -- tidak boleh masuk Chat resepsionis, walau
+  // pernah jadi tamu atau pesannya menyebut villa/pricelist.
+  if (await nomorPelangganRefund(supabase, phoneMentah)) return false;
   if (await orangDalamMkhsistem(supabase, phoneMentah)) return dariTombolWebsite(teks);
   const iklan = dariIklan(teks);
   if (!iklan && menyebutSewaVilla(teks)) return true;
@@ -195,6 +232,18 @@ export async function bolehMasukResepsionis(supabase: SupabaseClient, phoneMenta
   const { data: guests, error: guestError } = await supabase.from("guests").select("hp").not("hp", "is", null).neq("hp", "");
   if (guestError) console.error("[waChat] gagal memeriksa data tamu", guestError.message);
   return (guests ?? []).some((g) => samePhoneNumber(g.hp, phone));
+}
+
+/** Nomor ada di daftar refund Mkhsistem. Gagal baca = dianggap bukan (Mkhsistem tetap mengurus refund lebih dulu). */
+async function nomorPelangganRefund(supabase: SupabaseClient, phoneMentah: string): Promise<boolean> {
+  const akhiran = akhiranNomor(phoneMentah);
+  if (akhiran.length < 9) return false;
+  const { data, error } = await supabase.from("mkc_refund_customers").select("phone").is("deleted_at", null).not("phone", "is", null);
+  if (error) {
+    console.error("[waChat] gagal memeriksa daftar refund", error.message);
+    return false;
+  }
+  return (data ?? []).some((r) => !!r.phone && akhiranNomor(r.phone) === akhiran);
 }
 
 /** 9 digit terakhir, sama persis dengan findEmployeeByPhone/findContractorByPhone di Mkhsistem. */
