@@ -40,12 +40,12 @@ export function nomorHpTamuValid(hp: string): boolean {
 
 // Tata tertib & larangan Loonars Private Living, ditandatangani tamu saat
 // check-in (owner request 2026-09-11, mengadaptasi format kartu registrasi
-// fisik "Canggu Villas" -- jam check-in 14:00 per instruksi owner,
+// fisik "Canggu Villas" -- jam check-in 15:00 per instruksi owner,
 // sisanya struktur & nominal disamakan). Zona waktu WIB: villa berada di
 // Jalan Palagan, Sleman, Yogyakarta (dikoreksi 2026-09-11 -- sempat
 // tertulis WITA, selisih satu jam pada dokumen yang ditandatangani tamu
 // dan jadi dasar denda keterlambatan check-out).
-const HOUSE_RULES = `Batas waktu check-in pukul 14:00 WIB,
+const HOUSE_RULES = `Batas waktu check-in pukul 15:00 WIB,
 - Check-in lebih awal antara pukul 09:00 - 13:59 WIB dikenakan biaya sebesar 25% dari publish rate.
 - Check-in lebih awal antara pukul 06:00 - 08:59 WIB dikenakan biaya sebesar 50% dari publish rate.
 - Check-in sebelum pukul 05:59 WIB dikenakan biaya satu malam dari publish rate.

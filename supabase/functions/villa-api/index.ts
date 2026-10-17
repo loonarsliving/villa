@@ -852,13 +852,13 @@ function teksTerimaKasihLunas({nama, bahasa, checkin, checkout, unit, addon, tot
     return `Hi ${nama || 'there'} 👋\n\n`+
       `Congratulations, your payment has been received! Thank you for booking Loonars Private Living Yogyakarta 🎉\n\n`+
       `Stay: ${rentang}${unit ? `\nVilla: ${unit}` : ''}${addon ? `\nAdd-on: ${addon}` : ''}\nTotal paid: ${rp}${invoice ? `\nInvoice: ${invoice}` : ''}\n\n`+
-      `Check-in from 14.00, check-out by 12.00. Your invoice can be downloaded on the loonars.id booking page. `+
+      `Check-in from 15.00, check-out by 12.00. Your invoice can be downloaded on the loonars.id booking page. `+
       `If you have any questions, just reply to this message. See you soon at Loonars! 🌿`;
   }
   return `Halo Kak${nama ? ` ${nama}` : ''} 👋\n\n`+
     `Selamat, pembayaran Kakak sudah kami terima! Terima kasih sudah memesan di Loonars Private Living Yogyakarta 🎉\n\n`+
     `Menginap: ${rentang}${unit ? `\nVilla: ${unit}` : ''}${addon ? `\nAdd-on: ${addon}` : ''}\nTotal dibayar: ${rp}${invoice ? `\nNo. invoice: ${invoice}` : ''}\n\n`+
-    `Check-in mulai pukul 14.00, check-out paling lambat 12.00. Invoice bisa diunduh di halaman pemesanan loonars.id. `+
+    `Check-in mulai pukul 15.00, check-out paling lambat 12.00. Invoice bisa diunduh di halaman pemesanan loonars.id. `+
     `Kalau ada pertanyaan, silakan balas pesan ini ya. Sampai jumpa di Loonars! 🌿`;
 }
 
@@ -1461,7 +1461,7 @@ function jamMenitWIB(d = new Date()){
  * Malam yang dijual late night = malam KEMARIN (tanggal WIB), keluar hari
  * ini. Dengan begitu booking ini bentrok dengan tamu yang memang masih
  * menginap malam itu (dan dengan exclusion constraint bookings), tapi tidak
- * dengan tamu yang check-in hari ini pukul 14.00.
+ * dengan tamu yang check-in hari ini pukul 15.00.
  */
 function jendelaLateNight(d = new Date()){
   const {jam} = jamMenitWIB(d);
@@ -3588,7 +3588,7 @@ Deno.serve(async (req)=>{
       seluruhnyaGratis ? {
         unit_id: freeUnit.id, unit_nomor: freeUnit.nomor, guest_id: g?.id ?? null, guest_nama: nama,
         tipe: 'harian', sumber: isKol ? 'kol' : 'investor', tgl_checkin, tgl_checkout,
-        durasi_malam: nights, checkin_time: '14:00:00', adults, children,
+        durasi_malam: nights, checkin_time: '15:00:00', adults, children,
         tarif: 0, total_bayar: 0, status: 'terjadwal',
         voucher_id: isKol ? null : voucherTerpakai.voucher.id,
         kol_voucher_id: isKol ? voucherTerpakai.voucher.id : null,
@@ -3599,7 +3599,7 @@ Deno.serve(async (req)=>{
       } : {
         unit_id: freeUnit.id, unit_nomor: freeUnit.nomor, guest_id: g?.id ?? null, guest_nama: nama,
         tipe: 'harian', sumber: voucherTerpakai ? (isKol ? 'kol' : 'investor') : 'website', tgl_checkin, tgl_checkout,
-        durasi_malam: nights, checkin_time: '14:00:00', adults, children,
+        durasi_malam: nights, checkin_time: '15:00:00', adults, children,
         tarif: computedTarif, total_bayar: totalDitagih, status: 'menunggu_pembayaran',
         // Menginap lebih dari semalam bukan menginap gratis: hanya SATU
         // malamnya yang ditanggung voucher, sisanya dibayar seperti tamu
@@ -4891,7 +4891,7 @@ Deno.serve(async (req)=>{
     let dispatched=0;
     for(const bk of bookings ?? []){
       if(!bk.tgl_checkin) continue;
-      const checkinAt = new Date(`${bk.tgl_checkin}T${bk.checkin_time??'14:00:00'}`);
+      const checkinAt = new Date(`${bk.tgl_checkin}T${bk.checkin_time??'15:00:00'}`);
       const dueAt = new Date(checkinAt.getTime() - 3*60*60*1000);
       if(dueAt > windowEnd || dueAt < windowStart) continue;
       const {data:existing} = await supabase.from('cleaning_call_log').select('id').eq('booking_id',bk.id).maybeSingle();
@@ -7244,7 +7244,7 @@ Deno.serve(async (req)=>{
       unit_id:b.unit_id, unit_nomor:b.unit_nomor, guest_id, guest_nama:b.guest_nama,
       tipe:b.tipe, sumber:b.sumber??'walk-in', tgl_checkin:b.tgl_checkin,
       tgl_checkout:b.tgl_checkout??null, durasi_malam:b.durasi_malam??null,
-      checkin_time:b.checkin_time??'14:00:00',
+      checkin_time:b.checkin_time??'15:00:00',
       tarif:computedTarif, total_bayar:computedTarif, status:'terjadwal',
     }).select().single();
     if(error){

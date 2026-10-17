@@ -248,7 +248,7 @@ export default function FrontDeskPage() {
 
   const agenda: { title: string; sub: string; time: string; dot: string }[] = [];
   units.filter((u) => u.status === "checkout").forEach((u) => agenda.push({ title: `Checkout — Unit ${u.nomor}`, sub: "Hari ini", time: "12:00", dot: "bg-ruby-500" }));
-  if (sum && sum.checkin_today > 0) agenda.push({ title: `${sum.checkin_today} check-in terjadwal`, sub: "Siapkan unit", time: "14:00", dot: "bg-azure-500" });
+  if (sum && sum.checkin_today > 0) agenda.push({ title: `${sum.checkin_today} check-in terjadwal`, sub: "Siapkan unit", time: "15:00", dot: "bg-azure-500" });
   if (sum && sum.dirty > 0) agenda.push({ title: `${sum.dirty} unit perlu dibersihkan`, sub: "Housekeeping", time: "Segera", dot: "bg-gold-500" });
 
   return (
