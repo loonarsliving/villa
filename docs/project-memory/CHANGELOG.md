@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-18 — villa-api `/bridge/owner-finance` (keuangan villa untuk asisten WA owner, hanya baca)
+- Lihat CURRENT_STATE.md 2026-10-18.
+
 ### 2026-10-13 — Paket dekorasi add-on di booking website (QRIS), kolom bookings.paket_dekorasi/harga_paket
 - Lihat CURRENT_STATE.md 2026-10-13.
 
