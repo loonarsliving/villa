@@ -3199,6 +3199,202 @@ async function computeDividendList(periode){
   return { periode, per_investor_amount: report.per_investor_amount, investor_count: report.investor_count, investors: list };
 }
 
+
+// Isi /finance/summary dan /finance/channel-breakdown, dipisah ke fungsi
+// supaya /bridge/owner-finance (asisten WA owner di Mkhsistem) memakai rumus
+// yang PERSIS sama dengan halaman Finance, bukan salinan yang bisa melenceng.
+// Pemindahan saja -- isinya tidak diubah.
+class GalatQueryFinance extends Error {}
+
+async function hitungFinanceSummary(from, to){
+  const { data: rows, error } = await supabase.from('bookings')
+    .select('id,sumber,status,tgl_checkin,tgl_checkout,total_bayar,tarif,cloudbeds_subtotal,cloudbeds_balance')
+    .gte('tgl_checkin', from).lte('tgl_checkin', to);
+  if(error) throw new GalatQueryFinance(error.message);
+  const bookings = rows ?? [];
+  const configMap = await getSettlementConfigMap();
+  await ensureFinanceSettlements(bookings, configMap);
+
+  const active = bookings.filter(isPemasukanDiakui);
+  const cancelled = bookings.filter(b=>b.status==='batal').length;
+  const amountOf = b => Number(b.total_bayar ?? b.tarif ?? 0);
+  // Booking mendatang: tanggal check-in Cloudbeds belum tiba, belum pemasukan.
+  const todayForPipeline = todayWIB();
+  const pipelineRows = bookings.filter(b=>STATUS_PEMASUKAN_DIAKUI.includes(b.status) && b.tgl_checkin > todayForPipeline);
+  const pipelineAmount = pipelineRows.reduce((s,b)=>s+pendapatanBersih(b),0);
+  // Sudah dihitung (tanggalnya sudah lewat), tapi resepsionis belum
+  // menekan check-in -- peringatan operasional saja, bukan soal angka.
+  const belumCheckin = bookings.filter(b=>b.status==='terjadwal' && b.tgl_checkin < todayForPipeline);
+  const gross_revenue = active.reduce((s,b)=>s+amountOf(b),0);
+  const net_revenue = active.reduce((s,b)=>s+pendapatanBersih(b),0);
+  const payment_received = active.filter(b=>paymentStatusForBooking(b)==='PAID').reduce((s,b)=>s+amountOf(b),0);
+  const outstanding = active.reduce((s,b)=>s+outstandingForBooking(b, amountOf(b)),0);
+  const cloudbedsVerifiedCount = active.filter(b=>b.cloudbeds_balance != null).length;
+
+  const activeIds = active.map(b=>b.id);
+  let otaReceivable = 0, alertsUnknown = 0, alertsOverdue = 0, alertsDueToday = 0;
+  let cashReceivedAmount = 0, cashReceivedCount = 0;
+  if(activeIds.length){
+    const { data: settlements } = await supabase.from('finance_settlements')
+      .select('booking_id,sumber,amount,settlement_status,settlement_confidence,expected_settlement_date,amount_received,received_date')
+      .in('booking_id', activeIds);
+    const today = todayWIB();
+    for(const s of (settlements ?? [])){
+      const isOta = normalizedChannel(s.sumber) !== 'DIRECT';
+      if(isOta && s.settlement_status !== 'RECEIVED') otaReceivable += Number(s.amount ?? 0);
+      if(s.settlement_status !== 'RECEIVED' && s.settlement_confidence==='UNKNOWN') alertsUnknown++;
+      if(s.settlement_status !== 'RECEIVED' && s.expected_settlement_date){
+        if(s.expected_settlement_date < today) alertsOverdue++;
+        else if(s.expected_settlement_date === today) alertsDueToday++;
+      }
+      if(s.settlement_status==='RECEIVED' && s.received_date && s.received_date>=from && s.received_date<=to){
+        cashReceivedAmount += Number(s.amount_received ?? 0);
+        cashReceivedCount++;
+      }
+    }
+  }
+
+  const { data: lastEvent } = await supabase.from('cloudbeds_events_log').select('created_at').order('created_at',{ascending:false}).limit(1).maybeSingle();
+
+  const alerts = [];
+  if(outstanding>0) alerts.push({ type:'outstanding', level:'warning', message:`Rp ${Math.round(outstanding).toLocaleString('id-ID')} masih outstanding (belum lunas).` });
+  if(alertsDueToday>0) alerts.push({ type:'settlement_due', level:'info', message:`${alertsDueToday} settlement diperkirakan cair hari ini.` });
+  if(alertsOverdue>0) alerts.push({ type:'overdue', level:'danger', message:`${alertsOverdue} settlement sudah lewat tanggal perkiraan cair dan belum diterima.` });
+  if(alertsUnknown>0) alerts.push({ type:'unknown_settlement_rule', level:'warning', message:`${alertsUnknown} transaksi punya aturan settlement yang belum dikonfigurasi (UNKNOWN).` });
+  if(belumCheckin.length>0) alerts.push({ type:'belum_checkin', level:'warning', message:`${belumCheckin.length} booking sudah lewat tanggal check-in tapi belum di-check-in di sistem -- sudah DIHITUNG sebagai pemasukan (mengikuti tanggal Cloudbeds). Kalau tamunya ternyata tidak datang, tandai batal/no-show supaya angkanya terkoreksi.` });
+
+  return {
+    period: { from, to },
+    recognition_rule: 'Pemasukan diakui per tanggal check-in Cloudbeds: dihitung begitu tanggal check-in sudah tiba (tidak menunggu tombol check-in resepsionis), selama booking tidak batal. Booking dengan tanggal check-in di masa depan ditampilkan terpisah sebagai booking mendatang dan belum dihitung.',
+    pipeline: {
+      amount: pipelineAmount,
+      count: pipelineRows.length,
+      note: 'Booking dengan tanggal check-in yang belum tiba. Masih tercatat di Cloudbeds, belum dihitung sebagai pemasukan -- bisa berubah kalau dibatalkan.',
+    },
+    gross_revenue, net_revenue,
+    net_revenue_note: 'Bersih = harga kamar dari Cloudbeds ("Deposit Amount" di email reservasi), sebelum fee OTA yang Cloudbeds tambahkan ke Grand Total. Booking website/walk-in: bersih sama dengan kotor. Diskon/refund tidak tersedia dari Cloudbeds.',
+    payment_received,
+    payment_received_note: cloudbedsVerifiedCount>0
+      ? `Untuk ${cloudbedsVerifiedCount} dari ${active.length} booking, dihitung dari saldo asli Cloudbeds (getReservations.balance). Sisanya (booking direct/walk-in atau belum tersinkron) memakai status booking (checkin/checkout = lunas, sesuai alur "Tandai Lunas" front desk) sebagai perkiraan.`
+      : 'Dihitung dari status booking (checkin/checkout = sudah bayar penuh, sesuai alur "Tandai Lunas" front desk) -- belum ada booking dengan saldo asli Cloudbeds tersinkron pada periode ini. Jalankan "Tarik Reservasi" di Admin > Cloudbeds untuk mengisinya.',
+    outstanding,
+    ota_receivable: otaReceivable,
+    ota_receivable_note: 'Total revenue booking OTA (non-direct) yang statusnya belum RECEIVED di alur settlement manual Finance.',
+    cash_received: {
+      amount: cashReceivedAmount,
+      verified: cashReceivedCount>0,
+      count: cashReceivedCount,
+      note: cashReceivedCount>0
+        ? 'Berdasarkan input manual Finance (Tandai Diterima + referensi bank) pada periode ini.'
+        : 'NOT VERIFIED -- belum ada settlement yang ditandai diterima (dengan referensi bank) untuk periode ini.',
+    },
+    bookings_counted: active.length,
+    cloudbeds_balance_verified_count: cloudbedsVerifiedCount,
+    cancelled_excluded: cancelled,
+    alerts,
+    last_cloudbeds_activity: lastEvent?.created_at ?? null,
+    data_caveats: [
+      'Balance mismatch check (Cloudbeds balance vs calculated) NOT_AVAILABLE -- belum ada perbandingan otomatis antara total kami dan balance Cloudbeds; balance Cloudbeds sekarang dipakai langsung sebagai sumber status bayar/outstanding, bukan dibandingkan.',
+      'Refund tracking NOT_AVAILABLE -- tidak ada endpoint refund yang tersinkron dari Cloudbeds ke sistem ini.',
+      'Sync run history (jumlah reservasi/transaksi/pembayaran per sync) NOT_AVAILABLE sebagai log tersimpan -- lihat halaman Admin > Cloudbeds untuk menjalankan sync dan melihat ringkasannya secara langsung.',
+    ],
+  };
+}
+
+async function hitungChannelBreakdown(from, to){
+  const { data: rows, error } = await supabase.from('bookings')
+    .select('id,sumber,status,unit_nomor,guest_nama,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_subtotal,cloudbeds_balance')
+    .gte('tgl_checkin', from).lte('tgl_checkin', to).lte('tgl_checkin', todayWIB()).in('status', STATUS_PEMASUKAN_DIAKUI);
+  if(error) throw new GalatQueryFinance(error.message);
+  const bookings = rows ?? [];
+  const configMap = await getSettlementConfigMap();
+  await ensureFinanceSettlements(bookings, configMap);
+  const pctOf = (gross, net) => gross > 0 ? Math.round(((gross - net) / gross) * 1000) / 10 : 0;
+
+  const ids = bookings.map(b=>b.id);
+  const settlementByBooking = new Map();
+  if(ids.length){
+    const { data: settlements } = await supabase.from('finance_settlements').select('*').in('booking_id', ids);
+    for(const s of (settlements ?? [])) settlementByBooking.set(s.booking_id, s);
+  }
+
+  // Per tanggal check-in x channel (owner 2026-10-05: "tgl 1 ada 5
+  // booking dari channel mana sj, nilai uangnya sdh bersih dluar potongan
+  // OTA?"). Kotor/bersih per booking dari pendapatanKotor/pendapatanBersih,
+  // sama dengan tabel per-channel di bawah.
+  const byDate = new Map();
+  for(const b of bookings){
+    const dateRow = byDate.get(b.tgl_checkin) ?? new Map();
+    const key = b.sumber ?? 'other';
+    const c = dateRow.get(key) ?? { sumber:key, booking_count:0, malam:0, gross:0, ota_deduction:0, net:0, commission_pct:0, menginap_lama:[] };
+    const malam = Number(b.durasi_malam ?? 0);
+    c.booking_count++;
+    c.malam += malam;
+    c.gross += pendapatanKotor(b);
+    c.net += pendapatanBersih(b);
+    // Owner 2026-10-05: nilai seluruh masa inap tercatat di tanggal
+    // check-in, jadi booking >1 malam membuat satu tanggal terlihat besar.
+    // Ditampilkan per booking supaya tetap bisa dimengerti.
+    if(malam > 1) c.menginap_lama.push({
+      unit_nomor: b.unit_nomor, guest_nama: b.guest_nama,
+      tgl_checkin: b.tgl_checkin, tgl_checkout: b.tgl_checkout, malam,
+      bersih: pendapatanBersih(b), bersih_per_malam: pendapatanBersih(b) / malam,
+    });
+    c.ota_deduction = c.gross - c.net;
+    c.commission_pct = pctOf(c.gross, c.net);
+    dateRow.set(key, c);
+    byDate.set(b.tgl_checkin, dateRow);
+  }
+  const by_date = [...byDate.entries()].sort(([a],[b])=>a<b?-1:1).map(([tgl_checkin, m])=>{
+    const chs = [...m.values()].sort((a,b)=>b.gross-a.gross);
+    return {
+      tgl_checkin,
+      booking_count: chs.reduce((s,c)=>s+c.booking_count,0),
+      malam: chs.reduce((s,c)=>s+c.malam,0),
+      gross: chs.reduce((s,c)=>s+c.gross,0),
+      ota_deduction: chs.reduce((s,c)=>s+c.ota_deduction,0),
+      net: chs.reduce((s,c)=>s+c.net,0),
+      channels: chs,
+    };
+  });
+
+  const bySumber = new Map();
+  for(const b of bookings){
+    const key = b.sumber ?? 'other';
+    const cur = bySumber.get(key) ?? { sumber:key, normalized_channel: normalizedChannel(key), revenue:0, net_revenue:0, payment:0, outstanding:0, ota_receivable:0, settled_count:0, unsettled_count:0, booking_count:0, room_nights:0 };
+    const amount = pendapatanKotor(b);
+    const net = pendapatanBersih(b);
+    const bOutstanding = outstandingForBooking(b, amount);
+    cur.revenue += amount;
+    cur.net_revenue += net;
+    cur.booking_count++;
+    cur.room_nights += Number(b.durasi_malam ?? 0);
+    cur.payment += amount - bOutstanding;
+    cur.outstanding += bOutstanding;
+    const s = settlementByBooking.get(b.id);
+    const settled = s?.settlement_status==='RECEIVED';
+    if(settled) cur.settled_count++; else cur.unsettled_count++;
+    // Yang ditransfer OTA ke villa adalah angka bersih, bukan Grand Total.
+    if(cur.normalized_channel!=='DIRECT' && !settled) cur.ota_receivable += net;
+    bySumber.set(key, cur);
+  }
+  const cfgArr = [...configMap.values()];
+  const channels = [...bySumber.values()].map(c=>{
+    const cfg = configMap.get(c.sumber);
+    return {
+      ...c,
+      ota_deduction: c.revenue - c.net_revenue,
+      commission_pct: pctOf(c.revenue, c.net_revenue),
+      avg_net_adr: c.room_nights>0 ? c.net_revenue/c.room_nights : null,
+      collection_method: cfg?.collection_method ?? 'UNKNOWN',
+      destination_account: cfg?.destination_account_label ?? null,
+    };
+  }).sort((a,b)=>b.revenue-a.revenue);
+  const totals = channels.reduce((acc,c)=>({ revenue:acc.revenue+c.revenue, net_revenue:acc.net_revenue+c.net_revenue, payment:acc.payment+c.payment, outstanding:acc.outstanding+c.outstanding, ota_receivable:acc.ota_receivable+c.ota_receivable }), { revenue:0, net_revenue:0, payment:0, outstanding:0, ota_receivable:0 });
+  const bersih_belum_tersedia = bookings.filter(b=>b.cloudbeds_subtotal == null && normalizedChannel(b.sumber)!=='DIRECT').length;
+  return { period:{from,to}, channels, totals, by_date, bersih_belum_tersedia, settlement_configs_count: cfgArr.length };
+}
+
 Deno.serve(async (req)=>{
   if(req.method==='OPTIONS') return new Response('ok',{headers:CORS});
   if(!SESSION_SECRET){
@@ -4610,6 +4806,35 @@ Deno.serve(async (req)=>{
     });
   }
 
+  // Keuangan villa satu bulan untuk asisten WhatsApp owner di Mkhsistem
+  // (owner 2026-10-18: "pendapatan villa kan bisa ambil dari finance di repo
+  // villa"). Hanya baca, rahasia sama dengan /bridge/occupancy. Angkanya
+  // dari fungsi yang SAMA dengan halaman Finance (hitungFinanceSummary,
+  // hitungChannelBreakdown) dan laporan investor (computeReport), jadi
+  // jawaban WA tidak pernah berbeda dari dashboard. Satu-satunya tulisan
+  // adalah ensureFinanceSettlements (upsert ignoreDuplicates), sama seperti
+  // saat halaman Finance dibuka.
+  if(path==='/bridge/owner-finance' && m==='GET'){
+    const bridge = await getVercelBridge();
+    if(!bridge.secret) return err('Jembatan belum dikonfigurasi (integration_settings.vercel_bridge.secret)',503);
+    const provided = req.headers.get('x-internal-secret') ?? '';
+    if(!await secretsMatch(provided, bridge.secret)) return err('Unauthorized',401);
+    const bulan = url.searchParams.get('bulan') || monthWIB();
+    if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(bulan)) return err('bulan harus YYYY-MM');
+    const [y, mo] = bulan.split('-').map(Number);
+    const from = `${bulan}-01`;
+    const to = new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10);
+    try {
+      const finance = await hitungFinanceSummary(from, to);
+      const { by_date: _perTanggal, ...channel } = await hitungChannelBreakdown(from, to);
+      const laporan_investor = await computeReport(undefined, bulan);
+      return json({ bulan, hari_ini: todayWIB(), finance, channel, laporan_investor });
+    } catch(e){
+      if(e instanceof GalatQueryFinance) return err(e.message);
+      throw e;
+    }
+  }
+
   // Batalkan booking website yang tidak dibayar dalam 1 jam (instruksi
   // owner 2026-09-12). Dijalankan pg_cron tiap 5 menit, jadi pembatalan
   // paling telat 5 menit setelah jatuh tempo.
@@ -5819,194 +6044,15 @@ Deno.serve(async (req)=>{
   if(path==='/finance/summary' && m==='GET'){
     if(!isFinance) return forbidden();
     const { from, to } = financeDateRange();
-    const { data: rows, error } = await supabase.from('bookings')
-      .select('id,sumber,status,tgl_checkin,tgl_checkout,total_bayar,tarif,cloudbeds_subtotal,cloudbeds_balance')
-      .gte('tgl_checkin', from).lte('tgl_checkin', to);
-    if(error) return err(error.message);
-    const bookings = rows ?? [];
-    const configMap = await getSettlementConfigMap();
-    await ensureFinanceSettlements(bookings, configMap);
-
-    const active = bookings.filter(isPemasukanDiakui);
-    const cancelled = bookings.filter(b=>b.status==='batal').length;
-    const amountOf = b => Number(b.total_bayar ?? b.tarif ?? 0);
-    // Booking mendatang: tanggal check-in Cloudbeds belum tiba, belum pemasukan.
-    const todayForPipeline = todayWIB();
-    const pipelineRows = bookings.filter(b=>STATUS_PEMASUKAN_DIAKUI.includes(b.status) && b.tgl_checkin > todayForPipeline);
-    const pipelineAmount = pipelineRows.reduce((s,b)=>s+pendapatanBersih(b),0);
-    // Sudah dihitung (tanggalnya sudah lewat), tapi resepsionis belum
-    // menekan check-in -- peringatan operasional saja, bukan soal angka.
-    const belumCheckin = bookings.filter(b=>b.status==='terjadwal' && b.tgl_checkin < todayForPipeline);
-    const gross_revenue = active.reduce((s,b)=>s+amountOf(b),0);
-    const net_revenue = active.reduce((s,b)=>s+pendapatanBersih(b),0);
-    const payment_received = active.filter(b=>paymentStatusForBooking(b)==='PAID').reduce((s,b)=>s+amountOf(b),0);
-    const outstanding = active.reduce((s,b)=>s+outstandingForBooking(b, amountOf(b)),0);
-    const cloudbedsVerifiedCount = active.filter(b=>b.cloudbeds_balance != null).length;
-
-    const activeIds = active.map(b=>b.id);
-    let otaReceivable = 0, alertsUnknown = 0, alertsOverdue = 0, alertsDueToday = 0;
-    let cashReceivedAmount = 0, cashReceivedCount = 0;
-    if(activeIds.length){
-      const { data: settlements } = await supabase.from('finance_settlements')
-        .select('booking_id,sumber,amount,settlement_status,settlement_confidence,expected_settlement_date,amount_received,received_date')
-        .in('booking_id', activeIds);
-      const today = todayWIB();
-      for(const s of (settlements ?? [])){
-        const isOta = normalizedChannel(s.sumber) !== 'DIRECT';
-        if(isOta && s.settlement_status !== 'RECEIVED') otaReceivable += Number(s.amount ?? 0);
-        if(s.settlement_status !== 'RECEIVED' && s.settlement_confidence==='UNKNOWN') alertsUnknown++;
-        if(s.settlement_status !== 'RECEIVED' && s.expected_settlement_date){
-          if(s.expected_settlement_date < today) alertsOverdue++;
-          else if(s.expected_settlement_date === today) alertsDueToday++;
-        }
-        if(s.settlement_status==='RECEIVED' && s.received_date && s.received_date>=from && s.received_date<=to){
-          cashReceivedAmount += Number(s.amount_received ?? 0);
-          cashReceivedCount++;
-        }
-      }
-    }
-
-    const { data: lastEvent } = await supabase.from('cloudbeds_events_log').select('created_at').order('created_at',{ascending:false}).limit(1).maybeSingle();
-
-    const alerts = [];
-    if(outstanding>0) alerts.push({ type:'outstanding', level:'warning', message:`Rp ${Math.round(outstanding).toLocaleString('id-ID')} masih outstanding (belum lunas).` });
-    if(alertsDueToday>0) alerts.push({ type:'settlement_due', level:'info', message:`${alertsDueToday} settlement diperkirakan cair hari ini.` });
-    if(alertsOverdue>0) alerts.push({ type:'overdue', level:'danger', message:`${alertsOverdue} settlement sudah lewat tanggal perkiraan cair dan belum diterima.` });
-    if(alertsUnknown>0) alerts.push({ type:'unknown_settlement_rule', level:'warning', message:`${alertsUnknown} transaksi punya aturan settlement yang belum dikonfigurasi (UNKNOWN).` });
-    if(belumCheckin.length>0) alerts.push({ type:'belum_checkin', level:'warning', message:`${belumCheckin.length} booking sudah lewat tanggal check-in tapi belum di-check-in di sistem -- sudah DIHITUNG sebagai pemasukan (mengikuti tanggal Cloudbeds). Kalau tamunya ternyata tidak datang, tandai batal/no-show supaya angkanya terkoreksi.` });
-
-    return json({
-      period: { from, to },
-      recognition_rule: 'Pemasukan diakui per tanggal check-in Cloudbeds: dihitung begitu tanggal check-in sudah tiba (tidak menunggu tombol check-in resepsionis), selama booking tidak batal. Booking dengan tanggal check-in di masa depan ditampilkan terpisah sebagai booking mendatang dan belum dihitung.',
-      pipeline: {
-        amount: pipelineAmount,
-        count: pipelineRows.length,
-        note: 'Booking dengan tanggal check-in yang belum tiba. Masih tercatat di Cloudbeds, belum dihitung sebagai pemasukan -- bisa berubah kalau dibatalkan.',
-      },
-      gross_revenue, net_revenue,
-      net_revenue_note: 'Bersih = harga kamar dari Cloudbeds ("Deposit Amount" di email reservasi), sebelum fee OTA yang Cloudbeds tambahkan ke Grand Total. Booking website/walk-in: bersih sama dengan kotor. Diskon/refund tidak tersedia dari Cloudbeds.',
-      payment_received,
-      payment_received_note: cloudbedsVerifiedCount>0
-        ? `Untuk ${cloudbedsVerifiedCount} dari ${active.length} booking, dihitung dari saldo asli Cloudbeds (getReservations.balance). Sisanya (booking direct/walk-in atau belum tersinkron) memakai status booking (checkin/checkout = lunas, sesuai alur "Tandai Lunas" front desk) sebagai perkiraan.`
-        : 'Dihitung dari status booking (checkin/checkout = sudah bayar penuh, sesuai alur "Tandai Lunas" front desk) -- belum ada booking dengan saldo asli Cloudbeds tersinkron pada periode ini. Jalankan "Tarik Reservasi" di Admin > Cloudbeds untuk mengisinya.',
-      outstanding,
-      ota_receivable: otaReceivable,
-      ota_receivable_note: 'Total revenue booking OTA (non-direct) yang statusnya belum RECEIVED di alur settlement manual Finance.',
-      cash_received: {
-        amount: cashReceivedAmount,
-        verified: cashReceivedCount>0,
-        count: cashReceivedCount,
-        note: cashReceivedCount>0
-          ? 'Berdasarkan input manual Finance (Tandai Diterima + referensi bank) pada periode ini.'
-          : 'NOT VERIFIED -- belum ada settlement yang ditandai diterima (dengan referensi bank) untuk periode ini.',
-      },
-      bookings_counted: active.length,
-      cloudbeds_balance_verified_count: cloudbedsVerifiedCount,
-      cancelled_excluded: cancelled,
-      alerts,
-      last_cloudbeds_activity: lastEvent?.created_at ?? null,
-      data_caveats: [
-        'Balance mismatch check (Cloudbeds balance vs calculated) NOT_AVAILABLE -- belum ada perbandingan otomatis antara total kami dan balance Cloudbeds; balance Cloudbeds sekarang dipakai langsung sebagai sumber status bayar/outstanding, bukan dibandingkan.',
-        'Refund tracking NOT_AVAILABLE -- tidak ada endpoint refund yang tersinkron dari Cloudbeds ke sistem ini.',
-        'Sync run history (jumlah reservasi/transaksi/pembayaran per sync) NOT_AVAILABLE sebagai log tersimpan -- lihat halaman Admin > Cloudbeds untuk menjalankan sync dan melihat ringkasannya secara langsung.',
-      ],
-    });
+    try { return json(await hitungFinanceSummary(from, to)); }
+    catch(e){ if(e instanceof GalatQueryFinance) return err(e.message); throw e; }
   }
 
   if(path==='/finance/channel-breakdown' && m==='GET'){
     if(!isFinance) return forbidden();
     const { from, to } = financeDateRange();
-    const { data: rows, error } = await supabase.from('bookings')
-      .select('id,sumber,status,unit_nomor,guest_nama,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_subtotal,cloudbeds_balance')
-      .gte('tgl_checkin', from).lte('tgl_checkin', to).lte('tgl_checkin', todayWIB()).in('status', STATUS_PEMASUKAN_DIAKUI);
-    if(error) return err(error.message);
-    const bookings = rows ?? [];
-    const configMap = await getSettlementConfigMap();
-    await ensureFinanceSettlements(bookings, configMap);
-    const pctOf = (gross, net) => gross > 0 ? Math.round(((gross - net) / gross) * 1000) / 10 : 0;
-
-    const ids = bookings.map(b=>b.id);
-    const settlementByBooking = new Map();
-    if(ids.length){
-      const { data: settlements } = await supabase.from('finance_settlements').select('*').in('booking_id', ids);
-      for(const s of (settlements ?? [])) settlementByBooking.set(s.booking_id, s);
-    }
-
-    // Per tanggal check-in x channel (owner 2026-10-05: "tgl 1 ada 5
-    // booking dari channel mana sj, nilai uangnya sdh bersih dluar potongan
-    // OTA?"). Kotor/bersih per booking dari pendapatanKotor/pendapatanBersih,
-    // sama dengan tabel per-channel di bawah.
-    const byDate = new Map();
-    for(const b of bookings){
-      const dateRow = byDate.get(b.tgl_checkin) ?? new Map();
-      const key = b.sumber ?? 'other';
-      const c = dateRow.get(key) ?? { sumber:key, booking_count:0, malam:0, gross:0, ota_deduction:0, net:0, commission_pct:0, menginap_lama:[] };
-      const malam = Number(b.durasi_malam ?? 0);
-      c.booking_count++;
-      c.malam += malam;
-      c.gross += pendapatanKotor(b);
-      c.net += pendapatanBersih(b);
-      // Owner 2026-10-05: nilai seluruh masa inap tercatat di tanggal
-      // check-in, jadi booking >1 malam membuat satu tanggal terlihat besar.
-      // Ditampilkan per booking supaya tetap bisa dimengerti.
-      if(malam > 1) c.menginap_lama.push({
-        unit_nomor: b.unit_nomor, guest_nama: b.guest_nama,
-        tgl_checkin: b.tgl_checkin, tgl_checkout: b.tgl_checkout, malam,
-        bersih: pendapatanBersih(b), bersih_per_malam: pendapatanBersih(b) / malam,
-      });
-      c.ota_deduction = c.gross - c.net;
-      c.commission_pct = pctOf(c.gross, c.net);
-      dateRow.set(key, c);
-      byDate.set(b.tgl_checkin, dateRow);
-    }
-    const by_date = [...byDate.entries()].sort(([a],[b])=>a<b?-1:1).map(([tgl_checkin, m])=>{
-      const chs = [...m.values()].sort((a,b)=>b.gross-a.gross);
-      return {
-        tgl_checkin,
-        booking_count: chs.reduce((s,c)=>s+c.booking_count,0),
-        malam: chs.reduce((s,c)=>s+c.malam,0),
-        gross: chs.reduce((s,c)=>s+c.gross,0),
-        ota_deduction: chs.reduce((s,c)=>s+c.ota_deduction,0),
-        net: chs.reduce((s,c)=>s+c.net,0),
-        channels: chs,
-      };
-    });
-
-    const bySumber = new Map();
-    for(const b of bookings){
-      const key = b.sumber ?? 'other';
-      const cur = bySumber.get(key) ?? { sumber:key, normalized_channel: normalizedChannel(key), revenue:0, net_revenue:0, payment:0, outstanding:0, ota_receivable:0, settled_count:0, unsettled_count:0, booking_count:0, room_nights:0 };
-      const amount = pendapatanKotor(b);
-      const net = pendapatanBersih(b);
-      const bOutstanding = outstandingForBooking(b, amount);
-      cur.revenue += amount;
-      cur.net_revenue += net;
-      cur.booking_count++;
-      cur.room_nights += Number(b.durasi_malam ?? 0);
-      cur.payment += amount - bOutstanding;
-      cur.outstanding += bOutstanding;
-      const s = settlementByBooking.get(b.id);
-      const settled = s?.settlement_status==='RECEIVED';
-      if(settled) cur.settled_count++; else cur.unsettled_count++;
-      // Yang ditransfer OTA ke villa adalah angka bersih, bukan Grand Total.
-      if(cur.normalized_channel!=='DIRECT' && !settled) cur.ota_receivable += net;
-      bySumber.set(key, cur);
-    }
-    const cfgArr = [...configMap.values()];
-    const channels = [...bySumber.values()].map(c=>{
-      const cfg = configMap.get(c.sumber);
-      return {
-        ...c,
-        ota_deduction: c.revenue - c.net_revenue,
-        commission_pct: pctOf(c.revenue, c.net_revenue),
-        avg_net_adr: c.room_nights>0 ? c.net_revenue/c.room_nights : null,
-        collection_method: cfg?.collection_method ?? 'UNKNOWN',
-        destination_account: cfg?.destination_account_label ?? null,
-      };
-    }).sort((a,b)=>b.revenue-a.revenue);
-    const totals = channels.reduce((acc,c)=>({ revenue:acc.revenue+c.revenue, net_revenue:acc.net_revenue+c.net_revenue, payment:acc.payment+c.payment, outstanding:acc.outstanding+c.outstanding, ota_receivable:acc.ota_receivable+c.ota_receivable }), { revenue:0, net_revenue:0, payment:0, outstanding:0, ota_receivable:0 });
-    const bersih_belum_tersedia = bookings.filter(b=>b.cloudbeds_subtotal == null && normalizedChannel(b.sumber)!=='DIRECT').length;
-    return json({ period:{from,to}, channels, totals, by_date, bersih_belum_tersedia, settlement_configs_count: cfgArr.length });
+    try { return json(await hitungChannelBreakdown(from, to)); }
+    catch(e){ if(e instanceof GalatQueryFinance) return err(e.message); throw e; }
   }
 
   if(path==='/finance/bookings' && m==='GET'){

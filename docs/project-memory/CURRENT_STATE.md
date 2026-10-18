@@ -3,6 +3,12 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-18 — villa-api `GET /bridge/owner-finance` untuk asisten WA owner (BELUM merge)
+- Owner: "pendapatan villa kan bisa ambil dri finance di repo villa, sy ingin wa bot sistem bisa konek kesmua repo". Dipanggil asisten WA owner di Mkhsistem (`lib/ai/domains/owner-assistant.ts`), header `x-internal-secret` = `integration_settings.vercel_bridge.secret` (sama dengan `/bridge/occupancy`), query `bulan=YYYY-MM` (bawaan bulan berjalan).
+- Respons: `finance` (= isi `/finance/summary` untuk tanggal 1 s.d. akhir bulan), `channel` (= `/finance/channel-breakdown` tanpa `by_date`), `laporan_investor` (= `computeReport(undefined, bulan)`).
+- Isi `/finance/summary` dan `/finance/channel-breakdown` dipindah apa adanya ke `hitungFinanceSummary` / `hitungChannelBreakdown` (dicek otomatis: identik setelah mengabaikan spasi), supaya dashboard dan WA memakai rumus yang sama. Perilaku kedua endpoint tidak berubah. Satu-satunya tulisan tetap `ensureFinanceSettlements` (upsert ignoreDuplicates), sama dengan membuka halaman Finance.
+- Sebelum diubah: live v140 terbukti = `main` (deploy CI 13 detik setelah commit 87b8032).
+
 ## 2026-10-13 (malam) — Pengaturan harga website & OTA terkini (data, bukan kode)
 - `integration_settings.harga_website_agoda` (dibaca villa-api `aturanHargaWebsite`): Standard `tambahan.standard = 0` (website = 85% harga mesin - 5% dijepit 20-50rb, tidak di bawah 80% harga mesin -> ~405rb malam sepi); Sawah `tambahan.sawah_view = 150000`, `selisih_tetap.sawah_view = 50000`. Diubah atas permintaan owner ("cba dulu sesuaikan") karena Agoda tampil ~371rb sebelum pajak untuk 14 Okt.
 - Base Rate Adjustment di Cloudbeds Distribution (diatur owner sendiri): Agoda Standard +150rb lalu direncanakan +250rb, Sawah +200rb; kalender YCS 13 Okt mengonfirmasi 19 Okt = 652rb (502+150). Booking.com: owner bilang +70rb, tapi booking 13 Okt siang menunjukkan +20rb yang terpakai -- belum terjelaskan.
