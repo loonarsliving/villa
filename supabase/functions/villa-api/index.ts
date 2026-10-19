@@ -3395,6 +3395,116 @@ async function hitungChannelBreakdown(from, to){
   return { period:{from,to}, channels, totals, by_date, bersih_belum_tersedia, settlement_configs_count: cfgArr.length };
 }
 
+// ── Metrik bulanan untuk Laporan Investor MKH Property ───────────────────
+// Dikirim ke RPC ir_metrik_terima (mkh-properti migrasi 0040/0041), kunci
+// mengikuti kontrak v1 (`ir_kunci_metrik_v1`). Sebelum ini tidak ada yang
+// mengirim metrik sama sekali, jadi okupansi/ADR/RevPAR di laporan selalu
+// "data belum tersedia". Semua angka uang dari fungsi yang SAMA dengan
+// halaman Finance (hitungFinanceSummary, hitungChannelBreakdown) dan
+// laporan investor (computeReport) -- tidak ada rumus uang baru.
+//
+// Bulan sebelum METRIK_BULAN_PERTAMA tidak dikirim: tanggal buka villa di
+// September 2026 tercatat berbeda (20 Sep di catatan villa, 23 Sep di
+// ir_unit_bisnis), jadi malam tersedia bulan itu tidak bisa dihitung jujur.
+//
+// Kunci yang SENGAJA tidak dikirim (laporan menulis "data belum tersedia"):
+//  - unit_dijual / malam_tersedia_dijual / okupansi_unit_dijual_pct: unit
+//    yang ditutup di Cloudbeds tidak tercatat per hari di sistem ini.
+//  - kewajiban_investor_*: rumus dividen beku, tidak diturunkan ulang di sini.
+const METRIK_BULAN_PERTAMA = '2026-10';
+const METRIK_UNIT_BISNIS = 'loonars-1';
+
+async function hitungMetrikInvestor(periode){
+  const [y, mo] = periode.split('-').map(Number);
+  const from = `${periode}-01`;
+  const hariBulan = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  const to = `${periode}-${String(hariBulan).padStart(2,'0')}`;
+
+  const finance = await hitungFinanceSummary(from, to);
+  const channel = await hitungChannelBreakdown(from, to);
+  const report = await computeReport(undefined, periode);
+  const {count:unitTotal} = await supabase.from('units').select('id',{count:'exact',head:true});
+
+  // Malam gratis investor tidak membawa pendapatan; dikeluarkan dari malam
+  // terjual, sama dengan snapshot inventaris harian (is_free_stay).
+  const {data:gratis, error:gErr} = await supabase.from('bookings')
+    .select('status,tgl_checkin,durasi_malam')
+    .gte('tgl_checkin', from).lte('tgl_checkin', to).eq('is_free_stay', true);
+  if(gErr) throw new GalatQueryFinance(gErr.message);
+  const malamGratis = (gratis ?? []).filter(isPemasukanDiakui).reduce((s,b)=>s+Number(b.durasi_malam ?? 0),0);
+
+  const malamBooking = channel.channels.reduce((s,c)=>s+c.room_nights,0);
+  const malamTerjual = Math.max(0, malamBooking - malamGratis);
+  const malamTersedia = (unitTotal ?? 0) * hariBulan;
+  const kotor = finance.gross_revenue;
+  const bersih = finance.net_revenue;
+  const bagi = (a, b) => b > 0 ? a / b : null;
+  const pct = (a, b) => b > 0 ? Math.round(a / b * 1000) / 10 : null;
+  const kotorOta = channel.channels.filter(c=>c.normalized_channel!=='DIRECT').reduce((s,c)=>s+c.revenue,0);
+  const kotorChannel = channel.totals.revenue;
+
+  const metrik = {
+    hari_operasi: hariBulan,
+    unit_total: unitTotal ?? 0,
+    malam_tersedia_total: malamTersedia,
+    malam_terjual: malamTerjual,
+    okupansi_unit_total_pct: pct(malamTerjual, malamTersedia),
+    pendapatan_kotor: kotor,
+    pendapatan_basis_investor: report.gross_revenue,
+    pendapatan_bersih: bersih,
+    pendapatan_walkin: report.walkin_income.total,
+    adr_kotor: bagi(kotor, malamTerjual),
+    adr_bersih: bagi(bersih, malamTerjual),
+    revpar_kotor: bagi(kotor, malamTersedia),
+    revpar_bersih: bagi(bersih, malamTersedia),
+    booking_diakui: finance.bookings_counted,
+    booking_batal: finance.cancelled_excluded,
+    channel: channel.channels.map(c=>({
+      sumber: c.sumber, booking: c.booking_count, malam: c.room_nights,
+      pendapatan_kotor: c.revenue, pendapatan_bersih: c.net_revenue,
+    })),
+    porsi_ota_pct: pct(kotorOta, kotorChannel),
+    porsi_langsung_pct: pct(kotorChannel - kotorOta, kotorChannel),
+    catatan_sumber: [
+      'villa-api, booking diakui per tanggal check-in (seluruh malam menginap dihitung di bulan check-in).',
+      malamGratis > 0 ? `${malamGratis} malam gratis investor tidak dihitung sebagai malam terjual.` : null,
+      channel.bersih_belum_tersedia > 0 ? `${channel.bersih_belum_tersedia} booking OTA belum punya subtotal Cloudbeds; bersihnya sementara sama dengan kotor.` : null,
+      'Unit dijual belum tercatat per hari, jadi okupansi hanya atas unit total.',
+    ].filter(Boolean).join(' '),
+  };
+  // Nilai null (pembagi nol) tidak dikirim: laporan menulis "data belum
+  // tersedia", bukan 0.
+  for(const k of Object.keys(metrik)) if(metrik[k] === null) delete metrik[k];
+  return metrik;
+}
+
+async function kirimMetrikInvestor(bridge, periode){
+  if(periode < METRIK_BULAN_PERTAMA) return { dikirim:false, alasan:`metrik baru dikirim mulai ${METRIK_BULAN_PERTAMA}` };
+  // base_url menunjuk RPC villa_income_sync; ir_metrik_terima ada di
+  // PostgREST yang sama dan menerima rahasia x-villa-sync-secret yang sama.
+  if(!/\/villa_income_sync\/?$/.test(bridge.base_url)) return { dikirim:false, alasan:'base_url jembatan bukan RPC villa_income_sync' };
+  const urlMetrik = bridge.base_url.replace(/\/villa_income_sync\/?$/, '/ir_metrik_terima');
+  const metrik = await hitungMetrikInvestor(periode);
+  const r = await fetch(urlMetrik, {
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      apikey: bridge.apikey,
+      Authorization: `Bearer ${bridge.apikey}`,
+      'x-villa-sync-secret': bridge.secret,
+    },
+    body: JSON.stringify({
+      p_unit_kode: METRIK_UNIT_BISNIS, p_periode: periode, p_sumber: 'villa-api',
+      p_metrik: metrik, p_versi_definisi: 'v1',
+      // Bulan yang sudah lewat = final; bulan berjalan (kirim manual) = sementara.
+      p_status: periode < monthWIB() ? 'final' : 'sementara',
+    }),
+  });
+  const hasil = await r.json().catch(()=>null);
+  if(!r.ok) return { dikirim:false, alasan:(hasil && (hasil.message||hasil.error)) ?? `MKH Property menolak (HTTP ${r.status})` };
+  return { dikirim:true, hasil, metrik };
+}
+
 Deno.serve(async (req)=>{
   if(req.method==='OPTIONS') return new Response('ok',{headers:CORS});
   if(!SESSION_SECRET){
@@ -5260,7 +5370,12 @@ Deno.serve(async (req)=>{
       });
       const result = await r.json().catch(()=>null);
       if(!r.ok) return err((result && (result.message||result.error)) ?? `MKH Property menolak (HTTP ${r.status})`, 502);
-      return json({success:true, periode, items, mkh_response:result});
+      // Metrik okupansi/ADR untuk Laporan Investor. Kegagalannya tidak
+      // membatalkan sinkron pendapatan yang sudah berhasil di atas.
+      let metrik;
+      try { metrik = await kirimMetrikInvestor(bridge, periode); }
+      catch(e){ metrik = { dikirim:false, alasan:String(e?.message ?? e) }; }
+      return json({success:true, periode, items, mkh_response:result, metrik});
     } catch(e){
       return err(`Gagal menghubungi MKH Property: ${String(e)}`,502);
     }

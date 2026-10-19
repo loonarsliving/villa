@@ -1,0 +1,35 @@
+name: CI
+
+# Gerbang otomatis sebelum merge: typecheck, tes vitest (termasuk mesin harga
+# AI), dan build. Tidak memakai rahasia apa pun dan tidak men-deploy apa pun.
+# Deploy villa-api tetap hanya lewat deploy-villa-api.yml dari `main`.
+#
+# Lint belum dijalankan: repo ini belum punya konfigurasi ESLint, sehingga
+# `next lint` berhenti di pertanyaan interaktif.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test
+      - run: npm run build
