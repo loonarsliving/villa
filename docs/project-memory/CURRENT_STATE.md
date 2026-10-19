@@ -3,7 +3,7 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
-## 2026-10-19 — Metrik bulanan ke Laporan Investor MKH Property (BELUM merge)
+## 2026-10-19 — Metrik bulanan ke Laporan Investor MKH Property (LIVE: PR #222, villa-api v142)
 - Masalah: `ir_metrik_bulanan` di MKH Property kosong untuk semua unit, karena tidak ada sistem yang memanggil RPC `ir_metrik_terima` (mkh-properti 0040/0041). Okupansi, ADR, RevPAR di laporan investor dan asisten WA owner karena itu selalu "data belum tersedia".
 - villa-api `POST /cron/sync-mkh-income` (dipicu cron Vercel tgl 1, 08.15 WIB) kini, SETELAH sinkron pendapatan berhasil, juga mengirim metrik bulan itu lewat `kirimMetrikInvestor`: URL = `mkh_finance_bridge.base_url` dengan `villa_income_sync` diganti `ir_metrik_terima`, rahasia `x-villa-sync-secret` yang sama (diterima `ir_metrik_terima` sejak 0041; dicek live 2026-10-19). Tanpa rahasia, env, atau migrasi baru. Gagal kirim metrik tidak menggagalkan sinkron pendapatan; hasilnya di field `metrik` respons.
 - Isi (`hitungMetrikInvestor`, kontrak v1, unit `loonars-1`, sumber `villa-api`): hari_operasi, unit_total (tabel units = 13), malam tersedia/terjual, okupansi atas unit total, pendapatan kotor/bersih (= `hitungFinanceSummary`), basis investor dan walk-in (= `computeReport`), ADR/RevPAR, booking diakui/batal, rincian channel, porsi OTA/langsung, catatan_sumber. Booking dihitung per bulan check-in (sama dengan Finance); malam gratis investor (`is_free_stay`) dikeluarkan dari malam terjual. Status `final` untuk bulan yang sudah lewat.
