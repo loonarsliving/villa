@@ -2752,8 +2752,9 @@ valid `CRON_SECRET` sooner if you want to check before then.
 None explicitly documented as open/unfixed in this repo (no issue tracker content, no TODO/FIXME comments found in source). Historical "security: fix hardcoded admin token" (`17ebbd8`) indicates that class of issue was previously found and fixed on `main`.
 
 ## Technical debt
-- **No automated tests** anywhere in the repo.
-- **No CI/CD pipeline** (no `.github/workflows`) — quality gates before deploy are manual/best-effort only.
+- **Update 2026-10-19:** tes vitest sudah ada (`npm test`, `src/**/*.test.ts`) dan `.github/workflows/ci.yml` menjalankan typecheck + tes + build di setiap PR. Belum ada: konfigurasi ESLint, dan tes untuk `villa-api` (Deno, termasuk `computeReport`). Dua baris di bawah ini sejarah.
+- ~~**No automated tests** anywhere in the repo.~~
+- ~~**No CI/CD pipeline** (no `.github/workflows`) — quality gates before deploy are manual/best-effort only.~~
 - **No `.env.example`** — onboarding a new developer requires reverse-engineering required env vars from source (see ENVIRONMENT.md).
 - **Core backend (`villa-api`) has a manually-synced source snapshot at `supabase/functions/villa-api/index.ts`, not a live/automated one** — it is not deployed from this repo (no CI wires it to Supabase) and is not kept in sync automatically, so it drifts whenever someone deploys a `villa-api` change without also re-running the capture step in `supabase/functions/villa-api/README.md`. It had in fact drifted (last captured v26 on 2026-09-04, live had moved to v34) until re-synced 2026-09-10 in this session. Treat this file as **possibly stale** unless it was just re-synced — verify against `mcp__Supabase__get_edge_function` before trusting it for anything version-sensitive, per the villa-api verification rule in `CLAUDE.md`.
 - **No database migrations tracked in git** — schema changes are presumably made ad hoc against the live Supabase project.
