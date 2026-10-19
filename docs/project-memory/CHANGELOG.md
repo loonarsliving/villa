@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-19 — villa-api: metrik bulanan ke Laporan Investor MKH Property
+- Lihat CURRENT_STATE.md 2026-10-19.
+
 ### 2026-10-19 — CI untuk frontend
 - `.github/workflows/ci.yml`: `tsc --noEmit`, `vitest`, `next build` di setiap PR dan push ke `main` (tanpa rahasia, tanpa deploy). Lint belum: repo belum punya konfigurasi ESLint.
 
