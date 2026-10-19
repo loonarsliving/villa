@@ -48,10 +48,12 @@ export function statusSetelahSync(
  * Apakah booking ini LAHIR di sistem kita (dipesan lewat loonars.id lalu
  * didorong ke Cloudbeds), sehingga salinan Cloudbeds tidak boleh menimpanya.
  *
- * Penandanya dua, dan keduanya perlu: villa-api membuat booking website
- * dengan `sumber='website'` dan mencantumkan "[Website]" di catatan. Kalau
- * sebuah sync terlanjur menimpa `sumber` jadi 'cloudbeds', catatannya masih
- * menyelamatkan.
+ * Penandanya tiga, dan semuanya perlu: villa-api membuat booking website
+ * dengan `sumber='website'` dan mencantumkan "[Website]" di catatan; booking
+ * berkupon memakai sumber 'investor' / 'kol', catatan "[Menginap ...]" /
+ * "[Kupon KOL]", dan kolom voucher_id / kol_voucher_id / is_free_stay. Kalau
+ * sebuah sync terlanjur menimpa `sumber` jadi 'cloudbeds', penanda lainnya
+ * masih menyelamatkan.
  *
  * Dulu penandanya `sumber !== 'cloudbeds'`, dan itu SALAH sejak webhook mulai
  * memetakan nama sumber OTA ke nilai aslinya: booking Agoda yang sah jadi
@@ -59,6 +61,31 @@ export function statusSetelahSync(
  * pembatalan atau perubahan tanggal dari Cloudbeds tidak pernah sampai ke
  * booking OTA mana pun.
  */
-export function dibuatDiSini(sumber: string | null | undefined, catatan: string | null | undefined): boolean {
-  return sumber === "website" || String(catatan ?? "").includes("[Website]");
+export function dibuatDiSini(
+  sumber: string | null | undefined,
+  catatan: string | null | undefined,
+  kupon?: PenandaKupon | null,
+): boolean {
+  if (sumber === "website" || sumber === "investor" || sumber === "kol") return true;
+  const c = String(catatan ?? "");
+  if (PENANDA_CATATAN.some((p) => c.includes(p))) return true;
+  // Kolom kupon adalah penanda yang paling tahan banting: sumber dan catatan
+  // bisa ditimpa (sync Cloudbeds menimpa sumber, check-out menimpa catatan),
+  // tetapi voucher_id / kol_voucher_id / is_free_stay tidak pernah ditulis
+  // ulang oleh sync mana pun.
+  return !!(kupon?.is_free_stay || kupon?.voucher_id || kupon?.kol_voucher_id);
 }
+
+/** Kolom bookings yang menandai booking berkupon (menginap gratis investor / kupon KOL). */
+export interface PenandaKupon {
+  is_free_stay?: boolean | null;
+  voucher_id?: string | null;
+  kol_voucher_id?: string | null;
+}
+
+/**
+ * Awalan catatan yang dipasang villa-api pada booking buatan loonars.id.
+ * Booking berkupon TIDAK memakai "[Website]" -- itu sebabnya sync Cloudbeds
+ * dulu menimpa booking investor dan KOL (2026-10-19).
+ */
+const PENANDA_CATATAN = ["[Website]", "[Menginap gratis investor]", "[Menginap investor]", "[Kupon KOL]"];

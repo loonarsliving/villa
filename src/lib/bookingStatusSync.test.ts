@@ -43,4 +43,26 @@ describe("dibuatDiSini", () => {
   it("walk-in bukan booking website", () => {
     expect(dibuatDiSini("walk-in", null)).toBe(false);
   });
+
+  // Kejadian nyata 2026-10-19: booking investor (Natalia, 639.000) dan KOL
+  // (Atmojo, 603.000) ditimpa sync Cloudbeds -- sumber jadi 'cloudbeds',
+  // harga Rp0 jadi harga penuh -- lalu check-in mencatat pemasukan penuh.
+  it("booking berkupon investor dan KOL dikenali dan dilindungi", () => {
+    expect(dibuatDiSini("investor", null)).toBe(true);
+    expect(dibuatDiSini("kol", null)).toBe(true);
+    expect(dibuatDiSini("cloudbeds", "[Menginap gratis investor] Kode XZBQ5T3S atas nama x")).toBe(true);
+    expect(dibuatDiSini("cloudbeds", "[Menginap investor] Kode XZBQ5T3S")).toBe(true);
+    expect(dibuatDiSini("cloudbeds", "[Kupon KOL] Kode KOL-CH3JWC untuk @atmojoae")).toBe(true);
+  });
+
+  it("kolom kupon tetap melindungi saat sumber dan catatan sudah tertimpa", () => {
+    expect(dibuatDiSini("cloudbeds", "Baik — tidak ada kerusakan", { kol_voucher_id: "9c64b8ab" })).toBe(true);
+    expect(dibuatDiSini("cloudbeds", null, { voucher_id: "abc" })).toBe(true);
+    expect(dibuatDiSini("cloudbeds", null, { is_free_stay: true })).toBe(true);
+  });
+
+  it("booking OTA tanpa kupon tetap disinkronkan", () => {
+    expect(dibuatDiSini("agoda", null, { is_free_stay: false, voucher_id: null, kol_voucher_id: null })).toBe(false);
+    expect(dibuatDiSini("cloudbeds", null, null)).toBe(false);
+  });
 });
