@@ -39,6 +39,33 @@ Runtime boundary rule (preserved, not to be violated by later phases):
 
 ## 2. Frozen financial baseline — DO NOT CHANGE without explicit owner approval
 
+> **DIGANTI 2026-10-19 atas persetujuan owner** ("Ya, ubah rumusnya";
+> "ini bukan rumus baru ini rumus yg benar, dulu itu kt tidak tau rumus
+> waktu awal membuat sistem"; berlaku untuk SEMUA bulan). Potongan
+> pemasaran 27,5% dan opex 25% DIHAPUS. Rumus yang berlaku sekarang
+> (`computeReport()`, villa-api):
+>
+> ```
+> Revenue      = SUM(pendapatanBersih) booking diakui, per bulan check-in
+>                (uang yang benar-benar diterima villa setelah komisi OTA;
+>                computeNetRevenueForRange, sama dengan Net Revenue Finance)
+> COGS         = COGS standar per malam x malam terisi (durasi_malam)
+>                COGS standar = 25rb listrik kamar + 35rb laundry + 5rb
+>                amenities + (650rb internet + 3jt listrik receptionist +
+>                1,5jt Cloudbeds) / (13 kamar x 30 hari x 37,9%) = Rp99.797
+> Gross Profit = Revenue - COGS
+> OPEX         = gaji staf Rp10,5jt/bln (2 cleaning, 3 receptionist,
+>                2 security @1,5jt), per hari sejak villa beroperasi
+>                2026-09-20; bulan berjalan diprorata sampai hari ini
+> Net Profit   = Gross Profit - OPEX   -> 70% investor : 30% pengelola
+> ```
+>
+> Yang TIDAK berubah: pembagian 70/30, jaminan Rp5 jt/unit, pembagi =
+> jumlah unit, pemasukan tetap per investor, jadwal daftar dividen.
+> `/cron/sync-mkh-income` tetap mengirim SUM(transactions) ke MKH Property
+> (field `pendapatan_transaksi`), tidak ikut rumus ini.
+> Teks di bawah adalah catatan sejarah rumus lama.
+
 Verified directly from the deployed `villa-api` v25 source
 (`supabase/functions/villa-api/index.ts`, `computeReport()`):
 

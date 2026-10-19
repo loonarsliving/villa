@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { fmtCurrency, currentPeriod, periodLabel } from "@/lib/format";
 import { Card, CardHeader, CardBody, Loading } from "@/components/Card";
 import { pendapatanInvestor } from "@/lib/investorPendapatan";
+import { RincianBiayaInvestor } from "@/components/RincianBiayaInvestor";
 import type { Report } from "@/lib/types";
 
 export default function OpexPage() {
@@ -30,9 +31,9 @@ export default function OpexPage() {
   }, [unitId]);
 
   return (
-    <InvestorShell pageTitle="Rincian Opex" pageSub="Biaya operasional properti">
+    <InvestorShell pageTitle="Rincian Biaya" pageSub="COGS dan OPEX properti">
       <Card>
-        <CardHeader title="Opex Bulan Ini" subtitle={periodLabel()} />
+        <CardHeader title="Biaya Bulan Ini" subtitle={periodLabel()} />
         <CardBody>
           {loading ? (
             <Loading />
@@ -40,24 +41,30 @@ export default function OpexPage() {
             <div className="text-[11.5px] text-ruby-500">{galat}</div>
           ) : (
             <>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <div className="bg-base-800 border border-ink/[0.08] rounded p-4">
                   <div className="text-[9px] text-ink/30 uppercase tracking-wide">Pendapatan Villa</div>
                   <div className="font-serif text-xl font-light text-ink mt-1">{fmtCurrency(pendapatanInvestor(report))}</div>
                 </div>
                 <div className="bg-gold-500/10 border border-gold-500/25 rounded p-4">
-                  <div className="text-[9px] text-gold-500 uppercase tracking-wide">Opex Seluruh Villa</div>
-                  <div className="font-serif text-xl font-light text-gold-500 mt-1">{fmtCurrency(report?.opex_per_unit)}</div>
+                  <div className="text-[9px] text-gold-500 uppercase tracking-wide">COGS</div>
+                  <div className="font-serif text-xl font-light text-gold-500 mt-1">{fmtCurrency(report?.cogs)}</div>
+                </div>
+                <div className="bg-gold-500/10 border border-gold-500/25 rounded p-4">
+                  <div className="text-[9px] text-gold-500 uppercase tracking-wide">OPEX</div>
+                  <div className="font-serif text-xl font-light text-gold-500 mt-1">{fmtCurrency(report?.opex ?? report?.opex_per_unit)}</div>
                 </div>
               </div>
-              <div className="text-[11px] text-ink/30 leading-relaxed mt-5 bg-base-800 border-l-2 border-gold-500/40 rounded-r p-3.5">
-                Opex properti tidak dihitung dari rincian biaya aktual bulanan, melainkan tetap sesuai kesepakatan (akad) yang
-                berlaku — sehingga jumlahnya konsisten dan mudah diprediksi setiap bulan.
+              <div className="text-[11px] text-ink/40 leading-relaxed mt-5 bg-base-800 border-l-2 border-gold-500/40 rounded-r p-3.5">
+                COGS adalah biaya untuk setiap kamar yang terisi (listrik kamar, laundry, amenities, ditambah bagian internet,
+                listrik receptionist, dan Cloudbeds). OPEX adalah gaji staf. Pendapatan dikurangi COGS dan OPEX menjadi Net
+                Profit yang dibagi 70% investor dan 30% Loonars.
               </div>
             </>
           )}
         </CardBody>
       </Card>
+      {report && !galat && <RincianBiayaInvestor report={report} />}
     </InvestorShell>
   );
 }

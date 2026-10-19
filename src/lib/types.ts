@@ -158,11 +158,50 @@ export interface AmenityUsageLog {
   created_by: string | null;
 }
 
+export interface ReportBiayaItem {
+  label: string;
+  nominal: number;
+}
+
+export interface ReportCogsStandar {
+  okupansi_standar_pct: number;
+  total_kamar: number;
+  malam_standar_per_bulan: number;
+  biaya_langsung: ReportBiayaItem[];
+  biaya_tetap_bulanan: ReportBiayaItem[];
+  biaya_langsung_per_malam: number;
+  biaya_tetap_per_bulan: number;
+  alokasi_tetap_per_malam: number;
+  cogs_per_malam: number;
+}
+
+export interface ReportOpexItem {
+  peran: string;
+  orang: number;
+  gaji_per_orang: number;
+  per_bulan: number;
+  /** Bagian periode ini (bulan berjalan diprorata sampai hari ini). */
+  periode: number;
+}
+
 export interface Report {
   periode: string;
+  /** Rumus revenue - COGS - OPEX (villa-api sejak 2026-10-19). Kosong = villa-api versi lama. */
+  rumus?: "revenue_cogs_opex_v2";
+  /** Uang yang benar-benar diterima villa setelah komisi OTA. */
+  revenue?: number;
+  malam_terisi?: number;
+  cogs?: number;
+  cogs_per_malam?: number;
+  cogs_standar?: ReportCogsStandar;
+  opex?: number;
+  opex_rincian?: ReportOpexItem[];
+  payroll_bulanan?: number;
+  hari_dihitung?: number;
+  hari_bulan?: number;
   gross_revenue: number;
   opex_per_unit: number;
-  opex_pct?: number;
+  opex_pct?: number | null;
   marketing_pct: number;
   marketing_amount: number;
   gross_profit: number;

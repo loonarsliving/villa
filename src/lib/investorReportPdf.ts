@@ -1,35 +1,23 @@
 import { fmtCurrencyFull } from "./format";
 import { A4_WIDTH, buildPdf, type PdfItem } from "./simplePdf";
-import { pendapatanInvestor } from "./investorPendapatan";
+import { alurBagiHasil } from "./investorPendapatan";
 import type { Report } from "./types";
 
 /**
  * PDF Laporan Bulanan untuk investor yang sedang login.
  *
- * Isinya sama persis dengan "Alur Bagi Hasil" di halaman Pendapatan: semua
- * angka datang apa adanya dari GET /report (dihitung di villa-api), tidak
- * ada rumus yang dihitung ulang di sini. Untuk investor berskema pemasukan
+ * Isinya sama persis dengan "Alur Bagi Hasil" di halaman Pendapatan
+ * (alurBagiHasil): semua angka datang apa adanya dari GET /report
+ * (dihitung di villa-api), tidak ada rumus yang dihitung ulang di sini. Untuk investor berskema pemasukan
  * tetap, baris terakhirnya "Pemasukan Anda" dengan angka tetapnya; jaminan
  * dan pembagian antar-investor tidak ditampilkan, sama seperti dashboard.
  */
 export function investorReportLines(report: Report): { label: string; value: string; bold?: boolean }[] {
-  // Pendapatan sudah setelah potongan pemasaran/OTA (lihat investorPendapatan.ts).
-  const pendapatan = pendapatanInvestor(report);
-  const net = report.net ?? report.gross_profit ?? 0;
-  const pengelola = report.pengelola_amount ?? report.loonars_amount ?? 0;
-  const tetap = report.pemasukan_tetap ?? null;
-  const bagianAnda = report.bagian_anda ?? report.per_investor_amount ?? 0;
-
-  return [
-    { label: "Pendapatan Seluruh Villa", value: fmtCurrencyFull(pendapatan), bold: true },
-    { label: "Opex (sesuai akad)", value: `- ${fmtCurrencyFull(report.opex_per_unit)}` },
-    { label: "Net Profit", value: fmtCurrencyFull(net), bold: true },
-    { label: "Pool Investor (70%)", value: fmtCurrencyFull(report.owner_amount) },
-    { label: "Loonars (30%)", value: fmtCurrencyFull(pengelola) },
-    tetap !== null
-      ? { label: "Pemasukan Anda (tetap sesuai skema pembelian)", value: fmtCurrencyFull(bagianAnda), bold: true }
-      : { label: "Bagian Anda", value: fmtCurrencyFull(bagianAnda), bold: true },
-  ];
+  return alurBagiHasil(report).map((b) => ({
+    label: b.label,
+    value: b.kurang ? `- ${fmtCurrencyFull(b.nilai)}` : fmtCurrencyFull(b.nilai),
+    bold: b.tebal,
+  }));
 }
 
 export function buildInvestorReportPdf(opts: {
@@ -91,7 +79,7 @@ export function buildInvestorReportPdf(opts: {
   y -= 10;
   items.push({ kind: "text", x: left, y, text: `Dicetak dari dashboard investor pada ${opts.generatedAt}.`, size: 8.5 });
   y -= 12;
-  items.push({ kind: "text", x: left, y, text: "Angka dihitung oleh sistem Loonars sesuai akad yang berlaku.", size: 8.5 });
+  items.push({ kind: "text", x: left, y, text: "Pendapatan - COGS = Gross Profit; Gross Profit - OPEX = Net Profit, dibagi 70:30.", size: 8.5 });
 
   return buildPdf(items);
 }

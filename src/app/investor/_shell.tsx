@@ -33,7 +33,7 @@ export function InvestorShell({
       title: "Laporan",
       items: [
         { href: "/investor/laporan", label: "Laporan Bulanan", icon: "▤" },
-        { href: "/investor/opex", label: "Rincian Opex", icon: "▤" },
+        { href: "/investor/opex", label: "Rincian Biaya", icon: "▤" },
       ],
     },
     {

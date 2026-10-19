@@ -48,7 +48,7 @@ describe("porsi", () => {
 
 describe("hitungLaporan", () => {
   const p = { mulai: "2026-09-30", akhir: "2026-10-06" };
-  it("pendapatan = total_bayar dikurangi potongan pemasaran, untuk semua channel", () => {
+  it("pendapatan = uang diterima villa: OTA = subtotal Cloudbeds dikurangi komisi, langsung = total_bayar", () => {
     const l = hitungLaporan(
       [
         bk({ sumber: "booking.com", total_bayar: 515142.5, cloudbeds_subtotal: 447950 }),
@@ -59,8 +59,9 @@ describe("hitungLaporan", () => {
       13,
       p,
       wib,
+      { "booking.com": 23.0746 },
     );
-    expect(l.pendapatan).toBeCloseTo((515142.5 + 600000) * 0.725, 6);
+    expect(l.pendapatan).toBe(Math.round(447950 * (1 - 0.230746)) + 600000);
     expect(l.jumlahCheckin).toBe(2);
     expect(l.malamTerisi).toBe(2);
     expect(l.malamTerisiMingguDepan).toBe(1);
@@ -86,7 +87,7 @@ describe("teksLaporan", () => {
     const l = hitungLaporan([bk({})], 13, { mulai: "2026-09-30", akhir: "2026-10-06" }, wib);
     const t = teksLaporan(l);
     expect(t).toContain("Minggu ke-1: 30 Sep – 6 Okt 2026");
-    expect(t).toContain("Pendapatan villa minggu ini: *Rp362.500*");
+    expect(t).toContain("Pendapatan villa minggu ini: *Rp500.000*");
     expect(t).not.toMatch(/fee OTA|kotor|marketing/i);
     expect(t).toContain("Agoda: 100% (1 booking)");
     expect(t).not.toContain("Total Pendapatan");
@@ -110,22 +111,22 @@ describe("pendapatan kumulatif", () => {
     bk({ tgl_checkin: "2026-10-15", tgl_checkout: "2026-10-16", status: "batal", total_bayar: 9_000_000 }),
   ];
   it("per minggu sejak minggu ke-1, rumus yang sama", () => {
-    const pm = pendapatanPerMinggu(data, p3, 0.275);
+    const pm = pendapatanPerMinggu(data, p3);
     expect(pm.map((m) => [m.mingguKe, m.mulai, m.akhir])).toEqual([
       [1, "2026-09-30", "2026-10-06"],
       [2, "2026-10-07", "2026-10-13"],
       [3, "2026-10-14", "2026-10-20"],
     ]);
-    expect(pm.map((m) => m.pendapatan)).toEqual([725_000, 1_450_000, 2_900_000]);
+    expect(pm.map((m) => m.pendapatan)).toEqual([1_000_000, 2_000_000, 4_000_000]);
   });
   it("teks memuat minggu ini, rincian, total, dan catatan potongan OTA di minggu ke-3", () => {
     const l = hitungLaporan(data, 13, p3, wib);
     l.perMinggu = pendapatanPerMinggu(data, p3);
     const t = teksLaporan(l);
-    expect(t).toContain("Pendapatan villa minggu ini: *Rp2.900.000*");
+    expect(t).toContain("Pendapatan villa minggu ini: *Rp4.000.000*");
     expect(t).toContain("Total Pendapatan 3 Minggu* (30 Sep – 20 Okt)");
-    expect(t).toContain("• Minggu ke-1: Rp725.000");
-    expect(t).toContain("*Total: Rp5.075.000*");
+    expect(t).toContain("• Minggu ke-1: Rp1.000.000");
+    expect(t).toContain("*Total: Rp7.000.000*");
     expect(t).toContain("potongan OTA");
     expect(t).not.toMatch(/marketing/i);
   });

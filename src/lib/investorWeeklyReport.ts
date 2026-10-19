@@ -5,7 +5,6 @@ import { todayISO } from "./format";
 import { kirimDariNomorUtama } from "./mkhsistemWa";
 import { addDaysISO } from "./stayDates";
 import {
-  MARKETING_PCT_DEFAULT,
   MINGGU_PERTAMA_MULAI,
   STATUS_DIHITUNG,
   geser,
@@ -15,6 +14,7 @@ import {
   strategiUntuk,
   teksLaporan,
   type BookingRingkas,
+  type KomisiOta,
 } from "./investorWeeklyReportText";
 
 /**
@@ -70,10 +70,11 @@ export async function kirimLaporanMingguanInvestor(
     .gt("tgl_checkin", akhirPlus1);
   if (eN) throw new Error(`gagal membaca booking baru: ${eN.message}`);
 
-  // Tarif potongan pemasaran yang sama dengan computeReport() villa-api.
-  const { data: fin } = await supabase.from("integration_settings").select("value").eq("key", "finance").maybeSingle();
-  const mp = (fin?.value as { marketing_pct?: unknown } | null)?.marketing_pct;
-  const marketingPct = typeof mp === "number" ? mp : MARKETING_PCT_DEFAULT;
+  // Komisi OTA per channel, sama dengan pendapatanBersih() villa-api.
+  const { data: cfg, error: eC } = await supabase.from("finance_ota_settlement_config").select("sumber, commission_pct");
+  if (eC) throw new Error(`gagal membaca komisi OTA: ${eC.message}`);
+  const komisi: KomisiOta = {};
+  for (const r of cfg ?? []) if (r.commission_pct != null) komisi[String(r.sumber).toLowerCase()] = Number(r.commission_pct);
 
   // Total kumulatif sejak minggu ke-1 (owner 2026-10-14), rumus yang sama.
   const { data: sejakAwal, error: eK } = await supabase
@@ -88,8 +89,8 @@ export async function kirimLaporanMingguanInvestor(
   const { data: strat } = await supabase.from("integration_settings").select("value").eq("key", "laporan_investor_strategi").maybeSingle();
 
   const semua = [...(bookings ?? []), ...(baru ?? [])] as BookingRingkas[];
-  const laporan = hitungLaporan(semua, jumlahUnit ?? 0, p, (iso) => todayISO(new Date(iso)), marketingPct);
-  laporan.perMinggu = pendapatanPerMinggu((sejakAwal ?? []) as BookingRingkas[], p, marketingPct);
+  const laporan = hitungLaporan(semua, jumlahUnit ?? 0, p, (iso) => todayISO(new Date(iso)), komisi);
+  laporan.perMinggu = pendapatanPerMinggu((sejakAwal ?? []) as BookingRingkas[], p, komisi);
   laporan.strategi = strategiUntuk(p, strat?.value ?? null);
   const pesan = teksLaporan(laporan);
 
