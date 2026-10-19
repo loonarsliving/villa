@@ -2400,36 +2400,129 @@ async function countActiveInvestors(){
   return count ?? 0;
 }
 
-async function computeReport(unit_id, periode){
-  let q=supabase.from('transactions').select('tipe,jumlah').eq('periode_bulan',periode).eq('tipe','income');
-  if(unit_id) q=q.eq('unit_id',unit_id);
-  const {data:txs}=await q;
-  const gross=(txs||[]).reduce((s,t)=>s+Number(t.jumlah),0);
+/**
+ * RUMUS BAGI HASIL INVESTOR (owner 2026-10-19, menggantikan rumus awal
+ * "pendapatan - pemasaran 27,5% - opex 25%" untuk SEMUA bulan: "ini bukan
+ * rumus baru ini rumus yg benar, dulu itu kt tidak tau rumus"):
+ *
+ *   Revenue      = uang yang benar-benar diterima villa setelah komisi OTA
+ *                  (computeNetRevenueForRange -- angka yang sama dengan
+ *                  Net Revenue di halaman Finance, per bulan check-in)
+ *   COGS         = COGS standar per malam x malam terisi
+ *   Gross Profit = Revenue - COGS
+ *   OPEX         = gaji staf (PAYROLL_STAF), per hari sejak VILLA_MULAI_OPERASI;
+ *                  bulan berjalan diprorata sampai hari ini
+ *   Net Profit   = Gross Profit - OPEX  -> 70% investor : 30% pengelola
+ *
+ * COGS standar (owner memilih "COGS standar saja", tanpa koreksi okupansi):
+ * biaya langsung per malam + biaya tetap bulanan dibagi malam pada okupansi
+ * standar 37,9% (13 kamar x 30 hari x 37,9% = 148 malam) = Rp99.797.
+ * Angka yang sama ada di src/lib/cogsStandar.ts (halaman Finance); kalau
+ * berubah, ubah keduanya.
+ */
+const COGS_OKUPANSI_STANDAR_PCT = 37.9;
+const COGS_BIAYA_LANGSUNG = [
+  { label:'Listrik kamar', nominal:25000 },
+  { label:'Laundry', nominal:35000 },
+  { label:'Amenities', nominal:5000 },
+];
+const COGS_BIAYA_TETAP_BULANAN = [
+  { label:'Internet keseluruhan', nominal:650000 },
+  { label:'Listrik receptionist', nominal:3000000 },
+  { label:'Layanan Cloudbeds', nominal:1500000 },
+];
+// Tanggal villa mulai beroperasi (sama dengan OPERATIONAL_START_OVERRIDE
+// survival KPI); gaji sebelum tanggal ini tidak dibebankan ke bagi hasil.
+const VILLA_MULAI_OPERASI = '2026-09-20';
+// Staf yang dipekerjakan per 2026-10-19 (owner). finance_property_config
+// (payroll_employee_count x payroll_per_employee) diisi sama: 7 x 1,5 jt.
+const PAYROLL_STAF = [
+  { peran:'Cleaning service', orang:2, gaji_per_orang:1500000 },
+  { peran:'Receptionist', orang:3, gaji_per_orang:1500000 },
+  { peran:'Security', orang:2, gaji_per_orang:1500000 },
+];
 
-  const finance = await getSetting('finance');
-  const marketing_pct = typeof finance.marketing_pct === 'number' ? finance.marketing_pct : 0.275;
-  const opex_pct = typeof finance.opex_pct === 'number' ? finance.opex_pct : 0.25;
-  const marketing_amount = gross * marketing_pct;
-  const opex_per_unit = gross * opex_pct;
+function hitungCogsStandar(totalKamar){
+  const malam_standar_per_bulan = Math.round(totalKamar * 30 * (COGS_OKUPANSI_STANDAR_PCT / 100));
+  const biaya_langsung_per_malam = COGS_BIAYA_LANGSUNG.reduce((s,k)=>s+k.nominal,0);
+  const biaya_tetap_per_bulan = COGS_BIAYA_TETAP_BULANAN.reduce((s,k)=>s+k.nominal,0);
+  const alokasi_tetap_per_malam = malam_standar_per_bulan > 0 ? Math.round(biaya_tetap_per_bulan / malam_standar_per_bulan) : 0;
+  return {
+    okupansi_standar_pct: COGS_OKUPANSI_STANDAR_PCT,
+    total_kamar: totalKamar,
+    malam_standar_per_bulan,
+    biaya_langsung: COGS_BIAYA_LANGSUNG,
+    biaya_tetap_bulanan: COGS_BIAYA_TETAP_BULANAN,
+    biaya_langsung_per_malam,
+    biaya_tetap_per_bulan,
+    alokasi_tetap_per_malam,
+    cogs_per_malam: biaya_langsung_per_malam + alokasi_tetap_per_malam,
+  };
+}
 
-  const net = gross - opex_per_unit - marketing_amount;
+// unit_id tidak lagi dipakai: bagi hasil dihitung atas seluruh villa
+// (pool 70% dibagi per unit), dan tidak ada pemanggil yang meminta laporan
+// per unit (investor selalu diabaikan unit_id-nya di /report).
+async function computeReport(_unit_id, periode){
+  const [y, mo] = periode.split('-').map(Number);
+  const hariBulan = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  const from = `${periode}-01`;
+  const to = `${periode}-${String(hariBulan).padStart(2,'0')}`;
+
+  const pendapatan = await computeNetRevenueForRange(from, to);
+  const revenue = pendapatan.net_revenue;
+  const malam_terisi = pendapatan.room_nights;
+
+  const investor_count = await countActiveInvestors();
+  const cogs_standar = hitungCogsStandar(investor_count);
+  const cogs = cogs_standar.cogs_per_malam * malam_terisi;
+  const gross_profit = revenue - cogs;
+
+  // Gaji dihitung per hari sejak villa beroperasi sampai hari ini: bulan
+  // lalu penuh, bulan berjalan diprorata, bulan sebelum buka nol.
+  const hariMulai = from < VILLA_MULAI_OPERASI ? (periode === VILLA_MULAI_OPERASI.slice(0,7) ? Number(VILLA_MULAI_OPERASI.slice(8,10)) : hariBulan + 1) : 1;
+  const hariIni = todayWIB();
+  const hariAkhir = to <= hariIni ? hariBulan : periode === hariIni.slice(0,7) ? Number(hariIni.slice(8,10)) : 0;
+  const hari_dihitung = Math.max(0, hariAkhir - hariMulai + 1);
+  const faktor = hari_dihitung / hariBulan;
+  const payroll_bulanan = PAYROLL_STAF.reduce((s,p)=>s+p.orang*p.gaji_per_orang,0);
+  const opex_rincian = PAYROLL_STAF.map(p=>({ ...p, per_bulan: p.orang*p.gaji_per_orang, periode: Math.round(p.orang*p.gaji_per_orang*faktor) }));
+  const opex = opex_rincian.reduce((s,p)=>s+p.periode,0);
+
+  const net = gross_profit - opex;
   const owner_amount = net * 0.70;
   const pengelola_amount = net * 0.30;
 
   const walkin_income = await computeWalkinIncome(periode);
 
-  const investor_count = await countActiveInvestors();
   const per_investor_amount = investor_count > 0 ? owner_amount / investor_count : 0;
   const jaminan_aktif = per_investor_amount < 5000000;
   const jaminan_topup = jaminan_aktif ? 5000000 - per_investor_amount : 0;
 
+  // Pemasukan yang dicatat saat check-in (tabel transactions) -- TETAP
+  // dikirim apa adanya ke MKH Property oleh /cron/sync-mkh-income, supaya
+  // perubahan rumus bagi hasil ini tidak ikut mengubah pembukuan MKH.
+  const {data:txs} = await supabase.from('transactions').select('jumlah').eq('periode_bulan',periode).eq('tipe','income');
+  const pendapatan_transaksi = (txs||[]).reduce((s,t)=>s+Number(t.jumlah),0);
+
   return {
-    periode, gross_revenue:gross, opex_per_unit, opex_pct, marketing_pct, marketing_amount,
-    gross_profit: net, net,
+    periode,
+    rumus: 'revenue_cogs_opex_v2',
+    revenue, malam_terisi,
+    cogs, cogs_per_malam: cogs_standar.cogs_per_malam, cogs_standar,
+    gross_profit,
+    opex, opex_rincian, payroll_bulanan,
+    hari_dihitung, hari_bulan: hariBulan,
+    net,
     owner_amount, loonars_amount: pengelola_amount, pengelola_amount,
     jaminan_aktif, jaminan_topup,
     walkin_income,
     investor_count, per_investor_amount,
+    pendapatan_transaksi,
+    // Nama lama, dipertahankan untuk pemanggil yang belum diperbarui
+    // (mis. asisten WA owner di Mkhsistem). Pemasaran 27,5% dihapus.
+    gross_revenue: revenue, marketing_pct: 0, marketing_amount: 0,
+    opex_per_unit: opex, opex_pct: null,
   };
 }
 
@@ -5346,7 +5439,7 @@ Deno.serve(async (req)=>{
     try { report = await computeReport(undefined, periode); } catch(e){ return err(e.message,500); }
 
     const items = [
-      {kategori:'rental',  jumlah: report.gross_revenue},
+      {kategori:'rental',  jumlah: report.pendapatan_transaksi},
       {kategori:'cafe',    jumlah: report.walkin_income.cafe},
       {kategori:'spa',     jumlah: report.walkin_income.spa},
       {kategori:'lainnya', jumlah: report.walkin_income.lainnya},

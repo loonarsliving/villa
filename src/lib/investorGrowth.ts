@@ -38,7 +38,7 @@ export function buildGrowthRows(
 
   const out: GrowthRow[] = [];
   for (const { m, r } of rows.slice(first)) {
-    // Pendapatan setelah potongan pemasaran/OTA, sama dengan halaman Pendapatan.
+    // Pendapatan setelah potongan OTA, sama dengan halaman Pendapatan.
     const gross = pendapatanInvestor(r);
     const prev = out.at(-1);
     const berjalan = m.period === currentPeriod;

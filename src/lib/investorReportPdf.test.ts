@@ -30,7 +30,7 @@ function text(bytes: Uint8Array): string {
 describe("investorReportLines", () => {
   it("menampilkan angka server apa adanya, termasuk Bagian Anda", () => {
     const lines = investorReportLines(base);
-    expect(lines[0]).toMatchObject({ label: "Pendapatan Seluruh Villa", value: "Rp 72.500.000" });
+    expect(lines[0]).toMatchObject({ label: "Pendapatan Villa", value: "Rp 72.500.000" });
     expect(lines.map((l) => l.label).join(" ")).not.toMatch(/marketing/i);
     expect(lines.at(-1)).toMatchObject({ label: "Bagian Anda", value: "Rp 2.557.692" });
   });
@@ -39,6 +39,41 @@ describe("investorReportLines", () => {
     const lines = investorReportLines({ ...base, pemasukan_tetap: 5_000_000, bagian_anda: 5_000_000 });
     expect(lines.at(-1)?.label).toContain("Pemasukan Anda");
     expect(lines.at(-1)?.value).toBe("Rp 5.000.000");
+  });
+});
+
+describe("investorReportLines rumus revenue - COGS - OPEX", () => {
+  it("menampilkan COGS, Gross Profit, OPEX, lalu Net Profit", () => {
+    const r: Report = {
+      ...base,
+      rumus: "revenue_cogs_opex_v2",
+      revenue: 68_000_000,
+      gross_revenue: 68_000_000,
+      marketing_amount: 0,
+      malam_terisi: 150,
+      cogs_per_malam: 99_797,
+      cogs: 14_969_550,
+      gross_profit: 53_030_450,
+      opex: 10_500_000,
+      opex_per_unit: 10_500_000,
+      net: 42_530_450,
+    };
+    const lines = investorReportLines(r);
+    expect(lines.map((l) => l.label)).toEqual([
+      "Pendapatan Villa",
+      "COGS (biaya per kamar terisi)",
+      "Gross Profit",
+      "OPEX (gaji staf)",
+      "Net Profit",
+      "Pool Investor (70%)",
+      "Loonars (30%)",
+      "Bagian Anda",
+    ]);
+    expect(lines[0].value).toBe("Rp 68.000.000");
+    expect(lines[1].value).toBe("- Rp 14.969.550");
+    expect(lines[2].value).toBe("Rp 53.030.450");
+    expect(lines[3].value).toBe("- Rp 10.500.000");
+    expect(lines[4].value).toBe("Rp 42.530.450");
   });
 });
 

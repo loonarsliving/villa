@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-19 — Rumus bagi hasil investor: Revenue − COGS − OPEX (menggantikan pemasaran 27,5% + opex 25%)
+- Lihat CURRENT_STATE.md 2026-10-19 (malam).
+
 ### 2026-10-19 — Finance: kartu Laba Rugi + Rincian COGS
 - Lihat CURRENT_STATE.md 2026-10-19 (Laba Rugi).
 

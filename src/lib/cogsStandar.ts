@@ -8,13 +8,13 @@
  * Cloudbeds) yang dialokasikan per malam memakai okupansi standar minimum
  * 37,9% sebagai acuan -- supaya biaya tetap itu ikut masuk COGS.
  *
- * Akibatnya: kalau okupansi periode di bawah 37,9%, sebagian biaya tetap
- * belum terserap COGS. Selisih itu dicatat sebagai OPEX ("biaya tetap belum
- * terserap") supaya Net Profit tetap jujur; kalau okupansi di atas standar
- * selisihnya negatif (biaya tetap terserap lebih).
+ * Owner memilih "COGS standar saja": COGS = COGS standar x malam terisi,
+ * tanpa koreksi okupansi. OPEX = gaji staf (PAYROLL_STAF).
  *
- * Murni tampilan analisis Finance: tidak dipakai untuk harga, bagi hasil,
- * atau dividen investor (rumus beku tetap di villa-api computeReport).
+ * Rumus ini SAMA dengan bagi hasil investor di villa-api computeReport
+ * (owner 2026-10-19, semua bulan). Konstanta di sini dan di villa-api
+ * (COGS_BIAYA_LANGSUNG, COGS_BIAYA_TETAP_BULANAN, PAYROLL_STAF) harus sama;
+ * kalau satu berubah, ubah keduanya.
  */
 
 export const OKUPANSI_STANDAR_PCT = 37.9;
@@ -65,6 +65,51 @@ export function hitungCogsStandar(totalKamar: number): CogsStandar {
   };
 }
 
+export interface StafPayroll {
+  peran: string;
+  orang: number;
+  gajiPerOrang: number;
+}
+
+/** Villa mulai beroperasi; gaji sebelum tanggal ini tidak dihitung (sama dengan villa-api). */
+export const VILLA_MULAI_OPERASI = "2026-09-20";
+
+/** Staf yang dipekerjakan per 2026-10-19 (owner). */
+export const PAYROLL_STAF: StafPayroll[] = [
+  { peran: "Cleaning service", orang: 2, gajiPerOrang: 1_500_000 },
+  { peran: "Receptionist", orang: 3, gajiPerOrang: 1_500_000 },
+  { peran: "Security", orang: 2, gajiPerOrang: 1_500_000 },
+];
+
+function hariDalamBulan(iso: string): number {
+  const [y, m] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+}
+
+/**
+ * Bagian bulan yang tercakup rentang [from, to] (inklusif), dijumlah per
+ * hari: tiap hari = 1/jumlah hari bulannya. Satu bulan penuh = 1; tanggal 1
+ * s/d 19 Oktober = 19/31 -- sama dengan prorata bulan berjalan di villa-api.
+ */
+export function faktorBulan(from: string, to: string): number {
+  let f = 0;
+  for (let d = new Date(`${from}T00:00:00Z`); d.toISOString().slice(0, 10) <= to; d.setUTCDate(d.getUTCDate() + 1)) {
+    f += 1 / hariDalamBulan(d.toISOString().slice(0, 10));
+  }
+  return f;
+}
+
+export interface PayrollPeriode extends StafPayroll {
+  perBulan: number;
+  periode: number;
+}
+
+export function payrollPeriode(from: string, to: string): PayrollPeriode[] {
+  const mulai = from < VILLA_MULAI_OPERASI ? VILLA_MULAI_OPERASI : from;
+  const f = mulai <= to ? faktorBulan(mulai, to) : 0;
+  return PAYROLL_STAF.map((p) => ({ ...p, perBulan: p.orang * p.gajiPerOrang, periode: Math.round(p.orang * p.gajiPerOrang * f) }));
+}
+
 export interface LabaRugiInput {
   totalKamar: number;
   hariPeriode: number;
@@ -72,7 +117,7 @@ export interface LabaRugiInput {
   grossRevenue: number;
   komisiOta: number;
   netRevenue: number;
-  /** Payroll periode (villa-api opex_breakdown.payroll). Listrik kamar TIDAK masuk sini karena sudah di COGS. */
+  /** OPEX periode (payrollPeriode). Listrik kamar TIDAK masuk sini karena sudah di COGS. */
   payroll: number;
 }
 
@@ -84,10 +129,6 @@ export interface LabaRugi {
   cogs: number;
   grossProfit: number;
   grossMarginPct: number | null;
-  payroll: number;
-  biayaTetapAktual: number;
-  biayaTetapTerserap: number;
-  biayaTetapBelumTerserap: number;
   opex: number;
   netProfit: number;
   netMarginPct: number | null;
@@ -98,10 +139,7 @@ export function hitungLabaRugi(i: LabaRugiInput): LabaRugi {
   const standar = hitungCogsStandar(i.totalKamar);
   const cogs = standar.cogsPerMalam * i.malamTerjual;
   const grossProfit = i.netRevenue - cogs;
-  const biayaTetapAktual = Math.round(standar.biayaTetapPerBulan * (i.hariPeriode / HARI_PER_BULAN));
-  const biayaTetapTerserap = standar.alokasiTetapPerMalam * i.malamTerjual;
-  const biayaTetapBelumTerserap = biayaTetapAktual - biayaTetapTerserap;
-  const opex = i.payroll + biayaTetapBelumTerserap;
+  const opex = i.payroll;
   const netProfit = grossProfit - opex;
   const tersedia = i.totalKamar * i.hariPeriode;
   return {
@@ -112,10 +150,6 @@ export function hitungLabaRugi(i: LabaRugiInput): LabaRugi {
     cogs,
     grossProfit,
     grossMarginPct: i.netRevenue > 0 ? (grossProfit / i.netRevenue) * 100 : null,
-    payroll: i.payroll,
-    biayaTetapAktual,
-    biayaTetapTerserap,
-    biayaTetapBelumTerserap,
     opex,
     netProfit,
     netMarginPct: i.netRevenue > 0 ? (netProfit / i.netRevenue) * 100 : null,

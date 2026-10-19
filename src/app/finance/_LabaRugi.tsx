@@ -3,13 +3,14 @@
 import { fmtCurrency, fmtCurrencyFull } from "@/lib/format";
 import { Card, CardHeader } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
-import { BIAYA_LANGSUNG, BIAYA_TETAP_BULANAN, HARI_PER_BULAN, OKUPANSI_STANDAR_PCT, hitungLabaRugi } from "@/lib/cogsStandar";
+import { BIAYA_LANGSUNG, BIAYA_TETAP_BULANAN, HARI_PER_BULAN, OKUPANSI_STANDAR_PCT, hitungLabaRugi, payrollPeriode } from "@/lib/cogsStandar";
 import type { FinanceSurvivalKpis } from "@/lib/types";
 
 /**
  * Laba rugi sederhana + rincian COGS untuk /finance (owner 2026-10-19).
- * Angka pendapatan, malam terjual, dan payroll diambil apa adanya dari
- * villa-api /finance/survival; COGS dihitung di src/lib/cogsStandar.ts.
+ * Pendapatan dan malam terisi diambil apa adanya dari villa-api
+ * /finance/survival; COGS dan OPEX (gaji staf) dari src/lib/cogsStandar.ts.
+ * Rumusnya sama dengan bagi hasil investor (villa-api computeReport).
  */
 
 function fmtPct(v: number | null): string {
@@ -33,6 +34,7 @@ function Baris({ label, sub, nilai, tone, tebal }: { label: string; sub?: string
 }
 
 export function LabaRugi({ data }: { data: FinanceSurvivalKpis }) {
+  const staf = payrollPeriode(data.period.from, data.period.to);
   const lr = hitungLabaRugi({
     totalKamar: data.config.total_rooms,
     hariPeriode: data.period.days,
@@ -40,7 +42,7 @@ export function LabaRugi({ data }: { data: FinanceSurvivalKpis }) {
     grossRevenue: data.gross_revenue_mtd,
     komisiOta: data.ota_commission_mtd,
     netRevenue: data.net_revenue_mtd,
-    payroll: data.opex_breakdown.payroll,
+    payroll: staf.reduce((s, p) => s + p.periode, 0),
   });
   const st = lr.standar;
   const periode = `${data.period.from} s/d ${data.period.to} · ${data.period.days} hari`;
@@ -62,16 +64,8 @@ export function LabaRugi({ data }: { data: FinanceSurvivalKpis }) {
           <Baris label="Net Revenue" sub="Uang yang benar-benar diterima villa" nilai={lr.netRevenue} tebal />
           <Baris label="COGS (Harga Pokok Penjualan)" sub={`${fmtCurrencyFull(st.cogsPerMalam)} per malam × ${data.room_nights_mtd} malam terjual`} nilai={lr.cogs} tone="minus" />
           <Baris label="Gross Profit" sub={`Gross margin ${fmtPct(lr.grossMarginPct)}`} nilai={lr.grossProfit} tone="hasil" tebal />
-          <Baris label="Payroll" sub="Dari Konfigurasi Properti, diprorata per hari" nilai={lr.payroll} tone="minus" />
-          {lr.biayaTetapBelumTerserap !== 0 && (
-            <Baris
-              label={lr.biayaTetapBelumTerserap > 0 ? "Biaya tetap belum terserap COGS" : "Biaya tetap terserap lebih (koreksi)"}
-              sub={`Okupansi periode ${fmtPct(lr.okupansiPct)} vs standar ${fmtPct(OKUPANSI_STANDAR_PCT)}: biaya tetap aktual ${fmtCurrencyFull(lr.biayaTetapAktual)}, yang masuk COGS ${fmtCurrencyFull(lr.biayaTetapTerserap)}`}
-              nilai={lr.biayaTetapBelumTerserap}
-              tone={lr.biayaTetapBelumTerserap > 0 ? "minus" : undefined}
-            />
-          )}
-          <Baris label="Net Profit" sub={`Net margin ${fmtPct(lr.netMarginPct)} · sebelum bagi hasil investor & pajak`} nilai={lr.netProfit} tone="hasil" tebal />
+          <Baris label="OPEX (gaji staf)" sub="Rincian di kartu OPEX di bawah" nilai={lr.opex} tone="minus" />
+          <Baris label="Net Profit" sub={`Net margin ${fmtPct(lr.netMarginPct)} · dibagi 70% investor : 30% Loonars, sebelum pajak`} nilai={lr.netProfit} tone="hasil" tebal />
         </div>
       </Card>
 
@@ -119,9 +113,34 @@ export function LabaRugi({ data }: { data: FinanceSurvivalKpis }) {
           </div>
           <div className="text-[10px] text-ink/40 leading-relaxed pt-3">
             Biaya langsung {fmtCurrencyFull(st.biayaLangsungPerMalam)} + alokasi biaya tetap {fmtCurrencyFull(st.alokasiTetapPerMalam)}. Okupansi standar dipakai supaya
-            internet, listrik receptionist, dan Cloudbeds ikut masuk COGS. Kalau okupansi di bawah standar, sisa biaya tetap yang belum terserap dicatat di
-            bawah Gross Profit, jadi Net Profit tetap menghitung seluruh biaya. Listrik kamar sudah di COGS, jadi tidak dihitung lagi di OPEX. Hanya untuk
-            analisis Finance, tidak memengaruhi harga kamar maupun bagi hasil investor.
+            internet, listrik receptionist, dan Cloudbeds ikut masuk COGS. COGS = COGS standar × malam terisi, berapa pun okupansinya. Rumus dan angka
+            yang sama dipakai untuk bagi hasil investor.
+          </div>
+        </div>
+      </Card>
+
+      <Card className="mb-4">
+        <CardHeader title="Rincian OPEX" subtitle="Gaji staf yang dipekerjakan saat ini" />
+        <div className="px-4 sm:px-5 pb-4 text-[12px] divide-y divide-ink/5">
+          {staf.map((p) => (
+            <div key={p.peran} className="flex items-start justify-between gap-3 py-2">
+              <div>
+                <div className="text-ink/80">
+                  {p.peran} ({p.orang} orang)
+                </div>
+                <div className="text-[10px] text-ink/40">{fmtCurrencyFull(p.gajiPerOrang)} per orang</div>
+              </div>
+              <div className="shrink-0">{fmtCurrencyFull(p.perBulan)}/bln</div>
+            </div>
+          ))}
+          <div className="flex items-start justify-between gap-3 pt-3 font-semibold">
+            <div>
+              <div>OPEX periode ini</div>
+              <div className="text-[10px] text-ink/40 font-normal">
+                {fmtCurrencyFull(staf.reduce((s, p) => s + p.perBulan, 0))}/bln, diprorata per hari untuk {periode}
+              </div>
+            </div>
+            <div className="shrink-0">{fmtCurrencyFull(lr.opex)}</div>
           </div>
         </div>
       </Card>
