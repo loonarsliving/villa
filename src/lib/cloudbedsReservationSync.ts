@@ -195,14 +195,14 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
   if (reservationIds.length > 0) {
     const { data: existing } = await supabase
       .from("bookings")
-      .select("cloudbeds_reservation_id, sumber, catatan, status, guest_id")
+      .select("cloudbeds_reservation_id, sumber, catatan, status, guest_id, is_free_stay, voucher_id, kol_voucher_id")
       .in("cloudbeds_reservation_id", reservationIds);
     for (const b of existing ?? []) {
       if (!b.cloudbeds_reservation_id) continue;
       const id = String(b.cloudbeds_reservation_id);
       if (b.status) statusSaatIni.set(id, String(b.status));
       if (b.guest_id) guestIdSaatIni.set(id, String(b.guest_id));
-      if (dibuatDiSini(b.sumber, b.catatan)) ownReservationIds.add(id);
+      if (dibuatDiSini(b.sumber, b.catatan, b)) ownReservationIds.add(id);
     }
   }
 
