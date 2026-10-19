@@ -413,3 +413,10 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 - **Terdampak (dicek langsung di DB 2026-10-19):** booking Atmojo (KOL, 13 Okt) tercatat Rp603.000 dan pemasukan Rp603.000 sudah masuk periode 2026-10; booking Natalia (investor, XZBQ5T3S, 20 Okt, belum check-in) tercatat Rp639.000.
 - **Perbaikan kode:** `dibuatDiSini` kini juga mengenali sumber `investor`/`kol`, catatan berkupon, dan kolom `is_free_stay`/`voucher_id`/`kol_voucher_id` (penanda yang tidak pernah ditimpa sync). Sync memilih kolom itu. Tes ditambahkan.
 - **Belum dikerjakan:** koreksi data dua booking di atas dan pemasukan Rp603.000 (menyangkut dasar dividen Oktober, menunggu persetujuan owner); `villa_commit_checkin` masih bergantung pada `total_bayar` = 0 untuk malam gratis.
+
+### Koreksi data dijalankan 2026-10-19 (disetujui owner, setelah kode #220 live)
+- Booking Natalia Desi Ch (investor, kode XZBQ5T3S, unit B4, 20 Okt): `sumber` cloudbeds → `investor`, `tarif`/`total_bayar` 639.000 → 0.
+- Booking Atmojo (KOL, unit B4, 13 Okt): `sumber` cloudbeds → `kol`, `tarif`/`total_bayar` 603.000 → 0.
+- Pemasukan salah DIHAPUS: `transactions.id` 187b660b-ae9b-4881-93ff-610082db1101, income Rp603.000, kategori harian, "Check-in Atmojo Atmojo — Unit B4", periode 2026-10, dicatat_oleh reception, 2026-10-13 07:59 UTC. Pemasukan Oktober setelah koreksi: Rp73.120.749.
+- Tidak diubah: nama tamu hasil timpaan Cloudbeds ("Atmojo Atmojo") dan `cloudbeds_balance`/`cloudbeds_subtotal` (angka milik Cloudbeds; Cloudbeds menghitung harga sendiri karena booking didorong tanpa harga).
+
