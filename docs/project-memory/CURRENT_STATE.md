@@ -3,6 +3,12 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-19 — Finance: kartu Laba Rugi + Rincian COGS (frontend saja)
+- Owner: "harus ada card cogs dan penjelasan masing2 ... revenue, gross profit, cogs sampai nett profit". Komponen `src/app/finance/_LabaRugi.tsx` di `/finance` (di dalam Survival Control Center, selalu tampil): 4 kartu (Net Revenue, COGS, Gross Profit, Net Profit), kartu Laba Rugi (Gross Revenue − komisi OTA = Net Revenue − COGS = Gross Profit − payroll − biaya tetap belum terserap = Net Profit), dan kartu Rincian COGS dengan penjelasan tiap komponen.
+- COGS (angka dari owner, konstanta di `src/lib/cogsStandar.ts`, +5 tes): langsung per malam terjual listrik kamar 25rb, laundry 35rb, amenities 5rb; tetap per bulan internet 650rb, listrik receptionist 3 jt, Cloudbeds 1,5 jt, dialokasikan per malam dengan okupansi standar minimum 37,9% (13 kamar × 30 hari × 37,9% = 148 malam → Rp34.797/malam). COGS standar = Rp99.797/kamar/malam.
+- Kalau okupansi periode di bawah standar, sisa biaya tetap tampil sebagai "biaya tetap belum terserap" di bawah Gross Profit (di atas standar: koreksi negatif), jadi Net Profit = net revenue − semua biaya aktual. OPEX hanya payroll (`opex_breakdown.payroll`); listrik kamar villa-api (`room_electricity`) TIDAK dipakai karena sudah di COGS.
+- Sumber angka: villa-api `/finance/survival` apa adanya (net_revenue_mtd, gross_revenue_mtd, ota_commission_mtd, room_nights_mtd, period.days, config.total_rooms). Tanpa perubahan villa-api, database, atau env. Hanya analisis Finance: tidak memengaruhi harga, bagi hasil, atau dividen. Mengubah nominal COGS = ubah konstanta lalu deploy.
+
 ## 2026-10-19 — Metrik bulanan ke Laporan Investor MKH Property (LIVE: PR #222, villa-api v142)
 - Masalah: `ir_metrik_bulanan` di MKH Property kosong untuk semua unit, karena tidak ada sistem yang memanggil RPC `ir_metrik_terima` (mkh-properti 0040/0041). Okupansi, ADR, RevPAR di laporan investor dan asisten WA owner karena itu selalu "data belum tersedia".
 - villa-api `POST /cron/sync-mkh-income` (dipicu cron Vercel tgl 1, 08.15 WIB) kini, SETELAH sinkron pendapatan berhasil, juga mengirim metrik bulan itu lewat `kirimMetrikInvestor`: URL = `mkh_finance_bridge.base_url` dengan `villa_income_sync` diganti `ir_metrik_terima`, rahasia `x-villa-sync-secret` yang sama (diterima `ir_metrik_terima` sejak 0041; dicek live 2026-10-19). Tanpa rahasia, env, atau migrasi baru. Gagal kirim metrik tidak menggagalkan sinkron pendapatan; hasilnya di field `metrik` respons.
