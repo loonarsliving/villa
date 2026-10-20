@@ -194,9 +194,13 @@ export default function FinancePage() {
         <input
           type="date"
           className="text-[11px] px-2 py-1.5 rounded-full border border-ink/15 bg-transparent"
-          value={customFrom}
+          // Tampilkan rentang yang SEDANG dipakai, bukan sisa isian custom:
+          // dulu "Bulan ini" tetap tertulis "20 Oct s/d 20 Oct", sehingga
+          // total sebulan terbaca seperti pemasukan satu hari.
+          value={range.from}
           onChange={(e) => {
             setCustomFrom(e.target.value);
+            setCustomTo(range.to);
             setPreset("custom");
           }}
         />
@@ -204,8 +208,9 @@ export default function FinancePage() {
         <input
           type="date"
           className="text-[11px] px-2 py-1.5 rounded-full border border-ink/15 bg-transparent"
-          value={customTo}
+          value={range.to}
           onChange={(e) => {
+            setCustomFrom(range.from);
             setCustomTo(e.target.value);
             setPreset("custom");
           }}
