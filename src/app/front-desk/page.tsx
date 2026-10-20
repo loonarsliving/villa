@@ -36,6 +36,7 @@ export default function FrontDeskPage() {
   const [sum, setSum] = useState<Summary | null>(null);
   const [units, setUnits] = useState<Unit[]>([]);
   const [notifs, setNotifs] = useState<Notification[]>([]);
+  const [kedatangan, setKedatangan] = useState<{ sudah: number; total: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [ciOpen, setCiOpen] = useState(false);
   const [coOpen, setCoOpen] = useState(false);
@@ -64,14 +65,26 @@ export default function FrontDeskPage() {
   async function load() {
     setLoading(true);
     try {
-      const [s, u, n] = await Promise.all([
+      const hariIni = todayISO();
+      const [s, u, n, b] = await Promise.all([
         api.get<Summary>("/summary"),
         api.get<Unit[]>("/units"),
         api.get<Notification[]>("/notifications?role=receptionist"),
+        // /summary.checkin_today hanya menghitung yang MASIH terjadwal, jadi
+        // tamu yang sudah check-in hilang dari kartu (20 Okt 2026: tertulis
+        // "1" padahal 8 tamu datang hari itu, 7 sudah masuk). Gagal di sini
+        // tidak boleh menjatuhkan halaman -- kartu kembali ke angka lama.
+        api.get<Booking[]>(`/bookings?date_from=${hariIni}&date_to=${hariIni}`).catch(() => null),
       ]);
       setSum(s);
       setUnits(u || []);
       setNotifs(n || []);
+      if (b) {
+        const datang = b.filter((x) => x.tgl_checkin === hariIni && ["terjadwal", "checkin", "checkout"].includes(x.status));
+        setKedatangan({ sudah: datang.filter((x) => x.status !== "terjadwal").length, total: datang.length });
+      } else {
+        setKedatangan(null);
+      }
     } catch (e) {
       // Tanpa ini, satu permintaan yang gagal membuat setLoading(false)
       // tidak pernah dijalankan: halaman Front Desk berhenti di "Memuat…"
@@ -269,7 +282,16 @@ export default function FrontDeskPage() {
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 mb-3.5">
         <StatCard label="Tersedia" value={String(sum?.available ?? "—")} accent="sage" />
         <StatCard label="Terisi" value={String(sum?.occupied ?? "—")} sub="dari 13 unit" accent="gold" />
-        <StatCard label="Check-In Hari Ini" value={String(sum?.checkin_today ?? "—")} accent="azure" />
+        {kedatangan ? (
+          <StatCard
+            label="Check-In Hari Ini"
+            value={`${kedatangan.sudah}/${kedatangan.total}`}
+            sub={kedatangan.total - kedatangan.sudah > 0 ? `${kedatangan.total - kedatangan.sudah} belum datang` : "semua sudah datang"}
+            accent="azure"
+          />
+        ) : (
+          <StatCard label="Belum Check-In Hari Ini" value={String(sum?.checkin_today ?? "—")} accent="azure" />
+        )}
         <StatCard label="Checkout Hari Ini" value={String(sum?.checkout_today ?? "—")} accent="ruby" />
         <StatCard label="Perlu Dibersihkan" value={String(sum?.dirty ?? "—")} accent="ruby" onClick={() => router.push("/front-desk/housekeeping")} />
       </div>

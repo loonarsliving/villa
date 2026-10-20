@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { FinanceShell } from "./_shell";
 import { SurvivalControlCenter } from "./_SurvivalControlCenter";
 import { useAuth } from "@/lib/auth";
@@ -126,8 +126,13 @@ export default function FinancePage() {
   const [error, setError] = useState<string | null>(null);
 
   const [detailId, setDetailId] = useState<string | null>(null);
+  // Ganti periode cepat (Kemarin -> Hari ini) memicu dua load bersamaan;
+  // tanpa ini jawaban yang datang terakhir menang, sehingga "Hari ini" bisa
+  // menampilkan angka kemarin.
+  const loadSeq = useRef(0);
 
   function load() {
+    const seq = ++loadSeq.current;
     setLoading(true);
     setError(null);
     const qs = new URLSearchParams({ from: range.from, to: range.to });
@@ -144,13 +149,18 @@ export default function FinancePage() {
       api.get<FinanceAuditLogRow[]>(`/finance/audit-log?limit=15`),
     ])
       .then(([s, c, b, a]) => {
+        if (seq !== loadSeq.current) return;
         setSummary(s);
         setChannels(c);
         setBookings(b);
         setAuditLog(a);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false));
+      .catch((e) => {
+        if (seq === loadSeq.current) setError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (seq === loadSeq.current) setLoading(false);
+      });
   }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps

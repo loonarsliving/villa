@@ -4,6 +4,10 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-20 — Front Desk: kartu "Check-In Hari Ini" jadi sudah/total; finance anti-race ganti periode
+- `/summary.checkin_today` (villa-api) hanya menghitung booking `terjadwal`, jadi tamu yang sudah check-in hilang dari kartu (tertulis 1 padahal 8 kedatangan). Front Desk kini menghitung dari `/bookings?date_from=hari ini&date_to=hari ini`: "7/8 · 1 belum datang". Gagal ambil → kembali ke angka lama berlabel "Belum Check-In Hari Ini". villa-api tidak diubah.
+- `/finance` + Survival Control Center: jawaban periode lama yang datang belakangan diabaikan, supaya "Hari ini" tidak menampilkan angka "Kemarin". Rumus tidak berubah.
+
 ### 2026-10-19 — Rumus bagi hasil investor: Revenue − COGS − OPEX (menggantikan pemasaran 27,5% + opex 25%)
 - Lihat CURRENT_STATE.md 2026-10-19 (malam).
 
