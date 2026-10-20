@@ -46,13 +46,24 @@ export function SurvivalControlCenter({ from, to }: { from: string; to: string }
   const [showDetail, setShowDetail] = useState(false);
 
   useEffect(() => {
+    // Abaikan jawaban periode lama yang datang belakangan (lihat loadSeq di page.tsx).
+    let usang = false;
     setLoading(true);
     setError(null);
     api
       .get<FinanceSurvivalKpis>(`/finance/survival?property=loonars-1&from=${from}&to=${to}`)
-      .then(setData)
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false));
+      .then((d) => {
+        if (!usang) setData(d);
+      })
+      .catch((e) => {
+        if (!usang) setError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (!usang) setLoading(false);
+      });
+    return () => {
+      usang = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to]);
 
