@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-21 — Kiriman harian laporan keuangan villa ke MKH Property
+- Lihat CURRENT_STATE.md 2026-10-21 (kiriman harian).
+
 ### 2026-10-21 — Finance: tiap modul jadi menu sendiri
 - Lihat CURRENT_STATE.md 2026-10-21 (menu).
 

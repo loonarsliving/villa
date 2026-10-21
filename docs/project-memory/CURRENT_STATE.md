@@ -3,6 +3,14 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-21 — Kiriman harian laporan keuangan villa ke MKH Property + rekap pajak hotel
+- Owner: MKH Property punya laporan keuangan khusus villa yang bisa diminta lewat WhatsApp, plus rekap pajak hotel untuk Dispenda; "tidak perlu realtime, per hari saja agar tidak membebani". Laporan Dispenda memakai angka transaksi yang SEBENARNYA: permintaan agar laporan "diatur" supaya bayar Rp2-5 jt tidak dikerjakan.
+- villa-api: `hitungLaporanKeuanganVilla(periode)` (dari `computeReport` + `computeNetRevenueForRange` + `hitungChannelBreakdown`; tanpa rumus baru, sama dengan Finance) dan `kirimLaporanVilla`; rute `POST /cron/sync-laporan-villa` (x-cron-secret; bulan berjalan = sementara, tanggal 1-5 bulan lalu ikut = final, `?periode=YYYY-MM` manual). Dikirim ke RPC `villa_laporan_terima` MKH Property lewat jembatan `mkh_finance_bridge` yang sama dengan `/cron/sync-mkh-income` (rahasia `x-villa-sync-secret` yang sama, tanpa rahasia baru).
+- Vercel cron baru `/api/cron/sync-laporan-villa` tiap malam `40 17 * * *` UTC = 00.40 WIB (`vercel.json`).
+- Isi: omzet kotor (total dibayar tamu), komisi OTA, bersih, walk-in, malam terjual/gratis/tersedia, okupansi, COGS, gross profit, OPEX, net profit, rincian (channel, komponen COGS, gaji, bagi hasil). Malam gratis investor bukan malam terjual dan bukan dasar pajak.
+- Sisi penerima (migrasi 0054, halaman, WhatsApp, pajak hotel): lihat mkh-properti CURRENT_STATE 2026-10-21. Pemanggil WhatsApp di Mkhsistem belum disambungkan.
+- Tidak ada perubahan database villa, rumus, atau env. `sync-mkh-income` bulanan (pendapatan_villa) tidak diubah.
+
 ## 2026-10-21 — Finance: tiap modul jadi menu sendiri (frontend saja)
 - Owner: halaman Finance menyusun semua modul dari atas ke bawah; diminta per menu, tampil hanya kalau menu dipilih. Sekarang menu samping: **Finance** = Ringkasan (`/finance`, hanya posisi hari ini + target), Rencana Kas (`/finance/rencana-kas`), Laba Rugi & COGS (`/finance/laba-rugi`), Pendapatan & Channel (`/finance/pendapatan`), Transaksi (`/finance/transaksi`); **Alat** = Checklist Dana, What-If, Fee Referral; **Pengaturan** = Konfigurasi Settlement OTA, Konfigurasi Properti.
 - Kode lama `page.tsx` dipindah apa adanya ke `_Dashboard.tsx` (`FinanceDashboard view="pendapatan" | "transaksi"`, masing-masing hanya memuat data yang dipakainya; penjaga jawaban basi dari #226/#227 tetap). Filter periode dipakai bersama lewat `_periode.tsx` (`usePeriode`, `PeriodeBar`); tiap halaman punya pilihan periodenya sendiri, default "Bulan ini". Kartu Laba Rugi dikeluarkan dari Survival Control Center ke halamannya sendiri.

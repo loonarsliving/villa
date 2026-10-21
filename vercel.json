@@ -23,6 +23,10 @@
       "schedule": "15 1 1 * *"
     },
     {
+      "path": "/api/cron/sync-laporan-villa",
+      "schedule": "40 17 * * *"
+    },
+    {
       "path": "/api/cron/daily-inventory-snapshot",
       "schedule": "55 15 * * *"
     },
