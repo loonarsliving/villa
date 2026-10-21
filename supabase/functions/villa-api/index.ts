@@ -3598,6 +3598,96 @@ async function kirimMetrikInvestor(bridge, periode){
   return { dikirim:true, hasil, metrik };
 }
 
+// ── Laporan keuangan bulanan villa untuk MKH Property (owner 2026-10-21) ──
+// Satu angka untuk laporan keuangan villa di MKH Property (halaman laporan,
+// permintaan lewat WhatsApp, dan rekap pajak hotel Dispenda): kotor (total
+// yang dibayar tamu, sebelum komisi OTA), komisi OTA, bersih, lalu COGS,
+// gross profit, OPEX (gaji), net profit. Semua dari computeReport() dan
+// computeNetRevenueForRange(), jadi sama persis dengan Finance dan laporan
+// investor; tidak ada rumus baru di sini. Pendapatan walk-in (cafe/spa)
+// dilaporkan terpisah karena bukan sewa kamar.
+async function hitungLaporanKeuanganVilla(periode){
+  const [y, mo] = periode.split('-').map(Number);
+  const hariBulan = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  const from = `${periode}-01`;
+  const to = `${periode}-${String(hariBulan).padStart(2,'0')}`;
+
+  const report = await computeReport(undefined, periode);
+  const pendapatan = await computeNetRevenueForRange(from, to);
+  const channel = await hitungChannelBreakdown(from, to);
+  const {count:unitTotal} = await supabase.from('units').select('id',{count:'exact',head:true});
+
+  // Malam gratis investor (is_free_stay) tidak membawa pendapatan: bukan
+  // malam terjual dan bukan dasar pajak, tapi biayanya tetap di COGS.
+  const {data:gratis, error:gErr} = await supabase.from('bookings')
+    .select('status,tgl_checkin,durasi_malam')
+    .gte('tgl_checkin', from).lte('tgl_checkin', to).eq('is_free_stay', true);
+  if(gErr) throw new GalatQueryFinance(gErr.message);
+  const malamGratis = (gratis ?? []).filter(isPemasukanDiakui).reduce((s,b)=>s+Number(b.durasi_malam ?? 0),0);
+
+  const malamTerjual = Math.max(0, report.malam_terisi - malamGratis);
+  const malamTersedia = (unitTotal ?? 0) * hariBulan;
+  const data = {
+    omzet_kotor: pendapatan.gross_revenue,
+    komisi_ota: pendapatan.ota_commission,
+    pendapatan_bersih: pendapatan.net_revenue,
+    pendapatan_walkin: report.walkin_income.total,
+    malam_terjual: malamTerjual,
+    malam_gratis: malamGratis,
+    malam_tersedia: malamTersedia,
+    cogs_per_malam: report.cogs_per_malam,
+    cogs: report.cogs,
+    gross_profit: report.gross_profit,
+    opex: report.opex,
+    net_profit: report.net,
+    rincian: {
+      versi: 'v1',
+      hari_bulan: hariBulan,
+      hari_gaji_dihitung: report.hari_dihitung,
+      cogs_standar: report.cogs_standar,
+      opex_rincian: report.opex_rincian,
+      channel: channel.channels.map(c=>({
+        sumber: c.sumber, booking: c.booking_count, malam: c.room_nights,
+        kotor: c.revenue, komisi: c.ota_deduction, bersih: c.net_revenue,
+      })),
+      bagi_hasil: {
+        pool_investor: report.owner_amount, pengelola: report.pengelola_amount,
+        investor_count: report.investor_count, per_unit: report.per_investor_amount,
+        jaminan_aktif: report.jaminan_aktif, jaminan_topup: report.jaminan_topup,
+      },
+      catatan: [
+        'Kotor = total yang dibayar tamu per booking (Grand Total Cloudbeds untuk OTA); bersih = uang yang diterima villa setelah komisi OTA per channel.',
+        'Booking diakui per bulan check-in; malam gratis investor tidak dihitung sebagai malam terjual.',
+        'COGS = COGS standar per malam x malam terisi; OPEX = gaji staf, bulan berjalan diprorata.',
+      ],
+    },
+  };
+  if(malamTersedia > 0) data.okupansi_pct = Math.round(malamTerjual / malamTersedia * 1000) / 10;
+  return data;
+}
+
+async function kirimLaporanVilla(bridge, periode){
+  // base_url menunjuk RPC villa_income_sync; villa_laporan_terima ada di
+  // PostgREST yang sama dan memakai rahasia x-villa-sync-secret yang sama.
+  if(!/\/villa_income_sync\/?$/.test(bridge.base_url)) return { dikirim:false, alasan:'base_url jembatan bukan RPC villa_income_sync' };
+  const urlLaporan = bridge.base_url.replace(/\/villa_income_sync\/?$/, '/villa_laporan_terima');
+  const data = await hitungLaporanKeuanganVilla(periode);
+  const status = periode < monthWIB() ? 'final' : 'sementara';
+  const r = await fetch(urlLaporan, {
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      apikey: bridge.apikey,
+      Authorization: `Bearer ${bridge.apikey}`,
+      'x-villa-sync-secret': bridge.secret,
+    },
+    body: JSON.stringify({ p_periode:`${periode}-01`, p_data:data, p_status:status }),
+  });
+  const hasil = await r.json().catch(()=>null);
+  if(!r.ok) return { dikirim:false, alasan:(hasil && (hasil.message||hasil.error)) ?? `MKH Property menolak (HTTP ${r.status})` };
+  return { dikirim:true, status, hasil, ringkas:{ omzet_kotor:data.omzet_kotor, pendapatan_bersih:data.pendapatan_bersih, net_profit:data.net_profit } };
+}
+
 Deno.serve(async (req)=>{
   if(req.method==='OPTIONS') return new Response('ok',{headers:CORS});
   if(!SESSION_SECRET){
@@ -5472,6 +5562,37 @@ Deno.serve(async (req)=>{
     } catch(e){
       return err(`Gagal menghubungi MKH Property: ${String(e)}`,502);
     }
+  }
+
+  // Kiriman harian laporan keuangan villa ke MKH Property (owner 2026-10-21:
+  // "tidak perlu realtime, per hari saja agar tidak membebani"). Dipicu
+  // Vercel cron tiap malam; bulan berjalan dikirim sebagai 'sementara',
+  // dan tanggal 1-5 bulan lalu ikut dikirim ulang supaya menjadi 'final'.
+  // ?periode=YYYY-MM mengirim satu bulan tertentu (manual).
+  if(path==='/cron/sync-laporan-villa' && m==='POST'){
+    const cron = await getSetting('cron');
+    const provided = req.headers.get('x-cron-secret') ?? '';
+    if(!cron.secret) return err('Cron belum dikonfigurasi (integration_settings.cron.secret)',503);
+    if(!await secretsMatch(provided, cron.secret)) return err('Unauthorized',401);
+
+    const bridge = await getSetting('mkh_finance_bridge');
+    if(!bridge.base_url || !bridge.apikey || !bridge.secret){
+      return err('Jembatan MKH Property belum dikonfigurasi (integration_settings.mkh_finance_bridge)',503);
+    }
+
+    const periodeParam = url.searchParams.get('periode');
+    if(periodeParam && !/^\d{4}-(0[1-9]|1[0-2])$/.test(periodeParam)) return err('periode harus YYYY-MM',400);
+    const periodes = periodeParam
+      ? [periodeParam]
+      : [monthWIB(), ...(Number(todayWIB().slice(8,10)) <= 5 ? [prevMonthWIB()] : [])];
+
+    const hasil = [];
+    for(const periode of periodes){
+      try { hasil.push({ periode, ...await kirimLaporanVilla(bridge, periode) }); }
+      catch(e){ hasil.push({ periode, dikirim:false, alasan:String(e?.message ?? e) }); }
+    }
+    const semua = hasil.every(h=>h.dikirim);
+    return json({ success: semua, hasil }, semua ? 200 : 502);
   }
 
   // ── Baca notifikasi pembayaran QRIS BTN dari email (kode unik) ─────────
