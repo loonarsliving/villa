@@ -6,7 +6,6 @@ import { api } from "@/lib/api";
 import { fmtCurrency, fmtCurrencyFull } from "@/lib/format";
 import { Card, CardHeader, Loading, Badge } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
-import { LabaRugi } from "./_LabaRugi";
 import type { FinanceSurvivalKpis, SurvivalStatus } from "@/lib/types";
 
 /**
@@ -190,9 +189,6 @@ export function SurvivalControlCenter({ from, to }: { from: string; to: string }
           tercapai.
         </div>
       </Card>
-
-      {/* Revenue → COGS → Gross Profit → Net Profit (owner 2026-10-19) */}
-      <LabaRugi data={data} />
 
       {/* Toggle: detailed Rupiah/finance view for Finance/Admin */}
       <button onClick={() => setShowDetail((v) => !v)} className="text-[10.5px] font-semibold text-ink/50 border border-ink/15 rounded px-3 py-1.5 mb-4">

@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-21 — Finance: tiap modul jadi menu sendiri
+- Lihat CURRENT_STATE.md 2026-10-21 (menu).
+
 ### 2026-10-21 — Finance: modul Rencana Kas bulan ini
 - Lihat CURRENT_STATE.md 2026-10-21.
 
