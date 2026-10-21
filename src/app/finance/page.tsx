@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { FinanceShell } from "./_shell";
 import { SurvivalControlCenter } from "./_SurvivalControlCenter";
+import { RencanaKas } from "./_RencanaKas";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { fmtCurrency, fmtCurrencyFull, fmtDate, fmtDateTime, todayISO } from "@/lib/format";
@@ -175,6 +176,7 @@ export default function FinancePage() {
   return (
     <FinanceShell pageTitle="Finance" pageSub="Cloudbeds → OTA → Direct Booking → Settlement → Cash">
       <SurvivalControlCenter from={range.from} to={range.to} />
+      <RencanaKas />
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2 mb-4">
