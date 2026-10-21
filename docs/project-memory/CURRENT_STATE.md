@@ -3,6 +3,11 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-21 — Finance: tiap modul jadi menu sendiri (frontend saja)
+- Owner: halaman Finance menyusun semua modul dari atas ke bawah; diminta per menu, tampil hanya kalau menu dipilih. Sekarang menu samping: **Finance** = Ringkasan (`/finance`, hanya posisi hari ini + target), Rencana Kas (`/finance/rencana-kas`), Laba Rugi & COGS (`/finance/laba-rugi`), Pendapatan & Channel (`/finance/pendapatan`), Transaksi (`/finance/transaksi`); **Alat** = Checklist Dana, What-If, Fee Referral; **Pengaturan** = Konfigurasi Settlement OTA, Konfigurasi Properti.
+- Kode lama `page.tsx` dipindah apa adanya ke `_Dashboard.tsx` (`FinanceDashboard view="pendapatan" | "transaksi"`, masing-masing hanya memuat data yang dipakainya; penjaga jawaban basi dari #226/#227 tetap). Filter periode dipakai bersama lewat `_periode.tsx` (`usePeriode`, `PeriodeBar`); tiap halaman punya pilihan periodenya sendiri, default "Bulan ini". Kartu Laba Rugi dikeluarkan dari Survival Control Center ke halamannya sendiri.
+- Tanpa perubahan villa-api, database, env, atau angka.
+
 ## 2026-10-21 — Finance: modul Rencana Kas bulan ini (frontend saja, hanya halaman Finance)
 - Owner: "berapa saja yang cair dan berapa untuk bayar dividen, berapa dana sisa di akhir bulan ... meskipun agoda belum cair kita sudah tahu uang dimana dan akan kemana"; gaji dan listrik hanya indikator; selama masa garansi Rp5 jt/bulan didahulukan atas rumus bagi hasil; JANGAN tampil di halaman investor (investor tetap melihat rumus sebenarnya).
 - `src/app/finance/_RencanaKas.tsx` di `/finance` (di bawah Survival Control Center) + hitungan murni `src/lib/rencanaKas.ts` (+9 tes). Memakai endpoint yang sudah ada: `/finance/checklist-dana` (jadwal settlement), `/finance/summary` (pipeline, net revenue), `/admin/investors` (centang lunas; gagal untuk non-admin = isi manual). Tanpa perubahan villa-api, database, atau env.
