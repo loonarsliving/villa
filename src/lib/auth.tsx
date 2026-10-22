@@ -64,5 +64,7 @@ export function roleHome(role: Role): string {
   if (role === "finance") return "/finance";
   if (role === "manager") return "/manager";
   if (role === "late_night") return "/late-night";
+  if (role === "el_receptionist") return "/excellent/front-desk";
+  if (role === "el_investor") return "/excellent/investor";
   return "/investor";
 }

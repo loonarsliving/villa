@@ -46,6 +46,16 @@ export function AdminShell({ pageTitle, pageSub, children }: { pageTitle: string
       ],
     },
     {
+      title: "Excellent Living",
+      items: [
+        { href: "/excellent/front-desk", label: "Kamar & Booking EL", icon: "◎" },
+        { href: "/admin/excellent-living/kamar", label: "Atur Kamar EL", icon: "▦" },
+        { href: "/admin/excellent-living/investor", label: "Investor EL", icon: "◈" },
+        { href: "/admin/excellent-living/cloudbeds", label: "Cloudbeds EL", icon: "☁" },
+        { href: "/finance/excellent-living", label: "Keuangan EL", icon: "↗" },
+      ],
+    },
+    {
       title: "Kasir",
       items: [{ href: "/front-desk/payment-gateway", label: "Payment Gateway", icon: "◍" }],
     },

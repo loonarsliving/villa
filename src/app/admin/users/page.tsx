@@ -8,7 +8,7 @@ import { Card, CardHeader, Loading, Badge } from "@/components/Card";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
 import type { VillaUserRow, Role, Unit } from "@/lib/types";
 
-const roleLabel: Record<Role, string> = { owner: "Investor", receptionist: "Resepsionis", admin: "Admin", finance: "Finance", manager: "Manager", late_night: "Late Night" };
+const roleLabel: Record<Role, string> = { owner: "Investor", receptionist: "Resepsionis", admin: "Admin", finance: "Finance", manager: "Manager", late_night: "Late Night", el_investor: "Investor Excellent Living", el_receptionist: "Resepsionis Excellent Living" };
 
 export default function AdminUsersPage() {
   const toast = useToast();
@@ -169,6 +169,8 @@ export default function AdminUsersPage() {
             <option value="finance">Finance</option>
             <option value="manager">Manager (Kesiapan Kamar)</option>
             <option value="late_night">Late Night (loonars.id/late)</option>
+            <option value="el_investor">Investor Excellent Living</option>
+            <option value="el_receptionist">Resepsionis Excellent Living</option>
           </select>
         </Field>
         {form.role === "owner" && (

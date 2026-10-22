@@ -19,6 +19,10 @@ export function FinanceShell({ pageTitle, pageSub, children }: { pageTitle: stri
       ],
     },
     {
+      title: "Excellent Living",
+      items: [{ href: "/finance/excellent-living", label: "Keuangan Excellent Living", icon: "↗" }],
+    },
+    {
       title: "Alat",
       items: [
         { href: "/finance/checklist-dana", label: "Checklist Dana Masuk", icon: "✓" },
