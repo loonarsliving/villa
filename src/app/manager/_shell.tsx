@@ -4,10 +4,12 @@ import type { ReactNode } from "react";
 import { DashboardShell, type NavSection } from "@/components/DashboardShell";
 import { useAuth } from "@/lib/auth";
 import { useChatUnreadPoll } from "@/lib/hooks";
+import { ManagerNotifikasi } from "@/components/ManagerNotifikasi";
 
 export function ManagerShell({ pageTitle, pageSub, children }: { pageTitle: string; pageSub?: string; children: ReactNode }) {
   const { user } = useAuth();
-  const { unreadCount: chatUnread } = useChatUnreadPoll();
+  // Lebih sering dari 30 detik bawaan: angka ini juga memicu bunyi/toast chat tamu baru (2026-10-23).
+  const { unreadCount: chatUnread } = useChatUnreadPoll(15000);
 
   const sections: NavSection[] = [
     {
@@ -34,6 +36,7 @@ export function ManagerShell({ pageTitle, pageSub, children }: { pageTitle: stri
       pageTitle={pageTitle}
       pageSub={pageSub}
     >
+      {user?.role === "manager" && <ManagerNotifikasi unread={chatUnread} />}
       {children}
     </DashboardShell>
   );

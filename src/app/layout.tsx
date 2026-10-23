@@ -15,6 +15,8 @@ const mono = JetBrains_Mono({ subsets: ["latin"], weight: ["400", "500"], variab
 export const metadata: Metadata = {
   title: "Loonars Private Living",
   description: "Portal Investor & Operasional — Loonars Private Living",
+  // iPhone "Add to Home Screen" sebagai aplikasi penuh -- syarat Web Push di iOS (2026-10-23).
+  appleWebApp: { capable: true, title: "Loonars Living", statusBarStyle: "default" },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
