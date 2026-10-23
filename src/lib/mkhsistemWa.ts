@@ -3,7 +3,7 @@ import "server-only";
 /**
  * Kirim WhatsApp dari nomor utama 082228885223 -- perangkat WhaCenter yang
  * dipegang Mkhsistem, bukan perangkat villa sendiri (lihat src/lib/whacenter.ts).
- * Lewat /api/wa/send Mkhsistem yang sudah ada: body {phone, message},
+ * Lewat /api/wa/send Mkhsistem yang sudah ada: body {phone, message, file?},
  * header x-internal-secret (VILLA_BRIDGE_SECRET, nilainya sama di kedua sisi).
  *
  * Sengaja tanpa percobaan ulang: kalau Mkhsistem sudah meneruskan ke
@@ -12,7 +12,11 @@ import "server-only";
 const MKHSISTEM_WA_SEND_URL = "https://mkh.haluoleo.id/api/wa/send";
 const TIMEOUT_MS = 20_000;
 
-export async function kirimDariNomorUtama(phone: string, message: string): Promise<{ success: boolean; error?: string }> {
+export async function kirimDariNomorUtama(
+  phone: string,
+  message: string,
+  file?: string,
+): Promise<{ success: boolean; error?: string }> {
   const secret = (process.env.VILLA_BRIDGE_SECRET ?? "").trim();
   if (!secret) return { success: false, error: "VILLA_BRIDGE_SECRET belum diisi" };
 
@@ -20,7 +24,8 @@ export async function kirimDariNomorUtama(phone: string, message: string): Promi
     const res = await fetch(MKHSISTEM_WA_SEND_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-internal-secret": secret },
-      body: JSON.stringify({ phone, message }),
+      // file = URL gambar yang bisa diunduh WhaCenter; message jadi keterangannya (boleh kosong).
+      body: JSON.stringify(file ? { phone, message, file } : { phone, message }),
       cache: "no-store",
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });

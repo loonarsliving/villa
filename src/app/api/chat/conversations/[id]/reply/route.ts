@@ -5,6 +5,7 @@ import { terjemahkanChat } from "@/lib/aiBridge";
 import { kirimDariNomorUtama } from "@/lib/mkhsistemWa";
 import { catatPesan } from "@/lib/waChat";
 import { hapusDrafAiAman } from "@/lib/aiResepsionis";
+import { simpanGambarChat } from "@/lib/chatGambar";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,7 +40,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const body = await request.json().catch(() => null);
   const isi = typeof body?.message === "string" ? body.message.trim() : "";
   const staffName = typeof body?.staffName === "string" && body.staffName.trim() ? body.staffName.trim() : "Staf";
-  if (!isi) return NextResponse.json({ error: "Pesan tidak boleh kosong" }, { status: 400 });
+  // Gambar (data URL, sudah dikecilkan di browser) -- isi pesan jadi keterangannya dan boleh kosong.
+  const gambar = typeof body?.image === "string" && body.image ? body.image : null;
+  if (!isi && !gambar) return NextResponse.json({ error: "Pesan tidak boleh kosong" }, { status: 400 });
 
   const supabase = supabaseAdmin();
   const { data: percakapan, error: findError } = await supabase
@@ -56,7 +59,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // bahasa Indonesia tanpa tahu apa artinya.
   let kirim = isi;
   let terjemahan: string | null = null;
-  if (percakapan.bahasa && percakapan.bahasa !== "id") {
+  if (isi && percakapan.bahasa && percakapan.bahasa !== "id") {
     try {
       const hasil = await terjemahkanChat(isi, percakapan.bahasa);
       if (hasil.terjemahan.trim() && hasil.terjemahan.trim() !== isi) {
@@ -69,7 +72,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     }
   }
 
-  const sent = await kirimDariNomorUtama(percakapan.phone, kirim);
+  // Gambar disimpan dulu (perlu tautan yang bisa diunduh WhaCenter); kalau gagal, tidak ada yang terkirim.
+  let mediaUrl: string | null = null;
+  if (gambar) {
+    const simpan = await simpanGambarChat(supabase, percakapan.id, gambar);
+    if ("error" in simpan) return NextResponse.json({ error: simpan.error }, { status: 400 });
+    mediaUrl = simpan.url;
+  }
+
+  const sent = await kirimDariNomorUtama(percakapan.phone, kirim, mediaUrl ?? undefined);
   if (!sent.success) {
     return NextResponse.json({ error: sent.error ?? "Pesan gagal terkirim ke WhatsApp" }, { status: 502 });
   }
@@ -80,6 +91,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       arah: "keluar",
       isi: kirim,
       terjemahan,
+      mediaUrl,
       dibalasOleh: staffName,
     });
   } catch (e) {
