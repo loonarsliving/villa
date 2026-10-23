@@ -3,6 +3,14 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-23 — Notifikasi chat tamu untuk manager (Rebecca): push HP, bunyi, angka di ikon
+- Owner: Rebecca (role `manager`) mendapat fitur yang sama dengan chat refund di Mkhsistem, untuk chat tamu / penanya villa. Owner menyetujui: tabel baru + kunci VAPID di Vercel ("Ya, setujui keduanya"), penerima **Rebecca saja** (resepsionis & admin tidak).
+- PWA: `src/app/manifest.ts` (display standalone), ikon dari kode `src/app/icon.tsx` (/icon/32,192,512) & `src/app/apple-icon.tsx`, `appleWebApp` di layout -> "Add to Home Screen" di iPhone menjadi aplikasi penuh (syarat Web Push iOS 16.4+).
+- `public/sw.js`: hanya Web Push (tanpa cache): notifikasi "Pesan dari <nama>" + isi pesan, `setAppBadge` (angka belum-dibaca di ikon), klik membuka `/manager/chat?c=<id>`.
+- Tabel `villa_push_subscriptions` (migrasi `20261023000001`, diterapkan; RLS tanpa policy = service role saja), per PERAN karena `/manager/whoami` hanya mengembalikan role. `POST /api/push/subscribe` mengambil role dari villa-api (bukan dari body) dan hanya menyimpan `manager`.
+- Kirim: `/api/wa/mirror` setelah pesan tamu tercatat -> `after()` -> `kirimPushKePeranAman('manager', …)` (`src/lib/webPush.ts`, paket `web-push`), badge = total `wa_conversations.unread_count`. Env Vercel baru: `VILLA_VAPID_PRIVATE_KEY` (sensitive, production+preview); kunci publik di `src/lib/webPushConfig.ts`.
+- Aplikasi terbuka (`src/components/ManagerNotifikasi.tsx` di ManagerShell, role manager): tombol "Aktifkan notifikasi" (iOS wajib lewat ketukan), petunjuk "Tambahkan ke Layar Utama" untuk iPhone di Safari biasa, bunyi "ding" + toast saat belum-dibaca naik, penanda judul tab, `setAppBadge`. Poll belum-dibaca manager 15 dtk (bawaan tetap 30 dtk). Halaman chat membuka `?c=<id>` otomatis.
+
 ## 2026-10-21 — Kiriman harian laporan keuangan villa ke MKH Property + rekap pajak hotel
 - Owner: MKH Property punya laporan keuangan khusus villa yang bisa diminta lewat WhatsApp, plus rekap pajak hotel untuk Dispenda; "tidak perlu realtime, per hari saja agar tidak membebani". Laporan Dispenda memakai angka transaksi yang SEBENARNYA: permintaan agar laporan "diatur" supaya bayar Rp2-5 jt tidak dikerjakan.
 - villa-api: `hitungLaporanKeuanganVilla(periode)` (dari `computeReport` + `computeNetRevenueForRange` + `hitungChannelBreakdown`; tanpa rumus baru, sama dengan Finance) dan `kirimLaporanVilla`; rute `POST /cron/sync-laporan-villa` (x-cron-secret; bulan berjalan = sementara, tanggal 1-5 bulan lalu ikut = final, `?periode=YYYY-MM` manual). Dikirim ke RPC `villa_laporan_terima` MKH Property lewat jembatan `mkh_finance_bridge` yang sama dengan `/cron/sync-mkh-income` (rahasia `x-villa-sync-secret` yang sama, tanpa rahasia baru).

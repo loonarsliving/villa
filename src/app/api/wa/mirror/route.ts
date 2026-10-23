@@ -4,6 +4,8 @@ import { buatDrafAiAman } from "@/lib/aiResepsionis";
 import { secretsMatch } from "@/lib/internalSecret";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { bolehMasukResepsionis, catatPesanMasukAman, kirimSapaanPertamaAman, terjemahkanPesanMasukAman } from "@/lib/waChat";
+import { isiNotifChatTamu, kirimPushKePeranAman, totalChatBelumDibaca } from "@/lib/webPush";
+import { PERAN_NOTIF_CHAT_TAMU } from "@/lib/webPushConfig";
 import { normalizeInbound } from "@/lib/whacenter";
 
 export const runtime = "nodejs";
@@ -69,6 +71,24 @@ export async function POST(request: Request) {
   });
 
   if (hasil) {
+    // Notifikasi ke manager (Rebecca) -- push HP + angka di ikon aplikasi
+    // (owner 2026-10-23). Lewat after() supaya Mkhsistem tidak menunggu.
+    after(async () => {
+      const { title, body } = isiNotifChatTamu({
+        nama: inbound.senderName,
+        phone: inbound.sender,
+        text: inbound.text,
+        adaMedia: Boolean(inbound.mediaUrl),
+      });
+      await kirimPushKePeranAman(supabase, PERAN_NOTIF_CHAT_TAMU, {
+        title,
+        body,
+        link: `/manager/chat?c=${hasil.conversationId}`,
+        badge: await totalChatBelumDibaca(supabase),
+        tag: `chat-${hasil.conversationId}`,
+      });
+    });
+
     // Terjemahan dulu, baru draf: AI membaca versi Indonesia dari pesan tamu asing.
     after(async () => {
       await terjemahkanPesanMasukAman(supabase, hasil.conversationId, hasil.messageId, inbound.text);

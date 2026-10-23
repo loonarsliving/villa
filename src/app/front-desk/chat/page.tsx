@@ -251,6 +251,17 @@ export default function ChatPage() {
     el.style.height = draft ? `${Math.min(el.scrollHeight, 132)}px` : "";
   }, [draft, activeId]);
 
+  // Notifikasi push membuka /manager/chat?c=<id> (2026-10-23): langsung buka
+  // percakapan itu sekali, begitu daftarnya termuat.
+  const tautanDibuka = useRef(false);
+  useEffect(() => {
+    if (tautanDibuka.current || conversations.length === 0) return;
+    tautanDibuka.current = true;
+    const c = new URLSearchParams(window.location.search).get("c");
+    if (c && conversations.some((k) => k.id === c)) bukaPercakapan(c);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversations]);
+
   function bukaPercakapan(id: string) {
     if (id === activeId) return;
     if (satuPanel() && !riwayatDitambah.current) {

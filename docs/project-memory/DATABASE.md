@@ -34,6 +34,8 @@ These four tables are proven to exist because the webhook route performs live qu
 `units 1—N bookings`, `units 1—N transactions`, `units 1—1 cloudbeds_room_mapping` (per mapping row), `units 1—N notifications`, `bookings 1—1 guests` (via `guest_id`), `units 1—1 investor profile` (per the `InvestorProfile` type's `unit_id`/`user_id`).
 
 ## RLS / RPC / functions / triggers / views / storage / migrations
+
+- **Ditambahkan 2026-10-23** (migrasi `20261023000001_villa_push_subscriptions`, owner-approved, diterapkan): tabel `villa_push_subscriptions` (`role`, `endpoint` unik, `p256dh`, `auth_key`, `user_agent`, `created_at`, `last_seen_at`) -- langganan Web Push per perangkat per peran untuk notifikasi chat tamu ke manager. RLS aktif tanpa policy (service role saja). Tanpa data uang / data tamu.
 Confirmed 2026-08-23 via direct Supabase MCP access: every villa table has RLS enabled (`rls_enabled: true`), and `villa-api` uses the service-role key (bypasses RLS) for all reads/writes — RLS is defense-in-depth against direct anon/authenticated PostgREST access, not the enforcement layer (that's `villa-api`'s own token/role checks). RPC functions confirmed in use by `villa-api`: `villa_login`, `villa_set_password`, `villa_create_user`. Storage bucket usage: none observed in `villa-api`'s source.
 - **Project-wide advisory (unrelated to villa, surfaced for awareness):** at last check, 2 tables in this shared project had RLS fully disabled (`istri_daily_tips`, `contractor_fund_request_pending`) — anon-key-readable/writable. Not villa's tables; flagged to the project owner, not remediated from this session.
 
