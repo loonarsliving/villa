@@ -3,6 +3,12 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-23 — Chat: kirim gambar ke tamu
+- Tombol 📷 di halaman Chat (`/front-desk/chat`, juga `/manager/chat`): foto dikecilkan di browser (sisi terpanjang 1600px, JPEG), pratinjau di atas kolom ketik, isi kolom ketik jadi keterangan (boleh kosong; diterjemahkan seperti balasan biasa kalau bahasa tamu bukan Indonesia).
+- `POST /api/chat/conversations/[id]/reply` menerima `image` (data URL JPEG/PNG/WebP, maks 3MB — `src/lib/chatGambarFormat.ts`). Disimpan di bucket privat `guest-documents` folder `chat/<id percakapan>/` (`src/lib/chatGambar.ts`), tautan bertanda tangan 1 tahun dikirim ke WhaCenter lewat Mkhsistem `/api/wa/send` (`file`) dan disimpan di `media_url`. Tidak ada tabel/bucket baru.
+- Mkhsistem PR #105: `/api/wa/send` kini menerima gambar tanpa keterangan.
+- Gambar kiriman staf tampil langsung di riwayat; lampiran dari tamu (tautan WhaCenter) tetap berupa tautan "Buka lampiran".
+
 ## 2026-10-23 — Alamat pendek living.haluoleo.id/chat
 - Owner: "Bukankah harusnya dia punya living.haluoleo/chat ?" (padanan mkh.haluoleo.id/refund/chat). `src/app/chat/page.tsx` mengarahkan sesuai peran (`src/lib/chatRoute.ts`): manager -> `/manager/chat`, resepsionis/admin -> `/front-desk/chat`, membawa `?c=<id>`; belum login -> `/login`; peran lain -> `/`. Akses tetap ditegakkan halaman tujuan + `/api/chat/*`.
 

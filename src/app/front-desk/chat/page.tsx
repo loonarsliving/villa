@@ -84,7 +84,45 @@ interface PesanTertunda {
   tempId: string;
   conversationId: string;
   isi: string;
+  /** Gambar yang dikirim (data URL, sudah dikecilkan) -- isi jadi keterangannya. */
+  gambar?: string;
   status: "mengirim" | "terkirim" | "gagal";
+}
+
+/** Gambar kiriman staf disimpan di storage villa (tautan bertanda tangan) -- aman ditampilkan langsung. */
+function gambarStaf(url: string): boolean {
+  return url.startsWith("https://svcmybsziaelwwdrnzcv.supabase.co/storage/v1/object/sign/");
+}
+
+const SISI_MAKS_GAMBAR = 1600;
+
+/**
+ * Foto dari HP bisa 5-12MB; dikecilkan dulu di browser (sisi terpanjang
+ * 1600px, JPEG) supaya cepat terkirim dan muat di batas permintaan server.
+ */
+function kecilkanGambar(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const skala = Math.min(1, SISI_MAKS_GAMBAR / Math.max(img.naturalWidth, img.naturalHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(img.naturalWidth * skala));
+      canvas.height = Math.max(1, Math.round(img.naturalHeight * skala));
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return reject(new Error("Browser tidak bisa memproses gambar"));
+      ctx.fillStyle = "#fff"; // PNG transparan -> latar putih, bukan hitam
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL("image/jpeg", 0.82));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("File ini bukan gambar yang bisa dibuka"));
+    };
+    img.src = url;
+  });
 }
 
 function formatPhoneDisplay(phone: string): string {
@@ -115,6 +153,10 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<WaConversationMessageRow[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [draft, setDraft] = useState("");
+  // Gambar yang dipilih tapi belum dikirim -- terikat ke satu percakapan.
+  const [gambarDipilih, setGambarDipilih] = useState<{ conversationId: string; dataUrl: string } | null>(null);
+  const [memprosesGambar, setMemprosesGambar] = useState(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
   const [drafAi, setDrafAi] = useState<DrafAi | null>(null);
   // Draf yang sudah diabaikan resepsionis (per waktu dibuat) tidak dimunculkan lagi.
   const [drafDiabaikan, setDrafDiabaikan] = useState<string | null>(null);
@@ -184,7 +226,7 @@ export default function ChatPage() {
               !(
                 p.conversationId === id &&
                 p.status === "terkirim" &&
-                baru.some((m) => m.arah === "keluar" && (m.terjemahan ?? m.isi) === p.isi)
+                baru.some((m) => m.arah === "keluar" && !!m.media_url === !!p.gambar && (m.terjemahan ?? m.isi) === p.isi)
               ),
           );
           return sisa.length === prev.length ? prev : sisa;
@@ -288,7 +330,7 @@ export default function ChatPage() {
       try {
         await localApi(`/api/chat/conversations/${p.conversationId}/reply`, {
           method: "POST",
-          body: JSON.stringify({ message: p.isi, staffName: user?.nama }),
+          body: JSON.stringify({ message: p.isi, staffName: user?.nama, ...(p.gambar ? { image: p.gambar } : {}) }),
         });
         ubah("terkirim");
         if (activeIdRef.current === p.conversationId) loadMessages(p.conversationId, true);
@@ -302,12 +344,29 @@ export default function ChatPage() {
 
   function kirimBalasan() {
     const isi = draft.trim();
-    if (!activeId || !isi) return;
-    const p: PesanTertunda = { tempId: `tmp-${Date.now()}-${Math.random()}`, conversationId: activeId, isi, status: "mengirim" };
+    const gambar = gambarDipilih?.conversationId === activeId ? gambarDipilih?.dataUrl : undefined;
+    if (!activeId || (!isi && !gambar)) return;
+    const p: PesanTertunda = { tempId: `tmp-${Date.now()}-${Math.random()}`, conversationId: activeId, isi, gambar, status: "mengirim" };
     setPending((prev) => [...prev, p]);
     setDraft("");
+    setGambarDipilih(null);
     inputRef.current?.focus();
     kirim(p);
+  }
+
+  async function pilihGambar(file: File | undefined) {
+    if (!file || !activeId) return;
+    const conversationId = activeId;
+    setMemprosesGambar(true);
+    try {
+      const dataUrl = await kecilkanGambar(file);
+      setGambarDipilih({ conversationId, dataUrl });
+      inputRef.current?.focus();
+    } catch (e) {
+      toast("⚠", "Gambar tidak bisa dipakai", e instanceof Error ? e.message : "Coba gambar lain.", "ruby");
+    } finally {
+      setMemprosesGambar(false);
+    }
   }
 
   function gantiBahasa(conversationId: string, bahasa: string) {
@@ -551,7 +610,12 @@ export default function ChatPage() {
                                 keluar ? "bg-gold-500/20 text-ink rounded-br-md" : "bg-base-900 text-ink rounded-bl-md"
                               }`}
                             >
-                              {m.media_url && (
+                              {m.media_url && gambarStaf(m.media_url) ? (
+                                <a href={m.media_url} target="_blank" rel="noopener noreferrer" className="block -mx-1.5 -mt-0.5 mb-1">
+                                  {/* eslint-disable-next-line @next/next/no-img-element -- tautan storage bertanda tangan, bukan aset statis */}
+                                  <img src={m.media_url} alt="Gambar terkirim" loading="lazy" className="rounded-xl max-h-72 w-auto max-w-full object-cover" />
+                                </a>
+                              ) : m.media_url && (
                                 <a
                                   href={m.media_url}
                                   target="_blank"
@@ -587,6 +651,10 @@ export default function ChatPage() {
                             p.status === "gagal" ? "ring-2 ring-ruby-500/60" : ""
                           }`}
                         >
+                          {p.gambar && (
+                            // eslint-disable-next-line @next/next/no-img-element -- pratinjau lokal (data URL)
+                            <img src={p.gambar} alt="Gambar yang dikirim" className={`-mx-1.5 -mt-0.5 mb-1 rounded-xl max-h-72 w-auto max-w-full object-cover ${p.status === "mengirim" ? "opacity-70" : ""}`} />
+                          )}
                           {p.isi}
                           <div className="mt-1 flex items-center justify-end gap-2 text-[11px]">
                             {p.status === "gagal" ? (
@@ -646,7 +714,44 @@ export default function ChatPage() {
                 </div>
               )}
 
+              {gambarDipilih?.conversationId === active.id && (
+                <div className="shrink-0 flex items-center gap-3 px-3 lg:px-5 pt-2 bg-base-900 border-t border-ink/[0.06]">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- pratinjau lokal (data URL) */}
+                  <img src={gambarDipilih.dataUrl} alt="Gambar yang akan dikirim" className="h-16 w-16 rounded-xl object-cover border border-ink/10" />
+                  <div className="flex-1 text-[12px] text-ink/55">
+                    Gambar siap dikirim{draft.trim() ? " dengan keterangan di bawah" : " — tulis keterangan kalau perlu"}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setGambarDipilih(null)}
+                    aria-label="Batalkan gambar"
+                    className="shrink-0 w-8 h-8 rounded-full border border-ink/15 text-ink/60 flex items-center justify-center"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
               <div className="shrink-0 flex items-end gap-2 px-3 lg:px-5 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:pb-3 bg-base-900 border-t border-ink/[0.06]">
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    void pilihGambar(e.target.files?.[0]);
+                    e.target.value = "";
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={memprosesGambar}
+                  aria-label="Kirim gambar"
+                  title="Kirim gambar"
+                  className="shrink-0 w-11 h-11 rounded-full border border-ink/10 bg-base-800/60 text-ink/60 text-lg flex items-center justify-center disabled:opacity-40 active:scale-95 transition-transform"
+                >
+                  {memprosesGambar ? "…" : "📷"}
+                </button>
                 <textarea
                   ref={inputRef}
                   rows={1}
@@ -665,7 +770,7 @@ export default function ChatPage() {
                 <button
                   type="button"
                   onClick={kirimBalasan}
-                  disabled={!draft.trim()}
+                  disabled={!draft.trim() && gambarDipilih?.conversationId !== active.id}
                   aria-label="Kirim"
                   className="shrink-0 w-11 h-11 rounded-full bg-gold-500 text-white text-lg flex items-center justify-center shadow-sm disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-transform"
                 >
