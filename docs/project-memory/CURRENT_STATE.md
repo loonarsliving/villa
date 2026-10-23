@@ -3,6 +3,9 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-23 — Alamat pendek living.haluoleo.id/chat
+- Owner: "Bukankah harusnya dia punya living.haluoleo/chat ?" (padanan mkh.haluoleo.id/refund/chat). `src/app/chat/page.tsx` mengarahkan sesuai peran (`src/lib/chatRoute.ts`): manager -> `/manager/chat`, resepsionis/admin -> `/front-desk/chat`, membawa `?c=<id>`; belum login -> `/login`; peran lain -> `/`. Akses tetap ditegakkan halaman tujuan + `/api/chat/*`.
+
 ## 2026-10-23 — Notifikasi chat tamu untuk manager (Rebecca): push HP, bunyi, angka di ikon
 - Owner: Rebecca (role `manager`) mendapat fitur yang sama dengan chat refund di Mkhsistem, untuk chat tamu / penanya villa. Owner menyetujui: tabel baru + kunci VAPID di Vercel ("Ya, setujui keduanya"), penerima **Rebecca saja** (resepsionis & admin tidak).
 - PWA: `src/app/manifest.ts` (display standalone), ikon dari kode `src/app/icon.tsx` (/icon/32,192,512) & `src/app/apple-icon.tsx`, `appleWebApp` di layout -> "Add to Home Screen" di iPhone menjadi aplikasi penuh (syarat Web Push iOS 16.4+).
