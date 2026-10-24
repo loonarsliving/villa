@@ -8,6 +8,7 @@ import { Card, CardHeader, Loading, Empty, Badge } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
 import type { FinanceChecklist, FinanceChecklistItem } from "@/lib/types";
+import { kelompokkanPerPencairan, rentangCheckinUntukPencairan, type PencairanGroup } from "@/lib/financePencairan";
 
 /**
  * Checklist dana masuk (owner 2026-10-07): "checklist manual dana yg masuk
@@ -39,6 +40,9 @@ export default function ChecklistDanaPage() {
   const [sumber, setSumber] = useState("");
   const [status, setStatus] = useState<StatusFilter>("belum");
   const [data, setData] = useState<FinanceChecklist | null>(null);
+  // Data terpisah untuk total per tanggal cair -- check-in-nya bisa jatuh di
+  // bulan sebelumnya, lihat src/lib/financePencairan.ts.
+  const [dataCair, setDataCair] = useState<FinanceChecklist | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,10 +59,15 @@ export default function ChecklistDanaPage() {
     setLoading(true);
     setError(null);
     const { from, to } = monthRange(bulan);
-    api
-      .get<FinanceChecklist>(`/finance/checklist-dana?from=${from}&to=${to}`)
-      .then((d) => {
+    const cair = rentangCheckinUntukPencairan(bulan);
+    Promise.all([
+      api.get<FinanceChecklist>(`/finance/checklist-dana?from=${from}&to=${to}`),
+      // Gagal mengambil total per pencairan tidak boleh menutup daftar utama.
+      api.get<FinanceChecklist>(`/finance/checklist-dana?from=${cair.from}&to=${cair.to}`).catch(() => null),
+    ])
+      .then(([d, dc]) => {
         setData(d);
+        setDataCair(dc);
         setSelected(new Set());
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
@@ -77,7 +86,19 @@ export default function ChecklistDanaPage() {
     return list;
   }, [data, sumber, status]);
 
-  const selectedItems = useMemo(() => (data?.items ?? []).filter((i) => selected.has(i.booking_id)), [data, selected]);
+  const pencairan = useMemo(() => {
+    if (!dataCair) return [];
+    const list = sumber ? dataCair.items.filter((i) => (i.sumber ?? "-") === sumber) : dataCair.items;
+    return kelompokkanPerPencairan(list, bulan, dataCair.today);
+  }, [dataCair, sumber, bulan]);
+
+  // Booking yang dipilih lewat kartu pencairan bisa check-in di bulan lain,
+  // jadi dicari di kedua data.
+  const selectedItems = useMemo(() => {
+    const byId = new Map<string, FinanceChecklistItem>();
+    for (const i of [...(dataCair?.items ?? []), ...(data?.items ?? [])]) byId.set(i.booking_id, i);
+    return [...selected].map((id) => byId.get(id)).filter((i): i is FinanceChecklistItem => !!i);
+  }, [data, dataCair, selected]);
   const selectedTotal = selectedItems.reduce((a, i) => a + i.seharusnya, 0);
   const mutasi = nilaiMutasi ? Number(nilaiMutasi) : null;
   const selisih = mutasi != null ? mutasi - selectedTotal : null;
@@ -100,6 +121,12 @@ export default function ChecklistDanaPage() {
       else belumDiList.forEach((i) => next.add(i.booking_id));
       return next;
     });
+  }
+
+  function pilihPencairan(g: PencairanGroup) {
+    setSelected(new Set(g.items.filter((i) => !i.masuk).map((i) => i.booking_id)));
+    setNilaiMutasi("");
+    setTglMasuk(g.tanggal <= todayISO() ? g.tanggal : todayISO());
   }
 
   async function tandaiTerpilih() {
@@ -203,6 +230,69 @@ export default function ChecklistDanaPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </Card>
+
+          <Card className="mb-4">
+            <CardHeader
+              title="Per Tanggal Pencairan"
+              subtitle="Satu baris = satu transfer OTA yang diharapkan di mutasi bank. Bulan di atas = bulan tanggal cair, termasuk booking check-in bulan sebelumnya."
+            />
+            {pencairan.length === 0 ? (
+              <Empty label="Tidak ada pencairan yang dijadwalkan di bulan ini." />
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11.5px]">
+                  <thead>
+                    <tr className="text-ink/35 text-[9.5px] uppercase tracking-wide">
+                      <th className="text-left px-4 py-2">Tanggal cair</th>
+                      <th className="text-left px-4 py-2">Channel</th>
+                      <th className="text-right px-4 py-2">Booking</th>
+                      <th className="text-right px-4 py-2">Total seharusnya</th>
+                      <th className="text-right px-4 py-2">Sudah masuk</th>
+                      <th className="text-right px-4 py-2">Belum masuk</th>
+                      <th className="px-4 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pencairan.map((g) => {
+                      const lewat = g.count_belum > 0 && g.tanggal < dataCair!.today;
+                      return (
+                        <tr key={g.key} className="border-t border-ink/[0.05] text-ink/70 align-top">
+                          <td className={`px-4 py-2 whitespace-nowrap ${lewat ? "text-ruby-400" : ""}`}>
+                            {fmtDate(g.tanggal, { weekday: "short", day: "2-digit", month: "short" })}
+                            {g.berjalan && <div className="text-ink/30 text-[10px]">masih berjalan</div>}
+                            {lewat && <div className="text-[10px]">sudah lewat</div>}
+                          </td>
+                          <td className="px-4 py-2">{g.sumber}</td>
+                          <td className="px-4 py-2 text-right">{g.count}</td>
+                          <td className="px-4 py-2 text-right font-medium whitespace-nowrap">{fmtCurrencyFull(g.seharusnya)}</td>
+                          <td className="px-4 py-2 text-right text-sage-400 whitespace-nowrap">
+                            {fmtCurrencyFull(g.diterima)} <span className="text-ink/30">({g.count_masuk})</span>
+                          </td>
+                          <td className="px-4 py-2 text-right whitespace-nowrap">
+                            {fmtCurrencyFull(g.belum)} <span className="text-ink/30">({g.count_belum})</span>
+                          </td>
+                          <td className="px-4 py-2 text-right whitespace-nowrap">
+                            {g.count_belum > 0 ? (
+                              <button className="text-[10px] text-gold-400 underline" onClick={() => pilihPencairan(g)}>
+                                Cocokkan mutasi
+                              </button>
+                            ) : (
+                              <Badge tone="ok">Lengkap</Badge>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="px-4 py-3 text-[10.5px] text-ink/35 border-t border-ink/[0.05]">
+              &quot;Total seharusnya&quot; memakai komisi rata-rata di Konfigurasi Settlement OTA, jadi bisa berbeda sedikit dari nilai transfer.
+              Bandingkan juga jumlah booking dengan laporan payout OTA: kalau jumlahnya kurang, ada reservasi yang tidak masuk ke sistem.
+              &quot;Masih berjalan&quot; = tanggal cair belum lewat, booking yang check-in-nya belum tiba belum terhitung.
             </div>
           </Card>
 

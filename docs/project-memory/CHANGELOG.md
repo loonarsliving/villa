@@ -4,6 +4,10 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-24 — Checklist Dana Masuk: total per tanggal pencairan
+- Kartu baru "Per Tanggal Pencairan" di `/finance/checklist-dana`: satu baris per (tanggal cair, channel) = satu transfer OTA di mutasi, dengan total seharusnya / sudah masuk / belum masuk dan tombol "Cocokkan mutasi" yang memilih semua booking pencairan itu ke alur centang-sekaligus yang sudah ada.
+- Dikelompokkan menurut bulan TANGGAL CAIR (bukan bulan check-in) supaya payout Agoda (30 hari setelah checkout) dan payout Booking.com awal bulan tidak terpotong; halaman mengambil check-in mundur 75 hari untuk itu. Logika di `src/lib/financePencairan.ts` (+ tes). Frontend saja, tanpa perubahan villa-api atau skema, tidak mengubah angka apa pun.
+
 ### 2026-10-24 — Chat: perbaikan kirim gambar (WhaCenter menolak tautan ber-query)
 - Lihat CURRENT_STATE.md 2026-10-23 (kirim gambar, perbaikan 2026-10-24). Rute baru `/api/chat/gambar/[conversationId]/[file]`.
 
