@@ -20,3 +20,21 @@ export function bacaGambarDataUrl(
   if (bytes.length > MAKS_BYTE_GAMBAR_CHAT) return { error: "Gambar terlalu besar (maks 3MB)" };
   return { bytes, ...jenis };
 }
+
+/** Domain produksi villa -- WhaCenter harus bisa mengunduh dari sini (tautan pratinjau Vercel diproteksi). */
+const ASAL_PUBLIK = "https://living.haluoleo.id";
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const UUID_RE = new RegExp(`^${UUID}$`, "i");
+const FILE_RE = new RegExp(`^${UUID}\\.(jpg|png|webp)$`, "i");
+
+export const JENIS_PER_EXT: Record<string, string> = { jpg: "image/jpeg", png: "image/png", webp: "image/webp" };
+
+/** Tautan pendek tanpa query untuk gambar chat (lihat src/lib/chatGambar.ts). */
+export function tautanGambarChat(conversationId: string, file: string): string {
+  return `${ASAL_PUBLIK}/api/chat/gambar/${conversationId}/${file}`;
+}
+
+/** Bagian tautan yang sah: id percakapan UUID + nama file "<uuid>.jpg|png|webp" -- tidak ada "/" atau "..". */
+export function bagianGambarChatSah(conversationId: string, file: string): boolean {
+  return UUID_RE.test(conversationId) && FILE_RE.test(file);
+}
