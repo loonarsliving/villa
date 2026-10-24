@@ -5,7 +5,7 @@ _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 ## 2026-10-23 — Chat: kirim gambar ke tamu
 - Tombol 📷 di halaman Chat (`/front-desk/chat`, juga `/manager/chat`): foto dikecilkan di browser (sisi terpanjang 1600px, JPEG), pratinjau di atas kolom ketik, isi kolom ketik jadi keterangan (boleh kosong; diterjemahkan seperti balasan biasa kalau bahasa tamu bukan Indonesia).
-- `POST /api/chat/conversations/[id]/reply` menerima `image` (data URL JPEG/PNG/WebP, maks 3MB — `src/lib/chatGambarFormat.ts`). Disimpan di bucket privat `guest-documents` folder `chat/<id percakapan>/` (`src/lib/chatGambar.ts`), tautan bertanda tangan 1 tahun dikirim ke WhaCenter lewat Mkhsistem `/api/wa/send` (`file`) dan disimpan di `media_url`. Tidak ada tabel/bucket baru.
+- `POST /api/chat/conversations/[id]/reply` menerima `image` (data URL JPEG/PNG/WebP, maks 3MB — `src/lib/chatGambarFormat.ts`). Disimpan di bucket privat `guest-documents` folder `chat/<id percakapan>/` (`src/lib/chatGambar.ts`), dikirim ke WhaCenter lewat Mkhsistem `/api/wa/send` (`file`) dan disimpan di `media_url`. **Perbaikan 2026-10-24:** tautan bertanda tangan Supabase (`?token=`) ditolak WhaCenter (HTTP 500) — kini tautannya `https://living.haluoleo.id/api/chat/gambar/<id percakapan>/<uuid>.<ext>` (tanpa query; rute tanpa login yang hanya melayani folder `chat/`, nama file UUID acak). Tidak ada tabel/bucket baru.
 - Mkhsistem PR #105: `/api/wa/send` kini menerima gambar tanpa keterangan.
 - Gambar kiriman staf tampil langsung di riwayat; lampiran dari tamu (tautan WhaCenter) tetap berupa tautan "Buka lampiran".
 

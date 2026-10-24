@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-24 — Chat: perbaikan kirim gambar (WhaCenter menolak tautan ber-query)
+- Lihat CURRENT_STATE.md 2026-10-23 (kirim gambar, perbaikan 2026-10-24). Rute baru `/api/chat/gambar/[conversationId]/[file]`.
+
 ### 2026-10-23 — Chat: kirim gambar ke tamu
 - Lihat CURRENT_STATE.md 2026-10-23 (kirim gambar). Tanpa migrasi; memakai bucket `guest-documents` (folder `chat/`).
 

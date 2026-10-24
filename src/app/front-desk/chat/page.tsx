@@ -89,9 +89,9 @@ interface PesanTertunda {
   status: "mengirim" | "terkirim" | "gagal";
 }
 
-/** Gambar kiriman staf disimpan di storage villa (tautan bertanda tangan) -- aman ditampilkan langsung. */
+/** Gambar kiriman staf disimpan di storage villa (src/lib/chatGambar.ts) -- aman ditampilkan langsung. */
 function gambarStaf(url: string): boolean {
-  return url.startsWith("https://svcmybsziaelwwdrnzcv.supabase.co/storage/v1/object/sign/");
+  return url.startsWith("https://living.haluoleo.id/api/chat/gambar/");
 }
 
 const SISI_MAKS_GAMBAR = 1600;
