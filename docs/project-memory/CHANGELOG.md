@@ -4,6 +4,11 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-25 — Mesin bukti transfer dividen (`/admin/bukti-transfer`)
+- Owner mencentang investor yang sudah ditransfer, lalu menekan kirim. Mesin membuat bukti versi Loonars per investor (gambar PNG dari `next/og`, rute publik `/api/bukti-transfer/[d]/[s]/[file]` yang isinya ditandatangani HMAC dengan `CRON_SECRET`, tanpa query string karena WhaCenter menolak tautan ber-query) dan mengirimnya lewat WA nomor utama (`kirimDariNomorUtama`, jalur yang sama dengan laporan Rabu). Setiap kiriman dicatat di `wa_messages_log` (`template_type='dividend_receipt'`), dan yang sudah terkirim bulan ini dilewati kecuali dikirim ulang dengan sengaja.
+- Satu bukti per nomor HP: akun yang berbagi nomor (Susanto A5 + C3) digabung. Jumlah per unit = bagi hasil + top-up jaminan dari computeReport villa-api (lewat `/bridge/owner-finance`), atau `villa_investor_terms.pemasukan_tetap`. Ringkasan villa menampilkan pendapatan setelah komisi OTA (komisi OTA tidak pernah ditampilkan, instruksi owner), OPEX aktual, target OPEX 25%, dan kelebihan yang ditanggung Loonars.
+- Cron `dividend-list` (tanggal 25) kini menyusulkan tautan ke halaman ini ke admin. Tanpa migrasi dan tanpa perubahan villa-api; tidak mengubah rumus atau angka pembayaran. Logika di `src/lib/buktiTransferData.ts` (+ tes) dan `src/lib/buktiTransfer.ts`.
+
 ### 2026-10-24 — Checklist Dana Masuk: total per tanggal pencairan
 - Kartu baru "Per Tanggal Pencairan" di `/finance/checklist-dana`: satu baris per (tanggal cair, channel) = satu transfer OTA di mutasi, dengan total seharusnya / sudah masuk / belum masuk dan tombol "Cocokkan mutasi" yang memilih semua booking pencairan itu ke alur centang-sekaligus yang sudah ada.
 - Dikelompokkan menurut bulan TANGGAL CAIR (bukan bulan check-in) supaya payout Agoda (30 hari setelah checkout) dan payout Booking.com awal bulan tidak terpotong; halaman mengambil check-in mundur 75 hari untuk itu. Logika di `src/lib/financePencairan.ts` (+ tes). Frontend saja, tanpa perubahan villa-api atau skema, tidak mengubah angka apa pun.
