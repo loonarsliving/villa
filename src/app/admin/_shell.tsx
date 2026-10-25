@@ -40,6 +40,7 @@ export function AdminShell({ pageTitle, pageSub, children }: { pageTitle: string
       title: "Kelola",
       items: [
         { href: "/admin/investors", label: "Investor", icon: "◎" },
+        { href: "/admin/bukti-transfer", label: "Bukti Transfer Dividen", icon: "✓" },
         { href: "/admin/users", label: "Pengguna", icon: "◉" },
         { href: "/admin/staff", label: "Staff Operasional", icon: "▤" },
         { href: "/admin/amenities", label: "Amenities", icon: "▧" },

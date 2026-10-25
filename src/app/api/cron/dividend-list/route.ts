@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { kirimDariNomorUtama } from "@/lib/mkhsistemWa";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,8 +42,28 @@ export async function GET(request: Request) {
     if (!res.ok) {
       return NextResponse.json({ ok: false, error: result?.error || `HTTP ${res.status}` }, { status: 502 });
     }
-    return NextResponse.json({ ok: true, ...result });
+    const tautan_bukti = await kirimTautanBuktiTransfer();
+    return NextResponse.json({ ok: true, ...result, tautan_bukti });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
+}
+
+/**
+ * Menyusul daftar dividen: tautan ke mesin bukti transfer (/admin/bukti-transfer),
+ * tempat owner mencentang investor yang sudah ditransfer supaya buktinya
+ * terkirim otomatis (owner 2026-10-25). Gagal di sini tidak menggagalkan cron.
+ */
+async function kirimTautanBuktiTransfer(): Promise<{ terkirim: number } | { error: string }> {
+  const host = (process.env.VERCEL_PROJECT_PRODUCTION_URL || "").trim();
+  if (!host) return { error: "VERCEL_PROJECT_PRODUCTION_URL tidak tersedia" };
+  const { data: admins } = await supabaseAdmin().from("villa_users").select("hp").eq("role", "admin").eq("is_active", true);
+  const pesan = `Setelah transfer dividen selesai, buka tautan ini, centang investor yang sudah ditransfer, lalu tekan kirim. Bukti transfer versi Loonars akan terkirim otomatis ke WA masing-masing investor:\n\nhttps://${host}/admin/bukti-transfer`;
+  let terkirim = 0;
+  for (const a of admins ?? []) {
+    const hp = String(a.hp ?? "").replace(/\D/g, "");
+    if (hp.length < 8) continue;
+    if ((await kirimDariNomorUtama(hp, pesan)).success) terkirim++;
+  }
+  return { terkirim };
 }
