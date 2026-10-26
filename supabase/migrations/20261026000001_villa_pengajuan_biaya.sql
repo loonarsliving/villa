@@ -83,7 +83,6 @@ begin
 end;
 $$;
 
-drop trigger if exists villa_pengajuan_biaya_updated_at on public.villa_pengajuan_biaya;
 create trigger villa_pengajuan_biaya_updated_at
   before update on public.villa_pengajuan_biaya
   for each row execute function public.villa_pengajuan_biaya_updated_at();
@@ -118,7 +117,6 @@ begin
 end;
 $$;
 
-drop trigger if exists villa_pengajuan_biaya_catat on public.villa_pengajuan_biaya;
 create trigger villa_pengajuan_biaya_catat
   after insert or update on public.villa_pengajuan_biaya
   for each row execute function public.villa_pengajuan_biaya_catat();
