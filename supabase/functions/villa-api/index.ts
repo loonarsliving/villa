@@ -6526,6 +6526,15 @@ Deno.serve(async (req)=>{
     return json({pengajuan: await lengkapiPengajuan(data ?? []), menunggu: menunggu ?? 0});
   }
 
+  // Angka di menu Finance: pengajuan yang menunggu keputusan atau transfer.
+  if(path==='/finance/pengajuan/menunggu' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const {count, error} = await supabase.from('villa_pengajuan_biaya')
+      .select('id', {count:'exact', head:true}).in('status', ['diajukan','disetujui']);
+    if(error) return err(error.message);
+    return json({menunggu: count ?? 0});
+  }
+
   if(path==='/finance/pengajuan/putuskan' && m==='POST'){
     if(!isFinance) return forbidden();
     const b = await req.json().catch(()=>null);
