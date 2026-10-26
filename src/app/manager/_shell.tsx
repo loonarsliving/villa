@@ -17,6 +17,7 @@ export function ManagerShell({ pageTitle, pageSub, children }: { pageTitle: stri
       items: [
         { href: "/manager", label: "Kesiapan Kamar", icon: "✓" },
         { href: "/manager/riwayat", label: "Riwayat Cek", icon: "☰" },
+        { href: "/manager/pengajuan", label: "Pengajuan Biaya", icon: "₨" },
         { href: "/manager/chat", label: "Chat", icon: "◉", badge: chatUnread },
         { href: "/manager/cctv", label: "CCTV", icon: "◍" },
       ],

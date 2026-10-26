@@ -16,6 +16,7 @@ export function FinanceShell({ pageTitle, pageSub, children }: { pageTitle: stri
         { href: "/finance/laba-rugi", label: "Laba Rugi & COGS", icon: "▤" },
         { href: "/finance/pendapatan", label: "Pendapatan & Channel", icon: "↗" },
         { href: "/finance/transaksi", label: "Transaksi", icon: "☷" },
+        { href: "/finance/pengajuan-biaya", label: "Pengajuan Biaya", icon: "₨" },
       ],
     },
     {
