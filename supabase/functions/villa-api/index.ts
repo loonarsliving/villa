@@ -2915,6 +2915,94 @@ async function writeFinanceAudit({ entity_type, entity_id, session, action, old_
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// PENGAJUAN BIAYA (owner 2026-10-26)
+//
+// Manager villa mengajukan biaya laundry, Netflix, atau lain-lain (namanya
+// ditulis manager sendiri) dari /manager/pengajuan atau dari chat Loonars
+// Connect di Mkhsistem; Finance menyetujui/menolak lalu mengunggah bukti
+// transfer di /finance/pengajuan-biaya. Kedua jalur menulis ke tabel yang
+// sama (villa_pengajuan_biaya), riwayat status ditulis trigger database.
+// File (nota, bukti bayar reimburse, bukti transfer) disimpan di bucket
+// privat villa-pengajuan-biaya dan hanya dibuka lewat tautan bertanda
+// tangan 10 menit.
+// ═══════════════════════════════════════════════════════════════════════
+const PENGAJUAN_BUCKET = 'villa-pengajuan-biaya';
+const PENGAJUAN_KATEGORI = ['laundry','netflix','lain_lain'];
+const PENGAJUAN_JENIS = ['permintaan_dana','reimburse'];
+const PENGAJUAN_FILE_MAKS = 3 * 1024 * 1024;
+const PENGAJUAN_EXT = { 'image/jpeg':'jpg', 'image/png':'png', 'image/webp':'webp', 'application/pdf':'pdf' };
+const PENGAJUAN_NOMINAL_MAKS = 100000000;
+
+function bacaFilePengajuan(dataUrl){
+  const m = /^data:(image\/(?:jpeg|png|webp)|application\/pdf);base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl ?? ''));
+  if(!m) return {error:'File harus JPG, PNG, WebP, atau PDF'};
+  let bin;
+  try { bin = atob(m[2]); } catch { return {error:'File rusak'}; }
+  if(!bin.length) return {error:'File kosong'};
+  if(bin.length > PENGAJUAN_FILE_MAKS) return {error:'File terlalu besar (maks 3MB)'};
+  return {bytes: Uint8Array.from(bin, c=>c.charCodeAt(0)), contentType: m[1], ext: PENGAJUAN_EXT[m[1]]};
+}
+
+async function simpanFilePengajuan(folder, dataUrl){
+  const f = bacaFilePengajuan(dataUrl);
+  if(f.error) return f;
+  const path = `${folder}/${crypto.randomUUID()}.${f.ext}`;
+  const {error} = await supabase.storage.from(PENGAJUAN_BUCKET).upload(path, f.bytes, {contentType: f.contentType, upsert: false});
+  if(error) return {error:`Gagal mengunggah file: ${error.message}`};
+  return {path};
+}
+
+async function hapusFilePengajuan(paths){
+  const ada = paths.filter(Boolean);
+  if(ada.length) await supabase.storage.from(PENGAJUAN_BUCKET).remove(ada).catch(()=>{});
+}
+
+// Bulan biaya yang boleh dipilih: bulan ini atau bulan lalu (tagihan laundry
+// bulan lalu biasanya datang awal bulan).
+function periodePengajuanPilihan(){
+  const ini = monthWIB();
+  const [y, mo] = ini.split('-').map(Number);
+  const lalu = mo === 1 ? `${y-1}-12` : `${y}-${String(mo-1).padStart(2,'0')}`;
+  return [ini, lalu];
+}
+
+function teksOpsional(v, maks){
+  const s = String(v ?? '').trim();
+  return s ? s.slice(0, maks) : null;
+}
+
+// Pengajuan + tautan file bertanda tangan + riwayat status.
+async function lengkapiPengajuan(rows){
+  if(!rows.length) return [];
+  const paths = [...new Set(rows.flatMap(r=>[r.nota_path, r.bukti_bayar_path, r.bukti_transfer_path]).filter(Boolean))];
+  const tautan = new Map();
+  if(paths.length){
+    const {data} = await supabase.storage.from(PENGAJUAN_BUCKET).createSignedUrls(paths, 600);
+    for(const s of data ?? []) if(s.signedUrl) tautan.set(s.path, s.signedUrl);
+  }
+  const {data:log} = await supabase.from('villa_pengajuan_biaya_log')
+    .select('pengajuan_id,status,oleh_nama,catatan,created_at')
+    .in('pengajuan_id', rows.map(r=>r.id)).order('created_at');
+  const logPer = new Map();
+  for(const l of log ?? []){
+    if(!logPer.has(l.pengajuan_id)) logPer.set(l.pengajuan_id, []);
+    logPer.get(l.pengajuan_id).push(l);
+  }
+  return rows.map(r=>({
+    ...r,
+    nota_url: r.nota_path ? tautan.get(r.nota_path) ?? null : null,
+    bukti_bayar_url: r.bukti_bayar_path ? tautan.get(r.bukti_bayar_path) ?? null : null,
+    bukti_transfer_url: r.bukti_transfer_path ? tautan.get(r.bukti_transfer_path) ?? null : null,
+    riwayat: logPer.get(r.id) ?? [],
+  }));
+}
+
+async function namaPengguna(session){
+  const {data} = await supabase.from('villa_users').select('nama').eq('id', session.uid).maybeSingle();
+  return (data?.nama || session.email || session.role || '').toString().slice(0, 120);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // FINANCE SURVIVAL CONTROL CENTER
 //
 // A SEPARATE analysis engine from computeReport() (the frozen,
@@ -6042,6 +6130,69 @@ Deno.serve(async (req)=>{
     return json({ ok:true, role: session.role });
   }
 
+  // Pengajuan biaya milik manager (lihat komentar di atas PENGAJUAN_BUCKET).
+  // Manager melihat semua pengajuan villa (dari dashboard maupun chat), karena
+  // hanya ada satu manager dan pengajuan lewat chat tidak terikat akun villa.
+  if(path==='/manager/pengajuan' && m==='GET'){
+    if(!isManager) return forbidden();
+    const {data, error} = await supabase.from('villa_pengajuan_biaya').select('*').order('created_at',{ascending:false}).limit(100);
+    if(error) return err(error.message);
+    return json({pengajuan: await lengkapiPengajuan(data ?? []), periode_boleh: periodePengajuanPilihan()});
+  }
+
+  if(path==='/manager/pengajuan' && m==='POST'){
+    if(!isManager) return forbidden();
+    const b = await req.json().catch(()=>null);
+    const kategori = String(b?.kategori ?? '');
+    const jenis = String(b?.jenis ?? '');
+    const periode = String(b?.periode ?? '');
+    const nominal = Number(b?.nominal);
+    const keterangan = String(b?.keterangan ?? '').trim();
+    const kategori_nama = kategori === 'lain_lain' ? teksOpsional(b?.kategori_nama, 80) : null;
+    const penerima_nama = teksOpsional(b?.penerima_nama, 120);
+    const penerima_bank = teksOpsional(b?.penerima_bank, 60);
+    const penerima_rekening = teksOpsional(b?.penerima_rekening, 40);
+    if(!PENGAJUAN_KATEGORI.includes(kategori)) return err('Pilih kategori');
+    if(kategori === 'lain_lain' && (!kategori_nama || kategori_nama.length < 3)) return err('Tulis nama biayanya (minimal 3 huruf)');
+    if(!PENGAJUAN_JENIS.includes(jenis)) return err('Pilih jenis pengajuan');
+    if(!periodePengajuanPilihan().includes(periode)) return err('Bulan biaya hanya boleh bulan ini atau bulan lalu');
+    if(!Number.isInteger(nominal) || nominal <= 0 || nominal > PENGAJUAN_NOMINAL_MAKS) return err('Nominal tidak valid');
+    if(keterangan.length < 3 || keterangan.length > 1000) return err('Tulis keterangan (3-1000 huruf)');
+    if(!penerima_nama || !penerima_bank || !penerima_rekening) return err('Isi rekening tujuan transfer (nama, bank, nomor)');
+    if(jenis === 'reimburse' && !b?.bukti_bayar) return err('Reimburse wajib melampirkan bukti bayar');
+
+    const folder = `dashboard/${session.uid}`;
+    const nota = b?.nota ? await simpanFilePengajuan(folder, b.nota) : {path:null};
+    if(nota.error) return err(nota.error);
+    const bayar = b?.bukti_bayar ? await simpanFilePengajuan(folder, b.bukti_bayar) : {path:null};
+    if(bayar.error){ await hapusFilePengajuan([nota.path]); return err(bayar.error); }
+
+    const {data, error} = await supabase.from('villa_pengajuan_biaya').insert({
+      kategori, kategori_nama, jenis, periode, nominal, keterangan,
+      penerima_nama, penerima_bank, penerima_rekening,
+      nota_path: nota.path, bukti_bayar_path: bayar.path,
+      diajukan_lewat: 'dashboard', diajukan_oleh_nama: await namaPengguna(session), diajukan_oleh_villa_user: session.uid,
+    }).select('*').single();
+    if(error){ await hapusFilePengajuan([nota.path, bayar.path]); return err(error.message); }
+    return json((await lengkapiPengajuan([data]))[0]);
+  }
+
+  // Manager membatalkan pengajuannya sendiri selama Finance belum memutuskan.
+  if(path==='/manager/pengajuan/batal' && m==='POST'){
+    if(!isManager) return forbidden();
+    const b = await req.json().catch(()=>null);
+    const id = String(b?.id ?? '');
+    const alasan = String(b?.alasan ?? '').trim();
+    if(!/^[0-9a-f-]{36}$/i.test(id)) return err('id tidak valid');
+    if(alasan.length < 3) return err('Tulis alasan pembatalan');
+    const {data, error} = await supabase.from('villa_pengajuan_biaya')
+      .update({status:'dibatalkan', alasan_batal: alasan.slice(0,1000)})
+      .eq('id', id).eq('status', 'diajukan').select('*').maybeSingle();
+    if(error) return err(error.message);
+    if(!data) return err('Pengajuan ini sudah diproses Finance, tidak bisa dibatalkan', 409);
+    return json((await lengkapiPengajuan([data]))[0]);
+  }
+
   // CCTV untuk manager (owner 9 Okt 2026: "tambahkan cctv di menu manager").
   // Hanya kamera aktif, hanya yang perlu untuk live-view. Kelola kamera dan
   // laporan checkpoint AI tetap khusus admin (/admin/cctv/*).
@@ -6356,6 +6507,89 @@ Deno.serve(async (req)=>{
   if(path==='/finance/whoami' && m==='GET'){
     if(!isFinance) return forbidden();
     return json({ ok:true, role: session.role });
+  }
+
+  // Pengajuan biaya dari manager (lihat komentar di atas PENGAJUAN_BUCKET).
+  // ?periode=YYYY-MM menyaring per bulan biaya; tanpa itu = 200 terbaru.
+  if(path==='/finance/pengajuan' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const periode = url.searchParams.get('periode');
+    let q = supabase.from('villa_pengajuan_biaya').select('*').order('created_at',{ascending:false}).limit(200);
+    if(periode){
+      if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(periode)) return err('periode tidak valid');
+      q = q.eq('periode', periode);
+    }
+    const {data, error} = await q;
+    if(error) return err(error.message);
+    const {count: menunggu} = await supabase.from('villa_pengajuan_biaya')
+      .select('id', {count:'exact', head:true}).in('status', ['diajukan','disetujui']);
+    return json({pengajuan: await lengkapiPengajuan(data ?? []), menunggu: menunggu ?? 0});
+  }
+
+  // Angka di menu Finance: pengajuan yang menunggu keputusan atau transfer.
+  if(path==='/finance/pengajuan/menunggu' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const {count, error} = await supabase.from('villa_pengajuan_biaya')
+      .select('id', {count:'exact', head:true}).in('status', ['diajukan','disetujui']);
+    if(error) return err(error.message);
+    return json({menunggu: count ?? 0});
+  }
+
+  if(path==='/finance/pengajuan/putuskan' && m==='POST'){
+    if(!isFinance) return forbidden();
+    const b = await req.json().catch(()=>null);
+    const id = String(b?.id ?? '');
+    const keputusan = String(b?.keputusan ?? '');
+    const catatan = String(b?.catatan ?? '').trim().slice(0, 1000);
+    if(!/^[0-9a-f-]{36}$/i.test(id)) return err('id tidak valid');
+    if(keputusan !== 'setujui' && keputusan !== 'tolak') return err('Keputusan tidak dikenal');
+    if(keputusan === 'tolak' && catatan.length < 3) return err('Tulis alasan penolakan');
+    const {data:lama} = await supabase.from('villa_pengajuan_biaya').select('*').eq('id', id).maybeSingle();
+    if(!lama) return err('Pengajuan tidak ditemukan', 404);
+    const nama = await namaPengguna(session);
+    const patch = keputusan === 'setujui'
+      ? {status:'disetujui', diputus_oleh_nama: nama, diputus_at: new Date().toISOString(), catatan_finance: catatan || null}
+      : {status:'ditolak', diputus_oleh_nama: nama, diputus_at: new Date().toISOString(), alasan_tolak: catatan};
+    const {data, error} = await supabase.from('villa_pengajuan_biaya').update(patch).eq('id', id).eq('status', 'diajukan').select('*').maybeSingle();
+    if(error) return err(error.message);
+    if(!data) return err('Pengajuan ini sudah diputuskan atau dibatalkan', 409);
+    await writeFinanceAudit({ entity_type:'villa_pengajuan_biaya', entity_id:id, session, action: keputusan === 'setujui' ? 'pengajuan_disetujui' : 'pengajuan_ditolak', old_value: lama, new_value: data, reason: catatan || null });
+    return json((await lengkapiPengajuan([data]))[0]);
+  }
+
+  // Bukti transfer. Boleh langsung dari 'diajukan' (setujui + transfer
+  // sekaligus) atau dari 'disetujui'.
+  if(path==='/finance/pengajuan/transfer' && m==='POST'){
+    if(!isFinance) return forbidden();
+    const b = await req.json().catch(()=>null);
+    const id = String(b?.id ?? '');
+    const tanggal = String(b?.tanggal_transfer ?? '');
+    const catatan = String(b?.catatan ?? '').trim().slice(0, 1000);
+    if(!/^[0-9a-f-]{36}$/i.test(id)) return err('id tidak valid');
+    const hariIni = todayWIB();
+    const batasLama = new Date(`${hariIni}T00:00:00Z`);
+    batasLama.setUTCDate(batasLama.getUTCDate() - 60);
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(tanggal) || tanggal > hariIni || tanggal < batasLama.toISOString().slice(0,10)) return err('Tanggal transfer tidak valid (paling lama 60 hari lalu, tidak boleh di masa depan)');
+    if(!b?.bukti) return err('Lampirkan bukti transfer');
+    const {data:lama} = await supabase.from('villa_pengajuan_biaya').select('*').eq('id', id).maybeSingle();
+    if(!lama) return err('Pengajuan tidak ditemukan', 404);
+    if(lama.status !== 'diajukan' && lama.status !== 'disetujui') return err('Pengajuan ini tidak menunggu transfer', 409);
+    const bukti = await simpanFilePengajuan(`transfer/${id}`, b.bukti);
+    if(bukti.error) return err(bukti.error);
+    const nama = await namaPengguna(session);
+    const sekarang = new Date().toISOString();
+    const patch = {
+      status:'ditransfer', bukti_transfer_path: bukti.path, tanggal_transfer: tanggal,
+      ditransfer_oleh_nama: nama, ditransfer_at: sekarang,
+      ...(lama.status === 'diajukan' ? {diputus_oleh_nama: nama, diputus_at: sekarang, catatan_finance: catatan || null} : {}),
+    };
+    const {data, error} = await supabase.from('villa_pengajuan_biaya').update(patch).eq('id', id).eq('status', lama.status).select('*').maybeSingle();
+    if(error || !data){
+      await hapusFilePengajuan([bukti.path]);
+      return error ? err(error.message) : err('Status pengajuan berubah, muat ulang halaman', 409);
+    }
+    await writeFinanceAudit({ entity_type:'villa_pengajuan_biaya', entity_id:id, session, action:'pengajuan_ditransfer', old_value: lama, new_value: data, reason: catatan || null });
+    return json((await lengkapiPengajuan([data]))[0]);
   }
 
   // Default sampai AKHIR bulan berjalan, bukan hari ini (owner, 27 Sep

@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-26 — Pengajuan biaya manager → Finance
+- Tabel `villa_pengajuan_biaya` + riwayat + bucket privat (migrasi `20261026000001`, diterapkan 2026-10-26), rute villa-api `/manager/pengajuan*` dan `/finance/pengajuan*`, halaman `/manager/pengajuan` dan `/finance/pengajuan-biaya`. Pasangan chat: Mkhsistem 0307. COGS dari pengajuan belum diubah (menunggu aturan tanggal dari owner). Lihat CURRENT_STATE.md 2026-10-26.
+
 ### 2026-10-25 — Mesin bukti transfer dividen (`/admin/bukti-transfer`)
 - Owner mencentang investor yang sudah ditransfer, lalu menekan kirim. Mesin membuat bukti versi Loonars per investor (gambar PNG dari `next/og`, rute publik `/api/bukti-transfer/[d]/[s]/[file]` yang isinya ditandatangani HMAC dengan `CRON_SECRET`, tanpa query string karena WhaCenter menolak tautan ber-query) dan mengirimnya lewat WA nomor utama (`kirimDariNomorUtama`, jalur yang sama dengan laporan Rabu). Setiap kiriman dicatat di `wa_messages_log` (`template_type='dividend_receipt'`), dan yang sudah terkirim bulan ini dilewati kecuali dikirim ulang dengan sengaja.
 - Satu bukti per nomor HP: akun yang berbagi nomor (Susanto A5 + C3) digabung. Jumlah per unit = bagi hasil + top-up jaminan dari computeReport villa-api (lewat `/bridge/owner-finance`), atau `villa_investor_terms.pemasukan_tetap`. Ringkasan villa menampilkan pendapatan setelah komisi OTA (komisi OTA tidak pernah ditampilkan, instruksi owner), OPEX aktual, target OPEX 25%, dan kelebihan yang ditanggung Loonars.
