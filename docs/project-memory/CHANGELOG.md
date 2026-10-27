@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-27 — Excellent Living ke produksi: check-in KTP/tanda tangan/WA, housekeeping EL, pindah kamar, pilihan properti di loonars.id
+- Lihat CURRENT_STATE.md 2026-10-27. Migrasi `20261022000001_excellent_living` (diperluas: kolom dokumen check-in + `el_housekeeping`) diterapkan bersama merge ini.
+
 ### 2026-10-26 — Pengajuan biaya manager → Finance
 - Tabel `villa_pengajuan_biaya` + riwayat + bucket privat (migrasi `20261026000001`, diterapkan 2026-10-26), rute villa-api `/manager/pengajuan*` dan `/finance/pengajuan*`, halaman `/manager/pengajuan` dan `/finance/pengajuan-biaya`. Pasangan chat: Mkhsistem 0307. COGS dari pengajuan belum diubah (menunggu aturan tanggal dari owner). Lihat CURRENT_STATE.md 2026-10-26.
 
@@ -24,6 +27,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ### 2026-10-23 — Notifikasi chat tamu untuk manager (push HP, bunyi, angka ikon)
 - Lihat CURRENT_STATE.md 2026-10-23. Migrasi `20261023000001_villa_push_subscriptions` (owner-approved), env `VILLA_VAPID_PRIVATE_KEY`.
+
+### 2026-10-22 — Loonars Excellent Living: role, tabel el_*, dashboard, Cloudbeds kedua
+- Lihat CURRENT_STATE.md 2026-10-22.
 
 ### 2026-10-21 — Kiriman harian laporan keuangan villa ke MKH Property
 - Lihat CURRENT_STATE.md 2026-10-21 (kiriman harian).

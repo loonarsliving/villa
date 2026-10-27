@@ -25,12 +25,25 @@ export interface CloudbedsRoom {
   roomTypeName?: string;
 }
 
-function apiKey(): string {
-  const key = (process.env.CLOUDBEDS_API_KEY ?? "").trim();
+/**
+ * Dua akun Cloudbeds: "utama" = Loonars Private Living (CLOUDBEDS_*),
+ * "el" = Loonars Excellent Living (CLOUDBEDS2_*). Hanya getCloudbedsRooms
+ * dan getCloudbedsReservationTotals yang menerima akun "el" -- fungsi
+ * harga (getRate/putRate) sengaja tetap khusus akun utama.
+ */
+export type CloudbedsAkun = "utama" | "el";
+
+function apiKey(akun: CloudbedsAkun = "utama"): string {
+  const nama = akun === "el" ? "CLOUDBEDS2_API_KEY" : "CLOUDBEDS_API_KEY";
+  const key = (process.env[nama] ?? "").trim();
   if (!key) {
-    throw new CloudbedsApiError("Cloudbeds API key belum dikonfigurasi (CLOUDBEDS_API_KEY)", 503);
+    throw new CloudbedsApiError(`Cloudbeds API key belum dikonfigurasi (${nama})`, 503);
   }
   return key;
+}
+
+function propertyIdAkun(akun: CloudbedsAkun): string {
+  return ((akun === "el" ? process.env.CLOUDBEDS2_PROPERTY_ID : process.env.CLOUDBEDS_PROPERTY_ID) ?? "").trim();
 }
 
 /**
@@ -38,9 +51,9 @@ function apiKey(): string {
  * CLOUDBEDS_PROPERTY_ID is optional — only needed if the key is scoped to a
  * group/multi-property account rather than a single property.
  */
-export async function getCloudbedsRooms(): Promise<CloudbedsRoom[]> {
-  const key = apiKey();
-  const propertyId = (process.env.CLOUDBEDS_PROPERTY_ID ?? "").trim();
+export async function getCloudbedsRooms(akun: CloudbedsAkun = "utama"): Promise<CloudbedsRoom[]> {
+  const key = apiKey(akun);
+  const propertyId = propertyIdAkun(akun);
   const url = new URL(`${CLOUDBEDS_API_BASE}/getRooms`);
   if (propertyId) url.searchParams.set("propertyID", propertyId);
 
@@ -422,9 +435,9 @@ export async function getCloudbedsRatePlans(startDate: string, endDate: string):
 export async function getCloudbedsReservationTotals(params: {
   checkOutFrom?: string;
   reservationIDs?: string[];
-}): Promise<Map<string, ReservationTotals>> {
-  const key = apiKey();
-  const propertyId = (process.env.CLOUDBEDS_PROPERTY_ID ?? "").trim();
+}, akun: CloudbedsAkun = "utama"): Promise<Map<string, ReservationTotals>> {
+  const key = apiKey(akun);
+  const propertyId = propertyIdAkun(akun);
   const wanted = params.reservationIDs ? new Set(params.reservationIDs) : null;
   const out = new Map<string, ReservationTotals>();
 

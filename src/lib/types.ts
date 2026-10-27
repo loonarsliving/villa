@@ -1,4 +1,5 @@
-export type Role = "owner" | "receptionist" | "admin" | "finance" | "manager" | "late_night";
+// el_* = Loonars Excellent Living (properti kedua, tabel el_* sendiri).
+export type Role = "owner" | "receptionist" | "admin" | "finance" | "manager" | "late_night" | "el_investor" | "el_receptionist";
 
 export interface SessionUser {
   id: string;
@@ -920,4 +921,129 @@ export interface FinanceChecklist {
     count_belum: number;
     count_lewat_jatuh_tempo: number;
   };
+}
+
+// ── Loonars Excellent Living (tabel el_*, migrasi 20261022000001) ──────────
+export type ElRoomStatus = "available" | "occupied" | "dirty" | "maintenance";
+export type ElBookingStatus = "terjadwal" | "checkin" | "checkout" | "batal";
+
+export interface ElRoomType {
+  id: string;
+  kode: string;
+  nama: string;
+  deskripsi: string | null;
+  kapasitas: number | null;
+  sort_order: number;
+  active: boolean;
+}
+
+export interface ElBooking {
+  id: string;
+  room_id: string | null;
+  room_nomor: string | null;
+  guest_nama: string;
+  guest_hp: string | null;
+  sumber: string;
+  status: ElBookingStatus;
+  tgl_checkin: string;
+  tgl_checkout: string;
+  durasi_malam: number | null;
+  adults: number;
+  children: number;
+  total_bayar: number;
+  catatan: string | null;
+  cloudbeds_reservation_id: string | null;
+  checkin_at: string | null;
+  checkout_at: string | null;
+  ktp_photo_path?: string | null;
+  checkout_kondisi?: string | null;
+  created_at: string;
+}
+
+/** /el/rooms/tersedia: kamar aktif + apakah kosong di tanggal yang diminta. */
+export interface ElRoomTersedia {
+  id: string;
+  nomor: string;
+  status: ElRoomStatus;
+  room_type_id: string;
+  el_room_types: { kode: string; nama: string } | null;
+  tersedia: boolean;
+  alasan: string | null;
+}
+
+export interface ElHousekeepingTask {
+  id: string;
+  room_id: string;
+  room_nomor: string | null;
+  booking_id: string | null;
+  tgl: string;
+  jenis: "cleaning";
+  status: "pending" | "done";
+  catatan: string | null;
+  done_at: string | null;
+  done_by: string | null;
+  created_at: string;
+}
+
+export interface ElRoom {
+  id: string;
+  nomor: string;
+  room_type_id: string;
+  status: ElRoomStatus;
+  catatan: string | null;
+  sort_order: number;
+  active: boolean;
+  el_room_types: { kode: string; nama: string } | null;
+  booking_hari_ini?: Pick<ElBooking, "id" | "guest_nama" | "status" | "tgl_checkin" | "tgl_checkout"> | null;
+}
+
+export interface ElSummary {
+  total_kamar: number;
+  available: number;
+  occupied: number;
+  dirty: number;
+  maintenance: number;
+  checkin_hari_ini: number;
+  checkout_hari_ini: number;
+}
+
+export interface ElFinanceRingkasan {
+  from: string;
+  to: string;
+  pendapatan_kotor: number;
+  jumlah_booking: number;
+  adr: number | null;
+  jumlah_kamar: number;
+  room_nights_tersedia: number;
+  room_nights_terisi: number;
+  okupansi: number | null;
+  per_sumber: Record<string, number>;
+  per_tipe: Record<string, number>;
+  bookings: ElBooking[];
+}
+
+/** Unit Loonars 2 (Mkhsistem loonars_units) milik investor EL + pembeliannya. */
+export interface ElInvestorUnit {
+  id: string;
+  blok: string;
+  tipe: string | null;
+  luas: number | null;
+  status: string;
+  pembelian: {
+    transaction_type: string;
+    payment_method: string | null;
+    price: number | null;
+    booking_fee: number | null;
+    dp_amount: number | null;
+    pelunasan_amount: number | null;
+    transaction_date: string | null;
+    handover_date: string | null;
+    status: string;
+  } | null;
+}
+
+export interface ElInvestorSaya {
+  units: ElInvestorUnit[];
+  okupansi_bulan_ini: { from: string; to: string; jumlah_kamar: number; room_nights_terisi: number; room_nights_tersedia: number; okupansi: number | null };
+  bagi_hasil: null;
 }

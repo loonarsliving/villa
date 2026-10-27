@@ -32,6 +32,15 @@ describe("teksSapaanPertama", () => {
     expect(t).not.toContain("?");
     expect(t.toLowerCase()).not.toMatch(/nomor|skincare|beauty|pilih|\[/);
   });
+  it("tamu Excellent Living disapa dengan nama Excellent Living", () => {
+    const t = teksSapaanPertama("Avi", "Halo, saya ingin menginap di Loonars Excellent Living Yogyakarta.");
+    expect(t).toContain("Loonars Excellent Living Yogyakarta");
+    expect(t).not.toContain("Private Living");
+  });
+  it("pesan dari form Excellent Living di loonars.id masuk Chat resepsionis", () => {
+    expect(menyebutSewaVilla("Halo, saya ingin menginap di Loonars Excellent Living Yogyakarta.\nNama: Avi")).toBe(true);
+    expect(menyebutSewaVilla("Halo, saya ingin tanya soal menginap di Loonars Excellent Living Yogyakarta")).toBe(true);
+  });
   it("tanpa nama, atau nama aneh yang terlalu panjang, cukup 'Halo Kak,'", () => {
     expect(teksSapaanPertama(undefined).startsWith("Halo Kak,")).toBe(true);
     expect(teksSapaanPertama("   ").startsWith("Halo Kak,")).toBe(true);

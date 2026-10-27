@@ -230,3 +230,12 @@ Migrasi `20261002000002_manager_kesiapan_kamar.sql`:
   (FK ke `wa_conversation_messages`, `on delete set null`), `ai_draf_at`. Hanya
   kolom nullable baru. Ditulis oleh `src/lib/aiResepsionis.ts` setelah pesan
   masuk dicatat di `/api/wa/mirror`, dikosongkan saat staf membalas.
+
+## Loonars Excellent Living — tabel `el_*` (migrasi `20261022000001_excellent_living`, diterapkan 2026-10-27)
+Properti kedua (Loonars 2, Jogja), terpisah total dari `units`/`bookings` Private Living. Semua RLS ON tanpa policy + revoke anon/authenticated: hanya villa-api dan rute server (service role).
+- `el_room_types` (ST Single/Twin, SP Sanctuary Pool, FP Family Private Pool), `el_rooms` (31 kamar placeholder ST-01..14, SP-01..12, FP-01..05; status available/occupied/dirty/maintenance).
+- `el_bookings` (tgl_checkin s/d sebelum tgl_checkout; status terjadwal/checkin/checkout/batal; dokumen check-in `ktp_photo_path` + `signature_data_url`; `checkout_kondisi`; `cloudbeds_reservation_id` unik untuk akun Cloudbeds kedua). Bentrok tanggal dicegah di villa-api, bukan constraint.
+- `el_housekeeping` (tugas bersih kamar, dibuat saat check-out / pindah kamar).
+- `el_cloudbeds_room_mapping`, `el_cloudbeds_events_log` (Cloudbeds akun kedua, belum dipakai).
+- `el_investor_units` (akun `el_investor` ↔ `loonars_units` proyek LNR2 Mkhsistem; halaman investor ditunda).
+- `villa_users_role_check` + `el_investor`, `el_receptionist`.
