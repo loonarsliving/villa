@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FinanceShell } from "../_shell";
 import { api } from "@/lib/api";
 import { fmtCurrencyFull, fmtDate, todayISO } from "@/lib/format";
@@ -29,6 +29,27 @@ import { kelompokkanPerPencairan, rentangCheckinUntukPencairan, type PencairanGr
 
 type StatusFilter = "semua" | "belum" | "masuk";
 
+/**
+ * Pilihan bulan: 24 bulan ke belakang sampai 2 bulan ke depan. Dulu
+ * `<input type="month">`, yang di Safari & Firefox desktop jatuh jadi kotak
+ * teks biasa: setiap ketikan ("2026-1", lalu "2026-10") memicu load, dan
+ * jawaban bulan setengah-jadi bisa datang terakhir lalu menimpa data bulan
+ * yang benar (log produksi 2026-10-27: from=2026-1-01, 2026--01, 2026-19-01).
+ */
+function pilihanBulan(sekarang: string): string[] {
+  const [y, m] = sekarang.split("-").map(Number);
+  const out: string[] = [];
+  for (let i = 2; i >= -24; i--) {
+    const d = new Date(Date.UTC(y, m - 1 + i, 1));
+    out.push(d.toISOString().slice(0, 7));
+  }
+  return out;
+}
+
+function namaBulan(ym: string): string {
+  return new Date(`${ym}-01T00:00:00Z`).toLocaleDateString("id-ID", { month: "long", year: "numeric", timeZone: "UTC" });
+}
+
 function monthRange(ym: string): { from: string; to: string } {
   const [y, m] = ym.split("-").map(Number);
   const last = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
@@ -55,7 +76,13 @@ export default function ChecklistDanaPage() {
   const [tandai, setTandai] = useState<FinanceChecklistItem | null>(null);
   const [batal, setBatal] = useState<FinanceChecklistItem | null>(null);
 
+  // Ganti bulan cepat memicu dua load bersamaan; hanya jawaban load terakhir
+  // yang boleh dipakai (pola sama dengan _Dashboard.tsx).
+  const loadSeq = useRef(0);
+
   function load() {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(bulan)) return;
+    const seq = ++loadSeq.current;
     setLoading(true);
     setError(null);
     const { from, to } = monthRange(bulan);
@@ -66,15 +93,21 @@ export default function ChecklistDanaPage() {
       api.get<FinanceChecklist>(`/finance/checklist-dana?from=${cair.from}&to=${cair.to}`).catch(() => null),
     ])
       .then(([d, dc]) => {
+        if (seq !== loadSeq.current) return;
         setData(d);
         setDataCair(dc);
         setSelected(new Set());
       })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false));
+      .catch((e) => {
+        if (seq === loadSeq.current) setError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (seq === loadSeq.current) setLoading(false);
+      });
   }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(load, [bulan]);
+  const daftarBulan = useMemo(() => pilihanBulan(todayISO().slice(0, 7)), []);
 
   const sumberList = useMemo(() => [...new Set((data?.items ?? []).map((i) => i.sumber ?? "-"))].sort(), [data]);
 
@@ -161,7 +194,13 @@ export default function ChecklistDanaPage() {
       <div className="flex flex-wrap gap-3 items-end mb-4">
         <label className="text-[10px] text-ink/40">
           Bulan check-in
-          <input className={`${inputCls} block`} type="month" value={bulan} onChange={(e) => e.target.value && setBulan(e.target.value)} />
+          <select className={`${inputCls} block`} value={bulan} onChange={(e) => setBulan(e.target.value)}>
+            {daftarBulan.map((b) => (
+              <option key={b} value={b}>
+                {namaBulan(b)}
+              </option>
+            ))}
+          </select>
         </label>
         <label className="text-[10px] text-ink/40">
           Channel
