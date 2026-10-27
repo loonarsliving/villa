@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { advanceFloorRamp, occupancyFromAvailability, rampedFloor, type FloorRampState } from "./aiPricingEngine";
+import { advanceFloorRamp, occupancyFromAvailability, rampedFloor, scarcityUpliftPct, type FloorRampState } from "./aiPricingEngine";
 import { learnDayOfWeekDemand, paceDayGroup, buildPaceBaseline } from "./aiPricingEngine";
 import { acceptedPeakMedian, buildSearchDemand, decideRateForDate, fixedCalendarPeriodFor, learnDiscountWindow, OWNER_SELECTED_COMPETITOR, pickPeerPrices, searchDemandRelativeFor, type DateDecisionInput, type PricingSettings } from "./aiPricingEngine";
 
@@ -657,5 +657,56 @@ describe("harga target malam tahun baru (owner 2026-10-07: naik hingga 1 jutaan)
   it("only applies to 31 Dec", () => {
     const d = decide({ targetDate: "2026-12-30", anchorRate: 500000, roomTypeCode: "standard", period: fixedCalendarPeriodFor("2026-12-30"), maxRate: 1000000 });
     expect(d.reason_codes).not.toContain("new_years_eve_target");
+  });
+});
+
+describe("kamar tinggal sedikit (owner 2026-10-27: naik sampai 30%)", () => {
+  it("sisa 1 kamar: +30% dari harga dasar", () => {
+    const d = decide({ occupancyPct: 66.7, roomsLeft: 1 });
+    expect(d.decided_rate).toBe(845000);
+    expect(d.reason_codes).toContain("last_room");
+    expect(d.reason_text).toContain("kamar tinggal satu");
+  });
+
+  it("sisa 2 kamar: +15%", () => {
+    const d = decide({ occupancyPct: 60, roomsLeft: 2 });
+    expect(d.decided_rate).toBe(748000);
+    expect(d.reason_codes).toContain("few_rooms_left");
+  });
+
+  it("dihitung dari harga akhir pekan", () => {
+    // 650rb + 100rb akhir pekan = 750rb; +30% = 975rb.
+    expect(decide({ targetDate: "2026-09-19", occupancyPct: 90, roomsLeft: 1 }).decided_rate).toBe(975000);
+  });
+
+  it("tidak bisa digerus sinyal lain yang menurunkan harga", () => {
+    const d = decide({ occupancyPct: 66.7, roomsLeft: 1, marketSearchRelative: -1, dayOfWeekRelative: -0.5 });
+    expect(d.decided_rate).toBe(845000);
+  });
+
+  it("tidak direm batas gerak harian, tapi max_rate tetap menang", () => {
+    expect(decide({ occupancyPct: 90, roomsLeft: 1, liveRate: 650000 }).decided_rate).toBe(845000);
+    expect(decide({ occupancyPct: 90, roomsLeft: 1, maxRate: 800000 }).decided_rate).toBe(800000);
+  });
+
+  it("tidak dipotong harga tengah pesaing", () => {
+    expect(decide({ occupancyPct: 90, roomsLeft: 1, competitorMedian: 700000 }).decided_rate).toBe(845000);
+  });
+
+  it("tidak berlaku kalau kamar sedikit tapi belum laku (mis. kamar ditutup)", () => {
+    expect(decide({ occupancyPct: 33.3, roomsLeft: 1 }).reason_codes).not.toContain("last_room");
+    expect(scarcityUpliftPct(1, 49.9)).toBe(0);
+  });
+
+  it("sisa 3 kamar atau data tidak ada: tidak ada tambahan", () => {
+    expect(scarcityUpliftPct(3, 90)).toBe(0);
+    expect(scarcityUpliftPct(null, 90)).toBe(0);
+    expect(scarcityUpliftPct(0, 100)).toBe(0.3);
+  });
+
+  it("tidak menurunkan harga yang sudah lebih tinggi (mis. malam tahun baru)", () => {
+    const d = decide({ targetDate: "2026-12-31", occupancyPct: 90, roomsLeft: 2, daysToArrival: 60 });
+    expect(d.decided_rate).toBeGreaterThan(Math.round(650000 * 1.15));
+    expect(d.reason_codes).not.toContain("few_rooms_left");
   });
 });

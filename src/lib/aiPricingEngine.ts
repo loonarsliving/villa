@@ -607,6 +607,31 @@ export function fixedCalendarPeriodFor(date: string): SeasonPeriod | null {
 const OCCUPANCY_LADDER_START_PCT = 50;
 
 /**
+ * Kamar tinggal sedikit (owner 2026-10-27: "jika kamar sdh tinggal sedikit
+ * naikkan harga harusnya ... naikkan sampai 30%").
+ *
+ * Sebelumnya kenaikan okupansi hanya satu sinyal di rata-rata berbobot, jadi
+ * sinyal lain (hari sepi, minat pasar) bisa menggerusnya: 27 Okt Sawah View
+ * terisi 3 dari 3 tapi hanya naik 1,9% (630rb -> 642rb). Aturan ini berdiri
+ * sendiri dan dihitung dari SISA KAMAR, bukan persen -- Sawah View hanya
+ * punya 3 unit, jadi "tinggal 1" sudah terjadi di 67%.
+ *
+ * Harga minimal = harga dasar + tambahan akhir pekan, dinaikkan persen di
+ * bawah. Tidak ikut direm batas gerak harian (permintaannya nyata, bukan
+ * tebakan event) dan tidak dipotong harga pesaing; max_rate tetap menang.
+ * Hanya berlaku kalau tanggalnya memang sudah terisi minimal
+ * SCARCITY_MIN_OCC_PCT, supaya kamar yang sedikit karena ditutup tidak
+ * dianggap laku.
+ */
+const SCARCITY_UPLIFT_BY_ROOMS_LEFT: Record<number, number> = { 0: 0.3, 1: 0.3, 2: 0.15 };
+const SCARCITY_MIN_OCC_PCT = 50;
+
+export function scarcityUpliftPct(roomsLeft: number | null | undefined, occupancyPct: number): number {
+  if (roomsLeft == null || !Number.isFinite(roomsLeft) || occupancyPct < SCARCITY_MIN_OCC_PCT) return 0;
+  return SCARCITY_UPLIFT_BY_ROOMS_LEFT[Math.max(0, Math.floor(roomsLeft))] ?? 0;
+}
+
+/**
  * Okupansi dari INVENTORI YANG DIJUAL, bukan dari unit yang dimiliki
  * (owner 2026-10-04: "jika kamar penuh apakah hargaku tetap main serendah
  * itu? harusnya algoritmanya main").
@@ -1232,6 +1257,8 @@ export interface DateDecisionInput {
   peakCompetitorMedian?: number | null;
   /** Simpangan permintaan hari ini (Senin..Minggu) dari rata-rata, dipelajari dari malam yang sudah lewat. null = belum cukup data. */
   dayOfWeekRelative?: number | null;
+  /** Sisa kamar yang masih bisa dijual untuk tanggal ini (Cloudbeds), atau null. Lihat SCARCITY_UPLIFT_BY_ROOMS_LEFT. */
+  roomsLeft?: number | null;
 }
 
 /**
@@ -1554,6 +1581,17 @@ export function decideRateForDate(input: DateDecisionInput): DatePriceDecision {
     }
   }
 
+  // --- 8b. Kamar tinggal sedikit: harga minimal naik sampai 30% ---
+  const scarcityPct = scarcityUpliftPct(input.roomsLeft, occupancyPct);
+  if (scarcityPct > 0) {
+    const scarcityRate = Math.round(structuralRate * (1 + scarcityPct));
+    if (decidedRate < scarcityRate) {
+      decidedRate = scarcityRate;
+      if (guardrailStatus === "clamped_movement") guardrailStatus = "within_range";
+      reasonCodes.push(scarcityPct >= 0.3 ? "last_room" : "few_rooms_left");
+    }
+  }
+
   // --- 9. Owner's hard guardrails always win, last ---
   //
   // This is the line the owner pointed at when allowing the AI to set
@@ -1635,6 +1673,8 @@ function narrateDecision(codes: string[], guardrail: DatePriceDecision["guardrai
   if (has("peak_competitor_cap")) parts.push("lalu dibatasi agar tidak melewati harga tengah villa sekitar untuk malam itu");
   if (has("peak_competitor_headroom")) parts.push("lalu dinaikkan mendekati harga villa sekitar untuk malam itu");
   if (has("near_arrival_no_increase")) parts.push("dan tidak dinaikkan karena sudah dekat tanggal menginap tapi masih kosong");
+  if (has("last_room")) parts.push("dinaikkan 30% karena kamar tinggal satu");
+  else if (has("few_rooms_left")) parts.push("dinaikkan 15% karena kamar tinggal dua");
 
   if (guardrail === "clamped_movement") parts.push("terakhir direm agar tidak berubah drastis dari harga hari ini");
   else if (guardrail === "clamped_min") parts.push("terakhir dinaikkan ke batas bawah harga yang pemilik tetapkan");
@@ -1840,6 +1880,7 @@ export async function decideRatesForRoomType(
       dayOfWeekRelative: dayOfWeek.usable ? dayOfWeek.relativeByIsoDay.get(isoDay(targetDate)) ?? null : null,
       searchDemandRelative: searchDemandRelativeFor(searchDemand, targetDate),
       peakCompetitorMedian: peakAnchor ? peakMedianByDate.get(peakAnchor) ?? null : null,
+      roomsLeft: roomsAvailableByDate?.get(targetDate) ?? Math.max(0, unitIds.size - activeForDate.length - freeSold),
     });
   });
 }

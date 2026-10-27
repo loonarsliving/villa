@@ -3,6 +3,13 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-27 — Mesin harga: kamar tinggal sedikit naik sampai 30% (BELUM MERGE, menunggu owner)
+- Owner: "jika kamar sdh tinggal sedikit naikkan harga harusnya", lalu "Naikkan sampai 30%".
+- Masalah (data 27 Okt): Sawah View terisi 3/3 hanya naik 630rb -> 642rb (+1,9%); Standard 8/10 530rb (+6%). Penyebab: `high_occupancy_adjustment_pct` = 0,10 dan sinyal okupansi hanya satu suku di rata-rata berbobot `combineDemandSignals` (bobot 0,6), sehingga sinyal turun lain menggerusnya.
+- `aiPricingEngine.ts` langkah 8b (`scarcityUpliftPct`): sisa 0-1 kamar = harga minimal (harga dasar + tambahan akhir pekan) x 1,30; sisa 2 = x 1,15. Hanya kalau okupansi tanggal itu >= 50%. Tidak digerus sinyal lain, tidak direm batas gerak harian 15%, tidak dipotong harga pesaing; `max_rate` tetap menang. Sisa kamar = `roomsAvailable` Cloudbeds per tanggal, atau unit - terjual kalau tidak ada data. Kode alasan `last_room` / `few_rooms_left`.
+- `villa_pricing_settings` tidak diubah.
+- Traveloka "habis" padahal kamar ada (diperiksa 27 Okt): di database Standard maks 8/10 terisi dalam 60 hari; tidak ada blokir kamar menggantung atau reservasi ganda dari sistem. Sumbernya di pengaturan Cloudbeds/Traveloka (jumlah kamar dibuka, allotment/pemetaan Traveloka, min stay/stop-sell) — belum terverifikasi karena Cloudbeds tidak bisa dibaca dari sesi itu. Agoda juga tidak mendapat booking Standard sejak 12 Okt.
+
 ## 2026-10-27 — Excellent Living ke produksi + penyempurnaan front desk EL
 - Owner 2026-10-27: modul Excellent Living (branch `claude/excellent-living-e7k2m4`, lihat entri 2026-10-22) dibawa ke produksi; tarif kamar EL nanti ditarik dari Cloudbeds setelah API-nya tersambung (belum ada harga EL di sistem, `total_bayar` diisi manual); halaman investor EL ditunda (belum ada investor); Cloudbeds EL diatur belakangan.
 - Migrasi `20261022000001_excellent_living.sql` diperluas SEBELUM pertama kali diterapkan: `el_bookings` + `ktp_photo_path`, `signature_data_url`, `checkout_kondisi`; tabel baru `el_housekeeping` (tugas bersih kamar EL, RLS tanpa policy).
