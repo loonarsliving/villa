@@ -626,6 +626,22 @@ const OCCUPANCY_LADDER_START_PCT = 50;
 const SCARCITY_UPLIFT_BY_ROOMS_LEFT: Record<number, number> = { 0: 0.3, 1: 0.3, 2: 0.15 };
 const SCARCITY_MIN_OCC_PCT = 50;
 
+/**
+ * Okupansi tinggi, aturan yang sama (owner 2026-10-27: "Sama aturannya kalau
+ * okupansi tinggi naikkan jga"). Harga minimal naik bertahap dari 0% di
+ * OCCUPANCY_LADDER_START_PCT sampai penuh di high_occupancy_threshold_pct,
+ * tidak bisa digerus sinyal lain. Konstanta di kode, bukan
+ * villa_pricing_settings.high_occupancy_adjustment_pct (tetap 10%, masih
+ * dipakai sebagai sinyal di rata-rata berbobot).
+ */
+const HIGH_OCCUPANCY_FLOOR_PCT = 0.3;
+
+export function highOccupancyFloorPct(occupancyPct: number, highThresholdPct: number): number {
+  if (occupancyPct <= OCCUPANCY_LADDER_START_PCT) return 0;
+  if (occupancyPct >= highThresholdPct || highThresholdPct <= OCCUPANCY_LADDER_START_PCT) return HIGH_OCCUPANCY_FLOOR_PCT;
+  return HIGH_OCCUPANCY_FLOOR_PCT * ((occupancyPct - OCCUPANCY_LADDER_START_PCT) / (highThresholdPct - OCCUPANCY_LADDER_START_PCT));
+}
+
 export function scarcityUpliftPct(roomsLeft: number | null | undefined, occupancyPct: number): number {
   if (roomsLeft == null || !Number.isFinite(roomsLeft) || occupancyPct < SCARCITY_MIN_OCC_PCT) return 0;
   return SCARCITY_UPLIFT_BY_ROOMS_LEFT[Math.max(0, Math.floor(roomsLeft))] ?? 0;
@@ -1581,14 +1597,16 @@ export function decideRateForDate(input: DateDecisionInput): DatePriceDecision {
     }
   }
 
-  // --- 8b. Kamar tinggal sedikit: harga minimal naik sampai 30% ---
+  // --- 8b. Kamar tinggal sedikit / okupansi tinggi: harga minimal naik sampai 30% ---
   const scarcityPct = scarcityUpliftPct(input.roomsLeft, occupancyPct);
-  if (scarcityPct > 0) {
-    const scarcityRate = Math.round(structuralRate * (1 + scarcityPct));
-    if (decidedRate < scarcityRate) {
-      decidedRate = scarcityRate;
+  const occupancyFloorPct = highOccupancyFloorPct(occupancyPct, settings.high_occupancy_threshold_pct);
+  const floorPct = Math.max(scarcityPct, occupancyFloorPct);
+  if (floorPct > 0) {
+    const demandFloorRate = Math.round(structuralRate * (1 + floorPct));
+    if (decidedRate < demandFloorRate) {
+      decidedRate = demandFloorRate;
       if (guardrailStatus === "clamped_movement") guardrailStatus = "within_range";
-      reasonCodes.push(scarcityPct >= 0.3 ? "last_room" : "few_rooms_left");
+      reasonCodes.push(scarcityPct >= floorPct ? (scarcityPct >= 0.3 ? "last_room" : "few_rooms_left") : "high_occupancy_floor");
     }
   }
 
@@ -1675,6 +1693,7 @@ function narrateDecision(codes: string[], guardrail: DatePriceDecision["guardrai
   if (has("near_arrival_no_increase")) parts.push("dan tidak dinaikkan karena sudah dekat tanggal menginap tapi masih kosong");
   if (has("last_room")) parts.push("dinaikkan 30% karena kamar tinggal satu");
   else if (has("few_rooms_left")) parts.push("dinaikkan 15% karena kamar tinggal dua");
+  else if (has("high_occupancy_floor")) parts.push(`dinaikkan sampai 30% karena tanggal ini sudah terisi ${occupancyPct}%`);
 
   if (guardrail === "clamped_movement") parts.push("terakhir direm agar tidak berubah drastis dari harga hari ini");
   else if (guardrail === "clamped_min") parts.push("terakhir dinaikkan ke batas bawah harga yang pemilik tetapkan");
