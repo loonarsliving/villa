@@ -4,6 +4,10 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-27 — Mesin harga: kamar tinggal sedikit naik sampai 30%
+- Sisa 1 kamar +30%, sisa 2 +15% dari harga dasar + akhir pekan, kalau okupansi >= 50%. Lihat CURRENT_STATE.md 2026-10-27.
+- Okupansi tinggi: naik bertahap 50% -> 80% terisi, sampai +30%.
+
 ### 2026-10-27 — Finance Checklist Dana Masuk: pilihan bulan tidak lagi menampilkan data bulan yang salah
 - `<input type="month">` di Safari/Firefox desktop jatuh jadi kotak teks: setiap ketikan memicu load, dan jawaban bulan setengah-jadi ("2026-1", "2026--01", "2026-19") bisa datang terakhir lalu menimpa data bulan yang dipilih (log produksi 2026-10-27, 5 permintaan 400 + puluhan dengan tanggal tak wajar). Diganti `<select>` 24 bulan ke belakang s/d 2 ke depan, validasi format bulan, dan penjaga urutan load (`loadSeq`, pola sama dengan `_Dashboard.tsx`). Tanpa perubahan villa-api/rumus.
 - Loonars Excellent Living belum dibuka untuk tamu (owner 2026-10-27): di loonars.id form pemesanan EL diganti "Segera Dibuka" (repo loonars, saklar `EL_SUDAH_BUKA`). Front desk EL di aplikasi ini tetap ada untuk persiapan internal.
