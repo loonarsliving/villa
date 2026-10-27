@@ -26,6 +26,7 @@ export function DashboardShell({
   pageTitle,
   pageSub,
   topBarExtra,
+  property = "Loonars Private Living",
   children,
 }: {
   brandTitle: string;
@@ -35,6 +36,8 @@ export function DashboardShell({
   pageTitle: string;
   pageSub?: string;
   topBarExtra?: ReactNode;
+  /** Nama properti di atas sidebar -- Excellent Living memakai shell yang sama. */
+  property?: string;
   children: ReactNode;
 }) {
   const { user, logout, ready } = useAuth();
@@ -55,7 +58,7 @@ export function DashboardShell({
   const navContent = (
     <>
       <div className="px-5 py-5 border-b border-ink/[0.08]">
-        <div className="text-[10px] font-medium text-gold-500 tracking-[0.25em] uppercase">Loonars Private Living</div>
+        <div className="text-[10px] font-medium text-gold-500 tracking-[0.25em] uppercase">{property}</div>
         <div className="font-serif text-lg font-light text-ink leading-tight mt-1">
           {brandTitle}
           <br />

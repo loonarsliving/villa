@@ -25,6 +25,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 ### 2026-10-23 — Notifikasi chat tamu untuk manager (push HP, bunyi, angka ikon)
 - Lihat CURRENT_STATE.md 2026-10-23. Migrasi `20261023000001_villa_push_subscriptions` (owner-approved), env `VILLA_VAPID_PRIVATE_KEY`.
 
+### 2026-10-22 — Loonars Excellent Living: role, tabel el_*, dashboard, Cloudbeds kedua
+- Lihat CURRENT_STATE.md 2026-10-22.
+
 ### 2026-10-21 — Kiriman harian laporan keuangan villa ke MKH Property
 - Lihat CURRENT_STATE.md 2026-10-21 (kiriman harian).
 
