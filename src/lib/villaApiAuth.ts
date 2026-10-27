@@ -89,3 +89,15 @@ export async function periksaTokenChat(token: string): Promise<HasilPeriksaToken
   if (staf !== "ditolak") return staf;
   return periksaTokenManager(token);
 }
+
+/**
+ * Siapa saja yang boleh mengunggah foto KTP saat check-in: staf Private
+ * Living (/summary) ATAU resepsionis Excellent Living. Role el_* dikunci
+ * villa-api hanya ke /el/*, jadi /summary menolaknya -- karena itu dicoba
+ * lewat /el/summary (el_receptionist + admin) kalau pemeriksaan staf menolak.
+ */
+export async function periksaTokenCheckin(token: string): Promise<HasilPeriksaToken> {
+  const staf = await periksaTokenStaf(token);
+  if (staf !== "ditolak") return staf;
+  return periksaToken(token, "/el/summary");
+}

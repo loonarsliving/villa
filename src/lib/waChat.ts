@@ -161,11 +161,14 @@ export function dariTombolWebsite(teks: string): boolean {
  * pemanggil (mirror/route.ts). Sengaja tidak bertanya apa pun dan tidak
  * menawarkan apa pun: setelah ini resepsionis yang membalas.
  */
-export function teksSapaanPertama(namaTampilan?: string | null): string {
+export function teksSapaanPertama(namaTampilan?: string | null, pesanTamu?: string | null): string {
   const nama = (namaTampilan ?? "").trim();
   const sapa = nama && nama.length <= 40 ? `Halo Kak ${nama},` : "Halo Kak,";
+  // Tamu yang datang dari form/tombol Excellent Living di loonars.id
+  // (2026-10-27) disapa dengan nama properti yang dia tanyakan.
+  const properti = /\bexcellent\s+living\b/i.test(pesanTamu ?? "") ? "Loonars Excellent Living" : "Loonars Private Living";
   return (
-    `${sapa} terima kasih sudah menghubungi Loonars Private Living Yogyakarta. ` +
+    `${sapa} terima kasih sudah menghubungi ${properti} Yogyakarta. ` +
     "Pesan Kakak sudah kami terima dan selanjutnya akan ditangani langsung oleh tim Hospitality Management kami."
   );
 }
@@ -176,8 +179,9 @@ export async function kirimSapaanPertamaAman(
   conversationId: string,
   phone: string,
   namaTampilan?: string | null,
+  pesanTamu?: string | null,
 ): Promise<void> {
-  const isi = teksSapaanPertama(namaTampilan);
+  const isi = teksSapaanPertama(namaTampilan, pesanTamu);
   const sent = await kirimDariNomorUtama(phone, isi);
   if (!sent.success) {
     console.error("[waChat] sapaan pertama gagal dikirim", sent.error);

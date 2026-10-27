@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-27 — Excellent Living ke produksi: check-in KTP/tanda tangan/WA, housekeeping EL, pindah kamar, pilihan properti di loonars.id
+- Lihat CURRENT_STATE.md 2026-10-27. Migrasi `20261022000001_excellent_living` (diperluas: kolom dokumen check-in + `el_housekeeping`) diterapkan bersama merge ini.
+
 ### 2026-10-26 — Pengajuan biaya manager → Finance
 - Tabel `villa_pengajuan_biaya` + riwayat + bucket privat (migrasi `20261026000001`, diterapkan 2026-10-26), rute villa-api `/manager/pengajuan*` dan `/finance/pengajuan*`, halaman `/manager/pengajuan` dan `/finance/pengajuan-biaya`. Pasangan chat: Mkhsistem 0307. COGS dari pengajuan belum diubah (menunggu aturan tanggal dari owner). Lihat CURRENT_STATE.md 2026-10-26.
 

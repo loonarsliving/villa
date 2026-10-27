@@ -16,6 +16,7 @@ export function ExcellentShell({ pageTitle, pageSub, children }: { pageTitle: st
       items: [
         { href: "/excellent/front-desk", label: "Status Kamar", icon: "◎" },
         { href: "/excellent/front-desk/booking", label: "Booking", icon: "▦" },
+        { href: "/excellent/front-desk/housekeeping", label: "Housekeeping", icon: "✧" },
       ],
     });
   }

@@ -3816,6 +3816,52 @@ async function elBookingBentrok(room_id, checkin, checkout, kecualiId){
   return data?.[0] ?? null;
 }
 
+/** room_id yang sudah terpakai booking aktif di rentang [checkin, checkout). */
+async function elKamarTerpakai(checkin, checkout, kecualiId){
+  let q = supabase.from('el_bookings').select('room_id')
+    .in('status', ['terjadwal','checkin']).not('room_id', 'is', null)
+    .lt('tgl_checkin', checkout).gt('tgl_checkout', checkin);
+  if(kecualiId) q = q.neq('id', kecualiId);
+  const { data } = await q;
+  return new Set((data ?? []).map(b => b.room_id));
+}
+
+/** Nomor WA tamu: 9-15 digit, boleh diawali + (sama dengan kartu check-in Private Living). */
+function elHpValid(hp){
+  const t = String(hp ?? '').trim();
+  const digit = t.replace(/\D/g, '');
+  return /^\+?[0-9\s\-().]+$/.test(t) && digit.length >= 9 && digit.length <= 15;
+}
+
+async function elBuatTugasHousekeeping(room_id, room_nomor, booking_id, catatan){
+  // Satu tugas pending per kamar cukup -- jangan menumpuk kalau kamar yang
+  // sama dikosongkan dua kali sebelum sempat dibersihkan.
+  const { data: ada } = await supabase.from('el_housekeeping').select('id')
+    .eq('room_id', room_id).eq('status', 'pending').limit(1);
+  if(ada?.length) return;
+  const { error } = await supabase.from('el_housekeeping').insert({
+    room_id, room_nomor, booking_id, tgl: todayWIB(), catatan: catatan ?? null,
+  });
+  if(error) console.error('[el-housekeeping] gagal membuat tugas', error.message);
+}
+
+/**
+ * Ketersediaan publik per tipe kamar untuk loonars.id -- hanya angka, tanpa
+ * nama tamu. Belum ada harga: tarif EL nanti ditarik dari Cloudbeds.
+ */
+async function elKetersediaanPublik(checkin, checkout){
+  const [{ data: tipe }, { data: rooms }, terpakai] = await Promise.all([
+    supabase.from('el_room_types').select('id,kode,nama,deskripsi,kapasitas,sort_order').eq('active', true).order('sort_order'),
+    supabase.from('el_rooms').select('id,room_type_id,status').eq('active', true),
+    elKamarTerpakai(checkin, checkout, null),
+  ]);
+  return (tipe ?? []).map(t => {
+    const kamar = (rooms ?? []).filter(r => r.room_type_id === t.id && r.status !== 'maintenance');
+    return { kode: t.kode, nama: t.nama, deskripsi: t.deskripsi, kapasitas: t.kapasitas,
+      total: kamar.length, tersedia: kamar.filter(r => !terpakai.has(r.id)).length };
+  });
+}
+
 async function elOkupansi(from, to){
   const { count: jumlahKamar } = await supabase.from('el_rooms').select('id', { count:'exact', head:true }).eq('active', true);
   const { data } = await supabase.from('el_bookings')
@@ -3877,6 +3923,49 @@ async function routeExcellentLiving(req, path, m, url, session){
     return json((rooms ?? []).map(r => ({ ...r, booking_hari_ini: perKamar.get(r.id) ?? null })));
   }
 
+  // Kamar untuk form booking: semua kamar aktif + apakah kosong di tanggal
+  // itu, supaya resepsionis tidak menebak lalu kena 409.
+  if(path === '/el/rooms/tersedia' && m === 'GET'){
+    if(!isElStaff) return forbidden();
+    const checkin = url.searchParams.get('checkin'), checkout = url.searchParams.get('checkout');
+    if(!isValidDateStr(checkin) || !isValidDateStr(checkout) || checkout <= checkin) return err('checkin/checkout tidak valid');
+    const [{ data: rooms, error }, terpakai] = await Promise.all([
+      supabase.from('el_rooms').select('id,nomor,status,active,sort_order,room_type_id, el_room_types(kode,nama)')
+        .eq('active', true).order('sort_order').order('nomor'),
+      elKamarTerpakai(checkin, checkout, url.searchParams.get('kecuali')),
+    ]);
+    if(error) return err(error.message);
+    return json((rooms ?? []).map(r => ({ ...r,
+      tersedia: !terpakai.has(r.id) && r.status !== 'maintenance',
+      alasan: terpakai.has(r.id) ? 'sudah dipesan' : r.status === 'maintenance' ? 'maintenance' : null })));
+  }
+
+  // ── Housekeeping EL ───────────────────────────────────────────────────
+  if(path === '/el/housekeeping' && m === 'GET'){
+    if(!isElStaff) return forbidden();
+    const today = todayWIB();
+    const [{ data: pending, error }, { data: selesai }] = await Promise.all([
+      supabase.from('el_housekeeping').select('*').eq('status', 'pending').order('created_at'),
+      supabase.from('el_housekeeping').select('*').eq('status', 'done').gte('done_at', `${today}T00:00:00+07:00`).order('done_at', { ascending:false }),
+    ]);
+    if(error) return err(error.message);
+    return json({ pending: pending ?? [], selesai_hari_ini: selesai ?? [] });
+  }
+
+  if(path === '/el/housekeeping/done' && m === 'PATCH'){
+    if(!isElStaff) return forbidden();
+    const b = await req.json().catch(() => ({}));
+    if(!b.id) return err('id wajib diisi');
+    const { data: tugas } = await supabase.from('el_housekeeping').select('*').eq('id', b.id).maybeSingle();
+    if(!tugas) return err('tugas tidak ditemukan', 404);
+    if(tugas.status === 'done') return json({ success:true });
+    const now = new Date().toISOString();
+    await supabase.from('el_housekeeping').update({ status:'done', done_at: now, done_by: operator }).eq('id', tugas.id);
+    // Kamar kembali siap -- kecuali sudah diisi tamu lagi atau ditandai maintenance.
+    await supabase.from('el_rooms').update({ status:'available', updated_at: now }).eq('id', tugas.room_id).eq('status', 'dirty');
+    return json({ success:true });
+  }
+
   if(path === '/el/rooms/status' && m === 'PATCH'){
     if(!isElStaff) return forbidden();
     const b = await req.json().catch(() => ({}));
@@ -3884,6 +3973,12 @@ async function routeExcellentLiving(req, path, m, url, session){
     const { data, error } = await supabase.from('el_rooms')
       .update({ status: b.status, updated_at: new Date().toISOString() }).eq('id', b.id).select().single();
     if(error) return err(error.message);
+    // Ditandai Siap langsung dari Status Kamar = sudah dibersihkan; tutup
+    // tugas housekeeping-nya supaya tidak menggantung di daftar.
+    if(b.status === 'available'){
+      await supabase.from('el_housekeeping').update({ status:'done', done_at: new Date().toISOString(), done_by: operator })
+        .eq('room_id', b.id).eq('status', 'pending');
+    }
     return json(data);
   }
 
@@ -3992,17 +4087,45 @@ async function routeExcellentLiving(req, path, m, url, session){
     if(!lama) return err('booking tidak ditemukan', 404);
     const now = new Date().toISOString();
 
+    // Check-in memakai kartu check-in yang sama dengan Private Living: foto
+    // KTP, tanda tangan tata tertib, dan nomor WA tamu wajib.
     if(b.action === 'checkin'){
       if(lama.status !== 'terjadwal') return err('Hanya booking terjadwal yang bisa di-check-in', 409);
       if(!lama.room_id) return err('Booking ini belum punya kamar', 409);
-      await supabase.from('el_bookings').update({ status:'checkin', checkin_at: now, checkin_by: operator, updated_at: now }).eq('id', lama.id);
+      const ktp = String(b.ktp_photo_path ?? '');
+      if(!ktp.startsWith('ktp/')) return err('Foto KTP tamu wajib diunggah');
+      const ttd = String(b.signature_data_url ?? '');
+      if(!ttd.startsWith('data:image/png;base64,')) return err('Tanda tangan tamu wajib diisi');
+      if(ttd.length > 600_000) return err('Tanda tangan terlalu besar');
+      if(!elHpValid(b.guest_hp)) return err('Nomor WhatsApp tamu wajib diisi (9-15 digit)');
+      const guest_hp = String(b.guest_hp).trim();
+      const { data: berubah, error } = await supabase.from('el_bookings')
+        .update({ status:'checkin', checkin_at: now, checkin_by: operator, updated_at: now,
+          ktp_photo_path: ktp, signature_data_url: ttd, guest_hp })
+        .eq('id', lama.id).eq('status', 'terjadwal').select('id');
+      if(error) return err(error.message);
+      // Klik ganda / dua resepsionis: hanya yang pertama yang tercatat.
+      if(!berubah?.length) return err('Booking ini sudah check-in', 409);
       await supabase.from('el_rooms').update({ status:'occupied', updated_at: now }).eq('id', lama.room_id);
+      // Nomor kamar sengaja tidak disebut (alasan sama dengan Private Living:
+      // kamar fisik untuk booking OTA bisa berbeda dari yang tercatat).
+      await sendWa(guest_hp,
+        `Halo ${lama.guest_nama}, selamat datang di Loonars Excellent Living Yogyakarta!\nCheck-in Anda sudah tercatat (${lama.tgl_checkin} s/d ${lama.tgl_checkout}). Bila membutuhkan bantuan selama menginap, silakan hubungi resepsionis kami. Terima kasih.`,
+        { template_type:'el_checkin' });
       return json({ success:true });
     }
     if(b.action === 'checkout'){
       if(lama.status !== 'checkin') return err('Hanya tamu yang sudah check-in yang bisa di-check-out', 409);
-      await supabase.from('el_bookings').update({ status:'checkout', checkout_at: now, checkout_by: operator, updated_at: now }).eq('id', lama.id);
-      if(lama.room_id) await supabase.from('el_rooms').update({ status:'dirty', updated_at: now }).eq('id', lama.room_id);
+      const kondisi = b.kondisi ? String(b.kondisi).trim().slice(0, 500) : null;
+      const { data: berubah, error } = await supabase.from('el_bookings')
+        .update({ status:'checkout', checkout_at: now, checkout_by: operator, checkout_kondisi: kondisi, updated_at: now })
+        .eq('id', lama.id).eq('status', 'checkin').select('id');
+      if(error) return err(error.message);
+      if(!berubah?.length) return err('Booking ini sudah check-out', 409);
+      if(lama.room_id){
+        await supabase.from('el_rooms').update({ status:'dirty', updated_at: now }).eq('id', lama.room_id);
+        await elBuatTugasHousekeeping(lama.room_id, lama.room_nomor, lama.id, kondisi);
+      }
       return json({ success:true });
     }
     if(b.action === 'batal'){
@@ -4018,11 +4141,14 @@ async function routeExcellentLiving(req, path, m, url, session){
     if(isi.sumber !== undefined && !EL_SUMBER.includes(isi.sumber)) return err('sumber tidak valid');
     const checkin = isi.tgl_checkin ?? lama.tgl_checkin, checkout = isi.tgl_checkout ?? lama.tgl_checkout;
     if(!isValidDateStr(checkin) || !isValidDateStr(checkout) || checkout <= checkin) return err('tanggal check-in/check-out tidak valid');
-    if(lama.status === 'checkin' && isi.room_id && isi.room_id !== lama.room_id) return err('Tamu sudah check-in; pindah kamar belum didukung', 409);
+    const pindahKamar = lama.status === 'checkin' && isi.room_id && isi.room_id !== lama.room_id;
+    if(lama.status === 'checkin' && isi.tgl_checkin && isi.tgl_checkin !== lama.tgl_checkin) return err('Tamu sudah check-in; tanggal check-in tidak bisa diubah', 409);
     const roomId = isi.room_id ?? lama.room_id;
     if(roomId){
-      const { data: room } = await supabase.from('el_rooms').select('id,nomor,active').eq('id', roomId).maybeSingle();
+      const { data: room } = await supabase.from('el_rooms').select('id,nomor,active,status').eq('id', roomId).maybeSingle();
       if(!room || !room.active) return err('kamar tidak ditemukan', 404);
+      // Tamu yang sedang menginap hanya boleh dipindah ke kamar yang sudah siap.
+      if(pindahKamar && room.status !== 'available') return err(`Kamar ${room.nomor} belum siap (status: ${room.status})`, 409);
       const bentrok = await elBookingBentrok(room.id, checkin, checkout, lama.id);
       if(bentrok) return err(`Kamar ${room.nomor} sudah dipesan ${bentrok.guest_nama} (${bentrok.tgl_checkin} s/d ${bentrok.tgl_checkout})`, 409);
       isi.room_nomor = room.nomor;
@@ -4030,6 +4156,13 @@ async function routeExcellentLiving(req, path, m, url, session){
     isi.durasi_malam = elMalam(checkin, checkout);
     const { data, error } = await supabase.from('el_bookings').update({ ...isi, updated_at: now }).eq('id', lama.id).select().single();
     if(error) return err(error.message);
+    if(pindahKamar){
+      await supabase.from('el_rooms').update({ status:'occupied', updated_at: now }).eq('id', isi.room_id);
+      if(lama.room_id){
+        await supabase.from('el_rooms').update({ status:'dirty', updated_at: now }).eq('id', lama.room_id);
+        await elBuatTugasHousekeeping(lama.room_id, lama.room_nomor, lama.id, `Pindah kamar ke ${isi.room_nomor}`);
+      }
+    }
     return json(data);
   }
 
@@ -4263,6 +4396,16 @@ Deno.serve(async (req)=>{
       available: room_types_result.some(r=>r.available>0),
       room_types: room_types_result,
     });
+  }
+
+  // Ketersediaan Loonars Excellent Living untuk loonars.id (tanpa harga --
+  // tamu memesan lewat WhatsApp sampai tarif EL ditarik dari Cloudbeds).
+  if(path==='/public/el/availability' && m==='GET'){
+    const checkin = url.searchParams.get('checkin'), checkout = url.searchParams.get('checkout');
+    if(!isValidDateStr(checkin) || !isValidDateStr(checkout) || checkout <= checkin) return err('checkin/checkout tidak valid');
+    if(checkin < addDaysStr(todayWIB(), -1)) return err('Tanggal check-in sudah lewat');
+    if(elMalam(checkin, checkout) > 30) return err('Maksimal 30 malam');
+    return json({ checkin, checkout, tipe: await elKetersediaanPublik(checkin, checkout) });
   }
 
   if(path==='/public/payment-info' && m==='GET'){

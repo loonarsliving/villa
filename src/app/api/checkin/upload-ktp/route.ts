@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
-import { periksaTokenStaf } from "@/lib/villaApiAuth";
+import { periksaTokenCheckin } from "@/lib/villaApiAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,7 +16,7 @@ const BUCKET = "guest-documents";
  */
 export async function POST(request: Request) {
   const token = request.headers.get("x-villa-token") ?? "";
-  const sesi = token ? await periksaTokenStaf(token) : "ditolak";
+  const sesi = token ? await periksaTokenCheckin(token) : "ditolak";
   if (sesi === "gagal-periksa") {
     // 503, BUKAN 401: klien mengeluarkan pengguna dari aplikasi setiap kali
     // menerima 401, dan gangguan sesaat tidak boleh melempar resepsionis ke

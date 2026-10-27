@@ -98,6 +98,11 @@ create table if not exists public.el_bookings (
   checkin_by                text,
   checkout_at               timestamptz,
   checkout_by               text,
+  -- Kartu check-in (sama dengan Private Living): foto KTP di bucket privat
+  -- guest-documents (path saja, bukan gambarnya) + tanda tangan tata tertib.
+  ktp_photo_path            text,
+  signature_data_url        text,
+  checkout_kondisi          text,
   created_at                timestamptz not null default now(),
   updated_at                timestamptz not null default now(),
   check (tgl_checkout > tgl_checkin)
@@ -105,6 +110,26 @@ create table if not exists public.el_bookings (
 
 create index if not exists el_bookings_tanggal_idx on public.el_bookings (tgl_checkin, tgl_checkout);
 create index if not exists el_bookings_room_idx on public.el_bookings (room_id, tgl_checkin);
+
+-- 4b. Housekeeping EL --------------------------------------------------------
+-- Tugas bersih-bersih kamar EL, dibuat otomatis saat check-out atau pindah
+-- kamar. Selesai -> kamar kembali 'available'. Terpisah dari tabel
+-- housekeeping Private Living (yang menunjuk ke units).
+create table if not exists public.el_housekeeping (
+  id          uuid primary key default gen_random_uuid(),
+  room_id     uuid not null references public.el_rooms(id) on delete cascade,
+  room_nomor  text,
+  booking_id  uuid references public.el_bookings(id) on delete set null,
+  tgl         date not null,
+  jenis       text not null default 'cleaning' check (jenis in ('cleaning')),
+  status      text not null default 'pending' check (status in ('pending', 'done')),
+  catatan     text,
+  done_at     timestamptz,
+  done_by     text,
+  created_at  timestamptz not null default now()
+);
+
+create index if not exists el_housekeeping_status_idx on public.el_housekeeping (status, tgl);
 
 -- 5. Cloudbeds (akun kedua) --------------------------------------------------
 create table if not exists public.el_cloudbeds_room_mapping (
@@ -146,5 +171,6 @@ alter table public.el_bookings enable row level security;
 alter table public.el_cloudbeds_room_mapping enable row level security;
 alter table public.el_cloudbeds_events_log enable row level security;
 alter table public.el_investor_units enable row level security;
+alter table public.el_housekeeping enable row level security;
 revoke all on public.el_room_types, public.el_rooms, public.el_bookings, public.el_cloudbeds_room_mapping,
-  public.el_cloudbeds_events_log, public.el_investor_units from anon, authenticated;
+  public.el_cloudbeds_events_log, public.el_investor_units, public.el_housekeeping from anon, authenticated;

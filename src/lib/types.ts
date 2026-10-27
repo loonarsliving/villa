@@ -955,6 +955,33 @@ export interface ElBooking {
   cloudbeds_reservation_id: string | null;
   checkin_at: string | null;
   checkout_at: string | null;
+  ktp_photo_path?: string | null;
+  checkout_kondisi?: string | null;
+  created_at: string;
+}
+
+/** /el/rooms/tersedia: kamar aktif + apakah kosong di tanggal yang diminta. */
+export interface ElRoomTersedia {
+  id: string;
+  nomor: string;
+  status: ElRoomStatus;
+  room_type_id: string;
+  el_room_types: { kode: string; nama: string } | null;
+  tersedia: boolean;
+  alasan: string | null;
+}
+
+export interface ElHousekeepingTask {
+  id: string;
+  room_id: string;
+  room_nomor: string | null;
+  booking_id: string | null;
+  tgl: string;
+  jenis: "cleaning";
+  status: "pending" | "done";
+  catatan: string | null;
+  done_at: string | null;
+  done_by: string | null;
   created_at: string;
 }
 

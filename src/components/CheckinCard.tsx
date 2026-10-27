@@ -72,6 +72,19 @@ Larangan:
 * Noda yang ditinggalkan di area bed akan dikenakan charge sesuai kerusakan tersebut.`;
 
 /**
+ * Tata tertib Loonars Excellent Living (2026-10-27). SEMENTARA disalin dari
+ * tata tertib Private Living di atas dengan "villa" diganti "kamar" -- owner
+ * belum menetapkan aturan khusus EL. Kalau owner memberi aturan sendiri,
+ * ganti teks ini saja.
+ */
+export const HOUSE_RULES_EXCELLENT_LIVING = HOUSE_RULES
+  .replace(/Kunci villa/g, "Kunci kamar")
+  .replace(/pemakaian villa/g, "pemakaian kamar")
+  .replace(/Harga villa/g, "Harga kamar")
+  .replace(/di dalam villa/g, "di dalam kamar")
+  .replace(/area villa/g, "area penginapan");
+
+/**
  * Shared check-in card shown right before any booking actually flips to
  * "checkin" (walk-in after payment, OTA/existing booking on arrival, or a
  * manually-logged external-channel booking) -- captures a KTP photo and a
@@ -83,11 +96,17 @@ export function CheckinCard({
   guest,
   onClose,
   onConfirm,
+  houseRules = HOUSE_RULES,
+  unitLabel = "Unit",
 }: {
   open: boolean;
   guest: CheckinCardGuest | null;
   onClose: () => void;
   onConfirm: (data: CheckinCardResult) => Promise<void>;
+  /** Teks tata tertib yang ditandatangani -- bawaan: Private Living. */
+  houseRules?: string;
+  /** "Unit" (Private Living) atau "Kamar" (Excellent Living). */
+  unitLabel?: string;
 }) {
   const toast = useToast();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -311,7 +330,7 @@ export function CheckinCard({
         <div className="text-center mb-4">
           <div className="text-[13px] font-medium text-ink/80">{guest.guestName}</div>
           <div className="text-[10.5px] text-ink/40 mt-0.5">
-            Unit {guest.unitNomor} · {guest.tipe} · {fmtDate(guest.checkinDate)}
+            {unitLabel} {guest.unitNomor} · {guest.tipe} · {fmtDate(guest.checkinDate)}
             {guest.checkoutDate ? ` – ${fmtDate(guest.checkoutDate)}` : ""}
           </div>
         </div>
@@ -373,7 +392,7 @@ export function CheckinCard({
       <div className="mb-5">
         <label className="block text-[9.5px] font-semibold text-ink/30 tracking-[0.12em] uppercase mb-1.5">Tata Tertib & Larangan</label>
         <div className="max-h-40 overflow-y-auto rounded-lg border border-ink/15 bg-base-800/40 p-3 text-[10.5px] leading-relaxed text-ink/60 whitespace-pre-line">
-          {HOUSE_RULES}
+          {houseRules}
         </div>
         <label className="flex items-start gap-2 mt-2.5 cursor-pointer select-none">
           <input

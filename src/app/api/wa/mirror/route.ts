@@ -96,7 +96,7 @@ export async function POST(request: Request) {
     });
   }
   if (hasil?.baru && !hasil.guestId) {
-    after(() => kirimSapaanPertamaAman(supabase, hasil.conversationId, inbound.sender, inbound.senderName));
+    after(() => kirimSapaanPertamaAman(supabase, hasil.conversationId, inbound.sender, inbound.senderName, inbound.text));
   }
 
   return NextResponse.json({ ok: true, villa: true, tercatat: hasil !== null });
