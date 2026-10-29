@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-29 — Website menanyai Cloudbeds sebelum menjual kamar (villa-api)
+- `POST /public/bookings` kini memanggil `cloudbedsReservasiBelumTercatat`: reservasi Cloudbeds aktif yang beririsan tanggalnya, untuk tipe kamar yang sama, tapi belum tercatat di sistem ikut mengurangi unit kosong. Kalau sisanya habis, pesanan ditolak "penuh"; kalau Cloudbeds tidak bisa dibaca, pesanan ditolak (503) -- keputusan owner: kamar tidak boleh terjual dua kali apa pun alasannya. Menutup celah kasus Albi/Falah 29 Okt (B1 terjual di website padahal tipe kamarnya sudah penuh di Cloudbeds).
+
 ### 2026-10-29 — Notifikasi sync Cloudbeds benar-benar tersimpan
 - `notifications.ref_id` bertipe uuid, tapi sync mengisinya dengan ID reservasi Cloudbeds -- insert gagal tanpa suara. Ini membuat notifikasi unit sementara/bentrok/overbooking (#244, #245) dan notifikasi pembatalan Cloudbeds lewat sinkron berkala (sejak 2026-09-17) tidak pernah sampai ke staf. Kini ref_id = id booking (atau null), judul memuat ID reservasi untuk dedupe, dan kegagalan insert dicatat di `errors` ringkasan sync.
 

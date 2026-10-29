@@ -1384,6 +1384,62 @@ async function unitTidakBisaDijualWebsite(unitIds, checkin, checkout, kecualiBoo
 }
 
 /**
+ * Jumlah kamar dari reservasi Cloudbeds aktif yang beririsan dengan
+ * [checkin, checkout) untuk tipe kamar unit-unit ini, tapi BELUM tercatat
+ * sebagai booking di sistem ini. Mengembalikan null kalau Cloudbeds tidak
+ * bisa dibaca -- pemanggil wajib menganggapnya "tidak aman menjual".
+ *
+ * Kenapa ada (29 Okt 2026): Albi Arjani memesan Booking.com untuk 29-31 Okt
+ * pukul 10.19, tapi reservasinya belum diberi nomor kamar di Cloudbeds
+ * sehingga tidak pernah masuk ke sini. Pukul 16.27 website menjual B1 untuk
+ * malam yang sama ke tamu lain, lalu Cloudbeds menolak booking website itu
+ * karena tipe kamarnya sudah penuh. Database kita bukan cermin sempurna
+ * Cloudbeds (sync tiap 10 menit, reservasi tanpa kamar, overbooking), jadi
+ * sebelum menjual, Cloudbeds sendiri yang ditanya.
+ */
+async function cloudbedsReservasiBelumTercatat(unitIds, checkin, checkout){
+  const apiKey = cloudbedsApiKey();
+  if(!apiKey) return null;
+  const {data:map, error:mapErr} = await supabase.from('cloudbeds_room_mapping').select('cloudbeds_room_id').in('unit_id', unitIds);
+  if(mapErr) return null;
+  const tipeCb = new Set((map ?? []).map(r=>String(r.cloudbeds_room_id).replace(/-\d+$/, '')));
+  if(!tipeCb.size) return 0;
+  const propertyId = (Deno.env.get('CLOUDBEDS_PROPERTY_ID') ?? '').trim();
+  const kamarCocok = [];
+  try{
+    for(let halaman = 1; halaman <= 10; halaman++){
+      const url = new URL(`${CLOUDBEDS_API_BASE}/getReservations`);
+      if(propertyId) url.searchParams.set('propertyID', propertyId);
+      url.searchParams.set('checkInTo', addDaysStr(checkout, -1));
+      url.searchParams.set('checkOutFrom', addDaysStr(checkin, 1));
+      url.searchParams.set('includeAllRooms', 'true');
+      url.searchParams.set('pageNumber', String(halaman));
+      url.searchParams.set('pageSize', '100');
+      const res = await fetch(url, {headers:{'x-api-key':apiKey}, signal: AbortSignal.timeout(15000)});
+      const body = await res.json().catch(()=>null);
+      if(!res.ok || body?.success === false || !Array.isArray(body?.data)) return null;
+      for(const r of body.data){
+        if(!['not_confirmed','confirmed','checked_in'].includes(r?.status)) continue;
+        if(!(String(r.startDate) < checkout && String(r.endDate) > checkin)) continue;
+        for(const room of (r.rooms ?? [])){
+          const tipe = room?.roomTypeID != null ? String(room.roomTypeID) : (room?.roomID ? String(room.roomID).replace(/-\d+$/, '') : '');
+          if(tipeCb.has(tipe)) kamarCocok.push(String(r.reservationID));
+        }
+      }
+      if(body.data.length < 100) break;
+    }
+  }catch{ return null; }
+  if(!kamarCocok.length) return 0;
+  const {data:tercatat, error:bkErr} = await supabase.from('bookings').select('cloudbeds_reservation_id')
+    .in('cloudbeds_reservation_id', [...new Set(kamarCocok)]).in('status', ['terjadwal','checkin','menunggu_pembayaran','checkout']);
+  if(bkErr) return null;
+  // Yang sudah tercatat sudah dihitung oleh unitTidakBisaDijualWebsite (atau,
+  // untuk 'checkout', kamarnya memang sudah dikosongkan meja depan).
+  const sudah = new Set((tercatat ?? []).map(b=>String(b.cloudbeds_reservation_id)));
+  return kamarCocok.filter(id=>!sudah.has(id)).length;
+}
+
+/**
  * Unit booking website yang belum dibayar ternyata sudah terisi (biasanya
  * booking OTA dari Cloudbeds yang masuk selama tamu memegang QRIS, karena
  * tahanan website belum dikirim ke Cloudbeds). Pindahkan ke unit lain yang
@@ -4619,6 +4675,22 @@ Deno.serve(async (req)=>{
     const conflicts = await unitTidakBisaDijualWebsite(candidateUnits.map(u=>u.id), tgl_checkin, tgl_checkout);
     const freeUnit = candidateUnits.find(u=>!conflicts.has(u.id));
     if(!freeUnit) return err('Maaf, villa sudah penuh untuk tanggal yang dipilih. Silakan pilih tanggal lain atau hubungi kami di WhatsApp.', 409);
+
+    // Cloudbeds ditanya langsung sebelum menjual: reservasi OTA yang belum
+    // tercatat di sini (sync tertinggal, belum diberi nomor kamar, atau
+    // overbooking) tetap memakan kamar. Kalau Cloudbeds tidak bisa dibaca,
+    // pesanan DITOLAK -- owner 29 Okt 2026: kamar yang sama tidak boleh
+    // terjual dua kali, apa pun alasannya. Lihat cloudbedsReservasiBelumTercatat.
+    const unitKosong = candidateUnits.filter(u=>!conflicts.has(u.id)).length;
+    const belumTercatat = await cloudbedsReservasiBelumTercatat(candidateUnits.map(u=>u.id), tgl_checkin, tgl_checkout);
+    if(belumTercatat === null){
+      console.error('public/bookings: ketersediaan Cloudbeds tidak terbaca, pesanan ditolak', {tgl_checkin, tgl_checkout, room_type});
+      return err('Maaf, ketersediaan kamar sedang tidak bisa dipastikan. Silakan coba lagi beberapa menit lagi atau hubungi kami di WhatsApp.', 503);
+    }
+    if(belumTercatat >= unitKosong){
+      console.error('public/bookings: kamar habis menurut Cloudbeds', {tgl_checkin, tgl_checkout, room_type, unitKosong, belumTercatat});
+      return err('Maaf, villa sudah penuh untuk tanggal yang dipilih. Silakan pilih tanggal lain atau hubungi kami di WhatsApp.', 409);
+    }
 
     const nights = Math.max(1, Math.round((new Date(tgl_checkout).getTime() - new Date(tgl_checkin).getTime())/86400000));
     // Voucher menggratiskan MALAM PERTAMA saja. Nilainya dihitung dengan
