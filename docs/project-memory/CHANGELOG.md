@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-29 — Checklist Dana Masuk: cocokkan dari mutasi bank
+- Finance mengunggah foto/screenshot/PDF mutasi; baris disalin AI Mkhsistem (`/api/villa/ai/bank-statement`), dicocokkan dengan pencairan OTA oleh `src/lib/mutasiBank.ts`, lalu dipakai untuk centang massal. `receive-bulk` villa-api menerima `total_diterima` sehingga nominal transfer asli dan selisih komisi tercatat per booking (dulu selalu = perkiraan, selisih 0). Tanpa perubahan skema.
+
 ### 2026-10-29 — Website menanyai Cloudbeds sebelum menjual kamar (villa-api)
 - `POST /public/bookings` kini memanggil `cloudbedsReservasiBelumTercatat`: reservasi Cloudbeds aktif yang beririsan tanggalnya, untuk tipe kamar yang sama, tapi belum tercatat di sistem ikut mengurangi unit kosong. Kalau sisanya habis, pesanan ditolak "penuh"; kalau Cloudbeds tidak bisa dibaca, pesanan ditolak (503) -- keputusan owner: kamar tidak boleh terjual dua kali apa pun alasannya. Menutup celah kasus Albi/Falah 29 Okt (B1 terjual di website padahal tipe kamarnya sudah penuh di Cloudbeds).
 

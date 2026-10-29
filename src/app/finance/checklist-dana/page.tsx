@@ -9,6 +9,8 @@ import { StatCard } from "@/components/StatCard";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
 import type { FinanceChecklist, FinanceChecklistItem } from "@/lib/types";
 import { kelompokkanPerPencairan, rentangCheckinUntukPencairan, type PencairanGroup } from "@/lib/financePencairan";
+import type { MutasiBaris } from "@/lib/mutasiBank";
+import { MutasiBankCard } from "./_MutasiBank";
 
 /**
  * Checklist dana masuk (owner 2026-10-07): "checklist manual dana yg masuk
@@ -124,6 +126,11 @@ export default function ChecklistDanaPage() {
     const list = sumber ? dataCair.items.filter((i) => (i.sumber ?? "-") === sumber) : dataCair.items;
     return kelompokkanPerPencairan(list, bulan, dataCair.today);
   }, [dataCair, sumber, bulan]);
+  // Mutasi dicocokkan dengan SEMUA channel, tidak ikut filter channel di atas.
+  const pencairanSemua = useMemo(
+    () => (dataCair ? kelompokkanPerPencairan(dataCair.items, bulan, dataCair.today) : []),
+    [dataCair, bulan],
+  );
 
   // Booking yang dipilih lewat kartu pencairan bisa check-in di bulan lain,
   // jadi dicari di kedua data.
@@ -162,6 +169,13 @@ export default function ChecklistDanaPage() {
     setTglMasuk(g.tanggal <= todayISO() ? g.tanggal : todayISO());
   }
 
+  function pakaiMutasi(g: PencairanGroup, baris: MutasiBaris) {
+    setSelected(new Set(g.items.filter((i) => !i.masuk).map((i) => i.booking_id)));
+    setNilaiMutasi(String(baris.nominal));
+    setTglMasuk(baris.tanggal);
+    setRefBank(baris.keterangan.slice(0, 100));
+  }
+
   async function tandaiTerpilih() {
     if (!selected.size || !tglMasuk) return;
     setBusy(true);
@@ -175,6 +189,8 @@ export default function ChecklistDanaPage() {
         booking_ids: [...selected],
         received_date: tglMasuk,
         bank_reference: refBank || undefined,
+        // Nilai mutasi asli dibagi villa-api ke booking terpilih; selisihnya tercatat per booking.
+        total_diterima: mutasi != null && mutasi > 0 ? mutasi : undefined,
         notes,
       });
       setNilaiMutasi("");
@@ -335,6 +351,8 @@ export default function ChecklistDanaPage() {
             </div>
           </Card>
 
+          <MutasiBankCard groups={pencairanSemua} bulanLabel={namaBulan(bulan)} onPakai={pakaiMutasi} />
+
           {selected.size > 0 && (
             <Card className="mb-4 border-gold-500/40">
               <CardHeader
@@ -342,7 +360,7 @@ export default function ChecklistDanaPage() {
                 subtitle="Cocokkan dengan satu transfer di mutasi bank, lalu centang sekaligus"
               />
               <div className="p-4 grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
-                <Field label="Nilai di mutasi bank (opsional)">
+                <Field label="Nilai di mutasi bank (dicatat sebagai diterima)">
                   <input className={inputCls} type="number" value={nilaiMutasi} onChange={(e) => setNilaiMutasi(e.target.value)} />
                 </Field>
                 <Field label="Tanggal masuk">
@@ -362,7 +380,7 @@ export default function ChecklistDanaPage() {
                 <div className={`px-4 pb-4 text-[11px] ${selisih === 0 ? "text-sage-400" : "text-ruby-400"}`}>
                   {selisih === 0
                     ? "Cocok: nilai mutasi sama persis dengan total booking yang dipilih."
-                    : `Selisih ${fmtCurrencyFull(selisih)} (mutasi ${selisih > 0 ? "lebih besar" : "lebih kecil"} dari total yang dipilih). Periksa lagi booking yang dipilih, atau tandai satu per satu dengan nilai sebenarnya.`}
+                    : `Selisih ${fmtCurrencyFull(selisih)} (mutasi ${selisih > 0 ? "lebih besar" : "lebih kecil"} dari total yang dipilih). Kalau booking yang dipilih sudah benar, selisih ini ikut tercatat (dibagi ke booking sebanding angka seharusnya).`}
                 </div>
               )}
             </Card>
