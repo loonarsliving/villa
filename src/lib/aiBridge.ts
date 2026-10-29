@@ -344,3 +344,37 @@ export async function drafBalasanChat(input: DrafBalasanInput): Promise<DrafBala
     alasan: typeof data.alasan === "string" ? data.alasan : "",
   };
 }
+
+export interface MutasiBankBacaan {
+  readable: boolean;
+  bank: string | null;
+  rows: { tanggal: string; keterangan: string; nominal: number; arah: "masuk" | "keluar" }[];
+  catatan: string;
+}
+
+/**
+ * Checklist Dana Masuk (owner 2026-10-29): foto/screenshot/PDF mutasi bank
+ * disalin barisnya oleh Mkhsistem (/api/villa/ai/bank-statement, Gemini).
+ * Hanya menyalin -- pencocokan ada di src/lib/mutasiBank.ts dan pencatatan
+ * tetap lewat tombol finance.
+ */
+export async function bacaMutasiBank(data: string, mimeType: string, hariIni: string): Promise<MutasiBankBacaan> {
+  const { baseUrl, secret } = await loadAiBridgeConfig();
+  const res = await fetch(`${baseUrl}/api/villa/ai/bank-statement`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-internal-secret": secret },
+    body: JSON.stringify({ data, mimeType, hariIni }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(55_000),
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json || json.success !== true) {
+    throw new Error(`Membaca mutasi gagal: ${json?.error || `HTTP ${res.status}`}`);
+  }
+  return {
+    readable: json.readable === true,
+    bank: typeof json.bank === "string" ? json.bank : null,
+    rows: Array.isArray(json.rows) ? json.rows : [],
+    catatan: typeof json.catatan === "string" ? json.catatan : "",
+  };
+}

@@ -7542,6 +7542,14 @@ Deno.serve(async (req)=>{
   // transfer OTA yang membayar beberapa booking. Jumlah diterima per
   // booking = angka bersih yang seharusnya; kalau nilai di mutasi berbeda,
   // finance mengoreksi per booking lewat /finance/settlements/receive.
+  //
+  // total_diterima (opsional, owner 2026-10-29 "fitur untuk mengirim mutasi
+  // bank"): nominal transfer asli dari mutasi. OTA tidak merinci potongan
+  // per booking di mutasi, jadi total itu dibagi ke booking-booking yang
+  // dicentang sebanding angka seharusnya (sisa pembulatan ke booking
+  // terakhir), dan selisihnya tercatat per booking (VARIANCE) -- bukan
+  // diam-diam dianggap cocok. Tanpa total_diterima perilakunya sama seperti
+  // sebelumnya.
   if(path==='/finance/settlements/receive-bulk' && m==='POST'){
     if(!isFinance) return forbidden();
     const body = await req.json();
@@ -7549,15 +7557,32 @@ Deno.serve(async (req)=>{
     if(!ids.length) return err('booking_ids wajib diisi');
     if(ids.length > 200) return err('Maksimal 200 booking sekali centang');
     if(!body.received_date) return err('received_date wajib diisi');
+    const totalDiterima = body.total_diterima == null || body.total_diterima === '' ? null : Math.round(Number(body.total_diterima));
+    if(totalDiterima != null && (!Number.isFinite(totalDiterima) || totalDiterima <= 0)) return err('total_diterima harus angka lebih dari 0');
     const { data: list, error } = await supabase.from('finance_settlements').select('*').in('booking_id', ids);
     if(error) return err(error.message);
+    const belum = (list ?? []).filter((s) => s.settlement_status!=='RECEIVED');
+    const diterimaPer = new Map();
+    if(totalDiterima != null){
+      if(!belum.length) return err('Semua booking yang dipilih sudah ditandai masuk.');
+      const totalSeharusnya = belum.reduce((a, s) => a + Number(s.amount), 0);
+      let sisa = totalDiterima;
+      belum.forEach((s, i) => {
+        const bagian = i === belum.length - 1 ? sisa
+          : totalSeharusnya > 0 ? Math.round(totalDiterima * Number(s.amount) / totalSeharusnya) : Math.round(totalDiterima / belum.length);
+        diterimaPer.set(s.id, bagian);
+        sisa -= bagian;
+      });
+    }
     let updated = 0, skipped = 0;
     for(const s of (list ?? [])){
       if(s.settlement_status==='RECEIVED'){ skipped++; continue; }
+      const amount_received = diterimaPer.has(s.id) ? diterimaPer.get(s.id) : Number(s.amount);
+      const variance_amount = amount_received - Number(s.amount);
       const patch = {
-        settlement_status:'RECEIVED', amount_received: Number(s.amount), received_date: body.received_date,
+        settlement_status:'RECEIVED', amount_received, received_date: body.received_date,
         bank_reference: body.bank_reference ?? null, notes: body.notes ?? s.notes ?? null,
-        reconciliation_status:'MATCHED', variance_amount: 0, updated_at: new Date().toISOString(),
+        reconciliation_status: variance_amount === 0 ? 'MATCHED' : 'VARIANCE', variance_amount, updated_at: new Date().toISOString(),
       };
       const { data: saved, error: uErr } = await supabase.from('finance_settlements').update(patch).eq('id', s.id).select('*').single();
       if(uErr) return err(uErr.message);
