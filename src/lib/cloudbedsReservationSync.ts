@@ -1,7 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { statusSetelahSync, dibuatDiSini } from "./bookingStatusSync";
-import { getCloudbedsReservationTotals } from "@/lib/cloudbedsApi";
+import { getCloudbedsReservationTotals, getCloudbedsRoomBlocks } from "@/lib/cloudbedsApi";
 import { mapSourceNameToSumber } from "@/lib/cloudbedsSourceMapping";
+import { bacaBlokirKamar, pilihUnitSementara, type BlokirKamar, type KandidatUnit, type Pemakaian } from "@/lib/cloudbedsUnitSementara";
 
 /**
  * Pulls active & upcoming reservations pulls active & upcoming reservations
@@ -34,6 +35,8 @@ const ACTIVE_STATUSES = ["not_confirmed", "confirmed", "checked_in"] as const;
 
 interface CloudbedsRoomAssignment {
   roomID?: string | null;
+  /** Ada juga untuk kamar yang belum di-assign (includeAllRooms menggabungkan assigned + unassigned, per spec pms-v1.2). */
+  roomTypeID?: string | null;
   roomCheckIn?: string;
   roomCheckOut?: string;
   guestID?: string;
@@ -118,6 +121,8 @@ export interface ReservationSyncSummary {
   matched: number;
   inserted: number;
   skipped_unmapped: number;
+  /** Reservasi tanpa nomor kamar di Cloudbeds yang tetap dimasukkan dengan unit sementara -- lihat cloudbedsUnitSementara.ts. */
+  unit_sementara: { reservation_id: string; unit_nomor: string | null }[];
   /** Reservations that originated on our side and were deliberately not written back. */
   skipped_own: number;
   unmapped_room_ids: string[];
@@ -192,16 +197,18 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
   // nomor WA yang diisi resepsionis saat check-in tertinggal di baris lama
   // (9 Okt 2026: satu tamu sudah punya 491 baris, WA info malam tidak sampai).
   const guestIdSaatIni = new Map<string, string>();
+  const unitIdSaatIni = new Map<string, string>();
   if (reservationIds.length > 0) {
     const { data: existing } = await supabase
       .from("bookings")
-      .select("cloudbeds_reservation_id, sumber, catatan, status, guest_id, is_free_stay, voucher_id, kol_voucher_id")
+      .select("cloudbeds_reservation_id, sumber, catatan, status, guest_id, unit_id, is_free_stay, voucher_id, kol_voucher_id")
       .in("cloudbeds_reservation_id", reservationIds);
     for (const b of existing ?? []) {
       if (!b.cloudbeds_reservation_id) continue;
       const id = String(b.cloudbeds_reservation_id);
       if (b.status) statusSaatIni.set(id, String(b.status));
       if (b.guest_id) guestIdSaatIni.set(id, String(b.guest_id));
+      if (b.unit_id) unitIdSaatIni.set(id, String(b.unit_id));
       if (dibuatDiSini(b.sumber, b.catatan, b)) ownReservationIds.add(id);
     }
   }
@@ -218,24 +225,119 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
   const unmappedRoomIds: string[] = [];
   const errors: string[] = [];
 
+  // Reservasi OTA yang belum diberi nomor kamar di Cloudbeds (hanya tipe
+  // kamarnya) tetap dimasukkan, dengan unit sementara yang kosong dari tipe
+  // yang sama -- lihat cloudbedsUnitSementara.ts. Dulu dilewati, sehingga
+  // tamunya tidak ada di sistem dan kamarnya bisa terjual lagi lewat website.
+  //
+  // Diproses LEBIH DULU daripada reservasi lain: unit sementaranya dipilih
+  // dengan menghitung kamar yang sudah Cloudbeds tetapkan untuk reservasi
+  // lain di run ini, lalu disimpan sebelum reservasi-reservasi itu di-upsert.
+  // Dengan begitu unit sementara dari run sebelumnya bergeser lebih dulu dan
+  // tidak pernah menghalangi kamar yang Cloudbeds sendiri sudah tetapkan.
+  const tanpaNomorKamar = (r: CloudbedsReservation) =>
+    !(r.rooms ?? []).some((x) => x.roomID) && (r.rooms ?? []).some((x) => x.roomTypeID);
+  const butuhSementara = reservations
+    .filter((r) => !ownReservationIds.has(r.reservationID) && tanpaNomorKamar(r))
+    .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.reservationID.localeCompare(b.reservationID));
+  const unitSementara = new Map<string, KandidatUnit>();
+  const unitSementaraLaporan: { reservation_id: string; unit_nomor: string | null }[] = [];
+  if (butuhSementara.length > 0) {
+    const kandidat: KandidatUnit[] = (mappings ?? []).map((m) => {
+      const row = m as unknown as MappingRow & { cloudbeds_room_id: string };
+      return {
+        cloudbedsRoomId: String(row.cloudbeds_room_id),
+        unitId: row.unit_id,
+        unitNomor: Array.isArray(row.units) ? (row.units[0]?.nomor ?? null) : (row.units?.nomor ?? null),
+      };
+    });
+    const mulai = butuhSementara.map((r) => r.startDate).sort()[0];
+    const sampai = butuhSementara.map((r) => r.endDate).sort().at(-1)!;
+    const idSementara = new Set(butuhSementara.map((r) => r.reservationID));
+    const idBerkamar = new Set(reservations.filter((r) => !idSementara.has(r.reservationID)).map((r) => r.reservationID));
+
+    // Pemakaian kamar menurut database -- kecuali baris milik reservasi yang
+    // posisinya akan ditetapkan ulang di run ini (yang tanpa kamar dipilih
+    // ulang di sini; yang berkamar memakai posisi Cloudbeds, di bawah).
+    const { data: aktif } = await supabase
+      .from("bookings")
+      .select("unit_id, tgl_checkin, tgl_checkout, cloudbeds_reservation_id")
+      .in("status", ["terjadwal", "checkin", "menunggu_pembayaran"])
+      .lt("tgl_checkin", sampai)
+      .or(`tgl_checkout.is.null,tgl_checkout.gt.${mulai}`);
+    const terpakai: Pemakaian[] = [];
+    for (const b of aktif ?? []) {
+      const rid = b.cloudbeds_reservation_id ? String(b.cloudbeds_reservation_id) : null;
+      if (rid && (idSementara.has(rid) || (idBerkamar.has(rid) && !ownReservationIds.has(rid)))) continue;
+      terpakai.push({ unitId: String(b.unit_id), checkIn: String(b.tgl_checkin), checkOut: b.tgl_checkout ? String(b.tgl_checkout) : null });
+    }
+    for (const r of reservations) {
+      if (idSementara.has(r.reservationID) || ownReservationIds.has(r.reservationID)) continue;
+      const kamar = (r.rooms ?? []).find((x) => x.roomID && mappingByRoomId.has(String(x.roomID)));
+      if (!kamar?.roomID) continue;
+      terpakai.push({
+        unitId: mappingByRoomId.get(String(kamar.roomID))!.unit_id,
+        checkIn: kamar.roomCheckIn ?? r.startDate,
+        checkOut: kamar.roomCheckOut ?? r.endDate,
+      });
+    }
+
+    // Blokir kamar Cloudbeds (maintenance, tutup) ikut dihindari. Batas
+    // Cloudbeds 35 hari per permintaan; blokir di luar itu tidak terbaca.
+    let blokir: BlokirKamar[] = [];
+    try {
+      const batas = new Date(Date.parse(`${mulai}T00:00:00Z`) + 34 * 86400000).toISOString().slice(0, 10);
+      blokir = bacaBlokirKamar(await getCloudbedsRoomBlocks(mulai, sampai < batas ? sampai : batas));
+    } catch (e) {
+      errors.push(`blokir kamar tidak terbaca, unit sementara dipilih tanpa memperhitungkannya: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    for (const r of butuhSementara) {
+      const kamar = (r.rooms ?? []).find((x) => x.roomTypeID)!;
+      const checkIn = kamar.roomCheckIn ?? r.startDate;
+      const checkOut = kamar.roomCheckOut ?? r.endDate;
+      const pilihan = pilihUnitSementara({
+        roomTypeId: String(kamar.roomTypeID),
+        checkIn,
+        checkOut,
+        kandidat,
+        terpakai,
+        blokir,
+        unitSebelumnya: unitIdSaatIni.get(r.reservationID) ?? null,
+      });
+      if (!pilihan) {
+        errors.push(`${r.reservationID}: belum ada nomor kamar di Cloudbeds dan tidak ada unit kosong untuk ${checkIn} s/d ${checkOut}`);
+        continue;
+      }
+      unitSementara.set(r.reservationID, pilihan);
+      unitSementaraLaporan.push({ reservation_id: r.reservationID, unit_nomor: pilihan.unitNomor });
+      terpakai.push({ unitId: pilihan.unitId, checkIn, checkOut });
+    }
+  }
+
   let skippedOwn = 0;
-  for (const resv of reservations) {
+  const urutan = [...butuhSementara, ...reservations.filter((r) => !butuhSementara.includes(r))];
+  for (const resv of urutan) {
     if (ownReservationIds.has(resv.reservationID)) {
       skippedOwn++;
       continue;
     }
     const room = (resv.rooms ?? []).find((r) => r.roomID && mappingByRoomId.has(String(r.roomID)));
-    if (!room?.roomID) {
+    const sementara = room?.roomID ? undefined : unitSementara.get(resv.reservationID);
+    if (!room?.roomID && !sementara) {
       skippedUnmapped++;
       for (const r of resv.rooms ?? []) if (r.roomID) unmappedRoomIds.push(String(r.roomID));
       continue;
     }
-    const mapping = mappingByRoomId.get(String(room.roomID))!;
+    const kamar = room ?? (resv.rooms ?? []).find((r) => r.roomTypeID)!;
+    const mapping: MappingRow = room?.roomID
+      ? mappingByRoomId.get(String(room.roomID))!
+      : { unit_id: sementara!.unitId, units: sementara!.unitNomor ? { nomor: sementara!.unitNomor } : null };
     const unitNomor = Array.isArray(mapping.units) ? (mapping.units[0]?.nomor ?? null) : (mapping.units?.nomor ?? null);
     matched++;
 
-    const checkIn = room.roomCheckIn ?? resv.startDate;
-    const checkOut = room.roomCheckOut ?? resv.endDate;
+    const checkIn = kamar.roomCheckIn ?? resv.startDate;
+    const checkOut = kamar.roomCheckOut ?? resv.endDate;
     const nights = checkOut ? Math.round((Date.parse(`${checkOut}T00:00:00Z`) - Date.parse(`${checkIn}T00:00:00Z`)) / 86400000) : 0;
     // `tarif` holds the WHOLE-STAY amount in this schema, not a nightly
     // rate: villa-api writes `tarif: computedTarif, total_bayar:
@@ -249,7 +351,7 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
     const balanceRaw = resv.balance;
     const cloudbedsBalance = balanceRaw != null && balanceRaw !== '' && Number.isFinite(Number(balanceRaw)) ? Number(balanceRaw) : null;
 
-    const guestDetail = room.guestID ? resv.guestList?.[room.guestID] : undefined;
+    const guestDetail = kamar.guestID ? resv.guestList?.[kamar.guestID] : undefined;
     const guestNama =
       guestDetail?.guestFirstName || guestDetail?.guestLastName
         ? `${guestDetail?.guestFirstName ?? ""} ${guestDetail?.guestLastName ?? ""}`.trim()
@@ -323,6 +425,19 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
         errors.push(`${resv.reservationID}: ${error.message}`);
       } else {
         inserted++;
+        // Sekali saja, saat booking-nya baru masuk: staf perlu meng-assign
+        // kamar yang SAMA di Cloudbeds. Kalau Cloudbeds nanti memberi kamar
+        // lain, sync berikutnya memindahkan booking ke kamar itu.
+        if (sementara && !statusSaatIni.has(resv.reservationID)) {
+          await supabase.from("notifications").insert({
+            unit_id: mapping.unit_id,
+            target_role: "all",
+            tipe: "booking",
+            judul: `Booking Cloudbeds tanpa nomor kamar — sementara di Unit ${unitNomor ?? "?"}`,
+            pesan: `${guestNama} (${checkIn} s/d ${checkOut}) belum diberi kamar di Cloudbeds. Assign kamar Unit ${unitNomor ?? "?"} di Cloudbeds supaya sama dengan sistem.`,
+            ref_id: resv.reservationID,
+          });
+        }
       }
     } catch (e) {
       errors.push(`${resv.reservationID}: ${e instanceof Error ? e.message : String(e)}`);
@@ -380,6 +495,7 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
     matched,
     inserted,
     skipped_unmapped: skippedUnmapped,
+    unit_sementara: unitSementaraLaporan,
     skipped_own: skippedOwn,
     unmapped_room_ids: [...new Set(unmappedRoomIds)].slice(0, 20),
     cancelled_closed: cancelledClosed,
@@ -394,6 +510,7 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
     matched,
     inserted,
     skipped_unmapped: skippedUnmapped,
+    unit_sementara: unitSementaraLaporan,
     skipped_own: skippedOwn,
     unmapped_room_ids: [...new Set(unmappedRoomIds)].slice(0, 20),
     cancelled_closed: cancelledClosed,

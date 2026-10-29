@@ -4,6 +4,10 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-29 — Sync Cloudbeds: reservasi tanpa nomor kamar tetap masuk (unit sementara)
+- Reservasi OTA yang di Cloudbeds baru punya tipe kamar (belum di-assign nomor kamar) dulu dilewati sync (`skipped_unmapped`), sehingga tamunya tidak ada di sistem dan kamarnya bisa terjual lagi lewat website. Kasus nyata: Albi Arjani (Booking.com 68CNS8H63H, 29-31 Okt) tidak ada di sistem, lalu B1 terjual ke tamu website untuk malam yang sama.
+- Kini `syncCloudbedsReservations` memberi unit sementara dari tipe kamar yang sama yang kosong di seluruh rentang menginap (tidak bentrok dengan booking aktif/menunggu pembayaran, tidak diblokir di Cloudbeds), diproses sebelum reservasi berkamar supaya tidak menghalangi kamar yang Cloudbeds tetapkan. Unit dipertahankan antar-sync selama masih kosong; begitu Cloudbeds meng-assign kamar, booking ikut kamar Cloudbeds. Satu notifikasi ke staf saat booking pertama masuk ("assign kamar Unit X di Cloudbeds"). Logika di `src/lib/cloudbedsUnitSementara.ts` (+ tes). Tanpa perubahan skema/harga.
+
 ### 2026-10-27 — Mesin harga: kamar tinggal sedikit naik sampai 30%
 - Sisa 1 kamar +30%, sisa 2 +15% dari harga dasar + akhir pekan, kalau okupansi >= 50%. Lihat CURRENT_STATE.md 2026-10-27.
 - Okupansi tinggi: naik bertahap 50% -> 80% terisi, sampai +30%.
