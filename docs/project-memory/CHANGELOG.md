@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-29 — Notifikasi sync Cloudbeds benar-benar tersimpan
+- `notifications.ref_id` bertipe uuid, tapi sync mengisinya dengan ID reservasi Cloudbeds -- insert gagal tanpa suara. Ini membuat notifikasi unit sementara/bentrok/overbooking (#244, #245) dan notifikasi pembatalan Cloudbeds lewat sinkron berkala (sejak 2026-09-17) tidak pernah sampai ke staf. Kini ref_id = id booking (atau null), judul memuat ID reservasi untuk dedupe, dan kegagalan insert dicatat di `errors` ringkasan sync.
+
 ### 2026-10-29 — Sync Cloudbeds: reservasi yang kamarnya bentrok tetap masuk + peringatan overbooking
 - Reservasi yang kamar Cloudbeds-nya sudah dipakai booking lain di sistem (constraint `bookings_no_overlap_active`) dulu gagal masuk tiap 10 menit tanpa ada yang tahu (contoh 29 Okt: `68466MF24R`, `6576PZ5V3G`). Kini dipindah ke unit kosong dari tipe yang sama + notifikasi "Kamar Cloudbeds bentrok"; kalau tidak ada unit kosong sama sekali, notifikasi "TIDAK MASUK SISTEM" (sekali per reservasi), juga untuk reservasi tanpa nomor kamar.
 - Tamu yang sudah check-in/check-out tidak lagi dipindah unitnya oleh sync kalau Cloudbeds mengganti kamar (meja depan berwenang atas keadaan tamu di properti, sejalan dengan `bookingStatusSync.ts`).
