@@ -4,6 +4,10 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-29 — Payment Gateway Loonars Excellent Living
+- Halaman baru `/excellent/front-desk/payment-gateway`: QRIS EL sendiri (`integration_settings.el_qris`, merchant "LOONARS" NMID ID1026627194701), tagih per booking, Tandai Lunas / Batalkan Lunas (admin). QRIS Private Living tidak berubah.
+- Migrasi `20261029000001_el_status_bayar` (`el_bookings.status_bayar`, `paid_at`, `paid_by`); villa-api `/el/qris`, aksi `lunas`/`batal_lunas`; kolom Bayar di halaman Booking EL.
+
 ### 2026-10-29 — Website menanyai Cloudbeds sebelum menjual kamar (villa-api)
 - `POST /public/bookings` kini memanggil `cloudbedsReservasiBelumTercatat`: reservasi Cloudbeds aktif yang beririsan tanggalnya, untuk tipe kamar yang sama, tapi belum tercatat di sistem ikut mengurangi unit kosong. Kalau sisanya habis, pesanan ditolak "penuh"; kalau Cloudbeds tidak bisa dibaca, pesanan ditolak (503) -- keputusan owner: kamar tidak boleh terjual dua kali apa pun alasannya. Menutup celah kasus Albi/Falah 29 Okt (B1 terjual di website padahal tipe kamarnya sudah penuh di Cloudbeds).
 

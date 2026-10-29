@@ -139,4 +139,8 @@ Konsekuensi yang harus dipahami siapa pun yang mengoperasikan Payment Gateway:
    tamu tidak punya apa pun untuk dipindai; halaman sekarang menampilkan
    peringatan merah kalau kosong. Per 2026-09-19 gambar ini SUDAH terisi.
 4. **Tidak ada env var yang perlu diset** untuk pembayaran.
+5. **Excellent Living punya QRIS sendiri** (sejak 2026-10-29): `integration_settings.el_qris`,
+   merchant "LOONARS" (NMID ID1026627194701), diunggah lewat ⚙ QRIS di
+   `/excellent/front-desk/payment-gateway`. Jangan tertukar dengan `walkin_qris`
+   (Private Living). Status bayar EL ada di `el_bookings.status_bayar`.
 

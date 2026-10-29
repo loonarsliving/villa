@@ -957,8 +957,13 @@ export interface ElBooking {
   checkout_at: string | null;
   ktp_photo_path?: string | null;
   checkout_kondisi?: string | null;
+  status_bayar?: ElStatusBayar;
+  paid_at?: string | null;
+  paid_by?: string | null;
   created_at: string;
 }
+
+export type ElStatusBayar = "belum" | "lunas";
 
 /** /el/rooms/tersedia: kamar aktif + apakah kosong di tanggal yang diminta. */
 export interface ElRoomTersedia {

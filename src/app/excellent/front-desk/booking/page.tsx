@@ -256,6 +256,7 @@ export default function ElBookingPage() {
                   <th className="px-3.5 py-2.5">Sumber</th>
                   <th className="px-3.5 py-2.5 text-right">Total</th>
                   <th className="px-3.5 py-2.5">Status</th>
+                  <th className="px-3.5 py-2.5">Bayar</th>
                   <th className="px-3.5 py-2.5" />
                 </tr>
               </thead>
@@ -274,6 +275,9 @@ export default function ElBookingPage() {
                     <td className="px-3.5 py-2.5 text-ink/60">{b.sumber}</td>
                     <td className="px-3.5 py-2.5 text-right text-ink/70 whitespace-nowrap">{fmtCurrencyFull(b.total_bayar)}</td>
                     <td className="px-3.5 py-2.5"><Badge tone={STATUS_TONE[b.status]}>{STATUS_LABEL[b.status]}</Badge></td>
+                    <td className="px-3.5 py-2.5">
+                      {b.status !== "batal" && (b.status_bayar === "lunas" ? <Badge tone="ok">Lunas</Badge> : <Badge tone="pending">Belum</Badge>)}
+                    </td>
                     <td className="px-3.5 py-2.5 whitespace-nowrap text-right">
                       {b.status === "terjadwal" && (
                         <span className="inline-flex gap-2">
@@ -356,7 +360,9 @@ export default function ElBookingPage() {
             {SUMBER.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </Field>
-        <Field label="Total Bayar (Rp)"><input type="number" min={0} className={inputCls} value={form.total_bayar} onChange={(e) => setForm({ ...form, total_bayar: e.target.value })} /></Field>
+        <Field label={editing?.status_bayar === "lunas" ? "Total Bayar (Rp) — sudah lunas, tidak bisa diubah" : "Total Bayar (Rp)"}>
+          <input type="number" min={0} className={inputCls} value={form.total_bayar} disabled={editing?.status_bayar === "lunas"} onChange={(e) => setForm({ ...form, total_bayar: e.target.value })} />
+        </Field>
         <Field label="Catatan (opsional)"><input className={inputCls} value={form.catatan} onChange={(e) => setForm({ ...form, catatan: e.target.value })} /></Field>
       </Modal>
 

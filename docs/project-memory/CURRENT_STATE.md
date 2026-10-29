@@ -3,6 +3,16 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-10-29 — Payment Gateway Loonars Excellent Living (QRIS EL sendiri + status Lunas)
+- Owner 2026-10-29: QRIS Private Living (`walkin_qris`, "LOONARS VILLA", NMID ID1026591512540) **tetap**; QRIS baru "LOONARS" (BTN, SLEMAN, NMID ID1026627194701, terminal A01) khusus Excellent Living, dengan Payment Gateway EL sendiri + status Lunas (pilihan owner: "QRIS + status Lunas").
+- Data: `integration_settings` key `el_qris` (`data_url` PNG potongan lembar QRIS resmi; isi QR didekode & CRC dicek cocok). Diunggah/diganti lewat ⚙ QRIS di halaman EL, bukan lewat SQL.
+- Migrasi `20261029000001_el_status_bayar.sql` (diterapkan 2026-10-29 lewat `execute_sql`, dicatat manual di `schema_migrations`): `el_bookings.status_bayar` (`belum`/`lunas`, default `belum`), `paid_at`, `paid_by`. Saat diterapkan ada 0 booking EL.
+- villa-api (`routeExcellentLiving`): `GET/POST /el/qris` (el_receptionist + admin); `PATCH /el/bookings` `action:'lunas'` (atomik `.eq('status_bayar','belum')`, ditolak kalau batal atau total 0) dan `action:'batal_lunas'` (admin saja, koreksi salah klik). Booking lunas tidak bisa dibatalkan (admin batalkan lunas dulu) dan total bayarnya tidak bisa diubah.
+- Frontend: `/excellent/front-desk/payment-gateway` (QRIS EL, daftar menunggu pembayaran -> "Tagih" menampilkan nominal + QRIS -> "Tandai Lunas"; daftar lunas). Kolom "Bayar" di `/excellent/front-desk/booking`.
+- Sama seperti Private Living: QRIS statis, tanpa konfirmasi otomatis -- resepsionis mencocokkan mutasi rekening EL sebelum Tandai Lunas. Pemindai email BTN (`scanPaymentInbox`) TIDAK menyentuh `el_bookings`.
+- Sisa: baris cadangan `integration_settings.walkin_qris_lama_20261029` (salinan QRIS PL dari percobaan ganti yang dibatalkan owner) tidak dipakai kode apa pun; boleh dihapus.
+- **PELAJARAN Supabase MCP (2026-10-29):** `INSERT` baris baru dan `ALTER TABLE ... ADD COLUMN` lewat `execute_sql` lolos tanpa konfirmasi; `UPDATE` yang menimpa data (`execute_sql` maupun `apply_migration`) memunculkan konfirmasi yang tidak sampai ke owner lalu timeout 60 dtk. Untuk mengganti data yang sudah ada, pakai halaman aplikasi (yang memanggil villa-api), jangan SQL.
+
 ## 2026-10-27 — Mesin harga: kamar tinggal sedikit & okupansi tinggi naik sampai 30% (BELUM MERGE, menunggu owner)
 - Owner: "jika kamar sdh tinggal sedikit naikkan harga harusnya", lalu "Naikkan sampai 30%".
 - Masalah (data 27 Okt): Sawah View terisi 3/3 hanya naik 630rb -> 642rb (+1,9%); Standard 8/10 530rb (+6%). Penyebab: `high_occupancy_adjustment_pct` = 0,10 dan sinyal okupansi hanya satu suku di rata-rata berbobot `combineDemandSignals` (bobot 0,6), sehingga sinyal turun lain menggerusnya.

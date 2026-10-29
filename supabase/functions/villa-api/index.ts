@@ -4186,12 +4186,41 @@ async function routeExcellentLiving(req, path, m, url, session){
     }
     if(b.action === 'batal'){
       if(lama.status !== 'terjadwal') return err('Hanya booking terjadwal yang bisa dibatalkan', 409);
+      // Booking yang sudah dibayar butuh pengembalian dana -- jangan sampai
+      // hilang diam-diam dari daftar tagihan lewat tombol Batal biasa.
+      if(lama.status_bayar === 'lunas') return err('Booking ini sudah lunas. Admin perlu membatalkan status lunas dulu sebelum booking dibatalkan.', 409);
       await supabase.from('el_bookings').update({ status:'batal', updated_at: now }).eq('id', lama.id);
+      return json({ success:true });
+    }
+
+    // Payment Gateway EL: QRIS statis, jadi klik ini (setelah resepsionis
+    // mencocokkan mutasi rekening) ITULAH catatan pembayarannya.
+    if(b.action === 'lunas'){
+      if(lama.status === 'batal') return err('Booking yang dibatalkan tidak bisa ditandai lunas', 409);
+      if(!(Number(lama.total_bayar) > 0)) return err('Total bayar booking ini masih 0 -- isi dulu di halaman Booking', 409);
+      const { data: berubah, error } = await supabase.from('el_bookings')
+        .update({ status_bayar:'lunas', paid_at: now, paid_by: operator, updated_at: now })
+        .eq('id', lama.id).eq('status_bayar', 'belum').select('id');
+      if(error) return err(error.message);
+      if(!berubah?.length) return err('Booking ini sudah lunas', 409);
+      return json({ success:true });
+    }
+    // Koreksi salah klik "Tandai Lunas" -- hanya admin.
+    if(b.action === 'batal_lunas'){
+      if(!isAdmin) return forbidden();
+      const { data: berubah, error } = await supabase.from('el_bookings')
+        .update({ status_bayar:'belum', paid_at: null, paid_by: null, updated_at: now })
+        .eq('id', lama.id).eq('status_bayar', 'lunas').select('id');
+      if(error) return err(error.message);
+      if(!berubah?.length) return err('Booking ini belum lunas', 409);
       return json({ success:true });
     }
 
     // Ubah data booking (belum check-out/batal).
     if(lama.status === 'checkout' || lama.status === 'batal') return err('Booking yang sudah selesai/batal tidak bisa diubah', 409);
+    if(lama.status_bayar === 'lunas' && b.total_bayar !== undefined && Number(b.total_bayar) !== Number(lama.total_bayar)){
+      return err('Booking ini sudah lunas; total bayar tidak bisa diubah', 409);
+    }
     const isi = {};
     for(const k of ['guest_nama','guest_hp','sumber','tgl_checkin','tgl_checkout','adults','children','total_bayar','catatan','room_id']) if(b[k] !== undefined) isi[k] = b[k];
     if(isi.sumber !== undefined && !EL_SUMBER.includes(isi.sumber)) return err('sumber tidak valid');
@@ -4220,6 +4249,26 @@ async function routeExcellentLiving(req, path, m, url, session){
       }
     }
     return json(data);
+  }
+
+  // ── QRIS Excellent Living ────────────────────────────────────────────
+  // Terpisah dari 'walkin_qris' (QRIS Private Living): EL punya merchant
+  // QRIS sendiri. Diunggah lewat ⚙ QRIS di /excellent/front-desk/payment-gateway.
+  if(path === '/el/qris' && m === 'GET'){
+    if(!isElStaff) return forbidden();
+    const setting = await getSetting('el_qris');
+    return json({ data_url: setting?.data_url ?? null });
+  }
+  if(path === '/el/qris' && m === 'POST'){
+    if(!isElStaff) return forbidden();
+    const b = await req.json().catch(() => ({}));
+    const dataUrl = b.data_url ?? null;
+    if(dataUrl !== null && (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/'))) return err('QRIS harus berupa gambar');
+    if(typeof dataUrl === 'string' && dataUrl.length > 2_200_000) return err('Gambar QRIS terlalu besar (maks 1.5MB)');
+    const { error } = await supabase.from('integration_settings')
+      .upsert({ key:'el_qris', value:{ data_url: dataUrl }, updated_at: new Date().toISOString(), updated_by: operator });
+    if(error) return err(error.message);
+    return json({ success:true });
   }
 
   // ── Keuangan (finance + admin) ────────────────────────────────────────
