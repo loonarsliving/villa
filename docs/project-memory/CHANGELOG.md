@@ -4,6 +4,10 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-10-29 — Sync Cloudbeds: reservasi yang kamarnya bentrok tetap masuk + peringatan overbooking
+- Reservasi yang kamar Cloudbeds-nya sudah dipakai booking lain di sistem (constraint `bookings_no_overlap_active`) dulu gagal masuk tiap 10 menit tanpa ada yang tahu (contoh 29 Okt: `68466MF24R`, `6576PZ5V3G`). Kini dipindah ke unit kosong dari tipe yang sama + notifikasi "Kamar Cloudbeds bentrok"; kalau tidak ada unit kosong sama sekali, notifikasi "TIDAK MASUK SISTEM" (sekali per reservasi), juga untuk reservasi tanpa nomor kamar.
+- Tamu yang sudah check-in/check-out tidak lagi dipindah unitnya oleh sync kalau Cloudbeds mengganti kamar (meja depan berwenang atas keadaan tamu di properti, sejalan dengan `bookingStatusSync.ts`).
+
 ### 2026-10-29 — Sync Cloudbeds: reservasi tanpa nomor kamar tetap masuk (unit sementara)
 - Reservasi OTA yang di Cloudbeds baru punya tipe kamar (belum di-assign nomor kamar) dulu dilewati sync (`skipped_unmapped`), sehingga tamunya tidak ada di sistem dan kamarnya bisa terjual lagi lewat website. Kasus nyata: Albi Arjani (Booking.com 68CNS8H63H, 29-31 Okt) tidak ada di sistem, lalu B1 terjual ke tamu website untuk malam yang sama.
 - Kini `syncCloudbedsReservations` memberi unit sementara dari tipe kamar yang sama yang kosong di seluruh rentang menginap (tidak bentrok dengan booking aktif/menunggu pembayaran, tidak diblokir di Cloudbeds), diproses sebelum reservasi berkamar supaya tidak menghalangi kamar yang Cloudbeds tetapkan. Unit dipertahankan antar-sync selama masih kosong; begitu Cloudbeds meng-assign kamar, booking ikut kamar Cloudbeds. Satu notifikasi ke staf saat booking pertama masuk ("assign kamar Unit X di Cloudbeds"). Logika di `src/lib/cloudbedsUnitSementara.ts` (+ tes). Tanpa perubahan skema/harga.

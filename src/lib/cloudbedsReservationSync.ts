@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { statusSetelahSync, dibuatDiSini } from "./bookingStatusSync";
 import { getCloudbedsReservationTotals, getCloudbedsRoomBlocks } from "@/lib/cloudbedsApi";
 import { mapSourceNameToSumber } from "@/lib/cloudbedsSourceMapping";
+import { cloudbedsRoomTypeIdOf } from "@/lib/cloudbedsRoomTypeMapping";
 import { bacaBlokirKamar, pilihUnitSementara, type BlokirKamar, type KandidatUnit, type Pemakaian } from "@/lib/cloudbedsUnitSementara";
 
 /**
@@ -242,15 +243,40 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
     .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.reservationID.localeCompare(b.reservationID));
   const unitSementara = new Map<string, KandidatUnit>();
   const unitSementaraLaporan: { reservation_id: string; unit_nomor: string | null }[] = [];
+  const kandidat: KandidatUnit[] = (mappings ?? []).map((m) => {
+    const row = m as unknown as MappingRow & { cloudbeds_room_id: string };
+    return {
+      cloudbedsRoomId: String(row.cloudbeds_room_id),
+      unitId: row.unit_id,
+      unitNomor: Array.isArray(row.units) ? (row.units[0]?.nomor ?? null) : (row.units?.nomor ?? null),
+    };
+  });
+  // Blokir kamar Cloudbeds (maintenance, tutup) ikut dihindari saat memilih
+  // unit sementara/pengganti. Batas Cloudbeds 35 hari per permintaan; blokir
+  // di luar itu tidak terbaca. Dibaca paling banyak sekali per rentang.
+  const blokirCache = new Map<string, BlokirKamar[]>();
+  const muatBlokir = async (mulai: string, sampai: string): Promise<BlokirKamar[]> => {
+    const batas = new Date(Date.parse(`${mulai}T00:00:00Z`) + 34 * 86400000).toISOString().slice(0, 10);
+    const akhir = sampai < batas ? sampai : batas;
+    const kunci = `${mulai}|${akhir}`;
+    if (!blokirCache.has(kunci)) {
+      try {
+        blokirCache.set(kunci, bacaBlokirKamar(await getCloudbedsRoomBlocks(mulai, akhir)));
+      } catch (e) {
+        errors.push(`blokir kamar tidak terbaca, unit dipilih tanpa memperhitungkannya: ${e instanceof Error ? e.message : String(e)}`);
+        blokirCache.set(kunci, []);
+      }
+    }
+    return blokirCache.get(kunci)!;
+  };
+  // Satu peringatan per reservasi per judul, supaya sync tiap 10 menit tidak
+  // membanjiri staf dengan notifikasi yang sama.
+  const peringatkanSekali = async (n: { unit_id: string | null; judul: string; pesan: string; ref_id: string }) => {
+    const { data: sudah } = await supabase.from("notifications").select("id").eq("ref_id", n.ref_id).eq("judul", n.judul).limit(1);
+    if ((sudah ?? []).length > 0) return;
+    await supabase.from("notifications").insert({ ...n, target_role: "all", tipe: "booking" });
+  };
   if (butuhSementara.length > 0) {
-    const kandidat: KandidatUnit[] = (mappings ?? []).map((m) => {
-      const row = m as unknown as MappingRow & { cloudbeds_room_id: string };
-      return {
-        cloudbedsRoomId: String(row.cloudbeds_room_id),
-        unitId: row.unit_id,
-        unitNomor: Array.isArray(row.units) ? (row.units[0]?.nomor ?? null) : (row.units?.nomor ?? null),
-      };
-    });
     const mulai = butuhSementara.map((r) => r.startDate).sort()[0];
     const sampai = butuhSementara.map((r) => r.endDate).sort().at(-1)!;
     const idSementara = new Set(butuhSementara.map((r) => r.reservationID));
@@ -282,15 +308,7 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
       });
     }
 
-    // Blokir kamar Cloudbeds (maintenance, tutup) ikut dihindari. Batas
-    // Cloudbeds 35 hari per permintaan; blokir di luar itu tidak terbaca.
-    let blokir: BlokirKamar[] = [];
-    try {
-      const batas = new Date(Date.parse(`${mulai}T00:00:00Z`) + 34 * 86400000).toISOString().slice(0, 10);
-      blokir = bacaBlokirKamar(await getCloudbedsRoomBlocks(mulai, sampai < batas ? sampai : batas));
-    } catch (e) {
-      errors.push(`blokir kamar tidak terbaca, unit sementara dipilih tanpa memperhitungkannya: ${e instanceof Error ? e.message : String(e)}`);
-    }
+    const blokir = await muatBlokir(mulai, sampai);
 
     for (const r of butuhSementara) {
       const kamar = (r.rooms ?? []).find((x) => x.roomTypeID)!;
@@ -307,6 +325,12 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
       });
       if (!pilihan) {
         errors.push(`${r.reservationID}: belum ada nomor kamar di Cloudbeds dan tidak ada unit kosong untuk ${checkIn} s/d ${checkOut}`);
+        await peringatkanSekali({
+          unit_id: null,
+          judul: `TIDAK MASUK SISTEM — reservasi Cloudbeds ${r.reservationID}`,
+          pesan: `${r.guestName ?? "Tamu Cloudbeds"} (${checkIn} s/d ${checkOut}) belum diberi kamar di Cloudbeds dan semua unit tipe ini sudah terisi di sistem. Kemungkinan overbooking -- cek dan atur kamarnya sekarang.`,
+          ref_id: r.reservationID,
+        });
         continue;
       }
       unitSementara.set(r.reservationID, pilihan);
@@ -398,29 +422,90 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
         if (Object.keys(patch).length) await supabase.from("guests").update(patch).eq("id", guestId);
       }
 
-      const { error } = await supabase.from("bookings").upsert(
-        {
-          unit_id: mapping.unit_id,
-          unit_nomor: unitNomor,
-          guest_id: guestId,
-          guest_nama: guestNama,
-          tipe: "harian",
-          sumber: mapSourceNameToSumber(resv.sourceName),
-          tgl_checkin: checkIn,
-          tgl_checkout: checkOut,
-          durasi_malam: nights > 0 ? nights : null,
-          tarif: stayTotal,
-          total_bayar: stayTotal,
-          // Harga kamar sebelum fee OTA yang Cloudbeds tambahkan ke grandTotal
-          // = "Deposit Amount" di email reservasi; ini yang dipakai Finance
-          // sebagai pendapatan bersih (owner 2026-10-05).
-          ...(totals ? { cloudbeds_subtotal: totals.subTotal } : {}),
-          cloudbeds_balance: cloudbedsBalance,
-          status: statusSetelahSync(statusSaatIni.get(resv.reservationID), statusToVilla(resv.status)),
-          cloudbeds_reservation_id: resv.reservationID,
-        },
-        { onConflict: "cloudbeds_reservation_id" },
-      );
+      const simpan = (unit: { unitId: string; unitNomor: string | null }) =>
+        supabase.from("bookings").upsert(
+          {
+            unit_id: unit.unitId,
+            unit_nomor: unit.unitNomor,
+            guest_id: guestId,
+            guest_nama: guestNama,
+            tipe: "harian",
+            sumber: mapSourceNameToSumber(resv.sourceName),
+            tgl_checkin: checkIn,
+            tgl_checkout: checkOut,
+            durasi_malam: nights > 0 ? nights : null,
+            tarif: stayTotal,
+            total_bayar: stayTotal,
+            // Harga kamar sebelum fee OTA yang Cloudbeds tambahkan ke grandTotal
+            // = "Deposit Amount" di email reservasi; ini yang dipakai Finance
+            // sebagai pendapatan bersih (owner 2026-10-05).
+            ...(totals ? { cloudbeds_subtotal: totals.subTotal } : {}),
+            cloudbeds_balance: cloudbedsBalance,
+            status: statusSetelahSync(statusSaatIni.get(resv.reservationID), statusToVilla(resv.status)),
+            cloudbeds_reservation_id: resv.reservationID,
+          },
+          { onConflict: "cloudbeds_reservation_id" },
+        );
+
+      // Tamu yang sudah check-in/check-out tetap di unit tempat ia benar-benar
+      // berada -- meja depan berwenang atas keadaan tamu di properti (lihat
+      // bookingStatusSync.ts). Cloudbeds memindah kamar setelah tamu masuk
+      // tidak boleh memindahkan booking-nya di sini diam-diam.
+      const statusLama = statusSaatIni.get(resv.reservationID);
+      const unitLama = unitIdSaatIni.get(resv.reservationID);
+      const unitTerkunci =
+        (statusLama === "checkin" || statusLama === "checkout") && unitLama
+          ? { unitId: unitLama, unitNomor: kandidat.find((k) => k.unitId === unitLama)?.unitNomor ?? unitNomor }
+          : null;
+      let unitDipakai = unitTerkunci ?? { unitId: mapping.unit_id, unitNomor };
+      let { error } = await simpan(unitDipakai);
+
+      // Kamar yang Cloudbeds tetapkan ternyata sudah dipakai booking lain di
+      // sistem (biasanya booking website yang belum tercatat di Cloudbeds).
+      // Dulu reservasinya gagal masuk tiap 10 menit tanpa ada yang tahu; kini
+      // dipindah ke unit kosong dari tipe yang sama dan staf diberi tahu.
+      if (error && /bookings_no_overlap_active/.test(error.message) && !unitTerkunci) {
+        const roomTypeId = kamar.roomTypeID ? String(kamar.roomTypeID) : room?.roomID ? cloudbedsRoomTypeIdOf(String(room.roomID)) : null;
+        const { data: aktif } = await supabase
+          .from("bookings")
+          .select("unit_id, guest_nama, tgl_checkin, tgl_checkout, cloudbeds_reservation_id")
+          .in("status", ["terjadwal", "checkin", "menunggu_pembayaran"])
+          .lt("tgl_checkin", checkOut ?? "9999-12-31")
+          .or(`tgl_checkout.is.null,tgl_checkout.gt.${checkIn}`);
+        const lain = (aktif ?? []).filter((b) => String(b.cloudbeds_reservation_id ?? "") !== resv.reservationID);
+        const pengganti = roomTypeId
+          ? pilihUnitSementara({
+              roomTypeId,
+              checkIn,
+              checkOut,
+              kandidat,
+              terpakai: lain.map((b) => ({ unitId: String(b.unit_id), checkIn: String(b.tgl_checkin), checkOut: b.tgl_checkout ? String(b.tgl_checkout) : null })),
+              blokir: await muatBlokir(checkIn, checkOut ?? checkIn),
+              unitSebelumnya: unitLama ?? null,
+            })
+          : null;
+        const penghuni = lain.find((b) => String(b.unit_id) === mapping.unit_id);
+        if (pengganti) {
+          unitDipakai = { unitId: pengganti.unitId, unitNomor: pengganti.unitNomor };
+          ({ error } = await simpan(unitDipakai));
+          if (!error) {
+            unitSementaraLaporan.push({ reservation_id: resv.reservationID, unit_nomor: pengganti.unitNomor });
+            await peringatkanSekali({
+              unit_id: pengganti.unitId,
+              judul: `Kamar Cloudbeds bentrok — ${guestNama} dipindah ke Unit ${pengganti.unitNomor ?? "?"}`,
+              pesan: `Cloudbeds menaruh ${guestNama} (${checkIn} s/d ${checkOut}) di Unit ${unitNomor ?? "?"}, tapi unit itu sudah dipakai ${penghuni?.guest_nama ?? "booking lain"} di sistem. Sementara dicatat di Unit ${pengganti.unitNomor ?? "?"} -- samakan kamarnya di Cloudbeds.`,
+              ref_id: resv.reservationID,
+            });
+          }
+        } else {
+          await peringatkanSekali({
+            unit_id: mapping.unit_id,
+            judul: `TIDAK MASUK SISTEM — reservasi Cloudbeds ${resv.reservationID}`,
+            pesan: `Cloudbeds menaruh ${guestNama} (${checkIn} s/d ${checkOut}) di Unit ${unitNomor ?? "?"}, tapi unit itu sudah dipakai ${penghuni?.guest_nama ?? "booking lain"} dan tidak ada unit kosong lain. Overbooking -- atur kamarnya sekarang.`,
+            ref_id: resv.reservationID,
+          });
+        }
+      }
       if (error) {
         errors.push(`${resv.reservationID}: ${error.message}`);
       } else {
@@ -430,11 +515,11 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
         // lain, sync berikutnya memindahkan booking ke kamar itu.
         if (sementara && !statusSaatIni.has(resv.reservationID)) {
           await supabase.from("notifications").insert({
-            unit_id: mapping.unit_id,
+            unit_id: unitDipakai.unitId,
             target_role: "all",
             tipe: "booking",
-            judul: `Booking Cloudbeds tanpa nomor kamar — sementara di Unit ${unitNomor ?? "?"}`,
-            pesan: `${guestNama} (${checkIn} s/d ${checkOut}) belum diberi kamar di Cloudbeds. Assign kamar Unit ${unitNomor ?? "?"} di Cloudbeds supaya sama dengan sistem.`,
+            judul: `Booking Cloudbeds tanpa nomor kamar — sementara di Unit ${unitDipakai.unitNomor ?? "?"}`,
+            pesan: `${guestNama} (${checkIn} s/d ${checkOut}) belum diberi kamar di Cloudbeds. Assign kamar Unit ${unitDipakai.unitNomor ?? "?"} di Cloudbeds supaya sama dengan sistem.`,
             ref_id: resv.reservationID,
           });
         }
