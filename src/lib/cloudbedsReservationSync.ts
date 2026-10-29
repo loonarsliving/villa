@@ -269,12 +269,15 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
     }
     return blokirCache.get(kunci)!;
   };
-  // Satu peringatan per reservasi per judul, supaya sync tiap 10 menit tidak
-  // membanjiri staf dengan notifikasi yang sama.
-  const peringatkanSekali = async (n: { unit_id: string | null; judul: string; pesan: string; ref_id: string }) => {
-    const { data: sudah } = await supabase.from("notifications").select("id").eq("ref_id", n.ref_id).eq("judul", n.judul).limit(1);
+  // Satu peringatan per judul (judulnya selalu memuat ID reservasi), supaya
+  // sync tiap 10 menit tidak membanjiri staf dengan notifikasi yang sama.
+  // notifications.ref_id bertipe uuid: diisi id booking kita, BUKAN ID
+  // reservasi Cloudbeds -- yang terakhir membuat insert gagal tanpa suara.
+  const peringatkanSekali = async (n: { unit_id: string | null; judul: string; pesan: string; ref_id: string | null }) => {
+    const { data: sudah } = await supabase.from("notifications").select("id").eq("judul", n.judul).limit(1);
     if ((sudah ?? []).length > 0) return;
-    await supabase.from("notifications").insert({ ...n, target_role: "all", tipe: "booking" });
+    const { error } = await supabase.from("notifications").insert({ ...n, target_role: "all", tipe: "booking" });
+    if (error) errors.push(`notifikasi gagal (${n.judul}): ${error.message}`);
   };
   if (butuhSementara.length > 0) {
     const mulai = butuhSementara.map((r) => r.startDate).sort()[0];
@@ -329,7 +332,7 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
           unit_id: null,
           judul: `TIDAK MASUK SISTEM — reservasi Cloudbeds ${r.reservationID}`,
           pesan: `${r.guestName ?? "Tamu Cloudbeds"} (${checkIn} s/d ${checkOut}) belum diberi kamar di Cloudbeds dan semua unit tipe ini sudah terisi di sistem. Kemungkinan overbooking -- cek dan atur kamarnya sekarang.`,
-          ref_id: r.reservationID,
+          ref_id: null,
         });
         continue;
       }
@@ -445,7 +448,7 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
             cloudbeds_reservation_id: resv.reservationID,
           },
           { onConflict: "cloudbeds_reservation_id" },
-        );
+        ).select("id").maybeSingle();
 
       // Tamu yang sudah check-in/check-out tetap di unit tempat ia benar-benar
       // berada -- meja depan berwenang atas keadaan tamu di properti (lihat
@@ -458,7 +461,7 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
           ? { unitId: unitLama, unitNomor: kandidat.find((k) => k.unitId === unitLama)?.unitNomor ?? unitNomor }
           : null;
       let unitDipakai = unitTerkunci ?? { unitId: mapping.unit_id, unitNomor };
-      let { error } = await simpan(unitDipakai);
+      let { data: tersimpan, error } = await simpan(unitDipakai);
 
       // Kamar yang Cloudbeds tetapkan ternyata sudah dipakai booking lain di
       // sistem (biasanya booking website yang belum tercatat di Cloudbeds).
@@ -487,14 +490,14 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
         const penghuni = lain.find((b) => String(b.unit_id) === mapping.unit_id);
         if (pengganti) {
           unitDipakai = { unitId: pengganti.unitId, unitNomor: pengganti.unitNomor };
-          ({ error } = await simpan(unitDipakai));
+          ({ data: tersimpan, error } = await simpan(unitDipakai));
           if (!error) {
             unitSementaraLaporan.push({ reservation_id: resv.reservationID, unit_nomor: pengganti.unitNomor });
             await peringatkanSekali({
               unit_id: pengganti.unitId,
-              judul: `Kamar Cloudbeds bentrok — ${guestNama} dipindah ke Unit ${pengganti.unitNomor ?? "?"}`,
+              judul: `Kamar Cloudbeds bentrok (${resv.reservationID}) — ${guestNama} dipindah ke Unit ${pengganti.unitNomor ?? "?"}`,
               pesan: `Cloudbeds menaruh ${guestNama} (${checkIn} s/d ${checkOut}) di Unit ${unitNomor ?? "?"}, tapi unit itu sudah dipakai ${penghuni?.guest_nama ?? "booking lain"} di sistem. Sementara dicatat di Unit ${pengganti.unitNomor ?? "?"} -- samakan kamarnya di Cloudbeds.`,
-              ref_id: resv.reservationID,
+              ref_id: tersimpan?.id ?? null,
             });
           }
         } else {
@@ -502,7 +505,7 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
             unit_id: mapping.unit_id,
             judul: `TIDAK MASUK SISTEM — reservasi Cloudbeds ${resv.reservationID}`,
             pesan: `Cloudbeds menaruh ${guestNama} (${checkIn} s/d ${checkOut}) di Unit ${unitNomor ?? "?"}, tapi unit itu sudah dipakai ${penghuni?.guest_nama ?? "booking lain"} dan tidak ada unit kosong lain. Overbooking -- atur kamarnya sekarang.`,
-            ref_id: resv.reservationID,
+            ref_id: null,
           });
         }
       }
@@ -510,17 +513,15 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
         errors.push(`${resv.reservationID}: ${error.message}`);
       } else {
         inserted++;
-        // Sekali saja, saat booking-nya baru masuk: staf perlu meng-assign
-        // kamar yang SAMA di Cloudbeds. Kalau Cloudbeds nanti memberi kamar
-        // lain, sync berikutnya memindahkan booking ke kamar itu.
-        if (sementara && !statusSaatIni.has(resv.reservationID)) {
-          await supabase.from("notifications").insert({
+        // Staf perlu meng-assign kamar yang SAMA di Cloudbeds. Kalau Cloudbeds
+        // nanti memberi kamar lain, sync berikutnya memindahkan booking ke
+        // kamar itu. Sekali per reservasi per unit (lihat peringatkanSekali).
+        if (sementara) {
+          await peringatkanSekali({
             unit_id: unitDipakai.unitId,
-            target_role: "all",
-            tipe: "booking",
-            judul: `Booking Cloudbeds tanpa nomor kamar — sementara di Unit ${unitDipakai.unitNomor ?? "?"}`,
+            judul: `Booking Cloudbeds tanpa nomor kamar (${resv.reservationID}) — sementara di Unit ${unitDipakai.unitNomor ?? "?"}`,
             pesan: `${guestNama} (${checkIn} s/d ${checkOut}) belum diberi kamar di Cloudbeds. Assign kamar Unit ${unitDipakai.unitNomor ?? "?"} di Cloudbeds supaya sama dengan sistem.`,
-            ref_id: resv.reservationID,
+            ref_id: tersimpan?.id ?? null,
           });
         }
       }
@@ -567,7 +568,9 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
         tipe: "booking",
         judul: `Booking dibatalkan (Cloudbeds) — Unit ${b.unit_nomor}`,
         pesan: `${b.guest_nama} — reservasi dibatalkan di Cloudbeds, terdeteksi lewat sinkron berkala.`,
-        ref_id: b.cloudbeds_reservation_id,
+        // id booking, bukan ID reservasi Cloudbeds: ref_id bertipe uuid, dan
+        // ID Cloudbeds membuat notifikasi pembatalan ini selalu gagal tersimpan.
+        ref_id: b.id,
       });
     }
   }
