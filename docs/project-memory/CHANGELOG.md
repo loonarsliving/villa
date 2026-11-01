@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-11-01 — Laporan mingguan investor: total & nomor minggu per bulan kalender
+- Keputusan owner: total pendapatan di laporan Rabu ke investor tidak lagi kumulatif sejak 30 Sep, tapi **per bulan kalender** (sejalan dengan dividen tgl 25, lalu mulai lagi dari tgl 1): "Total Pendapatan November (1 Nov – …)". Nomor minggu juga mulai lagi tiap bulan dan ikut bulan tanggal akhir laporan ("Minggu ke-1 November: 28 Okt – 3 Nov"). Minggu yang melewati pergantian bulan: angka "minggu ini" tetap 7 malam utuh; total & rincian bulan dipotong mulai tgl 1. Rumus pendapatan (`bersih()`), status yang dihitung, dan jadwal kirim tidak berubah. `src/lib/investorWeeklyReportText.ts` (+ tes), `src/lib/investorWeeklyReport.ts`.
+
 ### 2026-11-01 — Kamar terisi malam ini realtime dari check-in; snapshot jam 22.00 WIB
 - `/finance` (Survival, villa-api `computeSurvivalKpis`): selama snapshot hari ini belum ada, "malam terisi" bulan berjalan dan "Hari ini" memakai kamar dari booking berstatus `checkin` yang menginap malam ini (`computeLiveOccupiedTonight`, malam gratis investor dikecualikan) -- angka naik saat tamu check-in, bukan menunggu malam. Hari yang lewat tetap dari snapshot. Pemicu: tgl 1 Nov jam 20.17 halaman menampilkan 0 kamar/malam padahal 12 kamar terisi.
 - Cron `daily-inventory-snapshot` dimajukan `55 15` → `0 15 * * *` UTC (22.00 WIB, permintaan owner) untuk menyelaraskan dengan jadwal booking hari itu (termasuk tamu `terjadwal` yang datang larut). Hitungan Rupiah (opex, ADR, status survival) dan `computeOccupiedRoomNights` tidak diubah.

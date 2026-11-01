@@ -86,58 +86,73 @@ describe("teksLaporan", () => {
   it("memuat angka utama dan target", () => {
     const l = hitungLaporan([bk({})], 13, { mulai: "2026-09-30", akhir: "2026-10-06" }, wib);
     const t = teksLaporan(l);
-    expect(t).toContain("Minggu ke-1: 30 Sep – 6 Okt 2026");
+    expect(t).toContain("Minggu ke-1 Oktober: 30 Sep – 6 Okt 2026");
+    expect(t).toContain("Mulai minggu ini");
     expect(t).toContain("Pendapatan villa minggu ini: *Rp500.000*");
     expect(t).not.toMatch(/fee OTA|kotor|marketing/i);
     expect(t).toContain("Agoda: 100% (1 booking)");
-    expect(t).not.toContain("Total Pendapatan");
+    expect(t).not.toContain("Total Pendapatan"); // perMinggu tidak diisi
     expect(t).toContain("okupansi 80% di akhir 2026");
     expect(t).not.toMatch(/airbnb.*rencana/i);
   });
   it("minggu berikutnya tanpa kalimat pembuka", () => {
     const l = hitungLaporan([], 13, { mulai: "2026-10-07", akhir: "2026-10-13" }, wib);
     const t = teksLaporan(l);
-    expect(t).toContain("Minggu ke-2");
+    expect(t).toContain("Minggu ke-2 Oktober");
     expect(t).not.toContain("Mulai minggu ini");
   });
 });
 
-describe("pendapatan kumulatif", () => {
+describe("pendapatan bulan berjalan", () => {
   const p3 = { mulai: "2026-10-14", akhir: "2026-10-20" };
   const data = [
     bk({ tgl_checkin: "2026-09-30", tgl_checkout: "2026-10-01", total_bayar: 1_000_000 }),
+    bk({ tgl_checkin: "2026-10-01", tgl_checkout: "2026-10-02", total_bayar: 500_000 }),
     bk({ tgl_checkin: "2026-10-13", tgl_checkout: "2026-10-14", total_bayar: 2_000_000 }),
     bk({ tgl_checkin: "2026-10-20", tgl_checkout: "2026-10-21", total_bayar: 4_000_000 }),
     bk({ tgl_checkin: "2026-10-15", tgl_checkout: "2026-10-16", status: "batal", total_bayar: 9_000_000 }),
+    bk({ tgl_checkin: "2026-10-30", tgl_checkout: "2026-10-31", total_bayar: 3_000_000 }),
+    bk({ tgl_checkin: "2026-11-02", tgl_checkout: "2026-11-03", total_bayar: 700_000 }),
   ];
-  it("per minggu sejak minggu ke-1, rumus yang sama", () => {
+  it("nomor minggu mulai lagi tiap bulan, ikut bulan tanggal akhir", () => {
+    expect(hitungLaporan([], 13, { mulai: "2026-10-28", akhir: "2026-11-03" }, wib).mingguKe).toBe(1);
+    expect(hitungLaporan([], 13, { mulai: "2026-11-18", akhir: "2026-11-24" }, wib).mingguKe).toBe(4);
+    expect(hitungLaporan([], 13, { mulai: "2026-11-25", akhir: "2026-12-01" }, wib).mingguKe).toBe(1);
+    expect(hitungLaporan([], 13, { mulai: "2026-12-23", akhir: "2026-12-29" }, wib).mingguKe).toBe(5);
+  });
+  it("per minggu hanya di bulan ini, minggu pertama dipotong mulai tgl 1", () => {
     const pm = pendapatanPerMinggu(data, p3);
     expect(pm.map((m) => [m.mingguKe, m.mulai, m.akhir])).toEqual([
-      [1, "2026-09-30", "2026-10-06"],
+      [1, "2026-10-01", "2026-10-06"],
       [2, "2026-10-07", "2026-10-13"],
       [3, "2026-10-14", "2026-10-20"],
     ]);
-    expect(pm.map((m) => m.pendapatan)).toEqual([1_000_000, 2_000_000, 4_000_000]);
+    expect(pm.map((m) => m.pendapatan)).toEqual([500_000, 2_000_000, 4_000_000]);
   });
-  it("teks memuat minggu ini, rincian, total, dan catatan potongan OTA di minggu ke-3", () => {
+  it("teks memuat total bulan, rincian, dan catatan potongan OTA di 20 Okt", () => {
     const l = hitungLaporan(data, 13, p3, wib);
     l.perMinggu = pendapatanPerMinggu(data, p3);
     const t = teksLaporan(l);
+    expect(t).toContain("Minggu ke-3 Oktober");
     expect(t).toContain("Pendapatan villa minggu ini: *Rp4.000.000*");
-    expect(t).toContain("Total Pendapatan 3 Minggu* (30 Sep – 20 Okt)");
-    expect(t).toContain("• Minggu ke-1: Rp1.000.000");
-    expect(t).toContain("*Total: Rp7.000.000*");
+    expect(t).toContain("Total Pendapatan Oktober* (1 Okt – 20 Okt)");
+    expect(t).toContain("• Minggu ke-1: Rp500.000");
+    expect(t).toContain("*Total: Rp6.500.000*");
     expect(t).toContain("potongan OTA");
     expect(t).not.toMatch(/marketing/i);
   });
-  it("catatan penyesuaian hanya sekali, dan rincian disembunyikan setelah 4 minggu", () => {
-    const p5 = { mulai: "2026-10-28", akhir: "2026-11-03" };
-    const l = hitungLaporan(data, 13, p5, wib);
-    l.perMinggu = pendapatanPerMinggu(data, p5);
+  it("minggu silang bulan: kinerja minggu utuh, total bulan baru mulai tgl 1", () => {
+    const p = { mulai: "2026-10-28", akhir: "2026-11-03" };
+    const l = hitungLaporan(data, 13, p, wib);
+    l.perMinggu = pendapatanPerMinggu(data, p);
     const t = teksLaporan(l);
-    expect(t).toContain("Total Pendapatan 5 Minggu");
-    expect(t).not.toContain("Minggu ke-1:");
+    expect(t).toContain("Minggu ke-1 November: 28 Okt – 3 Nov 2026");
+    expect(t).toContain("Pendapatan villa minggu ini: *Rp3.700.000*");
+    expect(t).toContain("Total Pendapatan November* (1 Nov – 3 Nov)");
+    expect(t).toContain("*Total: Rp700.000*");
+    expect(t).not.toContain("• Minggu ke-1:");
     expect(t).not.toContain("potongan OTA");
+    expect(t).not.toContain("Mulai minggu ini");
   });
 });
 

@@ -5,7 +5,7 @@ import { todayISO } from "./format";
 import { kirimDariNomorUtama } from "./mkhsistemWa";
 import { addDaysISO } from "./stayDates";
 import {
-  MINGGU_PERTAMA_MULAI,
+  awalBulan,
   STATUS_DIHITUNG,
   geser,
   hitungLaporan,
@@ -76,12 +76,13 @@ export async function kirimLaporanMingguanInvestor(
   const komisi: KomisiOta = {};
   for (const r of cfg ?? []) if (r.commission_pct != null) komisi[String(r.sumber).toLowerCase()] = Number(r.commission_pct);
 
-  // Total kumulatif sejak minggu ke-1 (owner 2026-10-14), rumus yang sama.
+  // Total bulan berjalan sejak tgl 1 (owner 2026-11-01; sebelumnya kumulatif
+  // sejak minggu ke-1, owner 2026-10-14), rumus yang sama.
   const { data: sejakAwal, error: eK } = await supabase
     .from("bookings")
     .select("sumber, status, unit_nomor, tgl_checkin, tgl_checkout, total_bayar, cloudbeds_subtotal, created_at")
     .in("status", STATUS_DIHITUNG as unknown as string[])
-    .gte("tgl_checkin", MINGGU_PERTAMA_MULAI)
+    .gte("tgl_checkin", awalBulan(p.akhir))
     .lte("tgl_checkin", p.akhir);
   if (eK) throw new Error(`gagal membaca booking kumulatif: ${eK.message}`);
 

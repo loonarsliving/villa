@@ -34,7 +34,6 @@ const CATATAN_PENYESUAIAN =
   "_Catatan: mulai laporan ini pendapatan dihitung dari uang yang benar-benar diterima villa setelah potongan OTA, sama dengan dashboard investor, sehingga angka minggu-minggu sebelumnya ikut disesuaikan._";
 
 /** Rincian per minggu hanya ditampilkan selama jumlah minggu masih sedikit. */
-const MAKS_RINCIAN_MINGGU = 4;
 
 /**
  * Strategi minggu ini (owner 2026-10-14: "jangan bahasa yang sama dari minggu
@@ -112,8 +111,19 @@ export function bersih(b: BookingRingkas, komisi: KomisiOta): number {
   return Math.round((Number(b.cloudbeds_subtotal) || 0) * (1 - pct / 100));
 }
 
+/**
+ * Nomor minggu DI DALAM BULAN (owner 2026-11-01): minggu laporan ikut bulan
+ * tanggal akhirnya, dan mulai lagi dari minggu ke-1 tiap bulan. Laporan
+ * berakhir hari Selasa, jadi Selasa tgl 1-7 = minggu ke-1, 8-14 = ke-2, dst.
+ * Contoh: 28 Okt – 3 Nov = Minggu ke-1 November.
+ */
 export function mingguKeDari(akhir: string): number {
-  return Math.max(1, Math.round((Date.parse(akhir) - Date.parse(MINGGU_PERTAMA_AKHIR)) / (7 * 86400000)) + 1);
+  return Math.ceil(Number(akhir.slice(8, 10)) / 7);
+}
+
+/** Tanggal 1 bulan dari tanggal ISO. */
+export function awalBulan(iso: string): string {
+  return `${iso.slice(0, 7)}-01`;
 }
 
 export interface PendapatanMinggu {
@@ -124,14 +134,20 @@ export interface PendapatanMinggu {
 }
 
 /**
- * Pendapatan tiap minggu sejak minggu ke-1 sampai minggu laporan, dengan
- * rumus yang sama (check-in di minggu itu, bersih()).
- * bookings: booking ber-check-in MINGGU_PERTAMA_MULAI..p.akhir.
+ * Pendapatan BULAN BERJALAN per minggu laporan (owner 2026-11-01: total
+ * investor per bulan kalender, sejalan dengan dividen tgl 25, lalu mulai
+ * lagi dari tgl 1). Hanya minggu yang berakhir di bulan p.akhir; minggu yang
+ * melewati awal bulan dipotong mulai tgl 1, supaya jumlah rinciannya sama
+ * dengan total bulan. Rumus sama (check-in di rentang itu, bersih()).
+ * bookings: booking ber-check-in awalBulan(p.akhir)..p.akhir.
  */
 export function pendapatanPerMinggu(bookings: BookingRingkas[], p: Periode, komisi: KomisiOta = {}): PendapatanMinggu[] {
   const hasil: PendapatanMinggu[] = [];
-  for (let akhir = MINGGU_PERTAMA_AKHIR; akhir <= p.akhir; akhir = addDaysISO(akhir, 7)) {
-    const mulai = addDaysISO(akhir, -6);
+  const bulanMulai = awalBulan(p.akhir);
+  // Akhir minggu ke-1 bulan ini: hari yang sama (Selasa) di tgl 1-7.
+  const akhirPertama = addDaysISO(bulanMulai, (Number(p.akhir.slice(8, 10)) - 1) % 7);
+  for (let akhir = akhirPertama; akhir <= p.akhir; akhir = addDaysISO(akhir, 7)) {
+    const mulai = addDaysISO(akhir, -6) < bulanMulai ? bulanMulai : addDaysISO(akhir, -6);
     const pendapatan = bookings
       .filter((b) => dihitung(b) && b.tgl_checkin >= mulai && b.tgl_checkin <= akhir)
       .reduce((s, b) => s + bersih(b, komisi), 0);
@@ -255,6 +271,12 @@ export function tglPendek(iso: string): string {
   return `${d} ${BULAN[m - 1]}`;
 }
 
+const BULAN_PANJANG = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+
+function namaBulan(iso: string): string {
+  return BULAN_PANJANG[Number(iso.slice(5, 7)) - 1];
+}
+
 function rp(n: number): string {
   return `Rp${Math.round(n).toLocaleString("id-ID")}`;
 }
@@ -265,10 +287,10 @@ function persen1(n: number): string {
 
 function bagianKumulatif(l: LaporanMingguan): string[] {
   const pm = l.perMinggu ?? [];
-  if (pm.length < 2) return [];
+  if (pm.length === 0) return [];
   const total = pm.reduce((s, m) => s + m.pendapatan, 0);
-  const baris = [`💰 *Total Pendapatan ${pm.length} Minggu* (${tglPendek(pm[0].mulai)} – ${tglPendek(pm[pm.length - 1].akhir)})`];
-  if (pm.length <= MAKS_RINCIAN_MINGGU) {
+  const baris = [`💰 *Total Pendapatan ${namaBulan(l.periode.akhir)}* (${tglPendek(pm[0].mulai)} – ${tglPendek(pm[pm.length - 1].akhir)})`];
+  if (pm.length >= 2) {
     for (const m of pm) baris.push(`• Minggu ke-${m.mingguKe}: ${rp(m.pendapatan)}`);
   }
   baris.push(`• *Total: ${rp(total)}*`);
@@ -289,12 +311,12 @@ export function teksLaporan(l: LaporanMingguan): string {
 
   const baris: string[] = [
     "*LAPORAN MINGGUAN LOONARS LIVING*",
-    `_Minggu ke-${l.mingguKe}: ${tglPendek(p.mulai)} – ${tglPendek(p.akhir)} ${tahun}_`,
+    `_Minggu ke-${l.mingguKe} ${namaBulan(p.akhir)}: ${tglPendek(p.mulai)} – ${tglPendek(p.akhir)} ${tahun}_`,
     "",
     "Bapak/Ibu Investor yang kami hormati,",
     "",
   ];
-  if (l.mingguKe === 1) {
+  if (p.akhir === MINGGU_PERTAMA_AKHIR) {
     baris.push(
       "Mulai minggu ini kami akan mengirimkan laporan singkat setiap minggu, supaya Bapak/Ibu bisa mengikuti perkembangan villa dari dekat.",
       "",
