@@ -3116,6 +3116,28 @@ async function computeNetRevenueForRange(from, to){
   return { gross_revenue: gross, ota_commission: gross - net, net_revenue: net, room_nights, booking_count: rows.length, tax_deduction: null };
 }
 
+/**
+ * Kamar terisi MALAM INI secara realtime, langsung dari booking yang sudah
+ * CHECK-IN (status 'checkin') dan menginap malam ini. Dipakai untuk hari ini
+ * selama snapshot jam 22.00 WIB belum dibuat, supaya angka "malam terisi"
+ * langsung naik begitu tamu check-in -- tidak menunggu malam. Setelah snapshot
+ * ada, snapshot yang dipakai (sudah diselaraskan dengan jadwal booking hari
+ * itu, termasuk tamu terjadwal yang datang larut). Malam gratis investor
+ * dikecualikan, sama seperti di cron snapshot.
+ */
+async function computeLiveOccupiedTonight(today){
+  const { data: bks } = await supabase.from('bookings')
+    .select('unit_id,tgl_checkin,tgl_checkout')
+    .eq('status', 'checkin').eq('is_free_stay', false)
+    .lte('tgl_checkin', today);
+  const units = new Set((bks ?? [])
+    .filter(b => b.unit_id && (!b.tgl_checkout || b.tgl_checkout > today))
+    .map(b => b.unit_id));
+  const { data: unitRows } = await supabase.from('units').select('status');
+  const available = (unitRows ?? []).filter(u => u.status !== 'maintenance').length;
+  return { occupied: units.size, available };
+}
+
 /** Occupied/available room-nights from the daily inventory snapshot -- the SAME table /api/admin/revenue-metrics reads, so occupancy never disagrees between the two dashboards. */
 async function computeOccupiedRoomNights(from, to){
   const { data } = await supabase.from('villa_daily_inventory_snapshot')
@@ -3254,8 +3276,12 @@ async function computeSurvivalKpis(property_code, from, to){
 
   const { data: todayRows } = await supabase.from('villa_daily_inventory_snapshot')
     .select('unit_status,on_books').eq('snapshot_date', today);
-  const todayOccupied = (todayRows ?? []).filter(r=>r.on_books || r.unit_status==='occupied').length;
-  const todayAvailable = (todayRows ?? []).filter(r=>r.unit_status!=='maintenance').length;
+  const todayHasSnapshot = (todayRows ?? []).length > 0;
+  // Belum ada snapshot hari ini (dibuat jam 22.00 WIB) -> pakai hitungan
+  // realtime dari tamu yang sudah check-in.
+  const liveTonight = todayHasSnapshot ? null : await computeLiveOccupiedTonight(today);
+  const todayOccupied = liveTonight ? liveTonight.occupied : (todayRows ?? []).filter(r=>r.on_books || r.unit_status==='occupied').length;
+  const todayAvailable = liveTonight ? liveTonight.available : (todayRows ?? []).filter(r=>r.unit_status!=='maintenance').length;
 
   const occ30 = await computeOccupiedRoomNights(addDaysStr(today,-29), today);
   const occupancy_30d_pct = occ30.availableRoomNights>0 ? (occ30.occupiedRoomNights/occ30.availableRoomNights)*100 : null;
@@ -3298,7 +3324,13 @@ async function computeSurvivalKpis(property_code, from, to){
   const [my, mo2] = monthStr.split('-').map(Number);
   const daysInCurrentMonth = new Date(Date.UTC(my, mo2, 0)).getUTCDate();
   const dayOfMonth = Number(today.slice(8,10));
-  const occThisMonthSoFar = await computeOccupiedRoomNights(monthStart, today);
+  const occThisMonthSnapshot = await computeOccupiedRoomNights(monthStart, today);
+  // Hari-hari yang sudah lewat: dari snapshot. Hari ini: snapshot kalau sudah
+  // dibuat (22.00 WIB), kalau belum pakai tamu yang sudah check-in (realtime).
+  const occThisMonthSoFar = {
+    ...occThisMonthSnapshot,
+    occupiedRoomNights: occThisMonthSnapshot.occupiedRoomNights + (liveTonight ? liveTonight.occupied : 0),
+  };
 
   // One-off: Loonars 1 baru mulai beroperasi 20 Sept 2026, bukan tgl 1
   // kalender. Rata-rata bulan-berjalan dihitung dari tanggal BUKA, supaya
@@ -3337,7 +3369,8 @@ async function computeSurvivalKpis(property_code, from, to){
     today: {
       date: today, occupied: todayOccupied, available: todayAvailable,
       occupancy_pct: todayAvailable>0 ? (todayOccupied/todayAvailable)*100 : null,
-      has_snapshot: (todayRows ?? []).length > 0,
+      has_snapshot: todayHasSnapshot,
+      source: todayHasSnapshot ? 'snapshot' : 'live_checkin',
     },
     rolling_30d: { occupancy_pct: occupancy_30d_pct, rooms_per_night: rooms_per_night_30d, days_with_data: occ30.daysWithData },
     rooms_per_night_period,
@@ -3374,6 +3407,8 @@ async function computeSurvivalKpis(property_code, from, to){
         days_since_operational_start: daysSinceOperationalStart,
         days_remaining: daysRemainingInMonth,
         room_nights_so_far: occThisMonthSoFar.occupiedRoomNights,
+        tonight_occupied: todayOccupied,
+        tonight_source: todayHasSnapshot ? 'snapshot' : 'live_checkin',
         room_nights_required: requiredRoomNightsThisMonth,
         room_nights_still_needed: roomNightsStillNeededThisMonth,
         avg_rooms_per_night_needed_for_rest_of_month: avgRoomsPerNightNeededForRestOfMonth,
