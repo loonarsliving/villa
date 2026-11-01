@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-11-01 — Finance: Tutup Buku bulanan
+- Halaman `/finance/tutup-buku`: tutup buku per bulan check-in dengan snapshot sisa piutang OTA, penanda "cair setelah tutup buku", bantuan belum cair per OTA + umur. Tabel baru `finance_tutup_buku` (migrasi `20261101000001`), rute villa-api `/finance/tutup-buku*`, `hitungChecklistDana` dipakai bersama Checklist Dana.
+
 ### 2026-11-01 — Laporan mingguan investor: total & nomor minggu per bulan kalender
 - Keputusan owner: total pendapatan di laporan Rabu ke investor tidak lagi kumulatif sejak 30 Sep, tapi **per bulan kalender** (sejalan dengan dividen tgl 25, lalu mulai lagi dari tgl 1): "Total Pendapatan November (1 Nov – …)". Nomor minggu juga mulai lagi tiap bulan dan ikut bulan tanggal akhir laporan ("Minggu ke-1 November: 28 Okt – 3 Nov"). Minggu yang melewati pergantian bulan: angka "minggu ini" tetap 7 malam utuh; total & rincian bulan dipotong mulai tgl 1. Rumus pendapatan (`bersih()`), status yang dihitung, dan jadwal kirim tidak berubah. `src/lib/investorWeeklyReportText.ts` (+ tes), `src/lib/investorWeeklyReport.ts`.
 

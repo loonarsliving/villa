@@ -926,6 +926,66 @@ export interface FinanceChecklist {
   };
 }
 
+// ── Tutup buku bulanan Finance (finance_tutup_buku, migrasi 20261101000001) ──
+export type TutupBukuStatus = "ditutup" | "dibuka_kembali";
+
+/** Booking yang belum cair saat bulan ditutup (disimpan di snapshot). */
+export interface TutupBukuPiutang {
+  booking_id: string;
+  guest_nama: string;
+  unit_nomor: string | null;
+  sumber: string | null;
+  cloudbeds_reservation_id: string | null;
+  tgl_checkin: string;
+  tgl_checkout: string;
+  seharusnya: number;
+  expected_settlement_date: string | null;
+}
+
+export interface TutupBukuRingkas {
+  periode: string;
+  status: TutupBukuStatus;
+  total_seharusnya: number;
+  total_diterima: number;
+  total_piutang: number;
+  jumlah_booking: number;
+  jumlah_booking_piutang: number;
+  catatan: string | null;
+  ditutup_oleh_nama: string | null;
+  ditutup_at: string;
+  dibuka_oleh_nama: string | null;
+  dibuka_at: string | null;
+  alasan_buka: string | null;
+}
+
+export interface TutupBukuRecord extends TutupBukuRingkas {
+  id: string;
+  snapshot: {
+    from: string;
+    to: string;
+    today: string;
+    totals: FinanceChecklist["totals"];
+    per_channel: FinanceChecklistChannel[];
+    piutang: TutupBukuPiutang[];
+  };
+}
+
+export interface TutupBukuDaftar {
+  bulan_berjalan: string;
+  today: string;
+  daftar: TutupBukuRingkas[];
+}
+
+export interface TutupBukuDetail {
+  periode: string;
+  from: string;
+  to: string;
+  bulan_berjalan: string;
+  bisa_ditutup: boolean;
+  record: TutupBukuRecord | null;
+  live: FinanceChecklist;
+}
+
 // ── Loonars Excellent Living (tabel el_*, migrasi 20261022000001) ──────────
 export type ElRoomStatus = "available" | "occupied" | "dirty" | "maintenance";
 export type ElBookingStatus = "terjadwal" | "checkin" | "checkout" | "batal";

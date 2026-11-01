@@ -2963,6 +2963,79 @@ async function ensureFinanceSettlements(bookings, configMap){
     .not('expected_settlement_date', 'is', null);
 }
 
+// Checklist Dana (owner 2026-10-07) -- dipakai /finance/checklist-dana dan
+// tutup buku (/finance/tutup-buku*), supaya angka keduanya selalu sama.
+async function hitungChecklistDana(from, to, sumber = null){
+  const { data: rows, error } = await supabase.from('bookings')
+    .select('id,unit_nomor,guest_nama,sumber,status,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_subtotal,cloudbeds_reservation_id')
+    .gte('tgl_checkin', from).lte('tgl_checkin', to)
+    .in('status', STATUS_PEMASUKAN_DIAKUI)
+    .order('tgl_checkin',{ascending:true}).limit(1000);
+  if(error) throw new GalatQueryFinance(error.message);
+  let bookings = (rows ?? []).filter(isPemasukanDiakui);
+  if(sumber) bookings = bookings.filter(b=>b.sumber===sumber);
+
+  const configMap = await getSettlementConfigMap();
+  const settlementByBooking = new Map();
+  for(let i=0; i<bookings.length; i+=100){
+    const chunk = bookings.slice(i, i+100);
+    await ensureFinanceSettlements(chunk, configMap);
+    const { data: settlements, error: sErr } = await supabase.from('finance_settlements').select('*').in('booking_id', chunk.map(b=>b.id));
+    if(sErr) throw new GalatQueryFinance(sErr.message);
+    for(const s of (settlements ?? [])) settlementByBooking.set(s.booking_id, s);
+  }
+
+  const items = bookings.map(b=>{
+    const s = settlementByBooking.get(b.id) ?? null;
+    const masuk = s?.settlement_status === 'RECEIVED';
+    return {
+      booking_id: b.id, unit_nomor: b.unit_nomor, guest_nama: b.guest_nama, sumber: b.sumber,
+      normalized_channel: normalizedChannel(b.sumber),
+      tgl_checkin: b.tgl_checkin, tgl_checkout: b.tgl_checkout, malam: Number(b.durasi_malam ?? 0),
+      kotor: pendapatanKotor(b),
+      seharusnya: s ? Number(s.amount) : pendapatanBersih(b),
+      cloudbeds_reservation_id: b.cloudbeds_reservation_id ?? null,
+      masuk,
+      settlement_status: s?.settlement_status ?? null,
+      expected_settlement_date: s?.expected_settlement_date ?? null,
+      amount_received: s?.amount_received != null ? Number(s.amount_received) : null,
+      received_date: s?.received_date ?? null,
+      bank_reference: s?.bank_reference ?? null,
+      variance_amount: s?.variance_amount != null ? Number(s.variance_amount) : null,
+      notes: s?.notes ?? null,
+    };
+  });
+
+  const today = todayWIB();
+  const per = new Map();
+  const totals = { seharusnya:0, diterima:0, belum:0, selisih:0, count:0, count_masuk:0, count_belum:0, count_lewat_jatuh_tempo:0 };
+  for(const it of items){
+    const k = it.sumber ?? '-';
+    if(!per.has(k)) per.set(k, { sumber:k, seharusnya:0, diterima:0, belum:0, count_masuk:0, count_belum:0 });
+    const p = per.get(k);
+    p.seharusnya += it.seharusnya; totals.seharusnya += it.seharusnya; totals.count++;
+    if(it.masuk){
+      p.diterima += it.amount_received ?? 0; p.count_masuk++;
+      totals.diterima += it.amount_received ?? 0; totals.count_masuk++;
+      totals.selisih += it.variance_amount ?? 0;
+    } else {
+      p.belum += it.seharusnya; p.count_belum++;
+      totals.belum += it.seharusnya; totals.count_belum++;
+      if(it.expected_settlement_date && it.expected_settlement_date < today) totals.count_lewat_jatuh_tempo++;
+    }
+  }
+  return ({ from, to, today, items, per_channel: [...per.values()].sort((a,b)=>b.seharusnya-a.seharusnya), totals });
+}
+
+// Tabel finance_tutup_buku (migrasi 20261101000001) belum diterapkan ->
+// pesan jelas, bukan galat PostgREST mentah. Fitur lain tidak terpengaruh.
+function errTutupBuku(e){
+  const msg = String(e?.message ?? e ?? '');
+  if(e?.code === '42P01' || e?.code === 'PGRST205' || /finance_tutup_buku/.test(msg))
+    return err('Tabel tutup buku belum dibuat di database (migrasi 20261101000001). Hubungi admin.', 503);
+  return err(msg);
+}
+
 async function writeFinanceAudit({ entity_type, entity_id, session, action, old_value, new_value, reason }){
   await supabase.from('finance_audit_log').insert({
     entity_type, entity_id, user_id: session.uid, user_nama: session.email ?? null,
@@ -7511,66 +7584,8 @@ Deno.serve(async (req)=>{
   if(path==='/finance/checklist-dana' && m==='GET'){
     if(!isFinance) return forbidden();
     const { from, to } = financeDateRange();
-    const sumber = url.searchParams.get('sumber');
-    const { data: rows, error } = await supabase.from('bookings')
-      .select('id,unit_nomor,guest_nama,sumber,status,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_subtotal,cloudbeds_reservation_id')
-      .gte('tgl_checkin', from).lte('tgl_checkin', to)
-      .in('status', STATUS_PEMASUKAN_DIAKUI)
-      .order('tgl_checkin',{ascending:true}).limit(1000);
-    if(error) return err(error.message);
-    let bookings = (rows ?? []).filter(isPemasukanDiakui);
-    if(sumber) bookings = bookings.filter(b=>b.sumber===sumber);
-
-    const configMap = await getSettlementConfigMap();
-    const settlementByBooking = new Map();
-    for(let i=0; i<bookings.length; i+=100){
-      const chunk = bookings.slice(i, i+100);
-      await ensureFinanceSettlements(chunk, configMap);
-      const { data: settlements, error: sErr } = await supabase.from('finance_settlements').select('*').in('booking_id', chunk.map(b=>b.id));
-      if(sErr) return err(sErr.message);
-      for(const s of (settlements ?? [])) settlementByBooking.set(s.booking_id, s);
-    }
-
-    const items = bookings.map(b=>{
-      const s = settlementByBooking.get(b.id) ?? null;
-      const masuk = s?.settlement_status === 'RECEIVED';
-      return {
-        booking_id: b.id, unit_nomor: b.unit_nomor, guest_nama: b.guest_nama, sumber: b.sumber,
-        normalized_channel: normalizedChannel(b.sumber),
-        tgl_checkin: b.tgl_checkin, tgl_checkout: b.tgl_checkout, malam: Number(b.durasi_malam ?? 0),
-        kotor: pendapatanKotor(b),
-        seharusnya: s ? Number(s.amount) : pendapatanBersih(b),
-        cloudbeds_reservation_id: b.cloudbeds_reservation_id ?? null,
-        masuk,
-        settlement_status: s?.settlement_status ?? null,
-        expected_settlement_date: s?.expected_settlement_date ?? null,
-        amount_received: s?.amount_received != null ? Number(s.amount_received) : null,
-        received_date: s?.received_date ?? null,
-        bank_reference: s?.bank_reference ?? null,
-        variance_amount: s?.variance_amount != null ? Number(s.variance_amount) : null,
-        notes: s?.notes ?? null,
-      };
-    });
-
-    const today = todayWIB();
-    const per = new Map();
-    const totals = { seharusnya:0, diterima:0, belum:0, selisih:0, count:0, count_masuk:0, count_belum:0, count_lewat_jatuh_tempo:0 };
-    for(const it of items){
-      const k = it.sumber ?? '-';
-      if(!per.has(k)) per.set(k, { sumber:k, seharusnya:0, diterima:0, belum:0, count_masuk:0, count_belum:0 });
-      const p = per.get(k);
-      p.seharusnya += it.seharusnya; totals.seharusnya += it.seharusnya; totals.count++;
-      if(it.masuk){
-        p.diterima += it.amount_received ?? 0; p.count_masuk++;
-        totals.diterima += it.amount_received ?? 0; totals.count_masuk++;
-        totals.selisih += it.variance_amount ?? 0;
-      } else {
-        p.belum += it.seharusnya; p.count_belum++;
-        totals.belum += it.seharusnya; totals.count_belum++;
-        if(it.expected_settlement_date && it.expected_settlement_date < today) totals.count_lewat_jatuh_tempo++;
-      }
-    }
-    return json({ from, to, today, items, per_channel: [...per.values()].sort((a,b)=>b.seharusnya-a.seharusnya), totals });
+    try { return json(await hitungChecklistDana(from, to, url.searchParams.get('sumber'))); }
+    catch(e){ if(e instanceof GalatQueryFinance) return err(e.message); throw e; }
   }
 
   // Centang banyak booking sekaligus sebagai "sudah masuk" -- untuk satu
@@ -7647,6 +7662,106 @@ Deno.serve(async (req)=>{
     const { data: saved, error } = await supabase.from('finance_settlements').update(patch).eq('id', s.id).select('*').single();
     if(error) return err(error.message);
     await writeFinanceAudit({ entity_type:'finance_settlement', entity_id: s.id, session, action:'unmark_received', old_value: s, new_value: saved, reason });
+    return json(saved);
+  }
+
+  // ── TUTUP BUKU (owner 2026-11-01) ─────────────────────────────────────
+  // "fitur tutup buku ... melihat mana saja yang belum cair dari OTA mana
+  // saja di bulan itu", "agar finance tutup buku dengan sisa piutang dari OTA
+  // yang belum masuk uangnya". Dasar bulan = bulan CHECK-IN (pilihan owner),
+  // angka = hitungChecklistDana (sama persis dengan Checklist Dana). Saat
+  // ditutup, rekap + daftar booking yang belum cair disimpan sebagai
+  // snapshot di finance_tutup_buku. Dana yang cair setelah itu tetap
+  // dicentang lewat Checklist Dana seperti biasa; halaman Tutup Buku
+  // membandingkan snapshot dengan data hari ini untuk menandainya.
+  // Tidak dibaca rumus apa pun (laporan, bagi hasil, dividen, harga).
+  if(path==='/finance/tutup-buku' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const { data, error } = await supabase.from('finance_tutup_buku')
+      .select('periode,status,total_seharusnya,total_diterima,total_piutang,jumlah_booking,jumlah_booking_piutang,catatan,ditutup_oleh_nama,ditutup_at,dibuka_oleh_nama,dibuka_at,alasan_buka')
+      .order('periode',{ascending:false}).limit(60);
+    if(error) return errTutupBuku(error);
+    return json({ bulan_berjalan: monthWIB(), today: todayWIB(), daftar: data ?? [] });
+  }
+
+  if(path==='/finance/tutup-buku/detail' && m==='GET'){
+    if(!isFinance) return forbidden();
+    const periode = String(url.searchParams.get('periode') ?? '');
+    if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(periode)) return err('periode harus YYYY-MM');
+    const from = `${periode}-01`;
+    const to = monthEndWIB(new Date(`${periode}-15T00:00:00Z`));
+    const { data: record, error } = await supabase.from('finance_tutup_buku').select('*').eq('periode', periode).maybeSingle();
+    if(error) return errTutupBuku(error);
+    let live;
+    try { live = await hitungChecklistDana(from, to); }
+    catch(e){ if(e instanceof GalatQueryFinance) return err(e.message); throw e; }
+    return json({ periode, from, to, bulan_berjalan: monthWIB(), bisa_ditutup: periode < monthWIB(), record: record ?? null, live });
+  }
+
+  if(path==='/finance/tutup-buku/tutup' && m==='POST'){
+    if(!isFinance) return forbidden();
+    const body = await req.json();
+    const periode = String(body.periode ?? '');
+    if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(periode)) return err('periode harus YYYY-MM');
+    if(periode >= monthWIB()) return err('Bulan ini belum selesai. Tutup buku hanya untuk bulan yang sudah lewat.');
+    const catatan = body.catatan == null ? null : String(body.catatan).trim().slice(0, 1000) || null;
+    const { data: lama, error: lErr } = await supabase.from('finance_tutup_buku').select('*').eq('periode', periode).maybeSingle();
+    if(lErr) return errTutupBuku(lErr);
+    if(lama?.status === 'ditutup') return err('Bulan ini sudah ditutup.', 409);
+
+    const from = `${periode}-01`;
+    const to = monthEndWIB(new Date(`${periode}-15T00:00:00Z`));
+    let c;
+    try { c = await hitungChecklistDana(from, to); }
+    catch(e){ if(e instanceof GalatQueryFinance) return err(e.message); throw e; }
+    const piutang = c.items.filter((i) => !i.masuk).map((i) => ({
+      booking_id: i.booking_id, guest_nama: i.guest_nama, unit_nomor: i.unit_nomor, sumber: i.sumber,
+      cloudbeds_reservation_id: i.cloudbeds_reservation_id, tgl_checkin: i.tgl_checkin, tgl_checkout: i.tgl_checkout,
+      seharusnya: i.seharusnya, expected_settlement_date: i.expected_settlement_date,
+    }));
+    const row = {
+      periode, status: 'ditutup',
+      total_seharusnya: Math.round(c.totals.seharusnya), total_diterima: Math.round(c.totals.diterima), total_piutang: Math.round(c.totals.belum),
+      jumlah_booking: c.totals.count, jumlah_booking_piutang: c.totals.count_belum,
+      snapshot: { from, to, today: c.today, totals: c.totals, per_channel: c.per_channel, piutang },
+      catatan, ditutup_oleh: session.uid ?? null, ditutup_oleh_nama: await namaPengguna(session), ditutup_at: new Date().toISOString(),
+      dibuka_oleh_nama: null, dibuka_at: null, alasan_buka: null, updated_at: new Date().toISOString(),
+    };
+    let saved, sErr;
+    if(lama){
+      // Ditutup lagi setelah dibuka kembali; .eq status mencegah dua klik bersamaan.
+      ({ data: saved, error: sErr } = await supabase.from('finance_tutup_buku').update(row).eq('id', lama.id).eq('status', 'dibuka_kembali').select('*').maybeSingle());
+      if(!sErr && !saved) return err('Bulan ini sudah ditutup.', 409);
+    } else {
+      ({ data: saved, error: sErr } = await supabase.from('finance_tutup_buku').insert(row).select('*').single());
+      if(sErr?.code === '23505') return err('Bulan ini sudah ditutup.', 409);
+    }
+    if(sErr) return errTutupBuku(sErr);
+    await writeFinanceAudit({ entity_type:'finance_tutup_buku', entity_id: saved.id, session, action:'tutup_buku',
+      old_value: lama ? { status: lama.status, total_piutang: lama.total_piutang, ditutup_at: lama.ditutup_at, dibuka_at: lama.dibuka_at, alasan_buka: lama.alasan_buka } : null,
+      new_value: { periode, total_seharusnya: row.total_seharusnya, total_diterima: row.total_diterima, total_piutang: row.total_piutang, jumlah_booking_piutang: row.jumlah_booking_piutang },
+      reason: catatan });
+    return json(saved);
+  }
+
+  if(path==='/finance/tutup-buku/buka' && m==='POST'){
+    if(!isFinance) return forbidden();
+    const body = await req.json();
+    const periode = String(body.periode ?? '');
+    if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(periode)) return err('periode harus YYYY-MM');
+    const alasan = String(body.alasan ?? '').trim().slice(0, 1000);
+    if(!alasan) return err('Alasan membuka kembali wajib diisi');
+    const { data: lama, error: lErr } = await supabase.from('finance_tutup_buku').select('*').eq('periode', periode).maybeSingle();
+    if(lErr) return errTutupBuku(lErr);
+    if(!lama || lama.status !== 'ditutup') return err('Bulan ini belum ditutup.', 400);
+    const { data: saved, error } = await supabase.from('finance_tutup_buku')
+      .update({ status: 'dibuka_kembali', dibuka_oleh_nama: await namaPengguna(session), dibuka_at: new Date().toISOString(), alasan_buka: alasan, updated_at: new Date().toISOString() })
+      .eq('id', lama.id).eq('status', 'ditutup').select('*').maybeSingle();
+    if(error) return errTutupBuku(error);
+    if(!saved) return err('Bulan ini belum ditutup.', 400);
+    await writeFinanceAudit({ entity_type:'finance_tutup_buku', entity_id: lama.id, session, action:'buka_kembali_tutup_buku',
+      old_value: { periode, status: lama.status, total_piutang: lama.total_piutang, ditutup_at: lama.ditutup_at },
+      new_value: { periode, status: 'dibuka_kembali' }, reason: alasan });
     return json(saved);
   }
 

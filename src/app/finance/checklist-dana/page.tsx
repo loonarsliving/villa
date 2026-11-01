@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FinanceShell } from "../_shell";
 import { api } from "@/lib/api";
@@ -7,7 +8,7 @@ import { fmtCurrencyFull, fmtDate, todayISO } from "@/lib/format";
 import { Card, CardHeader, Loading, Empty, Badge } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
-import type { FinanceChecklist, FinanceChecklistItem } from "@/lib/types";
+import type { FinanceChecklist, FinanceChecklistItem, TutupBukuDaftar } from "@/lib/types";
 import { kelompokkanPerPencairan, rentangCheckinUntukPencairan, type PencairanGroup } from "@/lib/financePencairan";
 import type { MutasiBaris } from "@/lib/mutasiBank";
 import { MutasiBankCard } from "./_MutasiBank";
@@ -109,6 +110,13 @@ export default function ChecklistDanaPage() {
   }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(load, [bulan]);
+  // Status tutup buku (owner 2026-11-01) -- hanya penanda; centang tetap
+  // boleh untuk dana yang cair setelah bulan ditutup.
+  const [tutupBuku, setTutupBuku] = useState<TutupBukuDaftar | null>(null);
+  useEffect(() => {
+    api.get<TutupBukuDaftar>("/finance/tutup-buku").then(setTutupBuku).catch(() => {});
+  }, []);
+  const tutupBulanIni = tutupBuku?.daftar.find((r) => r.periode === bulan && r.status === "ditutup") ?? null;
   const daftarBulan = useMemo(() => pilihanBulan(todayISO().slice(0, 7)), []);
 
   const sumberList = useMemo(() => [...new Set((data?.items ?? []).map((i) => i.sumber ?? "-"))].sort(), [data]);
@@ -243,6 +251,16 @@ export default function ChecklistDanaPage() {
       </div>
 
       {error && <div className="text-ruby-500 text-xs mb-3">{error}</div>}
+      {tutupBulanIni && (
+        <div className="text-[11px] text-ink/60 mb-3 px-3 py-2 rounded border border-sage-500/40 bg-sage-500/5">
+          Buku {namaBulan(bulan)} sudah ditutup ({fmtDate(tutupBulanIni.ditutup_at)}, sisa piutang saat itu{" "}
+          {fmtCurrencyFull(tutupBulanIni.total_piutang)}). Dana yang cair sekarang tetap dicentang di sini dan ditandai &quot;cair setelah tutup buku&quot; di{" "}
+          <Link href="/finance/tutup-buku" className="underline">
+            Tutup Buku
+          </Link>
+          .
+        </div>
+      )}
       {loading && <Loading />}
 
       {!loading && data && t && (
