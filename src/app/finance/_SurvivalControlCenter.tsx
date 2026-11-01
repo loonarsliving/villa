@@ -90,7 +90,7 @@ export function SurvivalControlCenter({ from, to }: { from: string; to: string }
           <div className="text-[10px] text-ink/40">
             Hari ini: {data.today.date} · {data.today.occupied}/{data.today.available} kamar terisi
             {data.today.occupancy_pct != null ? ` (${fmtPct(data.today.occupancy_pct)})` : ""}
-            {!data.today.has_snapshot && " — belum ada snapshot hari ini"}
+            {!data.today.has_snapshot && " — realtime dari tamu yang sudah check-in, diselaraskan jam 22.00"}
           </div>
         </div>
         <Link href="/finance/scenario" className="text-[10px] font-semibold text-ink/50 border border-ink/15 rounded px-2.5 py-1.5 shrink-0">
@@ -106,7 +106,14 @@ export function SurvivalControlCenter({ from, to }: { from: string; to: string }
             <span className="text-[10px] text-ink/40 uppercase tracking-wide">Status Loonars 1</span>
           </div>
           <div className="text-[13px] text-ink/80 leading-relaxed">
-            Rata-rata <strong>{fmtRoomsPerNight(roomsPerNightNow)}</strong> ({s.this_month.room_nights_so_far} malam terisi ÷ {s.this_month.days_since_operational_start} hari sejak mulai beroperasi {s.this_month.operational_start_date}). Supaya AMAN, butuh minimal{" "}
+            Rata-rata <strong>{fmtRoomsPerNight(roomsPerNightNow)}</strong> ({s.this_month.room_nights_so_far} malam terisi ÷ {s.this_month.days_since_operational_start} hari sejak mulai beroperasi {s.this_month.operational_start_date}
+            {s.this_month.tonight_occupied != null && (
+              <>
+                ; termasuk malam ini {s.this_month.tonight_occupied} kamar
+                {s.this_month.tonight_source === "live_checkin" ? " — realtime dari check-in, diselaraskan dengan jadwal booking jam 22.00" : " — sudah diselaraskan jam 22.00"}
+              </>
+            )}
+            ). Supaya AMAN, butuh minimal{" "}
             <strong>{s.required_rooms_per_night != null ? `${s.required_rooms_per_night.toFixed(1)} kamar/malam` : "—"}</strong> rata-rata sebulan.
             {currentRow?.aman === false && currentRow.kurang_malam_per_bulan != null && (
               <>

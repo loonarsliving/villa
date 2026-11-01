@@ -4,6 +4,10 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-11-01 — Kamar terisi malam ini realtime dari check-in; snapshot jam 22.00 WIB
+- `/finance` (Survival, villa-api `computeSurvivalKpis`): selama snapshot hari ini belum ada, "malam terisi" bulan berjalan dan "Hari ini" memakai kamar dari booking berstatus `checkin` yang menginap malam ini (`computeLiveOccupiedTonight`, malam gratis investor dikecualikan) -- angka naik saat tamu check-in, bukan menunggu malam. Hari yang lewat tetap dari snapshot. Pemicu: tgl 1 Nov jam 20.17 halaman menampilkan 0 kamar/malam padahal 12 kamar terisi.
+- Cron `daily-inventory-snapshot` dimajukan `55 15` → `0 15 * * *` UTC (22.00 WIB, permintaan owner) untuk menyelaraskan dengan jadwal booking hari itu (termasuk tamu `terjadwal` yang datang larut). Hitungan Rupiah (opex, ADR, status survival) dan `computeOccupiedRoomNights` tidak diubah.
+
 ### 2026-10-29 — Checklist Dana Masuk: cocokkan dari mutasi bank
 - Finance mengunggah foto/screenshot/PDF mutasi; baris disalin AI Mkhsistem (`/api/villa/ai/bank-statement`), dicocokkan dengan pencairan OTA oleh `src/lib/mutasiBank.ts`, lalu dipakai untuk centang massal. `receive-bulk` villa-api menerima `total_diterima` sehingga nominal transfer asli dan selisih komisi tercatat per booking (dulu selalu = perkiraan, selisih 0). Tanpa perubahan skema.
 

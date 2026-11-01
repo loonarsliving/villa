@@ -1868,7 +1868,7 @@ dasar denda keterlambatan check-out.
 
 Sisa penyebutan "WITA" ada di `docs/revenue-engine/PHASE4-DESIGN.md` dan
 `PHASE6-DESIGN.md`; keduanya catatan desain bertanggal, sengaja tidak
-diubah. Yang benar: cron `55 15 * * *` = 22:55 WIB, dan cron mesin harga di
+diubah. Yang benar: cron `55 15 * * *` = 22:55 WIB (sejak 2026-11-01 dimajukan ke `0 15 * * *` = 22:00 WIB), dan cron mesin harga di
 `vercel.json` sekarang `10 17 * * *` = 00:10 WIB (dokumen itu masih menulis
 `10 16 * * *`).
 

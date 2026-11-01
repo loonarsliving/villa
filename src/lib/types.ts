@@ -618,7 +618,7 @@ export interface FinanceSurvivalKpis {
   property_code: string;
   property_name: string;
   period: { from: string; to: string; days: number };
-  today: { date: string; occupied: number; available: number; occupancy_pct: number | null; has_snapshot: boolean };
+  today: { date: string; occupied: number; available: number; occupancy_pct: number | null; has_snapshot: boolean; source?: "snapshot" | "live_checkin" };
   rolling_30d: { occupancy_pct: number | null; rooms_per_night: number | null; days_with_data: number };
   rooms_per_night_period: number | null;
   rooms_per_night_band: RoomsPerNightBand;
@@ -666,6 +666,9 @@ export interface FinanceSimpleTargets {
     days_since_operational_start: number;
     days_remaining: number;
     room_nights_so_far: number;
+    /** Kamar terisi malam ini (sudah termasuk di room_nights_so_far). */
+    tonight_occupied?: number;
+    tonight_source?: "snapshot" | "live_checkin";
     room_nights_required: number | null;
     room_nights_still_needed: number | null;
     avg_rooms_per_night_needed_for_rest_of_month: number | null;
