@@ -3,6 +3,11 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-11-01 — CI: font disimpan di repo (build tidak lagi mengambil Google Fonts)
+- Gejala: CI GitHub gagal acak di `npm run build` (run #58 untuk #250, #59 untuk PR #251; run #60 di `main` dengan kode yang sama justru hijau). Log: `An error occurred in next/font` -> `TypeError: Cannot read properties of null (reading '1')` di `@next/font/dist/google/loader.js:122` = jawaban Google Fonts ke runner terpotong/rusak. Bukan masalah kode; build Vercel dan lokal lolos.
+- Perbaikan (owner: "Ya"): `src/app/layout.tsx` memakai `next/font/local` dengan file di `src/app/fonts/` (font variabel subset latin dari `@fontsource-variable/*` 5.3.0, lisensi OFL disertakan). Variabel CSS (`--font-body`, `--font-display`, `--font-mono`) dan ketebalan yang dipakai tetap sama; Cormorant tetap normal + italic. Tidak ada dependensi npm baru.
+- Rute `/api/bukti-transfer/...` masih mengambil Google Fonts saat runtime (dengan cadangan kalau gagal); tidak memengaruhi build, tidak diubah.
+
 ## 2026-11-01 — Finance: Tutup Buku bulanan + bantuan "yang belum cair per OTA" (LIVE: owner "Bawa ke production skrng"; migrasi diterapkan 2026-11-01)
 - Owner: "fitur tutup buku di finance ... agar financenya dapat tutup buku dan melihat mana saja yang belum cair dari OTA mana saja di bulan itu" + "fitur bantuan untuk mengetahui yang mana belum cair". Jawaban owner atas pertanyaan desain: tabel baru boleh ("Ya, boleh"); dasar bulan = **bulan check-in**; bantuan = "Daftar per OTA + umur"; setelah tutup buku: "buatkan fitur penandanya dan berapa totalnya agar finance tutup buku dengan sisa piutang dari OTA yang belum masuk uangnya" -> dana yang cair belakangan TETAP boleh dicentang, ditandai "cair setelah tutup buku". Tidak ada penguncian centang (tidak diminta).
 - Tabel baru `finance_tutup_buku` (migrasi `20261101000001_finance_tutup_buku.sql`, diuji di Postgres 16 lokal: idempoten, unik per periode, cek status/alasan, RLS ON tanpa policy). Satu baris per bulan: status `ditutup`/`dibuka_kembali`, total seharusnya/diterima/piutang, snapshot jsonb (totals, per_channel, daftar booking belum cair). Tidak dibaca rumus apa pun (laporan, bagi hasil, dividen, harga).

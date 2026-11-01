@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-11-01 — CI: font lokal
+- `src/app/layout.tsx` pindah dari `next/font/google` ke `next/font/local` (file di `src/app/fonts/`), karena build CI GitHub gagal acak saat mengambil Google Fonts. Tampilan tidak berubah.
+
 ### 2026-11-01 — Finance: Tutup Buku bulanan
 - Halaman `/finance/tutup-buku`: tutup buku per bulan check-in dengan snapshot sisa piutang OTA, penanda "cair setelah tutup buku", bantuan belum cair per OTA + umur. Tabel baru `finance_tutup_buku` (migrasi `20261101000001`), rute villa-api `/finance/tutup-buku*`, `hitungChecklistDana` dipakai bersama Checklist Dana.
 - Migrasi `20261101000001` diterapkan ke produksi 2026-11-01 (execute_sql, md5 dicocokkan) dan dicatat di `schema_migrations`; fitur aktif.
