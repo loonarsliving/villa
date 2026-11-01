@@ -3027,6 +3027,15 @@ async function hitungChecklistDana(from, to, sumber = null){
   return ({ from, to, today, items, per_channel: [...per.values()].sort((a,b)=>b.seharusnya-a.seharusnya), totals });
 }
 
+// Tabel finance_tutup_buku (migrasi 20261101000001) belum diterapkan ->
+// pesan jelas, bukan galat PostgREST mentah. Fitur lain tidak terpengaruh.
+function errTutupBuku(e){
+  const msg = String(e?.message ?? e ?? '');
+  if(e?.code === '42P01' || e?.code === 'PGRST205' || /finance_tutup_buku/.test(msg))
+    return err('Tabel tutup buku belum dibuat di database (migrasi 20261101000001). Hubungi admin.', 503);
+  return err(msg);
+}
+
 async function writeFinanceAudit({ entity_type, entity_id, session, action, old_value, new_value, reason }){
   await supabase.from('finance_audit_log').insert({
     entity_type, entity_id, user_id: session.uid, user_nama: session.email ?? null,
@@ -7671,7 +7680,7 @@ Deno.serve(async (req)=>{
     const { data, error } = await supabase.from('finance_tutup_buku')
       .select('periode,status,total_seharusnya,total_diterima,total_piutang,jumlah_booking,jumlah_booking_piutang,catatan,ditutup_oleh_nama,ditutup_at,dibuka_oleh_nama,dibuka_at,alasan_buka')
       .order('periode',{ascending:false}).limit(60);
-    if(error) return err(error.message);
+    if(error) return errTutupBuku(error);
     return json({ bulan_berjalan: monthWIB(), today: todayWIB(), daftar: data ?? [] });
   }
 
@@ -7682,7 +7691,7 @@ Deno.serve(async (req)=>{
     const from = `${periode}-01`;
     const to = monthEndWIB(new Date(`${periode}-15T00:00:00Z`));
     const { data: record, error } = await supabase.from('finance_tutup_buku').select('*').eq('periode', periode).maybeSingle();
-    if(error) return err(error.message);
+    if(error) return errTutupBuku(error);
     let live;
     try { live = await hitungChecklistDana(from, to); }
     catch(e){ if(e instanceof GalatQueryFinance) return err(e.message); throw e; }
@@ -7697,7 +7706,7 @@ Deno.serve(async (req)=>{
     if(periode >= monthWIB()) return err('Bulan ini belum selesai. Tutup buku hanya untuk bulan yang sudah lewat.');
     const catatan = body.catatan == null ? null : String(body.catatan).trim().slice(0, 1000) || null;
     const { data: lama, error: lErr } = await supabase.from('finance_tutup_buku').select('*').eq('periode', periode).maybeSingle();
-    if(lErr) return err(lErr.message);
+    if(lErr) return errTutupBuku(lErr);
     if(lama?.status === 'ditutup') return err('Bulan ini sudah ditutup.', 409);
 
     const from = `${periode}-01`;
@@ -7727,7 +7736,7 @@ Deno.serve(async (req)=>{
       ({ data: saved, error: sErr } = await supabase.from('finance_tutup_buku').insert(row).select('*').single());
       if(sErr?.code === '23505') return err('Bulan ini sudah ditutup.', 409);
     }
-    if(sErr) return err(sErr.message);
+    if(sErr) return errTutupBuku(sErr);
     await writeFinanceAudit({ entity_type:'finance_tutup_buku', entity_id: saved.id, session, action:'tutup_buku',
       old_value: lama ? { status: lama.status, total_piutang: lama.total_piutang, ditutup_at: lama.ditutup_at, dibuka_at: lama.dibuka_at, alasan_buka: lama.alasan_buka } : null,
       new_value: { periode, total_seharusnya: row.total_seharusnya, total_diterima: row.total_diterima, total_piutang: row.total_piutang, jumlah_booking_piutang: row.jumlah_booking_piutang },
@@ -7743,12 +7752,12 @@ Deno.serve(async (req)=>{
     const alasan = String(body.alasan ?? '').trim().slice(0, 1000);
     if(!alasan) return err('Alasan membuka kembali wajib diisi');
     const { data: lama, error: lErr } = await supabase.from('finance_tutup_buku').select('*').eq('periode', periode).maybeSingle();
-    if(lErr) return err(lErr.message);
+    if(lErr) return errTutupBuku(lErr);
     if(!lama || lama.status !== 'ditutup') return err('Bulan ini belum ditutup.', 400);
     const { data: saved, error } = await supabase.from('finance_tutup_buku')
       .update({ status: 'dibuka_kembali', dibuka_oleh_nama: await namaPengguna(session), dibuka_at: new Date().toISOString(), alasan_buka: alasan, updated_at: new Date().toISOString() })
       .eq('id', lama.id).eq('status', 'ditutup').select('*').maybeSingle();
-    if(error) return err(error.message);
+    if(error) return errTutupBuku(error);
     if(!saved) return err('Bulan ini belum ditutup.', 400);
     await writeFinanceAudit({ entity_type:'finance_tutup_buku', entity_id: lama.id, session, action:'buka_kembali_tutup_buku',
       old_value: { periode, status: lama.status, total_piutang: lama.total_piutang, ditutup_at: lama.ditutup_at },
