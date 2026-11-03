@@ -142,13 +142,38 @@ export async function syncCloudbedsEl(supabase: SupabaseClient): Promise<ElSyncR
   });
   const kamarDariRoomCb = new Map(peta.filter((p) => p.active).map((p) => [p.cbRoomId, p.roomId]));
   const roomCbDariKamar = new Map(peta.map((p) => [p.roomId, p.cbRoomId]));
-  const nomorKamar = new Map(peta.map((p) => [p.roomId, p.nomor]));
-  const kandidatPerTipe = new Map<string, string[]>();
+
+  // Owner 2026-11-04: "kt atur dari sini saja" -- Cloudbeds EL hanya punya 1
+  // room per tipe; 31 kamar fisik diatur di sistem ini. Tipe Cloudbeds
+  // dipadankan ke tipe lokal lewat kamar yang dipetakan, lalu SEMUA kamar
+  // aktif bertipe lokal itu jadi kandidat (yang dibuka manager didahulukan).
+  const { data: kamarAktif, error: kamarErr } = await supabase
+    .from("el_rooms")
+    .select("id, nomor, room_type_id, status, sort_order")
+    .eq("active", true)
+    .order("sort_order")
+    .order("nomor");
+  if (kamarErr) throw new Error(`kamar EL tidak terbaca: ${kamarErr.message}`);
+  const kamarLokal = (kamarAktif ?? []) as { id: string; nomor: string; room_type_id: string; status: string }[];
+  const nomorKamar = new Map(kamarLokal.map((k) => [k.id, k.nomor]));
+  const tipeLokalDariKamar = new Map(kamarLokal.map((k) => [k.id, k.room_type_id]));
+  const tipeLokalDariTipeCb = new Map<string, string>();
   for (const p of peta) {
-    if (!p.active) continue;
-    const tipe = tipeDariRoomCb.get(p.cbRoomId);
-    if (!tipe) continue;
-    kandidatPerTipe.set(tipe, [...(kandidatPerTipe.get(tipe) ?? []), p.roomId]);
+    const cb = tipeDariRoomCb.get(p.cbRoomId);
+    const lokal = tipeLokalDariKamar.get(p.roomId);
+    if (cb && lokal && !tipeLokalDariTipeCb.has(cb)) tipeLokalDariTipeCb.set(cb, lokal);
+  }
+  const tipeCbDariTipeLokal = new Map([...tipeLokalDariTipeCb].map(([cb, lokal]) => [lokal, cb]));
+  const tipeCbDariKamar = new Map<string, string>();
+  for (const k of kamarLokal) {
+    const cb = tipeCbDariTipeLokal.get(k.room_type_id);
+    if (cb) tipeCbDariKamar.set(k.id, cb);
+  }
+  const kandidatPerTipe = new Map<string, string[]>();
+  for (const [cb, lokal] of tipeLokalDariTipeCb) {
+    const setipe = kamarLokal.filter((k) => k.room_type_id === lokal);
+    const urut = [...setipe.filter((k) => k.status !== "maintenance"), ...setipe.filter((k) => k.status === "maintenance")];
+    kandidatPerTipe.set(cb, urut.map((k) => k.id));
   }
 
   // ── TARIK ─────────────────────────────────────────────────────────────
@@ -304,7 +329,7 @@ export async function syncCloudbedsEl(supabase: SupabaseClient): Promise<ElSyncR
     for (const b of antre) {
       ringkasan.kirim.dicoba++;
       const hasil = sourceId
-        ? await kirimSatu(apiKey, propertyId, sourceId, b, roomCbDariKamar, tipeDariRoomCb)
+        ? await kirimSatu(apiKey, propertyId, sourceId, b, roomCbDariKamar, tipeCbDariKamar)
         : { error: "sumber_langsung_tidak_ditemukan (getSources)" };
       if ("reservationID" in hasil) {
         // Hanya ditulis bila masih kosong: dua run bersamaan tidak saling menimpa.
@@ -353,12 +378,13 @@ async function kirimSatu(
   sourceId: string,
   b: BookingKirim,
   roomCbDariKamar: Map<string, string>,
-  tipeDariRoomCb: Map<string, string | null>,
+  tipeCbDariKamar: Map<string, string>,
 ): Promise<{ reservationID: string; variant: string } | { error: string; attempts?: unknown[] }> {
+  // Kamar lokal tidak harus punya room Cloudbeds sendiri: yang dikirim tipe
+  // kamarnya (varian pertama memang tanpa roomID, sama dengan villa-api).
+  const tipe = b.room_id ? tipeCbDariKamar.get(b.room_id) : undefined;
+  if (!tipe) return { error: "tipe_kamar_belum_terhubung_ke_cloudbeds" };
   const cbRoomId = b.room_id ? roomCbDariKamar.get(b.room_id) : undefined;
-  if (!cbRoomId) return { error: "kamar_belum_dipetakan_ke_cloudbeds" };
-  const tipe = tipeDariRoomCb.get(cbRoomId);
-  if (!tipe) return { error: "room_cloudbeds_tidak_ada_di_getRooms" };
   const { first, last } = pecahNama(b.guest_nama);
   const dewasa = Math.max(1, Math.trunc(Number(b.adults ?? 1)) || 1);
   const anak = Math.max(0, Math.trunc(Number(b.children ?? 0)) || 0);
@@ -390,7 +416,7 @@ async function kirimSatu(
   };
   const varian: Array<{ nama: string; form: () => URLSearchParams }> = [
     { nama: "room_type_only", form: () => dasar() },
-    { nama: "with_roomID", form: () => { const f = dasar(); f.set("rooms[0][roomID]", cbRoomId); return f; } },
+    ...(cbRoomId ? [{ nama: "with_roomID", form: () => { const f = dasar(); f.set("rooms[0][roomID]", cbRoomId); return f; } }] : []),
     { nama: "no_children_row", form: () => dasar(dewasa, null) },
     { nama: "occupancy_fallback_1_0", form: () => dasar(1, 0) },
   ];

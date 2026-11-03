@@ -3,6 +3,12 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-11-04 — Kamar EL diatur di sistem; tipe dari Cloudbeds
+- Hasil getRooms semua halaman: Cloudbeds EL memang hanya punya 4 room (`total` = 4): DOU(1) "Double  Room with Terrace", QUA(1) "Quadruple Room", JSP(1) "Junior Suite with Pool View", KIN(1) "King Suit With Pool" — 1 room per tipe. Sinkron 20:02 UTC membuat 4 tipe itu (kode DOU/QUA/JSP/KIN); tipe placeholder ST/SP/FP jadi nonaktif. Owner menghapus 4 pemetaan manual lewat admin.
+- Owner: "Itu sudah benar, kt atur dari sini saja" = 31 kamar fisik diatur di sistem ini, bukan ditambah di Cloudbeds. Pembagian (disetujui owner): DOU 12 (ST-01..ST-12), QUA 2 (ST-13, ST-14), JSP 12 (SP-01..SP-12), KIN 5 (FP-01..FP-05).
+- Kode: `rencanakanKamarEl` tidak lagi menimpa nama kamar dengan nama Cloudbeds dan hanya menonaktifkan kamar BERPETA yang room Cloudbeds-nya hilang (kamar buatan sistem dibiarkan). Sinkron EL: kandidat kamar untuk reservasi = semua kamar aktif bertipe lokal yang dipadankan ke tipe Cloudbeds (kamar yang sudah dibuka manager didahulukan); kirim booking ke Cloudbeds memakai tipe Cloudbeds dari tipe kamar lokal (roomID hanya bila kamar itu berpeta).
+- Catatan bisnis: inventori Cloudbeds EL = 1 room per tipe, jadi OTA hanya bisa menjual 1 kamar per tipe per malam sampai inventori di Cloudbeds ditambah.
+
 ## 2026-11-04 — Konteks properti villa-api + perbaikan kamar EL dari Cloudbeds
 - villa-api (#267): `AsyncLocalStorage` `konteksProperti`; `klienProperti` membaca properti per request. Admin/finance (header `x-villa-property`) dan manager/resepsionis (`property_kode`) hanya berpindah properti bila ada di `PROPERTI_SIAP` (saat ini hanya 'PL' = perilaku tidak berubah). `pushBookingToCloudbeds` hanya untuk PL. Probe `GET /public/cek-konteks-properti` di production: `konteks_bekerja: true`.
 - Owner 2026-11-04: Cloudbeds EL punya 31 kamar dan 4 tipe, tetapi sinkron hanya menerima 4 room (DOU(1), QUA(1), JSP(1), KIN(1) = room pertama tiap tipe); 4 pemetaan dibuat manual oleh owner (DOU & QUA tergabung ke tipe ST). Perbaikan: `getCloudbedsRooms` membaca semua halaman (`pageSize=100`, berhenti saat `total` tercapai, maks 20 halaman; dulu hanya halaman pertama) + diagnosa `diagnosaGetRooms` di ringkasan sinkron EL (`kamar.cloudbeds`: halaman, total, virtual, jumlah per tipe). Atas permintaan owner ("baiknya sy hapus dulu agar dipetakan dr cloudbeds sj"), data kamar EL (pemetaan, kamar, tipe; 0 booking) dikosongkan setelah deploy supaya dibangun ulang dari Cloudbeds.
