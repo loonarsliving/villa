@@ -23,6 +23,10 @@ export interface CloudbedsRoom {
   roomName: string;
   roomTypeID?: string;
   roomTypeName?: string;
+  roomTypeNameShort?: string;
+  /** Kamar diblokir (tutup/maintenance) pada hari ini, per getRooms pms-v1.2. */
+  roomBlocked?: boolean;
+  isVirtual?: boolean;
 }
 
 /**
@@ -163,38 +167,41 @@ export async function getCloudbedsRooms(akun: CloudbedsAkun = "utama"): Promise<
     throw new CloudbedsApiError(message, res.status >= 400 ? res.status : 502);
   }
 
-  const rooms = (body?.data ?? []) as Array<{
+  type RoomMentah = {
     roomID?: string;
     roomName?: string;
-    roomTypeID?: string;
+    roomTypeID?: string | number;
     roomTypeName?: string;
-    rooms?: Array<{ roomID?: string; roomName?: string }>;
-  }>;
+    roomTypeNameShort?: string;
+    roomBlocked?: unknown;
+    isVirtual?: unknown;
+  };
+  const rooms = (body?.data ?? []) as Array<RoomMentah & { rooms?: RoomMentah[] }>;
+  // API ini sering mengirim boolean sebagai string ("1"/"true").
+  const benar = (v: unknown) => v === true || v === 1 || v === "1" || v === "true";
 
   // getRooms groups rooms by room type in some accounts (each entry carrying
   // a nested `rooms` array) and returns a flat per-room list in others --
-  // handle both shapes rather than assuming one.
+  // handle both shapes rather than assuming one. Per spec pms-v1.2 the
+  // nested rooms carry their own roomTypeID/roomTypeName, so those win over
+  // the wrapper's.
   const flat: CloudbedsRoom[] = [];
+  const dorong = (r: RoomMentah, wadah: RoomMentah) => {
+    if (!r.roomID) return;
+    const tipe = r.roomTypeID ?? wadah.roomTypeID;
+    flat.push({
+      roomID: String(r.roomID),
+      roomName: r.roomName || String(r.roomID),
+      roomTypeID: tipe != null ? String(tipe) : undefined,
+      roomTypeName: r.roomTypeName ?? wadah.roomTypeName,
+      roomTypeNameShort: r.roomTypeNameShort ?? wadah.roomTypeNameShort,
+      roomBlocked: benar(r.roomBlocked),
+      isVirtual: benar(r.isVirtual),
+    });
+  };
   for (const entry of rooms) {
-    if (Array.isArray(entry.rooms)) {
-      for (const r of entry.rooms) {
-        if (r.roomID) {
-          flat.push({
-            roomID: String(r.roomID),
-            roomName: r.roomName || String(r.roomID),
-            roomTypeID: entry.roomTypeID,
-            roomTypeName: entry.roomTypeName,
-          });
-        }
-      }
-    } else if (entry.roomID) {
-      flat.push({
-        roomID: String(entry.roomID),
-        roomName: entry.roomName || String(entry.roomID),
-        roomTypeID: entry.roomTypeID,
-        roomTypeName: entry.roomTypeName,
-      });
-    }
+    if (Array.isArray(entry.rooms)) for (const r of entry.rooms) dorong(r, entry);
+    else dorong(entry, entry);
   }
   return flat;
 }
@@ -479,9 +486,9 @@ export async function getCloudbedsAvailabilityForDate(
  * kamar adalah tersangka pertama -- dan satu-satunya yang bisa dilihat lewat
  * API, bukan hanya di dashboard. Batas Cloudbeds: rentang maksimal 35 hari.
  */
-export async function getCloudbedsRoomBlocks(startDate: string, endDate: string): Promise<unknown[]> {
-  const key = apiKey();
-  const propertyId = (process.env.CLOUDBEDS_PROPERTY_ID ?? "").trim();
+export async function getCloudbedsRoomBlocks(startDate: string, endDate: string, akun: CloudbedsAkun = "utama"): Promise<unknown[]> {
+  const key = apiKey(akun);
+  const propertyId = propertyIdAkun(akun);
   const url = new URL(`${CLOUDBEDS_API_BASE}/getRoomBlocks`);
   if (propertyId) url.searchParams.set("propertyID", propertyId);
   url.searchParams.set("startDate", startDate);

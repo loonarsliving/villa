@@ -3,6 +3,13 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-11-03 — Kamar Excellent Living diambil dari Cloudbeds (tanpa pemetaan manual)
+- Owner: "dipemetaan room ini mesti 1 per satu kamar ya ? tolong buat dia ambil data dari cloudbeds sj, jdi kt bisa buka tutup kamar dgan mudah".
+- `sinkronKamarEl()` (`elCloudbedsSync.ts`, rencana murni `rencanakanKamarEl()` di `elCloudbedsLogic.ts`, +6 tes) jalan di awal setiap sinkron EL (cron 10 menit / tombol Sinkron Sekarang): tipe Cloudbeds dicocokkan ke `el_room_types` lewat kamar yang sudah dipetakan, nama, atau singkatan (`roomTypeNameShort` = kode); tipe baru dibuat. Room Cloudbeds -> kamar dipetakan / kamar lama bernomor sama dipetakan / kamar baru dibuat (`nomor` = nama room Cloudbeds). Nama room berubah di Cloudbeds -> `nomor` ikut (juga `el_bookings.room_nomor`). Room hilang dari Cloudbeds -> `el_rooms.active=false` kecuali masih ada booking terjadwal/checkin; muncul lagi -> aktif. `roomBlocked` hari ini -> `status='maintenance'` + penanda `[Blok Cloudbeds]` di catatan; blokir dibuka -> `available` (maintenance manual tanpa penanda tidak disentuh). Tipe tanpa kamar aktif -> nonaktif. Room virtual diabaikan. Pengaman: getRooms kosong -> tidak ada yang diubah.
+- Pemilihan kamar reservasi tanpa nomor kamar kini juga menghindari blokir Cloudbeds (`getRoomBlocks` akun EL, 35 hari).
+- `getCloudbedsRooms` kini membaca `roomTypeID/roomTypeName` dari tiap room (spec pms-v1.2; dulu dari wadah per properti) + `roomTypeNameShort`, `roomBlocked`, `isVirtual`. Pemakai Private Living hanya tampilan admin. `getCloudbedsRoomBlocks` menerima akun.
+- Akibat pertama kali jalan: 31 kamar placeholder (ST-01.., SP-01.., FP-01..) yang namanya tidak ada di Cloudbeds dinonaktifkan (0 booking EL saat itu), kamar Cloudbeds dibuat.
+
 ## 2026-11-03 — Cloudbeds Excellent Living TERSAMBUNG
 - Env awal `CLOUDBEDS_API_KEY_LOONARS2` ternyata **Client ID** OAuth (`live1_`, 46 karakter) dan `CLOUDBEDS_SECRET_LOONARS2` = Client Secret (32 karakter); keduanya ditolak Cloudbeds (401, x-api-key maupun Bearer). `periksaKunciEl()` (#258) melaporkan bentuk kunci tanpa isinya.
 - Owner membuat **API Key** (`cbat_`) pada kredensial "Cloudbeds2" di Cloudbeds EL (Marketplace -> API Credentials -> API KEY: Create; scope Hotel/Reservation/Guest/Room/Rate/App Property Settings R+W, Roomblock R/W/D, Taxes and Fees R, Payment R), mengganti `CLOUDBEDS_API_KEY_LOONARS2` (17:30 UTC) dan redeploy.

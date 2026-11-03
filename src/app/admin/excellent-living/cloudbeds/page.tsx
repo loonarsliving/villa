@@ -28,15 +28,23 @@ export default function ElCloudbedsPage() {
     setSinkron({ jalan: true, hasil: null });
     try {
       const r = await localApi<{
+        kamar: { room_cloudbeds: number; tipe_dibuat: string[]; kamar_dibuat: string[]; dipetakan: number; dinonaktifkan: string[]; tetap_aktif_ada_booking: string[]; diblokir_hari_ini: string[] };
         tarik: { aktif: number; disimpan: number; dibatalkan: number; tanpa_kamar: string[]; dilewati_tipe_belum_dipetakan: number };
         kirim: { dicoba: number; berhasil: number; gagal: { error: string }[] };
         errors: string[];
       }>("/api/admin/cloudbeds-el/sync", { method: "POST" });
-      const t = r.tarik, k = r.kirim;
+      const t = r.tarik, k = r.kirim, km = r.kamar;
       setSinkron({
         jalan: false,
         hasil:
-          `Tarik: ${t.aktif} reservasi aktif di Cloudbeds, ${t.disimpan} tersimpan, ${t.dibatalkan} dibatalkan` +
+          `Kamar: ${km.room_cloudbeds} kamar di Cloudbeds` +
+          (km.tipe_dibuat.length ? `, tipe baru: ${km.tipe_dibuat.join(", ")}` : "") +
+          (km.kamar_dibuat.length ? `, ${km.kamar_dibuat.length} kamar baru` : "") +
+          (km.dipetakan ? `, ${km.dipetakan} kamar lama dipetakan` : "") +
+          (km.dinonaktifkan.length ? `, ${km.dinonaktifkan.length} kamar dinonaktifkan (tidak ada di Cloudbeds)` : "") +
+          (km.tetap_aktif_ada_booking.length ? `, tetap aktif karena ada booking: ${km.tetap_aktif_ada_booking.join(", ")}` : "") +
+          (km.diblokir_hari_ini.length ? `, diblokir hari ini: ${km.diblokir_hari_ini.join(", ")}` : "") +
+          `. Tarik: ${t.aktif} reservasi aktif di Cloudbeds, ${t.disimpan} tersimpan, ${t.dibatalkan} dibatalkan` +
           (t.dilewati_tipe_belum_dipetakan ? `, ${t.dilewati_tipe_belum_dipetakan} dilewati (tipe kamar belum dipetakan)` : "") +
           (t.tanpa_kamar.length ? `, ${t.tanpa_kamar.length} TANPA KAMAR KOSONG` : "") +
           `. Kirim: ${k.berhasil}/${k.dicoba} booking front desk terkirim ke Cloudbeds` +
@@ -102,7 +110,7 @@ export default function ElCloudbedsPage() {
       <Card className="mb-5">
         <CardHeader
           title="Sinkron Reservasi"
-          subtitle="Otomatis tiap 10 menit: reservasi Cloudbeds/OTA masuk ke front desk EL, booking front desk EL dikirim ke Cloudbeds"
+          subtitle="Otomatis tiap 10 menit: daftar kamar diambil dari Cloudbeds, reservasi Cloudbeds/OTA masuk ke front desk EL, booking front desk EL dikirim ke Cloudbeds"
           action={<Btn variant="primary" onClick={sinkronSekarang} disabled={sinkron.jalan}>{sinkron.jalan ? "Menyinkron..." : "Sinkron Sekarang"}</Btn>}
         />
         {sinkron.hasil && <div className="px-4 sm:px-5 pb-4 text-[12px] text-ink/70">{sinkron.hasil}</div>}
@@ -111,7 +119,7 @@ export default function ElCloudbedsPage() {
       <Card className="mb-5">
         <CardHeader
           title="Pemetaan Room"
-          subtitle="Room Cloudbeds → kamar Excellent Living"
+          subtitle="Otomatis dari Cloudbeds: kamar baru di Cloudbeds langsung dibuat & dipetakan, kamar yang dihapus jadi nonaktif, kamar diblokir jadi maintenance. Tambah manual hanya bila perlu."
           action={<Btn variant="primary" onClick={() => setForm({ cloudbeds_room_id: "", cloudbeds_room_name: "", room_id: "" })}>+ Petakan Room</Btn>}
         />
         {!mappings ? (

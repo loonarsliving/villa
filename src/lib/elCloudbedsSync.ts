@@ -1,8 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { CloudbedsApiError, getCloudbedsReservationTotals, getCloudbedsRooms, kredensialCloudbeds, periksaKunciEl, type CloudbedsRoom, type HasilPeriksaKunci } from "@/lib/cloudbedsApi";
+import { CloudbedsApiError, getCloudbedsReservationTotals, getCloudbedsRoomBlocks, getCloudbedsRooms, kredensialCloudbeds, periksaKunciEl, type CloudbedsRoom, type HasilPeriksaKunci } from "@/lib/cloudbedsApi";
 import { mapSourceNameToSumber } from "@/lib/cloudbedsSourceMapping";
 import { statusSetelahSync } from "@/lib/bookingStatusSync";
+import { bacaBlokirKamar } from "@/lib/cloudbedsUnitSementara";
 import {
+  rencanakanKamarEl,
+  type KamarLokal,
+  type PetaLokal,
+  type TipeLokal,
   elDibuatDiSini,
   jumlahMalam,
   pecahNama,
@@ -50,6 +55,8 @@ interface ReservasiCb {
 }
 
 export interface ElSyncRingkasan {
+  /** Daftar kamar EL yang disamakan dengan Cloudbeds (lihat sinkronKamarEl). */
+  kamar: RingkasanKamar;
   /** Kunci EL yang diterima Cloudbeds + hasil uji tiap env (tanpa isi kunci). */
   kunci: { terpilih: string | null; hasil: HasilPeriksaKunci[] };
   tarik: {
@@ -116,6 +123,7 @@ export async function syncCloudbedsEl(supabase: SupabaseClient): Promise<ElSyncR
   const errors: string[] = [];
   const ringkasan: ElSyncRingkasan = {
     kunci: periksa,
+    kamar: { room_cloudbeds: 0, tipe_dibuat: [], kamar_dibuat: [], dipetakan: 0, diubah: 0, dinonaktifkan: [], tetap_aktif_ada_booking: [], diblokir_hari_ini: [] },
     tarik: { diambil: 0, aktif: 0, disimpan: 0, dipindah_kamar: [], tanpa_kamar: [], dilewati_milik_sendiri: 0, dilewati_tipe_belum_dipetakan: 0, dibatalkan: 0 },
     kirim: { dicoba: 0, berhasil: 0, gagal: [] },
     errors,
@@ -123,6 +131,7 @@ export async function syncCloudbedsEl(supabase: SupabaseClient): Promise<ElSyncR
 
   // Room Cloudbeds (roomID -> roomTypeID) dan pemetaan ke kamar EL.
   const roomsCb: CloudbedsRoom[] = await getCloudbedsRooms("el");
+  ringkasan.kamar = await sinkronKamarEl(supabase, roomsCb, hariIni, errors);
   const tipeDariRoomCb = new Map(roomsCb.map((r) => [String(r.roomID), r.roomTypeID ? String(r.roomTypeID) : null]));
   const { data: mappings, error: mapErr } = await supabase.from("el_cloudbeds_room_mapping").select("cloudbeds_room_id, room_id, el_rooms(nomor, active)");
   if (mapErr) throw new Error(`pemetaan room tidak terbaca: ${mapErr.message}`);
@@ -174,6 +183,19 @@ export async function syncCloudbedsEl(supabase: SupabaseClient): Promise<ElSyncR
     checkOut: String(b.tgl_checkout),
     reservationId: b.cloudbeds_reservation_id ? String(b.cloudbeds_reservation_id) : null,
   }));
+  // Kamar yang diblokir di Cloudbeds (tutup/maintenance) tidak dipilih untuk
+  // reservasi tanpa nomor kamar. Batas Cloudbeds 35 hari per permintaan.
+  try {
+    const sampai = new Date(Date.parse(`${hariIni}T00:00:00Z`) + 34 * 86400000).toISOString().slice(0, 10);
+    for (const blk of bacaBlokirKamar(await getCloudbedsRoomBlocks(hariIni, sampai, "el"))) {
+      for (const cb of blk.roomIds) {
+        const roomId = kamarDariRoomCb.get(cb);
+        if (roomId) terpakai.push({ roomId, checkIn: blk.startDate, checkOut: blk.endDate ?? "9999-12-31", reservationId: "blok-cloudbeds" });
+      }
+    }
+  } catch (e) {
+    errors.push(`blokir kamar tidak terbaca: ${e instanceof Error ? e.message : String(e)}`);
+  }
 
   for (const r of aktif) {
     const ada = lokal.get(r.reservationID);
@@ -384,4 +406,133 @@ async function kirimSatu(
     if (res.ok && body?.success !== false && body?.reservationID) return { reservationID: String(body.reservationID), variant: v.nama };
   }
   return { error: "postReservation_failed_all_variants", attempts };
+}
+
+export interface RingkasanKamar {
+  room_cloudbeds: number;
+  tipe_dibuat: string[];
+  kamar_dibuat: string[];
+  dipetakan: number;
+  diubah: number;
+  dinonaktifkan: string[];
+  /** Kamar yang hilang dari Cloudbeds tapi masih punya booking aktif -- dibiarkan aktif. */
+  tetap_aktif_ada_booking: string[];
+  diblokir_hari_ini: string[];
+}
+
+/**
+ * Cloudbeds = sumber daftar kamar EL (owner 2026-11-03: "ambil data dari
+ * cloudbeds sj, jdi kt bisa buka tutup kamar dgan mudah"):
+ *  - tipe & kamar baru di Cloudbeds -> dibuat + dipetakan otomatis
+ *    (kamar lama dengan nomor sama dipakai ulang);
+ *  - nama kamar di Cloudbeds berubah -> nomor ikut;
+ *  - kamar dihapus di Cloudbeds -> el_rooms.active=false (kecuali masih ada
+ *    booking aktif); muncul lagi -> aktif lagi;
+ *  - kamar diblokir di Cloudbeds hari ini -> 'maintenance' (ditandai
+ *    "[Blok Cloudbeds]" di catatan supaya bisa dibuka lagi otomatis tanpa
+ *    menyentuh maintenance yang diset manual oleh staf).
+ * Pengaman: kalau Cloudbeds tidak mengembalikan satu kamar pun, tidak ada
+ * yang diubah -- jawaban kosong sesaat tidak boleh menutup semua kamar.
+ */
+export async function sinkronKamarEl(supabase: SupabaseClient, roomsCb: CloudbedsRoom[], hariIni: string, errors: string[]): Promise<RingkasanKamar> {
+  const hasil: RingkasanKamar = { room_cloudbeds: 0, tipe_dibuat: [], kamar_dibuat: [], dipetakan: 0, diubah: 0, dinonaktifkan: [], tetap_aktif_ada_booking: [], diblokir_hari_ini: [] };
+  const nyata = roomsCb.filter((r) => !r.isVirtual && r.roomTypeID);
+  hasil.room_cloudbeds = nyata.length;
+  hasil.diblokir_hari_ini = nyata.filter((r) => r.roomBlocked).map((r) => r.roomName);
+  if (nyata.length === 0) {
+    errors.push("Cloudbeds tidak mengembalikan kamar; daftar kamar EL tidak diubah");
+    return hasil;
+  }
+
+  const [{ data: tipe, error: e1 }, { data: kamar, error: e2 }, { data: peta, error: e3 }] = await Promise.all([
+    supabase.from("el_room_types").select("id, kode, nama, active"),
+    supabase.from("el_rooms").select("id, nomor, room_type_id, status, active, catatan"),
+    supabase.from("el_cloudbeds_room_mapping").select("cloudbeds_room_id, room_id"),
+  ]);
+  if (e1 || e2 || e3) {
+    errors.push(`daftar kamar EL tidak terbaca: ${(e1 ?? e2 ?? e3)!.message}`);
+    return hasil;
+  }
+  const rencana = rencanakanKamarEl(nyata, (tipe ?? []) as TipeLokal[], (kamar ?? []) as KamarLokal[], (peta ?? []) as PetaLokal[]);
+  const sekarang = () => new Date().toISOString();
+
+  // Tipe baru.
+  const idTipe = new Map(rencana.tipeCocok);
+  for (const t of rencana.tipeBaru) {
+    const { data, error } = await supabase.from("el_room_types").insert({ kode: t.kode, nama: t.nama, sort_order: t.sort_order, active: true }).select("id").single();
+    if (error || !data) {
+      errors.push(`tipe ${t.nama}: ${error?.message ?? "gagal dibuat"}`);
+      continue;
+    }
+    idTipe.set(t.kunci, data.id);
+    hasil.tipe_dibuat.push(t.nama);
+  }
+
+  // Pemetaan otomatis untuk kamar lama bernomor sama.
+  for (const p of rencana.petaBaru) {
+    const { error } = await supabase.from("el_cloudbeds_room_mapping").insert(p);
+    if (error) errors.push(`peta ${p.cloudbeds_room_name}: ${error.message}`);
+    else hasil.dipetakan++;
+  }
+
+  // Kamar baru + pemetaannya.
+  const blokById = new Map(nyata.map((r) => [r.roomID, !!r.roomBlocked]));
+  for (const k of rencana.kamarBaru) {
+    const room_type_id = idTipe.get(k.kunciTipe);
+    if (!room_type_id) continue;
+    const terblokir = blokById.get(k.cloudbeds_room_id);
+    const { data, error } = await supabase
+      .from("el_rooms")
+      .insert({ nomor: k.nomor, room_type_id, sort_order: k.sort_order, active: true, status: terblokir ? "maintenance" : "available", catatan: terblokir ? "[Blok Cloudbeds]" : null })
+      .select("id")
+      .single();
+    if (error || !data) {
+      errors.push(`kamar ${k.nomor}: ${error?.message ?? "gagal dibuat"}`);
+      continue;
+    }
+    const { error: ep } = await supabase.from("el_cloudbeds_room_mapping").insert({ cloudbeds_room_id: k.cloudbeds_room_id, cloudbeds_room_name: k.nomor, room_id: data.id });
+    if (ep) errors.push(`peta ${k.nomor}: ${ep.message}`);
+    hasil.kamar_dibuat.push(k.nomor);
+  }
+
+  // Perubahan kamar yang sudah dipetakan.
+  for (const u of rencana.ubahKamar) {
+    const isi: Record<string, unknown> = { ...u.isi, updated_at: sekarang() };
+    if (u.kunciTipe && idTipe.get(u.kunciTipe)) isi.room_type_id = idTipe.get(u.kunciTipe);
+    const { error } = await supabase.from("el_rooms").update(isi).eq("id", u.id);
+    if (error) {
+      errors.push(`ubah kamar ${u.id}: ${error.message}`);
+      continue;
+    }
+    hasil.diubah++;
+    if (typeof u.isi.nomor === "string") await supabase.from("el_bookings").update({ room_nomor: u.isi.nomor }).eq("room_id", u.id);
+  }
+
+  // Kamar yang tidak ada lagi di Cloudbeds: nonaktif, kecuali masih ada tamu/booking.
+  if (rencana.nonaktifkan.length) {
+    const { data: masihDipakai } = await supabase
+      .from("el_bookings")
+      .select("room_id")
+      .in("room_id", rencana.nonaktifkan)
+      .in("status", ["terjadwal", "checkin"])
+      .gte("tgl_checkout", hariIni);
+    const dipakai = new Set((masihDipakai ?? []).map((b) => String(b.room_id)));
+    const nomor = new Map((kamar ?? []).map((k) => [k.id as string, k.nomor as string]));
+    const mati = rencana.nonaktifkan.filter((id) => !dipakai.has(id));
+    if (mati.length) {
+      const { error } = await supabase.from("el_rooms").update({ active: false, updated_at: sekarang() }).in("id", mati);
+      if (error) errors.push(`nonaktifkan kamar: ${error.message}`);
+      else hasil.dinonaktifkan = mati.map((id) => nomor.get(id) ?? id);
+    }
+    hasil.tetap_aktif_ada_booking = [...dipakai].map((id) => nomor.get(id) ?? id);
+  }
+
+  // Tipe aktif = tipe yang punya kamar aktif.
+  const { data: aktif } = await supabase.from("el_rooms").select("room_type_id").eq("active", true);
+  const tipeAktif = new Set((aktif ?? []).map((r) => String(r.room_type_id)));
+  for (const t of (tipe ?? []) as TipeLokal[]) {
+    const harus = tipeAktif.has(t.id);
+    if (t.active !== harus) await supabase.from("el_room_types").update({ active: harus, updated_at: sekarang() }).eq("id", t.id);
+  }
+  return hasil;
 }
