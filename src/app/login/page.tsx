@@ -39,7 +39,7 @@ export default function LoginPage() {
 
   function finish(u: SessionUser) {
     localStorage.setItem("villa_user", JSON.stringify(u));
-    router.replace(roleHome(u.role));
+    router.replace(roleHome(u.role, u.property_kode));
   }
 
   async function handleLogin() {

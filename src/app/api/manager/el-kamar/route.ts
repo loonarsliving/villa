@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { PENANDA_BLOK } from "@/lib/elCloudbedsLogic";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { periksaTokenManager } from "@/lib/villaApiAuth";
+import { periksaTokenManager, propertiDariToken } from "@/lib/villaApiAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,6 +20,10 @@ async function sesi(request: Request) {
   const hasil = token ? await periksaTokenManager(token) : "ditolak";
   if (hasil === "gagal-periksa") return NextResponse.json({ error: "Sesi tidak bisa diperiksa, coba lagi" }, { status: 503 });
   if (hasil !== "lolos") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Token sudah diverifikasi villa-api di atas. Manager properti lain (bukan
+  // PL/EL) tidak boleh mengatur kamar EL.
+  const p = propertiDariToken(token);
+  if (p && p !== "PL" && p !== "EL") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   return null;
 }
 

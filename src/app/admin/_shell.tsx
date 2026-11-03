@@ -4,12 +4,14 @@ import type { ReactNode } from "react";
 import { DashboardShell, type NavSection } from "@/components/DashboardShell";
 import { useAuth } from "@/lib/auth";
 import { useChatUnreadPoll } from "@/lib/hooks";
+import { usePropertiTerpilih } from "@/lib/properti";
 
 export function AdminShell({ pageTitle, pageSub, children }: { pageTitle: string; pageSub?: string; children: ReactNode }) {
   const { user } = useAuth();
   const { unreadCount: chatUnread } = useChatUnreadPoll();
+  const properti = usePropertiTerpilih();
 
-  const sections: NavSection[] = [
+  const semua: NavSection[] = [
     {
       title: "Ikhtisar",
       items: [
@@ -41,7 +43,6 @@ export function AdminShell({ pageTitle, pageSub, children }: { pageTitle: string
       items: [
         { href: "/admin/investors", label: "Investor", icon: "◎" },
         { href: "/admin/bukti-transfer", label: "Bukti Transfer Dividen", icon: "✓" },
-        { href: "/admin/users", label: "Pengguna", icon: "◉" },
         { href: "/admin/staff", label: "Staff Operasional", icon: "▤" },
         { href: "/admin/amenities", label: "Amenities", icon: "▧" },
       ],
@@ -71,8 +72,27 @@ export function AdminShell({ pageTitle, pageSub, children }: { pageTitle: string
     },
   ];
 
+  // Menu mengikuti properti yang dipilih (owner 2026-11-04). Private Living =
+  // semua menu lama; Excellent Living = menu EL; properti baru = belum ada
+  // fitur operasional. Pengelolaan properti & pengguna selalu tampil.
+  const propertiNav: NavSection = {
+    title: "Properti",
+    items: [
+      { href: "/pilih-properti", label: "Ganti Properti", icon: "⇄" },
+      { href: "/admin/properti", label: "Kelola Properti", icon: "⌂" },
+      { href: "/admin/users", label: "Pengguna & Role", icon: "◉" },
+    ],
+  };
+  const sections: NavSection[] =
+    properti.kode === "PL"
+      ? [propertiNav, ...semua.filter((s) => s.title !== "Excellent Living")]
+      : properti.kode === "EL"
+        ? [propertiNav, ...semua.filter((s) => s.title === "Excellent Living")]
+        : [propertiNav];
+
   return (
     <DashboardShell
+      property={properti.nama}
       brandTitle="Panel"
       brandSub="Admin"
       roleLabel={user?.nama ? "Business Owner" : "Admin"}

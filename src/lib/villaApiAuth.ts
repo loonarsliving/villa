@@ -94,10 +94,30 @@ export async function isFinanceToken(token: string): Promise<boolean> {
  * Manager dikunci villa-api hanya ke /manager/*, jadi /summary menolaknya --
  * karena itu dicoba lewat /manager/whoami kalau pemeriksaan staf menolak.
  */
+/**
+ * Properti di dalam token sesi (multi-properti 2026-11-04). HANYA boleh
+ * dipercaya SETELAH token lolos salah satu periksaToken* di atas (villa-api
+ * yang memverifikasi tanda tangannya). null = semua properti / token lama.
+ */
+export function propertiDariToken(token: string): string | null {
+  try {
+    const isi = JSON.parse(Buffer.from(token.split(".")[0].replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8")) as { property_kode?: unknown };
+    return typeof isi.property_kode === "string" && isi.property_kode ? isi.property_kode : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function periksaTokenChat(token: string): Promise<HasilPeriksaToken> {
   const staf = await periksaTokenStaf(token);
   if (staf !== "ditolak") return staf;
-  return periksaTokenManager(token);
+  const manager = await periksaTokenManager(token);
+  // Chat WA tamu milik Private Living: manager properti lain tidak ikut membaca.
+  if (manager === "lolos") {
+    const p = propertiDariToken(token);
+    if (p && p !== "PL") return "ditolak";
+  }
+  return manager;
 }
 
 /**

@@ -3,6 +3,15 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-11-04 — Multi-properti: pilih properti saat login, kelola properti, pengguna per properti
+- Owner: "ketika admin atau finance login, langsung muncul pilihan dia mau memilih properti mana ... admin itu bisa menambahkan properti baru dgan mudah ... admin jga harusnya bisa menambahkan karyawan dan role untuk login berdasarkan properti".
+- Login: villa-api `/login` membaca `villa_users.property_kode` dan menaruhnya di token + `user` (token lama tanpa properti = semua/PL). `roleHome(role, property)`: admin & finance -> `/pilih-properti`; manager EL -> `/manager/kamar-el`; manager/resepsionis properti yang belum punya fitur -> `/properti-belum-aktif`.
+- `/pilih-properti` (admin, finance): daftar `villa_properties` aktif (`GET /api/properti`, `periksaTokenFinance`), pilihan disimpan di localStorage `villa_properti` (`src/lib/properti.ts`). PL -> menu lama; EL -> menu EL (`/excellent/front-desk`, finance `/finance/excellent-living`); properti lain -> pesan "fitur belum aktif". AdminShell/FinanceShell menyaring menu per properti + "Ganti Properti"; nama properti di sidebar.
+- `/admin/properti` + `POST/PATCH /api/admin/properti` (`periksaTokenAdmin`): tambah properti (kode 2-6 huruf, unik, tetap), ubah nama, aktif/nonaktif (PL tidak bisa dinonaktifkan).
+- `/admin/users`: kolom Properti; form memilih properti dulu, role menyesuaikan (Semua = admin/finance; PL = resepsionis/manager/investor/late night; EL = el_receptionist/manager/el_investor; properti baru = manager/resepsionis). villa-api `/admin/users` POST/PATCH menerima `property_kode` (`propertiAkunValid`: admin/finance -> NULL, el_* -> 'EL', lainnya harus properti aktif).
+- Pengaman villa-api: manager dengan properti selain PL hanya boleh `/manager/whoami`; resepsionis dengan properti selain PL ditolak semua rute. Next.js: `periksaTokenChat` menolak manager non-PL (chat WA milik PL), `/api/manager/el-kamar` menolak properti selain PL/EL (`propertiDariToken`, dibaca setelah token diverifikasi villa-api). ManagerShell manager EL: hanya menu Kamar EL, polling chat dimatikan (401 akan mengakhiri sesi).
+- Belum: fitur operasional properti baru (kamar, booking, Cloudbeds, finance) dan penggabungan EL ke tabel bersama (Tahap 3-4 di `docs/multi-properti/RENCANA.md`).
+
 ## 2026-11-04 — Multi-properti Tahap 1: fondasi database + pengaman uang Private Living
 - Owner: "betul buat sj pgaman, dan jgan sampai menggangu private living yg sedang berjalan".
 - Migrasi `20261104000001_multi_properti_fondasi` diterapkan (lihat DATABASE.md): `villa_properties` + `property_kode` default 'PL' di 7 tabel inti + `villa_users.property_kode`. PostgREST dicek mengenali kolom (query REST `property_kode=eq.PL` -> 200, kolom palsu -> 400) sebelum kode di-deploy.

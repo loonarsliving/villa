@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { DashboardShell, type NavSection } from "@/components/DashboardShell";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { usePropertiTerpilih } from "@/lib/properti";
 
 export function FinanceShell({ pageTitle, pageSub, children }: { pageTitle: string; pageSub?: string; children: ReactNode }) {
   const { user } = useAuth();
@@ -17,7 +18,8 @@ export function FinanceShell({ pageTitle, pageSub, children }: { pageTitle: stri
       .catch(() => {});
   }, []);
 
-  const sections: NavSection[] = [
+  const properti = usePropertiTerpilih();
+  const semua: NavSection[] = [
     {
       title: "Finance",
       items: [
@@ -51,8 +53,18 @@ export function FinanceShell({ pageTitle, pageSub, children }: { pageTitle: stri
     },
   ];
 
+  // Menu mengikuti properti yang dipilih (owner 2026-11-04).
+  const gantiNav: NavSection = { title: "Properti", items: [{ href: "/pilih-properti", label: "Ganti Properti", icon: "⇄" }] };
+  const sections: NavSection[] =
+    properti.kode === "PL"
+      ? [gantiNav, ...semua.filter((s) => s.title !== "Excellent Living")]
+      : properti.kode === "EL"
+        ? [gantiNav, ...semua.filter((s) => s.title === "Excellent Living")]
+        : [gantiNav];
+
   return (
     <DashboardShell
+      property={properti.nama}
       brandTitle="Panel"
       brandSub="Finance"
       roleLabel={user?.role === "admin" ? "Admin" : "Finance"}
