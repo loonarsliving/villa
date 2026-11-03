@@ -38,10 +38,15 @@ jobs:
           # Run #50 (23 Sep 2026) gagal dua kali berturut-turut sebelum satu
           # baris kode pun diunggah, karena ghcr.io menolak unduhan image
           # edge-runtime ("toomanyrequests"). Tanpa Docker, jalur itu hilang.
+          #
+          # --yes: Supabase CLI terbaru meminta konfirmasi sebelum deploy dan
+          # gagal di runner tanpa terminal ("Confirmation required ... Re-run
+          # with --yes", run 2026-11-03 untuk PR #264).
           supabase functions deploy villa-api \
             --project-ref svcmybsziaelwwdrnzcv \
             --no-verify-jwt \
-            --use-api
+            --use-api \
+            --yes
 
       # Kegagalan deploy ini SENYAP: aplikasi tetap berjalan karena frontend
       # kompatibel dengan villa-api versi lama, jadi `main` bisa terlihat
