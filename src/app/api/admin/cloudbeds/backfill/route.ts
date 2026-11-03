@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { klienProperti } from "@/lib/klienProperti";
 
 import { syncCloudbedsReservations } from "@/lib/cloudbedsReservationSync";
 import { isAdminToken } from "@/lib/villaApiAuth";
@@ -33,7 +34,7 @@ export async function POST(request: Request) {
   if (!serviceRoleKey) {
     return NextResponse.json({ error: "SUPABASE_SERVICE_ROLE_KEY belum dikonfigurasi" }, { status: 503 });
   }
-  const supabase: SupabaseClient = createClient(SUPABASE_URL, serviceRoleKey);
+  const supabase: SupabaseClient = klienProperti(createClient(SUPABASE_URL, serviceRoleKey)); // pengaman multi-properti: hanya Private Living
 
   try {
     return NextResponse.json(await syncCloudbedsReservations(supabase, apiKey));

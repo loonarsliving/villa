@@ -27,7 +27,7 @@ query itu harus diperiksa.
 
 ## Tahap
 
-### Tahap 1: Fondasi database (aditif, perilaku PL tidak berubah)
+### Tahap 1: Fondasi database (aditif, perilaku PL tidak berubah) — SELESAI 2026-11-04
 Migrasi baru, butuh persetujuan owner:
 - Tabel `villa_properties` (`kode` 'PL' / 'EL', nama, awalan env Cloudbeds,
   aktif).
@@ -45,7 +45,13 @@ Migrasi baru, butuh persetujuan owner:
   Begitu juga resepsionis (`receptionist` + 'EL'). Role `el_receptionist`
   dipertahankan sampai Tahap 4.
 - `guests` tetap bersama (satu tamu bisa menginap di kedua properti).
-- Semua baris lama otomatis 'PL' lewat default. Belum ada query yang berubah.
+- Semua baris lama otomatis 'PL' lewat default.
+- Ditambah pengaman (owner 2026-11-04 "buat sj pgaman"): koneksi database
+  villa-api dan Next.js dibungkus `klienProperti` sehingga tabel inti
+  otomatis disaring ke 'PL'. Dengan pengaman ini, langkah "kunci rumus uang
+  PL" di Tahap 2 sudah terpenuhi untuk semua kode lama. Tabel yang tercakup
+  untuk sementara baru 7 tabel inti (lihat DATABASE.md); tabel lain di
+  daftar atas ditambahkan saat dibutuhkan.
 
 ### Tahap 2: Saringan properti di villa-api dan src (PL tetap identik)
 - Setiap query `units`/`bookings`/finance memakai properti dari sesi:

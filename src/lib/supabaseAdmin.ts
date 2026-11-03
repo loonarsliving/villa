@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createClient } from "@supabase/supabase-js";
+import { klienProperti } from "@/lib/klienProperti";
 
 const SUPABASE_URL = "https://svcmybsziaelwwdrnzcv.supabase.co";
 
@@ -16,7 +17,11 @@ export function supabaseAdmin() {
   if (!serviceRoleKey) {
     throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured");
   }
-  return createClient(SUPABASE_URL, serviceRoleKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
+  // Pengaman multi-properti: tabel inti otomatis hanya baris Private Living
+  // (lihat src/lib/klienProperti.ts).
+  return klienProperti(
+    createClient(SUPABASE_URL, serviceRoleKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    }),
+  );
 }
