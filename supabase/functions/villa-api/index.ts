@@ -1,6 +1,7 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { timingSafeEqual } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 // ── PENGAMAN MULTI-PROPERTI (owner 2026-11-04: "betul buat sj pgaman, dan
 // jgan sampai menggangu private living yg sedang berjalan") ──────────────
@@ -18,7 +19,21 @@ function isiProperti(rows, properti){
   const isi = r => (r && typeof r === 'object' && !('property_kode' in r)) ? { ...r, property_kode: properti } : r;
   return Array.isArray(rows) ? rows.map(isi) : isi(rows);
 }
+// Konteks properti per request (multi-properti Tahap 4, owner 2026-11-04:
+// "buat smua fitur private living bisa dipakai di excellent living").
+// Setiap request berjalan di dalam konteksProperti.run({properti:'PL'});
+// setelah sesi dikenali, properti bisa diganti (lihat tentukanProperti).
+// Di luar request (atau bila konteks hilang) = 'PL'.
+const konteksProperti = new AsyncLocalStorage();
+function propertiSaatIni(){ return konteksProperti.getStore()?.properti ?? 'PL'; }
+// Properti yang datanya sudah di tabel bersama DAN pengaman per propertinya
+// (Cloudbeds, QRIS, rumus uang) sudah dipasang. Properti lain selalu
+// diperlakukan PL -- tidak ada perubahan perilaku sampai properti
+// ditambahkan di sini.
+const PROPERTI_SIAP = new Set(['PL']);
+
 function klienProperti(klien, properti){
+  const kode = () => (typeof properti === 'function' ? properti() : properti);
   return new Proxy(klien, {
     get(target, prop, receiver){
       if(prop !== 'from'){
@@ -32,8 +47,8 @@ function klienProperti(klien, properti){
           get(b, p, r){
             const asli = Reflect.get(b, p, r);
             if(typeof asli !== 'function') return asli;
-            if(p === 'select' || p === 'update' || p === 'delete') return (...a) => asli.apply(b, a).eq('property_kode', properti);
-            if(p === 'insert' || p === 'upsert') return (rows, ...rest) => asli.apply(b, [isiProperti(rows, properti), ...rest]);
+            if(p === 'select' || p === 'update' || p === 'delete') return (...a) => asli.apply(b, a).eq('property_kode', kode());
+            if(p === 'insert' || p === 'upsert') return (rows, ...rest) => asli.apply(b, [isiProperti(rows, kode()), ...rest]);
             return asli.bind(b);
           },
         });
@@ -42,7 +57,7 @@ function klienProperti(klien, properti){
   });
 }
 const supabaseSemua = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-const supabase = klienProperti(supabaseSemua, 'PL');
+const supabase = klienProperti(supabaseSemua, propertiSaatIni);
 
 const SESSION_SECRET = Deno.env.get('VILLA_SESSION_SECRET') ?? '';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
@@ -50,7 +65,7 @@ const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const CLOUDBEDS_API_BASE = 'https://api.cloudbeds.com/api/v1.2';
 function cloudbedsApiKey(){ return (Deno.env.get('CLOUDBEDS_API_KEY') ?? '').trim(); }
 
-const CORS = { 'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'authorization,x-client-info,apikey,content-type,x-villa-token,x-cloudbeds-secret,x-cron-secret,x-internal-secret','Access-Control-Allow-Methods':'GET,POST,PATCH,DELETE,OPTIONS' };
+const CORS = { 'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'authorization,x-client-info,apikey,content-type,x-villa-token,x-villa-property,x-cloudbeds-secret,x-cron-secret,x-internal-secret','Access-Control-Allow-Methods':'GET,POST,PATCH,DELETE,OPTIONS' };
 
 function json(d, s=200){ return new Response(JSON.stringify(d),{status:s,headers:{...CORS,'Content-Type':'application/json'}}); }
 function err(m, s=400){ return json({error:m},s); }
@@ -1042,6 +1057,9 @@ async function getVercelBridge(){
 }
 
 async function pushBookingToCloudbeds(booking){
+  // Kunci Cloudbeds di sini milik Private Living. Booking properti lain
+  // dikirim lewat sinkron properti itu sendiri (Next.js), bukan dari sini.
+  if(propertiSaatIni() !== 'PL') return;
   const apiKey = cloudbedsApiKey();
   if(!apiKey) return;
 
@@ -4526,7 +4544,9 @@ async function routeExcellentLiving(req, path, m, url, session){
   return err('Not found', 404);
 }
 
-Deno.serve(async (req)=>{
+Deno.serve((req)=>konteksProperti.run({ properti: 'PL' }, ()=>layani(req)));
+
+async function layani(req){
   if(req.method==='OPTIONS') return new Response('ok',{headers:CORS});
   if(!SESSION_SECRET){
     return err('Server misconfigured: VILLA_SESSION_SECRET is not set',503);
@@ -4621,6 +4641,18 @@ Deno.serve(async (req)=>{
 
   // Ketersediaan Loonars Excellent Living untuk loonars.id (tanpa harga --
   // tamu memesan lewat WhatsApp sampai tarif EL ditarik dari Cloudbeds).
+  // Pemeriksaan konteks properti (multi-properti): memastikan runtime Edge
+  // menjaga properti per request melewati await dan query. Tanpa data
+  // pribadi; hanya true/false.
+  if(path==='/public/cek-konteks-properti' && m==='GET'){
+    const hasil = await Promise.all(['PL','EL','PL','EL'].map(kode => konteksProperti.run({ properti: kode }, async () => {
+      await new Promise(r => setTimeout(r, Math.random() * 20));
+      await supabase.from('villa_room_types').select('id', { count:'exact', head:true });
+      return propertiSaatIni() === kode;
+    })));
+    return json({ konteks_bekerja: hasil.every(Boolean), properti_request: propertiSaatIni(), properti_siap: [...PROPERTI_SIAP] });
+  }
+
   if(path==='/public/el/availability' && m==='GET'){
     const checkin = url.searchParams.get('checkin'), checkout = url.searchParams.get('checkout');
     if(!isValidDateStr(checkin) || !isValidDateStr(checkout) || checkout <= checkin) return err('checkin/checkout tidak valid');
@@ -6746,6 +6778,18 @@ Deno.serve(async (req)=>{
   // front desk di villa-api ini masih khusus Private Living (resepsionis
   // Excellent Living memakai role el_receptionist dan rute /el/*).
   if(session.role==='receptionist' && session.property_kode && session.property_kode!=='PL') return forbidden();
+
+  // Properti request ini. Manager/resepsionis = properti akunnya; admin &
+  // finance = properti yang dipilih (header x-villa-property). Hanya properti
+  // di PROPERTI_SIAP yang dipakai; selain itu tetap PL.
+  {
+    const diminta = (session.role==='admin' || session.role==='finance')
+      ? (req.headers.get('x-villa-property') ?? '').trim().toUpperCase()
+      : String(session.property_kode ?? '');
+    if(diminta && diminta !== 'PL' && PROPERTI_SIAP.has(diminta)){
+      konteksProperti.getStore().properti = diminta;
+    }
+  }
 
   // Role late_night (Laila) HANYA boleh memakai modul late night -- dikunci
   // di sini dengan alasan yang sama seperti manager di atas. Admin boleh
@@ -9009,4 +9053,4 @@ Deno.serve(async (req)=>{
   }
 
   return err('Endpoint tidak ditemukan',404);
-});
+}
