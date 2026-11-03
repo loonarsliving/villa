@@ -4,6 +4,7 @@ import { mapSourceNameToSumber } from "@/lib/cloudbedsSourceMapping";
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { klienProperti } from "@/lib/klienProperti";
 import { statusSetelahSync } from "@/lib/bookingStatusSync";
 import { z } from "zod";
 
@@ -139,7 +140,7 @@ export async function POST(request: Request) {
   if (!serviceRoleKey) {
     return NextResponse.json({ error: "SUPABASE_SERVICE_ROLE_KEY belum dikonfigurasi" }, { status: 503 });
   }
-  const supabase = createClient(SUPABASE_URL, serviceRoleKey);
+  const supabase = klienProperti(createClient(SUPABASE_URL, serviceRoleKey)); // pengaman multi-properti: hanya Private Living
 
   const rawPayload = await request.json().catch(() => null);
   if (rawPayload === null) {

@@ -2,7 +2,47 @@ import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { timingSafeEqual } from 'node:crypto';
 
-const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+// ── PENGAMAN MULTI-PROPERTI (owner 2026-11-04: "betul buat sj pgaman, dan
+// jgan sampai menggangu private living yg sedang berjalan") ──────────────
+// Kode ini ditulis saat hanya ada satu properti: banyak rumus uang menghitung
+// SEMUA baris units/bookings (computeReport: dividen = 70% pendapatan semua
+// booking; okupansi = malam terjual / semua unit). Supaya Loonars Excellent
+// Living (EL) tidak pernah ikut terhitung, koneksi `supabase` di seluruh file
+// ini dibungkus: untuk TABEL_PER_PROPERTI, select/update/delete otomatis
+// `.eq('property_kode','PL')` dan insert/upsert mengisi property_kode='PL'.
+// Kode untuk properti lain harus memakai klienProperti(supabaseSemua, 'EL')
+// secara eksplisit. Padanan di Next.js: src/lib/klienProperti.ts (ubah
+// keduanya). Migrasi: 20261104000001_multi_properti_fondasi.sql.
+const TABEL_PER_PROPERTI = new Set(['units','villa_room_types','bookings','transactions','finance_settlements','cloudbeds_room_mapping','villa_daily_inventory_snapshot']);
+function isiProperti(rows, properti){
+  const isi = r => (r && typeof r === 'object' && !('property_kode' in r)) ? { ...r, property_kode: properti } : r;
+  return Array.isArray(rows) ? rows.map(isi) : isi(rows);
+}
+function klienProperti(klien, properti){
+  return new Proxy(klien, {
+    get(target, prop, receiver){
+      if(prop !== 'from'){
+        const v = Reflect.get(target, prop, receiver);
+        return typeof v === 'function' ? v.bind(target) : v;
+      }
+      return (tabel) => {
+        const qb = target.from(tabel);
+        if(!TABEL_PER_PROPERTI.has(tabel)) return qb;
+        return new Proxy(qb, {
+          get(b, p, r){
+            const asli = Reflect.get(b, p, r);
+            if(typeof asli !== 'function') return asli;
+            if(p === 'select' || p === 'update' || p === 'delete') return (...a) => asli.apply(b, a).eq('property_kode', properti);
+            if(p === 'insert' || p === 'upsert') return (rows, ...rest) => asli.apply(b, [isiProperti(rows, properti), ...rest]);
+            return asli.bind(b);
+          },
+        });
+      };
+    },
+  });
+}
+const supabaseSemua = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+const supabase = klienProperti(supabaseSemua, 'PL');
 
 const SESSION_SECRET = Deno.env.get('VILLA_SESSION_SECRET') ?? '';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;

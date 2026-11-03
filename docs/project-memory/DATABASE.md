@@ -239,3 +239,10 @@ Properti kedua (Loonars 2, Jogja), terpisah total dari `units`/`bookings` Privat
 - `el_cloudbeds_room_mapping`, `el_cloudbeds_events_log` (Cloudbeds akun kedua, belum dipakai).
 - `el_investor_units` (akun `el_investor` ↔ `loonars_units` proyek LNR2 Mkhsistem; halaman investor ditunda).
 - `villa_users_role_check` + `el_investor`, `el_receptionist`.
+
+## Multi-properti: `villa_properties` + `property_kode` (2026-11-04, DITERAPKAN, disetujui owner)
+- Migrasi `20261104000001_multi_properti_fondasi.sql`, diterapkan 2026-11-03 sekitar 18:40 UTC (4 Nov 01.40 WIB) lewat `execute_sql` (isi = file, md5 `f278412611885ee4cb936e56cde1186e`), dicatat di `supabase_migrations.schema_migrations`.
+- `villa_properties(kode PK, nama, aktif)`: 'PL' Loonars Private Living, 'EL' Loonars Excellent Living. RLS ON tanpa policy.
+- `property_kode text NOT NULL DEFAULT 'PL' REFERENCES villa_properties` + index di `units`, `villa_room_types`, `bookings`, `transactions`, `finance_settlements`, `cloudbeds_room_mapping`, `villa_daily_inventory_snapshot`. Saat diterapkan: semua baris 'PL' (560 bookings, 13 units, 292 transactions, 299 finance_settlements, 13 mapping, 793 snapshot, 2 room types).
+- `villa_users.property_kode` (NULL = semua properti) untuk manager/resepsionis per properti.
+- PENGAMAN: villa-api `klienProperti` dan `src/lib/klienProperti.ts` (dipakai `supabaseAdmin()` + webhook Cloudbeds PL + backfill) menyaring tabel di atas ke 'PL' secara otomatis. Fungsi database yang membaca units/bookings TANPA saringan (harus disaring sebelum data EL masuk, Tahap 4): `mkc_hosp_fo_inspect`, `mkc_hosp_issue_create`, `mkc_hosp_report_villa_snapshot`, `mkc_hosp_submit_security`, `mkc_hosp_sync_room_tasks`, `mkc_hosp_units`, `mkc_mkt_kol_decide`, `mkc_mkt_kol_update`, `mkc_mkt_sync_kol` (Mkhsistem), `cfo_kirim_snapshot_mkh` (finance_settlements). `villa_commit_checkin/checkout` bekerja per id booking.

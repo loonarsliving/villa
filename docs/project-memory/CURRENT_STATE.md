@@ -3,6 +3,12 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-11-04 — Multi-properti Tahap 1: fondasi database + pengaman uang Private Living
+- Owner: "betul buat sj pgaman, dan jgan sampai menggangu private living yg sedang berjalan".
+- Migrasi `20261104000001_multi_properti_fondasi` diterapkan (lihat DATABASE.md): `villa_properties` + `property_kode` default 'PL' di 7 tabel inti + `villa_users.property_kode`. PostgREST dicek mengenali kolom (query REST `property_kode=eq.PL` -> 200, kolom palsu -> 400) sebelum kode di-deploy.
+- Pengaman di kode: villa-api `const supabase = klienProperti(supabaseSemua, 'PL')` dan Next.js `supabaseAdmin()` -> select/update/delete tabel inti otomatis `.eq('property_kode','PL')`, insert/upsert mengisi 'PL'. Diuji dengan supabase-js asli: URL berisi `property_kode=eq.PL`; tabel lain (guests, dll), rpc, storage tidak berubah. Karena semua baris saat ini 'PL', semua angka PL (dividen, finance, okupansi, harga AI) identik.
+- Belum: Tahap 2 (pemilih properti untuk admin/finance, sesi manager/resepsionis per properti), Tahap 3-4 (Cloudbeds per properti, pindah data EL). Sebelum data EL masuk, fungsi database Mkhsistem yang membaca units/bookings juga harus disaring.
+
 ## 2026-11-03 — Keputusan owner: EL selengkap PL lewat sistem multi-properti (RENCANA, belum dikerjakan)
 - Owner memilih "B: satu sistem multi-properti" (bukan tabel `el_*` terpisah) dan menyetujui manager khusus EL. Admin & finance = akun yang sama untuk kedua properti; manager & resepsionis per properti. Akun dibuat owner sendiri lewat admin.
 - Rencana bertahap + bukti angka PL tidak berubah: `docs/multi-properti/RENCANA.md`. Tahap 1 (migrasi `villa_properties` + kolom `property_kode`) MENUNGGU persetujuan owner atas rencana itu.
