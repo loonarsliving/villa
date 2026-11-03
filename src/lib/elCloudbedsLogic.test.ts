@@ -50,3 +50,51 @@ describe("pembantu sinkron EL", () => {
     expect(jumlahMalam("2026-11-10", "2026-11-13")).toBe(3);
   });
 });
+
+import { rencanakanKamarEl, PENANDA_BLOK, buatKodeTipe } from "./elCloudbedsLogic";
+
+const tipe = [{ id: "t-st", kode: "ST", nama: "Standard Twin", active: true }];
+const kamarLokal = (o: Partial<{ id: string; nomor: string; room_type_id: string; status: string; active: boolean; catatan: string | null }>) =>
+  ({ id: "k", nomor: "X", room_type_id: "t-st", status: "available", active: true, catatan: null, ...o });
+
+describe("rencanakanKamarEl (kamar dari Cloudbeds)", () => {
+  const cb = [
+    { roomID: "c1", roomName: "101", roomTypeID: "T1", roomTypeName: "Standard Twin" },
+    { roomID: "c2", roomName: "201", roomTypeID: "T2", roomTypeName: "Sanctuary Pool", roomTypeNameShort: "SP" },
+  ];
+  it("kamar baru dibuat, tipe dicocokkan lewat nama, tipe baru dibuat, placeholder dinonaktifkan", () => {
+    const r = rencanakanKamarEl(cb, tipe, [kamarLokal({ id: "p1", nomor: "ST-01" })], []);
+    expect(r.tipeCocok.get("T1")).toBe("t-st");
+    expect(r.tipeBaru).toEqual([{ kunci: "T2", kode: "SP", nama: "Sanctuary Pool", sort_order: 2 }]);
+    expect(r.kamarBaru.map((k) => k.nomor)).toEqual(["101", "201"]);
+    expect(r.nonaktifkan).toEqual(["p1"]);
+  });
+  it("kamar lama dengan nomor sama dipetakan, bukan dibuat ulang", () => {
+    const r = rencanakanKamarEl(cb.slice(0, 1), tipe, [kamarLokal({ id: "a", nomor: "101" })], []);
+    expect(r.petaBaru).toEqual([{ cloudbeds_room_id: "c1", cloudbeds_room_name: "101", room_id: "a" }]);
+    expect(r.kamarBaru).toEqual([]);
+    expect(r.nonaktifkan).toEqual([]);
+  });
+  it("kamar dipetakan yang nonaktif diaktifkan lagi dan nama mengikuti Cloudbeds", () => {
+    const r = rencanakanKamarEl(cb.slice(0, 1), tipe, [kamarLokal({ id: "a", nomor: "ST-01", active: false })], [{ cloudbeds_room_id: "c1", room_id: "a" }]);
+    expect(r.ubahKamar).toEqual([{ id: "a", isi: { active: true, nomor: "101" } }]);
+  });
+  it("blokir Cloudbeds -> maintenance bertanda, dibuka lagi -> available; maintenance manual tidak disentuh", () => {
+    const peta = [{ cloudbeds_room_id: "c1", room_id: "a" }];
+    const tutup = rencanakanKamarEl([{ ...cb[0], roomBlocked: true }], tipe, [kamarLokal({ id: "a", nomor: "101" })], peta);
+    expect(tutup.ubahKamar[0].isi).toEqual({ status: "maintenance", catatan: PENANDA_BLOK });
+    const buka = rencanakanKamarEl(cb.slice(0, 1), tipe, [kamarLokal({ id: "a", nomor: "101", status: "maintenance", catatan: `${PENANDA_BLOK} AC` })], peta);
+    expect(buka.ubahKamar[0].isi).toEqual({ status: "available", catatan: "AC" });
+    const manual = rencanakanKamarEl(cb.slice(0, 1), tipe, [kamarLokal({ id: "a", nomor: "101", status: "maintenance", catatan: "bocor" })], peta);
+    expect(manual.ubahKamar).toEqual([]);
+  });
+  it("room virtual diabaikan", () => {
+    const r = rencanakanKamarEl([{ ...cb[0], isVirtual: true }], tipe, [], []);
+    expect(r.kamarBaru).toEqual([]);
+  });
+  it("kode tipe unik", () => {
+    const dipakai = new Set(["ST"]);
+    expect(buatKodeTipe("Standard Twin", undefined, dipakai)).toBe("ST2");
+    expect(buatKodeTipe("Family Private Pool", undefined, dipakai)).toBe("FPP");
+  });
+});

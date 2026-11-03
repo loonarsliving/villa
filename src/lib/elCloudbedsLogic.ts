@@ -81,3 +81,119 @@ export function pecahNama(nama: string | null | undefined): { first: string; las
 export function jumlahMalam(checkIn: string, checkOut: string): number {
   return Math.round((Date.parse(`${checkOut}T00:00:00Z`) - Date.parse(`${checkIn}T00:00:00Z`)) / 86400000);
 }
+
+// ── Kamar dari Cloudbeds ───────────────────────────────────────────────
+// Owner 2026-11-03: "tolong buat dia ambil data dari cloudbeds sj, jdi kt
+// bisa buka tutup kamar dgan mudah". Cloudbeds = sumber daftar kamar EL:
+// kamar & tipe dibuat/dipetakan otomatis, kamar yang hilang dari Cloudbeds
+// dinonaktifkan, kamar yang diblokir hari ini jadi 'maintenance'.
+
+export interface RoomCb { roomID: string; roomName: string; roomTypeID?: string; roomTypeName?: string; roomTypeNameShort?: string; roomBlocked?: boolean; isVirtual?: boolean }
+export interface TipeLokal { id: string; kode: string; nama: string; active: boolean }
+export interface KamarLokal { id: string; nomor: string; room_type_id: string; status: string; active: boolean; catatan: string | null }
+export interface PetaLokal { cloudbeds_room_id: string; room_id: string }
+
+/** Penanda di catatan kamar bahwa status 'maintenance' berasal dari blokir Cloudbeds. */
+export const PENANDA_BLOK = "[Blok Cloudbeds]";
+
+export function normalNama(v: string | null | undefined): string {
+  return (v ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/** Kode tipe kamar unik: singkatan Cloudbeds, atau huruf depan nama. */
+export function buatKodeTipe(nama: string, singkat: string | undefined, dipakai: Set<string>): string {
+  const dasar =
+    (singkat ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6) ||
+    nama.trim().split(/\s+/).map((w) => w[0] ?? "").join("").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4) ||
+    "TIPE";
+  let kode = dasar;
+  for (let i = 2; dipakai.has(kode); i++) kode = `${dasar}${i}`;
+  dipakai.add(kode);
+  return kode;
+}
+
+export interface RencanaKamar {
+  /** Tipe Cloudbeds yang belum ada padanannya -> dibuat. kunci = roomTypeID Cloudbeds. */
+  tipeBaru: { kunci: string; kode: string; nama: string; sort_order: number }[];
+  /** roomTypeID Cloudbeds -> id tipe lokal yang sudah ada. */
+  tipeCocok: Map<string, string>;
+  /** Kamar lokal yang dipakai untuk room Cloudbeds (dipetakan otomatis bila belum). */
+  petaBaru: { cloudbeds_room_id: string; cloudbeds_room_name: string; room_id: string }[];
+  /** Room Cloudbeds tanpa kamar lokal -> dibuat (tipe dari kunci). */
+  kamarBaru: { cloudbeds_room_id: string; nomor: string; kunciTipe: string; sort_order: number }[];
+  /** Kamar lokal yang sudah dipetakan: field yang perlu diubah. */
+  ubahKamar: { id: string; isi: Partial<{ nomor: string; active: boolean; status: string; catatan: string | null; sort_order: number }>; kunciTipe?: string }[];
+  /** Kamar lokal aktif yang tidak ada di Cloudbeds -> dinonaktifkan. */
+  nonaktifkan: string[];
+}
+
+export function rencanakanKamarEl(roomsCb: RoomCb[], tipe: TipeLokal[], kamar: KamarLokal[], peta: PetaLokal[]): RencanaKamar {
+  const nyata = roomsCb.filter((r) => !r.isVirtual && r.roomTypeID);
+  const kodeDipakai = new Set(tipe.map((t) => t.kode.toUpperCase()));
+  const tipeCocok = new Map<string, string>();
+  const tipeBaru: RencanaKamar["tipeBaru"] = [];
+  const tipeCb = new Map<string, RoomCb>();
+  for (const r of nyata) if (!tipeCb.has(r.roomTypeID!)) tipeCb.set(r.roomTypeID!, r);
+
+  // Tipe: dari kamar yang sudah dipetakan dulu, lalu nama/singkatan yang sama.
+  const kamarById = new Map(kamar.map((k) => [k.id, k]));
+  const petaByCb = new Map(peta.map((p) => [p.cloudbeds_room_id, p.room_id]));
+  for (const r of nyata) {
+    const lokal = petaByCb.get(r.roomID);
+    const k = lokal ? kamarById.get(lokal) : undefined;
+    if (k && !tipeCocok.has(r.roomTypeID!)) tipeCocok.set(r.roomTypeID!, k.room_type_id);
+  }
+  let urut = tipe.length;
+  for (const [kunci, r] of tipeCb) {
+    if (tipeCocok.has(kunci)) continue;
+    const t =
+      tipe.find((x) => normalNama(x.nama) === normalNama(r.roomTypeName)) ??
+      tipe.find((x) => r.roomTypeNameShort && x.kode.toUpperCase() === r.roomTypeNameShort.trim().toUpperCase());
+    if (t) tipeCocok.set(kunci, t.id);
+    else tipeBaru.push({ kunci, kode: buatKodeTipe(r.roomTypeName ?? "Kamar", r.roomTypeNameShort, kodeDipakai), nama: (r.roomTypeName ?? "Kamar").trim(), sort_order: ++urut });
+  }
+
+  // Kamar.
+  const terpakai = new Set<string>();
+  const petaBaru: RencanaKamar["petaBaru"] = [];
+  const kamarBaru: RencanaKamar["kamarBaru"] = [];
+  const ubahKamar: RencanaKamar["ubahKamar"] = [];
+  const nomorDipakai = new Set(kamar.map((k) => normalNama(k.nomor)));
+  nyata.forEach((r, i) => {
+    let lokal = petaByCb.get(r.roomID);
+    if (lokal && !kamarById.has(lokal)) lokal = undefined;
+    if (!lokal) {
+      const sama = kamar.find((k) => normalNama(k.nomor) === normalNama(r.roomName) && !terpakai.has(k.id) && ![...petaByCb.values()].includes(k.id));
+      if (sama) {
+        lokal = sama.id;
+        petaBaru.push({ cloudbeds_room_id: r.roomID, cloudbeds_room_name: r.roomName, room_id: sama.id });
+      }
+    }
+    if (!lokal) {
+      let nomor = r.roomName.trim() || r.roomID;
+      for (let n = 2; nomorDipakai.has(normalNama(nomor)); n++) nomor = `${r.roomName.trim() || r.roomID} (${n})`;
+      nomorDipakai.add(normalNama(nomor));
+      kamarBaru.push({ cloudbeds_room_id: r.roomID, nomor, kunciTipe: r.roomTypeID!, sort_order: i + 1 });
+      return;
+    }
+    terpakai.add(lokal);
+    const k = kamarById.get(lokal)!;
+    const isi: RencanaKamar["ubahKamar"][number]["isi"] = {};
+    if (!k.active) isi.active = true;
+    if (k.nomor !== r.roomName.trim() && r.roomName.trim() && !kamar.some((x) => x.id !== k.id && normalNama(x.nomor) === normalNama(r.roomName))) isi.nomor = r.roomName.trim();
+    const catatan = k.catatan ?? "";
+    const dariBlok = catatan.includes(PENANDA_BLOK);
+    if (r.roomBlocked && k.status === "available") {
+      isi.status = "maintenance";
+      isi.catatan = `${PENANDA_BLOK} ${catatan}`.trim();
+    } else if (!r.roomBlocked && k.status === "maintenance" && dariBlok) {
+      isi.status = "available";
+      isi.catatan = catatan.replace(PENANDA_BLOK, "").trim() || null;
+    }
+    const ubahTipe = tipeCocok.get(r.roomTypeID!) !== k.room_type_id;
+    if (Object.keys(isi).length || ubahTipe) ubahKamar.push({ id: k.id, isi, ...(ubahTipe ? { kunciTipe: r.roomTypeID! } : {}) });
+  });
+
+  const nonaktifkan = kamar.filter((k) => k.active && !terpakai.has(k.id) && !petaBaru.some((p) => p.room_id === k.id)).map((k) => k.id);
+  return { tipeBaru, tipeCocok, petaBaru, kamarBaru, ubahKamar, nonaktifkan };
+}
