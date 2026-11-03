@@ -3,6 +3,10 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-11-03 — Keputusan owner: EL selengkap PL lewat sistem multi-properti (RENCANA, belum dikerjakan)
+- Owner memilih "B: satu sistem multi-properti" (bukan tabel `el_*` terpisah) dan menyetujui manager khusus EL. Admin & finance = akun yang sama untuk kedua properti; manager & resepsionis per properti. Akun dibuat owner sendiri lewat admin.
+- Rencana bertahap + bukti angka PL tidak berubah: `docs/multi-properti/RENCANA.md`. Tahap 1 (migrasi `villa_properties` + kolom `property_kode`) MENUNGGU persetujuan owner atas rencana itu.
+
 ## 2026-11-03 — EL: kamar ditutup sampai dibuka manager villa + harga EL dibaca dari Cloudbeds
 - Owner: "maintenancekan semua kamar sampai nti bisa diaktifkan dihalaman manager villa ... harga sinkronkan juga diambil dari cloudbeds".
 - Data 2026-11-03 ~18:30 UTC (execute_sql, atas perintah owner): semua `el_rooms` berstatus available/maintenance -> `maintenance`, penanda `[Blok Cloudbeds]` dihapus (jadi "tahan manual": sinkron tidak membukanya saat blokir Cloudbeds dibuka). 4 kamar aktif: DOU(1), QUA(1), JSP(1), KIN(1).
