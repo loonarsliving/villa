@@ -66,6 +66,11 @@ function propertyIdAkun(akun: CloudbedsAkun): string {
   return akun === "el" ? envPertama(ENV_EL.propertyId) : (process.env.CLOUDBEDS_PROPERTY_ID ?? "").trim();
 }
 
+/** Kunci API + property ID satu akun (melempar CloudbedsApiError 503 bila kunci kosong). */
+export function kredensialCloudbeds(akun: CloudbedsAkun): { apiKey: string; propertyId: string } {
+  return { apiKey: apiKey(akun), propertyId: propertyIdAkun(akun) };
+}
+
 /**
  * Fetches every room for the property tied to CLOUDBEDS_API_KEY.
  * CLOUDBEDS_PROPERTY_ID is optional — only needed if the key is scoped to a
