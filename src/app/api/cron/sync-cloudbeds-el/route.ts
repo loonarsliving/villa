@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { CloudbedsApiError } from "@/lib/cloudbedsApi";
 import { isAuthorizedCronRequest } from "@/lib/cronAuth";
-import { syncCloudbedsEl } from "@/lib/elCloudbedsSync";
+import { KunciElDitolak, syncCloudbedsEl } from "@/lib/elCloudbedsSync";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -24,6 +24,6 @@ export async function GET(request: Request) {
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     console.error("[cron/sync-cloudbeds-el] gagal", message);
-    return NextResponse.json({ error: message }, { status: e instanceof CloudbedsApiError ? e.status : 502 });
+    return NextResponse.json({ error: message, ...(e instanceof KunciElDitolak ? { kunci: e.periksa } : {}) }, { status: e instanceof CloudbedsApiError ? e.status : 502 });
   }
 }

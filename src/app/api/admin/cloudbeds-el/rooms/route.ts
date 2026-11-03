@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCloudbedsRooms, CloudbedsApiError } from "@/lib/cloudbedsApi";
+import { getCloudbedsRooms, CloudbedsApiError, periksaKunciEl } from "@/lib/cloudbedsApi";
 import { isAdminToken } from "@/lib/villaApiAuth";
 
 export const runtime = "nodejs";
@@ -11,8 +11,17 @@ export async function GET(request: Request) {
   if (!token || !(await isAdminToken(token))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  // Pilih kunci EL yang diterima Cloudbeds (API key / secret) sebelum membaca room.
+  const periksa = await periksaKunciEl();
+  if (!periksa.terpilih) {
+    const ringkas = periksa.hasil.map((h) => `${h.env}: HTTP ${h.http_x_api_key ?? "-"}${h.pesan ? ` (${h.pesan})` : ""}`).join("; ");
+    return NextResponse.json(
+      { error: periksa.hasil.length ? `Cloudbeds menolak kunci Excellent Living -- ${ringkas}` : "Kunci Cloudbeds Excellent Living belum diisi", kunci: periksa },
+      { status: periksa.hasil.length ? 401 : 503 },
+    );
+  }
   try {
-    return NextResponse.json({ rooms: await getCloudbedsRooms("el") });
+    return NextResponse.json({ rooms: await getCloudbedsRooms("el"), kunci_dipakai: periksa.terpilih });
   } catch (e) {
     if (e instanceof CloudbedsApiError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
