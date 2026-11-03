@@ -9,6 +9,8 @@ export interface SessionUser {
   unit_nomor: string | null;
   is_active: boolean;
   must_change_password?: boolean;
+  /** Properti tempat akun bekerja (multi-properti 2026-11-04). null = semua properti. */
+  property_kode?: string | null;
 }
 
 export interface Unit {
@@ -274,6 +276,7 @@ export interface VillaUserRow {
   must_change_password: boolean;
   last_login: string | null;
   created_at: string;
+  property_kode?: string | null;
 }
 
 export interface InvestorProfile {

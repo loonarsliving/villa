@@ -15,7 +15,7 @@ export default function RootPage() {
       return;
     }
     const user = JSON.parse(raw) as SessionUser;
-    router.replace(roleHome(user.role));
+    router.replace(roleHome(user.role, user.property_kode));
   }, [router]);
   return null;
 }

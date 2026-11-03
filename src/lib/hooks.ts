@@ -43,10 +43,11 @@ export function useNotifPoll(query: string, readField: "is_read_owner" | "is_rea
  * notifications). Gagal poll diam-diam saja: lencana nav bukan tempat
  * yang tepat untuk menumpuk toast galat jaringan.
  */
-export function useChatUnreadPoll(intervalMs = 30000) {
+export function useChatUnreadPoll(intervalMs = 30000, aktif = true) {
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
+    if (!aktif) return;
     let cancelled = false;
     const refresh = () => {
       localApi<WaConversationRow[]>("/api/chat/conversations")
@@ -61,7 +62,7 @@ export function useChatUnreadPoll(intervalMs = 30000) {
       cancelled = true;
       clearInterval(id);
     };
-  }, [intervalMs]);
+  }, [intervalMs, aktif]);
 
   return { unreadCount };
 }

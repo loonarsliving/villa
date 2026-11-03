@@ -2,11 +2,40 @@
 
 import { useEffect, useState } from "react";
 import { AdminShell } from "../_shell";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, localApi } from "@/lib/api";
+import type { Properti } from "@/lib/properti";
 import { useToast } from "@/lib/toast";
 import { Card, CardHeader, Loading, Badge } from "@/components/Card";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
 import type { VillaUserRow, Role, Unit } from "@/lib/types";
+
+/**
+ * Pilihan role per properti (owner 2026-11-04: "admin jga harusnya bisa
+ * menambahkan karyawan dan role untuk login berdasarkan properti").
+ * Admin & finance = semua properti. Resepsionis/investor Excellent Living
+ * memakai role el_* yang sudah ada; manager memakai role manager + properti.
+ */
+const SEMUA = "__semua__";
+function pilihanRole(properti: string): { value: Role; label: string }[] {
+  if (properti === SEMUA) return [{ value: "admin", label: "Admin" }, { value: "finance", label: "Finance" }];
+  if (properti === "PL")
+    return [
+      { value: "receptionist", label: "Resepsionis" },
+      { value: "manager", label: "Manager (Kesiapan Kamar)" },
+      { value: "owner", label: "Investor" },
+      { value: "late_night", label: "Late Night (loonars.id/late)" },
+    ];
+  if (properti === "EL")
+    return [
+      { value: "el_receptionist", label: "Resepsionis" },
+      { value: "manager", label: "Manager (buka/tutup kamar)" },
+      { value: "el_investor", label: "Investor" },
+    ];
+  return [
+    { value: "manager", label: "Manager" },
+    { value: "receptionist", label: "Resepsionis" },
+  ];
+}
 
 const roleLabel: Record<Role, string> = { owner: "Investor", receptionist: "Resepsionis", admin: "Admin", finance: "Finance", manager: "Manager", late_night: "Late Night", el_investor: "Investor Excellent Living", el_receptionist: "Resepsionis Excellent Living" };
 
@@ -16,7 +45,9 @@ export default function AdminUsersPage() {
   const [units, setUnits] = useState<Unit[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ nama: "", email: "", password: "", role: "owner" as Role, unit_id: "", hp: "" });
+  const [form, setForm] = useState({ nama: "", email: "", password: "", role: "receptionist" as Role, unit_id: "", hp: "", properti: "PL" });
+  const [properti, setProperti] = useState<Properti[]>([]);
+  const namaProperti = (kode: string | null | undefined) => (kode ? (properti.find((p) => p.kode === kode)?.nama ?? kode) : null);
   const [resetTarget, setResetTarget] = useState<VillaUserRow | null>(null);
   const [resetPass, setResetPass] = useState("");
   // Bawaannya TETAP true supaya perilaku lama tidak berubah: akun investor
@@ -34,6 +65,7 @@ export default function AdminUsersPage() {
     setRows(r || []);
     setUnits(u || []);
     setLoading(false);
+    localApi<Properti[]>("/api/properti").then((p) => setProperti(p)).catch(() => setProperti([]));
   }
 
   useEffect(() => {
@@ -55,10 +87,11 @@ export default function AdminUsersPage() {
         hp: form.hp || null,
         unit_id: form.role === "owner" ? form.unit_id || null : null,
         unit_nomor: form.role === "owner" ? unit?.nomor || null : null,
+        property_kode: form.properti === SEMUA ? null : form.properti,
         force_password_change: true,
       });
       setOpen(false);
-      setForm({ nama: "", email: "", password: "", role: "owner", unit_id: "", hp: "" });
+      setForm({ nama: "", email: "", password: "", role: "receptionist", unit_id: "", hp: "", properti: "PL" });
       toast("✓", "Pengguna dibuat", `${form.nama} berhasil ditambahkan.`, "sage");
       load();
     } catch (e) {
@@ -121,7 +154,7 @@ export default function AdminUsersPage() {
             <table className="w-full text-[11.5px] min-w-[600px]">
               <thead>
                 <tr className="bg-base-800">
-                  {["Nama", "Email", "Role", "Unit", "Status", "Password", "Aksi"].map((h) => (
+                  {["Nama", "Email", "Properti", "Role", "Unit", "Status", "Password", "Aksi"].map((h) => (
                     <th key={h} className="text-left px-3.5 py-2 text-[8.5px] font-semibold tracking-wide uppercase text-ink/30 border-b border-ink/[0.08]">
                       {h}
                     </th>
@@ -133,6 +166,11 @@ export default function AdminUsersPage() {
                   <tr key={u.id} className="hover:bg-base-800/50">
                     <td className="px-3.5 py-2.5 border-b border-ink/[0.05] font-medium text-ink/80">{u.nama}</td>
                     <td className="px-3.5 py-2.5 border-b border-ink/[0.05] text-ink/50">{u.email}</td>
+                    <td className="px-3.5 py-2.5 border-b border-ink/[0.05] text-ink/50">
+                      {u.role === "admin" || u.role === "finance"
+                        ? "Semua properti"
+                        : namaProperti(u.property_kode) ?? (u.role.startsWith("el_") ? namaProperti("EL") : namaProperti("PL")) ?? "—"}
+                    </td>
                     <td className="px-3.5 py-2.5 border-b border-ink/[0.05] text-ink/50">{roleLabel[u.role]}</td>
                     <td className="px-3.5 py-2.5 border-b border-ink/[0.05] text-gold-500">{u.unit_nomor || "—"}</td>
                     <td className="px-3.5 py-2.5 border-b border-ink/[0.05]">
@@ -161,18 +199,33 @@ export default function AdminUsersPage() {
         <Field label="Nama"><input className={inputCls} value={form.nama} onChange={(e) => setForm({ ...form, nama: e.target.value })} /></Field>
         <Field label="Email"><input className={inputCls} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
         <Field label="Password Sementara"><input className={inputCls} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
-        <Field label="Role">
-          <select className={inputCls} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })}>
-            <option value="owner">Investor</option>
-            <option value="receptionist">Resepsionis</option>
-            <option value="admin">Admin</option>
-            <option value="finance">Finance</option>
-            <option value="manager">Manager (Kesiapan Kamar)</option>
-            <option value="late_night">Late Night (loonars.id/late)</option>
-            <option value="el_investor">Investor Excellent Living</option>
-            <option value="el_receptionist">Resepsionis Excellent Living</option>
+        <Field label="Properti">
+          <select
+            className={inputCls}
+            value={form.properti}
+            onChange={(e) => {
+              const p = e.target.value;
+              setForm({ ...form, properti: p, role: pilihanRole(p)[0].value, unit_id: "" });
+            }}
+          >
+            <option value={SEMUA}>Semua properti (admin / finance)</option>
+            {properti.filter((p) => p.aktif).map((p) => (
+              <option key={p.kode} value={p.kode}>{p.nama}</option>
+            ))}
           </select>
         </Field>
+        <Field label="Role">
+          <select className={inputCls} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })}>
+            {pilihanRole(form.properti).map((r) => (
+              <option key={r.value} value={r.value}>{r.label}</option>
+            ))}
+          </select>
+        </Field>
+        {form.properti !== SEMUA && form.properti !== "PL" && form.properti !== "EL" && (
+          <div className="text-[11px] text-gold-600 -mt-1 mb-2">
+            Akun untuk properti ini sudah bisa dibuat, tetapi fitur operasionalnya belum aktif. Akun bisa login setelah fiturnya tersedia.
+          </div>
+        )}
         {form.role === "owner" && (
           <Field label="Unit">
             <select className={inputCls} value={form.unit_id} onChange={(e) => setForm({ ...form, unit_id: e.target.value })}>

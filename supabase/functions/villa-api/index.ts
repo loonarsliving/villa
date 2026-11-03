@@ -71,6 +71,19 @@ async function hmac(data){
   const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(data));
   return b64url(new Uint8Array(sig));
 }
+// Multi-properti: properti akun. Admin & finance = semua properti (NULL).
+// Role khusus Excellent Living (el_*) selalu 'EL'. Role lain boleh diberi
+// properti aktif mana pun; kosong = Private Living (perilaku lama).
+async function propertiAkunValid(kode, role){
+  if(role === 'admin' || role === 'finance') return { kode: null };
+  if(String(role ?? '').startsWith('el_')) return { kode: 'EL' };
+  if(kode === null || kode === undefined || kode === '') return { kode: null };
+  const {data} = await supabase.from('villa_properties').select('kode,aktif').eq('kode', String(kode)).maybeSingle();
+  if(!data) return { error: 'Properti tidak ditemukan' };
+  if(!data.aktif) return { error: 'Properti tidak aktif' };
+  return { kode: data.kode };
+}
+
 async function makeToken(payload){
   const full = {...payload, iat: Date.now(), exp: Date.now()+SESSION_TTL_MS};
   const body = b64url(new TextEncoder().encode(JSON.stringify(full)));
@@ -4530,8 +4543,12 @@ Deno.serve(async (req)=>{
     if(error||!u) return err('Email atau password salah',401);
     if(!u.is_active) return err('Akun tidak aktif',403);
     await supabase.from('villa_users').update({last_login:new Date().toISOString()}).eq('id',u.id);
-    const token = await makeToken({uid:u.id, email, role:u.role, unit_id:u.unit_id, unit_nomor:u.unit_nomor});
-    return json({token, user:u});
+    // Multi-properti (owner 2026-11-04): properti tempat akun ini bekerja.
+    // NULL = semua properti (admin, finance, akun lama).
+    const {data:prop} = await supabase.from('villa_users').select('property_kode').eq('id',u.id).maybeSingle();
+    const property_kode = prop?.property_kode ?? null;
+    const token = await makeToken({uid:u.id, email, role:u.role, unit_id:u.unit_id, unit_nomor:u.unit_nomor, property_kode});
+    return json({token, user:{...u, property_kode}});
   }
 
   if(path==='/public/room-types' && m==='GET'){
@@ -6721,6 +6738,14 @@ Deno.serve(async (req)=>{
   // baru apa pun yang tidak disebut namanya. /me/password ada di atas
   // requireAuth ini, jadi ganti password tetap jalan.
   if(session.role==='manager' && !path.startsWith('/manager/')) return forbidden();
+  // Manager properti lain (mis. Excellent Living) tidak boleh membuka modul
+  // manager Private Living; ia memakai halaman Next.js properti itu sendiri,
+  // yang memeriksa sesinya lewat /manager/whoami.
+  if(session.role==='manager' && session.property_kode && session.property_kode!=='PL' && path!=='/manager/whoami') return forbidden();
+  // Sama untuk resepsionis yang diberi properti selain Private Living: modul
+  // front desk di villa-api ini masih khusus Private Living (resepsionis
+  // Excellent Living memakai role el_receptionist dan rute /el/*).
+  if(session.role==='receptionist' && session.property_kode && session.property_kode!=='PL') return forbidden();
 
   // Role late_night (Laila) HANYA boleh memakai modul late night -- dikunci
   // di sini dengan alasan yang sama seperti manager di atas. Admin boleh
@@ -8152,7 +8177,7 @@ Deno.serve(async (req)=>{
   }
 
   if(path==='/admin/users' && m==='GET'){
-    const {data,error} = await supabase.from('villa_users').select('id,nama,email,role,unit_id,unit_nomor,hp,is_active,must_change_password,last_login,created_at').order('created_at',{ascending:false});
+    const {data,error} = await supabase.from('villa_users').select('id,nama,email,role,unit_id,unit_nomor,hp,is_active,must_change_password,last_login,created_at,property_kode').order('created_at',{ascending:false});
     if(error) return err(error.message);
     return json(data);
   }
@@ -8160,12 +8185,18 @@ Deno.serve(async (req)=>{
     const b = await req.json();
     if(!b.nama||!b.email||!b.password||!b.role) return err('nama, email, password, role wajib diisi');
     if(String(b.password).length < 8) return err('Password minimal 8 karakter');
+    const properti = await propertiAkunValid(b.property_kode, b.role);
+    if(properti.error) return err(properti.error);
     const {data,error} = await supabase.rpc('villa_create_user',{
       p_nama:b.nama, p_email:b.email, p_password:b.password, p_role:b.role,
       p_unit_id:b.unit_id??null, p_unit_nomor:b.unit_nomor??null, p_hp:b.hp??null,
     });
     if(error) return err(error.message);
     const created = Array.isArray(data)?data[0]:data;
+    if(properti.kode){
+      await supabase.from('villa_users').update({property_kode:properti.kode}).eq('id',created.id);
+      created.property_kode = properti.kode;
+    }
     if(b.force_password_change !== false){
       await supabase.from('villa_users').update({must_change_password:true}).eq('id',created.id);
     }
@@ -8182,6 +8213,14 @@ Deno.serve(async (req)=>{
     }
     if(typeof b.is_active==='boolean'){
       const {error} = await supabase.from('villa_users').update({is_active:b.is_active}).eq('id',b.id);
+      if(error) return err(error.message);
+    }
+    if(b.property_kode !== undefined){
+      const {data:akun} = await supabase.from('villa_users').select('role').eq('id',b.id).maybeSingle();
+      if(!akun) return err('Pengguna tidak ditemukan',404);
+      const properti = await propertiAkunValid(b.property_kode, akun.role);
+      if(properti.error) return err(properti.error);
+      const {error} = await supabase.from('villa_users').update({property_kode:properti.kode}).eq('id',b.id);
       if(error) return err(error.message);
     }
     return json({success:true});

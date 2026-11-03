@@ -37,7 +37,7 @@ export function AuthProvider({ children, requireRole }: { children: ReactNode; r
       return;
     }
     if (requireRole && !requireRole.includes(u.role)) {
-      router.replace(roleHome(u.role));
+      router.replace(roleHome(u.role, u.property_kode));
       return;
     }
     setToken(t);
@@ -58,11 +58,15 @@ export function useAuth() {
   return useContext(AuthContext);
 }
 
-export function roleHome(role: Role): string {
-  if (role === "receptionist") return "/front-desk";
-  if (role === "admin") return "/admin";
-  if (role === "finance") return "/finance";
-  if (role === "manager") return "/manager";
+export function roleHome(role: Role, propertyKode?: string | null): string {
+  // Akun manager/resepsionis untuk properti yang fiturnya belum aktif.
+  const propertiBaru = !!propertyKode && propertyKode !== "PL" && propertyKode !== "EL";
+  if ((role === "receptionist" || role === "manager") && propertiBaru) return "/properti-belum-aktif";
+  if (role === "receptionist") return propertyKode === "EL" ? "/properti-belum-aktif" : "/front-desk";
+  // Admin & finance mengelola semua properti: pilih properti dulu (owner 2026-11-04).
+  if (role === "admin" || role === "finance") return "/pilih-properti";
+  // Manager properti selain Private Living memakai halaman properti itu.
+  if (role === "manager") return propertyKode && propertyKode !== "PL" ? "/manager/kamar-el" : "/manager";
   if (role === "late_night") return "/late-night";
   if (role === "el_receptionist") return "/excellent/front-desk";
   if (role === "el_investor") return "/excellent/investor";

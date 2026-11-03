@@ -24,7 +24,13 @@ export function ExcellentShell({ pageTitle, pageSub, children }: { pageTitle: st
     sections.push({ title: "Investor", items: [{ href: "/excellent/investor", label: "Unit Saya", icon: "◈" }] });
   }
   if (role === "admin") {
-    sections.push({ title: "Admin", items: [{ href: "/admin", label: "Panel Admin", icon: "◈" }] });
+    sections.push({
+      title: "Admin",
+      items: [
+        { href: "/admin/excellent-living/kamar", label: "Panel Admin EL", icon: "◈" },
+        { href: "/pilih-properti", label: "Ganti Properti", icon: "⇄" },
+      ],
+    });
   }
 
   const roleLabel = role === "admin" ? "Admin" : role === "el_investor" ? "Investor" : "Resepsionis";
