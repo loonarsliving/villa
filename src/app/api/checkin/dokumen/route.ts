@@ -69,13 +69,22 @@ export async function GET(request: Request) {
   const { data: booking, error } = await supabase
     .from("bookings")
     .select(
-      "id,guest_nama,guest_hp,unit_nomor,tipe,sumber,status,tgl_checkin,tgl_checkout,checkin_at,checkin_by,ktp_photo_path,signature_data_url",
+      "id,guest_id,guest_nama,unit_nomor,tipe,sumber,status,tgl_checkin,tgl_checkout,checkin_at,checkin_by,ktp_photo_path,signature_data_url",
     )
     .eq("id", bookingId)
     .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!booking) return NextResponse.json({ error: "Booking tidak ditemukan" }, { status: 404 });
+
+  // Nomor HP tamu TIDAK ada di tabel bookings -- tersimpan di guests.hp,
+  // terhubung lewat bookings.guest_id. Diambil terpisah dan dibuat opsional:
+  // kalau gagal, dokumen check-in (KTP + tanda tangan) tetap harus tampil.
+  let guestHp: string | null = null;
+  if (booking.guest_id) {
+    const { data: guest } = await supabase.from("guests").select("hp").eq("id", booking.guest_id).maybeSingle();
+    guestHp = guest?.hp ?? null;
+  }
 
   let ktpUrl: string | null = null;
   let ktpError: string | null = null;
@@ -91,7 +100,7 @@ export async function GET(request: Request) {
     booking: {
       id: booking.id,
       guest_nama: booking.guest_nama,
-      guest_hp: booking.guest_hp ?? null,
+      guest_hp: guestHp,
       unit_nomor: booking.unit_nomor,
       tipe: booking.tipe,
       sumber: booking.sumber,
