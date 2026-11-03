@@ -69,7 +69,7 @@ export async function GET(request: Request) {
   const { data: booking, error } = await supabase
     .from("bookings")
     .select(
-      "id,guest_nama,unit_nomor,tipe,sumber,status,tgl_checkin,tgl_checkout,checkin_at,checkin_by,ktp_photo_path,signature_data_url",
+      "id,guest_nama,guest_hp,unit_nomor,tipe,sumber,status,tgl_checkin,tgl_checkout,checkin_at,checkin_by,ktp_photo_path,signature_data_url",
     )
     .eq("id", bookingId)
     .maybeSingle();
@@ -91,6 +91,7 @@ export async function GET(request: Request) {
     booking: {
       id: booking.id,
       guest_nama: booking.guest_nama,
+      guest_hp: booking.guest_hp ?? null,
       unit_nomor: booking.unit_nomor,
       tipe: booking.tipe,
       sumber: booking.sumber,

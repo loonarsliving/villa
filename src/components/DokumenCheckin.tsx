@@ -10,6 +10,7 @@ interface DokumenResponse {
   booking: {
     id: string;
     guest_nama: string;
+    guest_hp: string | null;
     unit_nomor: string | null;
     tipe: string | null;
     sumber: string | null;
@@ -22,6 +23,13 @@ interface DokumenResponse {
   ktpUrl: string | null;
   ktpError: string | null;
   signatureDataUrl: string | null;
+}
+
+/** Nomor lokal "08..." -> "628..." untuk tautan wa.me (pola sama dengan front-desk/bbq). */
+function waLink(hp: string): string | null {
+  const d = hp.replace(/\D/g, "");
+  if (!d) return null;
+  return `https://wa.me/${d.startsWith("0") ? `62${d.slice(1)}` : d}`;
 }
 
 const statusLabel: Record<string, string> = {
@@ -91,6 +99,30 @@ export function DokumenCheckin({ bookingId, onClose }: { bookingId: string | nul
         <>
           <div className="text-center mb-4">
             <div className="text-[13px] font-medium text-ink/80">{b.guest_nama}</div>
+            <div className="text-[11px] text-ink/60 mt-0.5">
+              {b.guest_hp ? (
+                <>
+                  <a href={`tel:${b.guest_hp.replace(/[^\d+]/g, "")}`} className="underline underline-offset-2">
+                    📞 {b.guest_hp}
+                  </a>
+                  {waLink(b.guest_hp) && (
+                    <>
+                      {" · "}
+                      <a
+                        href={waLink(b.guest_hp)!}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline underline-offset-2"
+                      >
+                        WhatsApp
+                      </a>
+                    </>
+                  )}
+                </>
+              ) : (
+                <span className="text-ink/30">No. HP tidak tercatat</span>
+              )}
+            </div>
             <div className="text-[10.5px] text-ink/40 mt-0.5">
               Unit {b.unit_nomor ?? "—"} · {b.tipe ?? "—"} · {fmtDate(b.tgl_checkin)}
               {b.tgl_checkout ? ` – ${fmtDate(b.tgl_checkout)}` : ""}
