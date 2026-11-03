@@ -3,6 +3,10 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-11-04 — Konteks properti villa-api + perbaikan kamar EL dari Cloudbeds
+- villa-api (#267): `AsyncLocalStorage` `konteksProperti`; `klienProperti` membaca properti per request. Admin/finance (header `x-villa-property`) dan manager/resepsionis (`property_kode`) hanya berpindah properti bila ada di `PROPERTI_SIAP` (saat ini hanya 'PL' = perilaku tidak berubah). `pushBookingToCloudbeds` hanya untuk PL. Probe `GET /public/cek-konteks-properti` di production: `konteks_bekerja: true`.
+- Owner 2026-11-04: Cloudbeds EL punya 31 kamar dan 4 tipe, tetapi sinkron hanya menerima 4 room (DOU(1), QUA(1), JSP(1), KIN(1) = room pertama tiap tipe); 4 pemetaan dibuat manual oleh owner (DOU & QUA tergabung ke tipe ST). Perbaikan: `getCloudbedsRooms` membaca semua halaman (`pageSize=100`, berhenti saat `total` tercapai, maks 20 halaman; dulu hanya halaman pertama) + diagnosa `diagnosaGetRooms` di ringkasan sinkron EL (`kamar.cloudbeds`: halaman, total, virtual, jumlah per tipe). Atas permintaan owner ("baiknya sy hapus dulu agar dipetakan dr cloudbeds sj"), data kamar EL (pemetaan, kamar, tipe; 0 booking) dikosongkan setelah deploy supaya dibangun ulang dari Cloudbeds.
+
 ## 2026-11-04 — Multi-properti: pilih properti saat login, kelola properti, pengguna per properti
 - Owner: "ketika admin atau finance login, langsung muncul pilihan dia mau memilih properti mana ... admin itu bisa menambahkan properti baru dgan mudah ... admin jga harusnya bisa menambahkan karyawan dan role untuk login berdasarkan properti".
 - Login: villa-api `/login` membaca `villa_users.property_kode` dan menaruhnya di token + `user` (token lama tanpa properti = semua/PL). `roleHome(role, property)`: admin & finance -> `/pilih-properti`; manager EL -> `/manager/kamar-el`; manager/resepsionis properti yang belum punya fitur -> `/properti-belum-aktif`.

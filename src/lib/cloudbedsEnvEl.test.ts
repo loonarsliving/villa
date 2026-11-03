@@ -46,3 +46,31 @@ describe("periksaKunciEl", () => {
     expect(jenisKunci("abc")).toBe("lain");
   });
 });
+
+import { getCloudbedsRooms, diagnosaGetRooms } from "./cloudbedsApi";
+
+describe("getCloudbedsRooms membaca semua halaman", () => {
+  it("31 room di 2 halaman terbaca semua", async () => {
+    const asli = globalThis.fetch;
+    const semua = Array.from({ length: 31 }, (_, i) => ({ roomID: `r${i}`, roomName: `K${i}`, roomTypeID: `T${i % 4}`, roomTypeName: `Tipe ${i % 4}` }));
+    const urls: string[] = [];
+    globalThis.fetch = (async (u: URL) => {
+      urls.push(String(u));
+      const hal = Number(new URL(String(u)).searchParams.get("pageNumber"));
+      // Cloudbeds mungkin mengabaikan pageSize: kirim 20 per halaman.
+      const isi = semua.slice((hal - 1) * 20, hal * 20);
+      return new Response(JSON.stringify({ success: true, total: 31, data: [{ propertyID: "1", rooms: isi }] }));
+    }) as unknown as typeof fetch;
+    process.env.CLOUDBEDS2_API_KEY = "cbat_uji";
+    try {
+      const rooms = await getCloudbedsRooms("el");
+      expect(rooms).toHaveLength(31);
+      expect(new Set(rooms.map((r) => r.roomTypeID)).size).toBe(4);
+      expect(urls).toHaveLength(2);
+      expect(diagnosaGetRooms("el")).toEqual({ halaman: 2, total_dari_cloudbeds: 31, room_diterima: 31, room_virtual: 0 });
+    } finally {
+      globalThis.fetch = asli;
+      delete process.env.CLOUDBEDS2_API_KEY;
+    }
+  });
+});
