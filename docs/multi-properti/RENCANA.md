@@ -99,3 +99,8 @@ setuju.
 - Sinkron Cloudbeds EL, pemetaan kamar otomatis, buka/tutup kamar oleh manager
   villa, dan harga EL dari Cloudbeds (2026-11-03) tetap berjalan di tabel
   `el_*` sampai Tahap 4.
+
+## Progres Tahap 4 (2026-11-04)
+- SELESAI: konteks properti per request di villa-api (#267, `PROPERTI_SIAP` masih hanya PL); fungsi database MK Connect disaring PL (Mkhsistem 0313/0314); check-in mencatat properti booking; `units.blok` A/B/C hanya untuk PL; kamar EL = 31 kamar / 4 tipe (tipe dari Cloudbeds, kamar diatur di sistem).
+- Temuan yang menentukan urutan berikutnya: banyak fitur PL punya efek khusus PL -- WA bertuliskan Private Living + PIN pintu saat check-in, QRIS kasir (`walkin_qris`) rekening PL, harga booking dari `villa_rates` PL, notifikasi & riwayat cek kamar tanpa kolom properti, rumus uang dengan konstanta PL (COGS, gaji, 70/30, jaminan). Karena itu EL dibuka dengan DAFTAR IZIN rute di villa-api: dalam konteks non-PL hanya rute yang sudah diperiksa yang boleh, `sendWa` hanya template EL, sisanya "belum aktif untuk properti ini".
+- BERIKUTNYA: (a) pengaman villa-api (daftar izin + sendWa + tanpa PIN); (b) pindahkan 31 kamar + 4 tipe + pemetaan EL ke `units`/`villa_room_types`/`cloudbeds_room_mapping` dan sinkron Cloudbeds EL menulis ke tabel bersama; (c) `PROPERTI_SIAP` + EL, header `x-villa-property`, menu EL = halaman yang sudah diizinkan; (d) fitur berikutnya dibuka satu per satu setelah diperiksa.
