@@ -1,7 +1,7 @@
 import { timingSafeEqual, createHash } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
-import { getCloudbedsReservationTotals } from "@/lib/cloudbedsApi";
+import { getCloudbedsReservationTotals, ENV_EL, envPertama } from "@/lib/cloudbedsApi";
 import { mapSourceNameToSumber } from "@/lib/cloudbedsSourceMapping";
 import { statusSetelahSync } from "@/lib/bookingStatusSync";
 
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 /**
  * Webhook Cloudbeds untuk akun KEDUA: Loonars Excellent Living. Sama seperti
  * /api/webhooks/cloudbeds (Private Living) tetapi:
- *   - secret: CLOUDBEDS2_WEBHOOK_SECRET (header x-cloudbeds-secret)
+ *   - secret: CLOUDBEDS2_WEBHOOK_SECRET atau CLOUDBEDS_SECRET_LOONARS2 (header x-cloudbeds-secret)
  *   - total booking dibaca lewat CLOUDBEDS2_API_KEY / CLOUDBEDS2_PROPERTY_ID
  *   - hanya menulis tabel el_* (el_bookings, el_cloudbeds_room_mapping,
  *     el_cloudbeds_events_log) -- tidak pernah bookings/guests Private Living.
@@ -42,9 +42,9 @@ function teks(v: unknown): string | null {
 }
 
 export async function POST(request: Request) {
-  const expected = (process.env.CLOUDBEDS2_WEBHOOK_SECRET ?? "").trim();
+  const expected = envPertama(ENV_EL.webhookSecret);
   if (!expected) {
-    return NextResponse.json({ error: "Cloudbeds Excellent Living belum dikonfigurasi (CLOUDBEDS2_WEBHOOK_SECRET)" }, { status: 503 });
+    return NextResponse.json({ error: "Cloudbeds Excellent Living belum dikonfigurasi (CLOUDBEDS2_WEBHOOK_SECRET / CLOUDBEDS_SECRET_LOONARS2)" }, { status: 503 });
   }
   if (!secretsMatch((request.headers.get("x-cloudbeds-secret") ?? "").trim(), expected)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });

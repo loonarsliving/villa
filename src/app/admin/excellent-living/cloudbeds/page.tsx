@@ -66,10 +66,10 @@ export default function ElCloudbedsPage() {
         {cbRooms
           ? `Terhubung ke Cloudbeds API — ${cbRooms.length} room tersedia`
           : cbError
-            ? `Belum terhubung: ${cbError}. Isi env var CLOUDBEDS2_API_KEY (dan CLOUDBEDS2_PROPERTY_ID bila perlu) di Vercel.`
+            ? `Belum terhubung: ${cbError}. Isi env var CLOUDBEDS_API_KEY_LOONARS2 (atau CLOUDBEDS2_API_KEY; CLOUDBEDS2_PROPERTY_ID bila perlu) di Vercel, lalu redeploy.`
             : "Memeriksa koneksi Cloudbeds..."}
         <div className="text-[11px] opacity-80 mt-1">
-          Webhook: <code>/api/webhooks/cloudbeds-el</code> dengan header <code>x-cloudbeds-secret</code> = CLOUDBEDS2_WEBHOOK_SECRET
+          Webhook: <code>/api/webhooks/cloudbeds-el</code> dengan header <code>x-cloudbeds-secret</code> = CLOUDBEDS_SECRET_LOONARS2 (atau CLOUDBEDS2_WEBHOOK_SECRET)
         </div>
       </div>
 
