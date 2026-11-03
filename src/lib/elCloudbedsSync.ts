@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getCloudbedsReservationTotals, getCloudbedsRooms, kredensialCloudbeds, type CloudbedsRoom } from "@/lib/cloudbedsApi";
+import { CloudbedsApiError, getCloudbedsReservationTotals, getCloudbedsRooms, kredensialCloudbeds, periksaKunciEl, type CloudbedsRoom, type HasilPeriksaKunci } from "@/lib/cloudbedsApi";
 import { mapSourceNameToSumber } from "@/lib/cloudbedsSourceMapping";
 import { statusSetelahSync } from "@/lib/bookingStatusSync";
 import {
@@ -50,6 +50,8 @@ interface ReservasiCb {
 }
 
 export interface ElSyncRingkasan {
+  /** Kunci EL yang diterima Cloudbeds + hasil uji tiap env (tanpa isi kunci). */
+  kunci: { terpilih: string | null; hasil: HasilPeriksaKunci[] };
   tarik: {
     diambil: number;
     aktif: number;
@@ -94,11 +96,26 @@ async function catat(supabase: SupabaseClient, row: { reservation_id: string | n
   await supabase.from("el_cloudbeds_events_log").insert(row);
 }
 
+/** Dilempar bila tidak satu pun kunci EL diterima Cloudbeds; membawa hasil uji kunci. */
+export class KunciElDitolak extends CloudbedsApiError {
+  constructor(public periksa: { terpilih: string | null; hasil: HasilPeriksaKunci[] }) {
+    super(
+      periksa.hasil.length
+        ? "Cloudbeds menolak semua kunci Excellent Living (lihat 'kunci')"
+        : "Kunci Cloudbeds Excellent Living belum diisi (CLOUDBEDS_API_KEY_LOONARS2)",
+      periksa.hasil.length ? 401 : 503,
+    );
+  }
+}
+
 export async function syncCloudbedsEl(supabase: SupabaseClient): Promise<ElSyncRingkasan> {
+  const periksa = await periksaKunciEl();
+  if (!periksa.terpilih) throw new KunciElDitolak(periksa);
   const { apiKey, propertyId } = kredensialCloudbeds("el");
   const hariIni = hariIniWib();
   const errors: string[] = [];
   const ringkasan: ElSyncRingkasan = {
+    kunci: periksa,
     tarik: { diambil: 0, aktif: 0, disimpan: 0, dipindah_kamar: [], tanpa_kamar: [], dilewati_milik_sendiri: 0, dilewati_tipe_belum_dipetakan: 0, dibatalkan: 0 },
     kirim: { dicoba: 0, berhasil: 0, gagal: [] },
     errors,

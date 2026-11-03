@@ -53,7 +53,16 @@ export function envPertama(nama: readonly string[], env: Record<string, string |
   return "";
 }
 
+/**
+ * Kunci EL yang terbukti diterima Cloudbeds oleh periksaKunciEl() pada
+ * proses ini. Owner menyimpan "API key" dan "secret" EL di dua env; kalau
+ * yang bernama API key ditolak tetapi yang satunya diterima, yang diterima
+ * yang dipakai.
+ */
+let kunciElTerbukti: string | null = null;
+
 function apiKey(akun: CloudbedsAkun = "utama"): string {
+  if (akun === "el" && kunciElTerbukti) return kunciElTerbukti;
   const nama: readonly string[] = akun === "el" ? ENV_EL.apiKey : ["CLOUDBEDS_API_KEY"];
   const key = envPertama(nama);
   if (!key) {
@@ -64,6 +73,67 @@ function apiKey(akun: CloudbedsAkun = "utama"): string {
 
 function propertyIdAkun(akun: CloudbedsAkun): string {
   return akun === "el" ? envPertama(ENV_EL.propertyId) : (process.env.CLOUDBEDS_PROPERTY_ID ?? "").trim();
+}
+
+/** Bentuk sebuah kunci tanpa membuka isinya (aman dicatat di log). */
+export function jenisKunci(v: string): "cbat_" | "live1_" | "lain" {
+  if (v.startsWith("cbat_")) return "cbat_";
+  if (v.startsWith("live1_")) return "live1_";
+  return "lain";
+}
+
+/** Env yang dicoba sebagai kunci API akun EL, urut prioritas. */
+export const KANDIDAT_KUNCI_EL = ["CLOUDBEDS2_API_KEY", "CLOUDBEDS_API_KEY_LOONARS2", "CLOUDBEDS_SECRET_LOONARS2"] as const;
+
+export interface HasilPeriksaKunci {
+  env: string;
+  panjang: number;
+  jenis: ReturnType<typeof jenisKunci>;
+  http_x_api_key: number | null;
+  http_bearer: number | null;
+  pesan: string | null;
+  properti: { id: string; nama: string }[];
+}
+
+/**
+ * Mencoba setiap env kandidat ke Cloudbeds `getHotels` (header x-api-key,
+ * lalu Authorization: Bearer). Kunci pertama yang diterima lewat x-api-key
+ * dipakai untuk seluruh panggilan akun EL berikutnya. Hasilnya hanya
+ * memuat nama env, panjang, dan awalan jenis -- tidak pernah isi kunci.
+ */
+export async function periksaKunciEl(env: Record<string, string | undefined> = process.env): Promise<{ terpilih: string | null; hasil: HasilPeriksaKunci[] }> {
+  const hasil: HasilPeriksaKunci[] = [];
+  let terpilih: string | null = null;
+  for (const nama of KANDIDAT_KUNCI_EL) {
+    const v = (env[nama] ?? "").trim();
+    if (!v) continue;
+    const coba = async (headers: Record<string, string>) => {
+      try {
+        const res = await fetch(`${CLOUDBEDS_API_BASE}/getHotels`, { headers, cache: "no-store" });
+        const body = await res.json().catch(() => null);
+        const ok = res.ok && body?.success !== false;
+        return { status: res.status, ok, body };
+      } catch (e) {
+        return { status: null, ok: false, body: { message: e instanceof Error ? e.message : String(e) } };
+      }
+    };
+    const a = await coba({ "x-api-key": v });
+    const b = a.ok ? null : await coba({ Authorization: `Bearer ${v}` });
+    const sukses = a.ok ? a : b?.ok ? b : null;
+    const rows = Array.isArray(sukses?.body?.data) ? (sukses!.body.data as Array<Record<string, unknown>>) : [];
+    hasil.push({
+      env: nama,
+      panjang: v.length,
+      jenis: jenisKunci(v),
+      http_x_api_key: a.status,
+      http_bearer: b?.status ?? null,
+      pesan: sukses ? null : String((b?.body ?? a.body)?.message ?? (b?.body ?? a.body)?.error ?? "ditolak").slice(0, 200),
+      properti: rows.map((r) => ({ id: String(r.propertyID ?? ""), nama: String(r.propertyName ?? "") })).slice(0, 10),
+    });
+    if (a.ok && !terpilih) terpilih = nama;
+  }
+  kunciElTerbukti = terpilih ? (env[terpilih] ?? "").trim() : null;
+  return { terpilih, hasil };
 }
 
 /** Kunci API + property ID satu akun (melempar CloudbedsApiError 503 bila kunci kosong). */
