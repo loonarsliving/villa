@@ -150,22 +150,29 @@ export function kredensialCloudbeds(akun: CloudbedsAkun): { apiKey: string; prop
  * CLOUDBEDS_PROPERTY_ID is optional — only needed if the key is scoped to a
  * group/multi-property account rather than a single property.
  */
+/** Keterangan jawaban getRooms terakhir per akun (diagnosa, tanpa data rahasia). */
+export interface DiagnosaGetRooms {
+  halaman: number;
+  total_dari_cloudbeds: number | null;
+  room_diterima: number;
+  room_virtual: number;
+}
+const diagnosaTerakhir = new Map<CloudbedsAkun, DiagnosaGetRooms>();
+export function diagnosaGetRooms(akun: CloudbedsAkun): DiagnosaGetRooms | null {
+  return diagnosaTerakhir.get(akun) ?? null;
+}
+
+/**
+ * Semua room satu akun Cloudbeds. getRooms berhalaman (pms-v1.2: pageSize
+ * bawaan 20, `total` = jumlah semua room); dulu hanya halaman pertama yang
+ * dibaca. Sekarang dibaca per 100 sampai `total` tercapai atau halaman
+ * kosong (maks 20 halaman).
+ * CLOUDBEDS_PROPERTY_ID is optional — only needed if the key is scoped to a
+ * group/multi-property account rather than a single property.
+ */
 export async function getCloudbedsRooms(akun: CloudbedsAkun = "utama"): Promise<CloudbedsRoom[]> {
   const key = apiKey(akun);
   const propertyId = propertyIdAkun(akun);
-  const url = new URL(`${CLOUDBEDS_API_BASE}/getRooms`);
-  if (propertyId) url.searchParams.set("propertyID", propertyId);
-
-  const res = await fetch(url, {
-    headers: { "x-api-key": key },
-    cache: "no-store",
-  });
-  const body = await res.json().catch(() => null);
-
-  if (!res.ok || body?.success === false) {
-    const message = body?.message || body?.error || `Cloudbeds API error (HTTP ${res.status})`;
-    throw new CloudbedsApiError(message, res.status >= 400 ? res.status : 502);
-  }
 
   type RoomMentah = {
     roomID?: string;
@@ -176,7 +183,6 @@ export async function getCloudbedsRooms(akun: CloudbedsAkun = "utama"): Promise<
     roomBlocked?: unknown;
     isVirtual?: unknown;
   };
-  const rooms = (body?.data ?? []) as Array<RoomMentah & { rooms?: RoomMentah[] }>;
   // API ini sering mengirim boolean sebagai string ("1"/"true").
   const benar = (v: unknown) => v === true || v === 1 || v === "1" || v === "true";
 
@@ -186,8 +192,10 @@ export async function getCloudbedsRooms(akun: CloudbedsAkun = "utama"): Promise<
   // nested rooms carry their own roomTypeID/roomTypeName, so those win over
   // the wrapper's.
   const flat: CloudbedsRoom[] = [];
+  const sudah = new Set<string>();
   const dorong = (r: RoomMentah, wadah: RoomMentah) => {
-    if (!r.roomID) return;
+    if (!r.roomID || sudah.has(String(r.roomID))) return;
+    sudah.add(String(r.roomID));
     const tipe = r.roomTypeID ?? wadah.roomTypeID;
     flat.push({
       roomID: String(r.roomID),
@@ -199,10 +207,32 @@ export async function getCloudbedsRooms(akun: CloudbedsAkun = "utama"): Promise<
       isVirtual: benar(r.isVirtual),
     });
   };
-  for (const entry of rooms) {
-    if (Array.isArray(entry.rooms)) for (const r of entry.rooms) dorong(r, entry);
-    else dorong(entry, entry);
+
+  let total: number | null = null;
+  let halaman = 0;
+  for (let pageNumber = 1; pageNumber <= 20; pageNumber++) {
+    const url = new URL(`${CLOUDBEDS_API_BASE}/getRooms`);
+    if (propertyId) url.searchParams.set("propertyID", propertyId);
+    url.searchParams.set("pageNumber", String(pageNumber));
+    url.searchParams.set("pageSize", "100");
+    const res = await fetch(url, { headers: { "x-api-key": key }, cache: "no-store" });
+    const body = await res.json().catch(() => null);
+    if (!res.ok || body?.success === false) {
+      const message = body?.message || body?.error || `Cloudbeds API error (HTTP ${res.status})`;
+      throw new CloudbedsApiError(message, res.status >= 400 ? res.status : 502);
+    }
+    halaman = pageNumber;
+    const t = Number(body?.total);
+    if (Number.isFinite(t) && t > 0) total = t;
+    const sebelum = flat.length;
+    for (const entry of (body?.data ?? []) as Array<RoomMentah & { rooms?: RoomMentah[] }>) {
+      if (Array.isArray(entry.rooms)) for (const r of entry.rooms) dorong(r, entry);
+      else dorong(entry, entry);
+    }
+    const baru = flat.length - sebelum;
+    if (baru === 0 || total === null || flat.length >= total) break;
   }
+  diagnosaTerakhir.set(akun, { halaman, total_dari_cloudbeds: total, room_diterima: flat.length, room_virtual: flat.filter((r) => r.isVirtual).length });
   return flat;
 }
 

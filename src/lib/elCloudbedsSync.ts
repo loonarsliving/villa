@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { CloudbedsApiError, getCloudbedsReservationTotals, getCloudbedsRoomBlocks, getCloudbedsRooms, kredensialCloudbeds, periksaKunciEl, type CloudbedsRoom, type HasilPeriksaKunci } from "@/lib/cloudbedsApi";
+import { CloudbedsApiError, diagnosaGetRooms, type DiagnosaGetRooms, getCloudbedsReservationTotals, getCloudbedsRoomBlocks, getCloudbedsRooms, kredensialCloudbeds, periksaKunciEl, type CloudbedsRoom, type HasilPeriksaKunci } from "@/lib/cloudbedsApi";
 import { mapSourceNameToSumber } from "@/lib/cloudbedsSourceMapping";
 import { statusSetelahSync } from "@/lib/bookingStatusSync";
 import { bacaBlokirKamar } from "@/lib/cloudbedsUnitSementara";
@@ -418,6 +418,8 @@ export interface RingkasanKamar {
   /** Kamar yang hilang dari Cloudbeds tapi masih punya booking aktif -- dibiarkan aktif. */
   tetap_aktif_ada_booking: string[];
   diblokir_hari_ini: string[];
+  /** Diagnosa jawaban Cloudbeds: halaman, total, virtual, jumlah room per tipe. */
+  cloudbeds?: (DiagnosaGetRooms & { per_tipe: Record<string, number> }) | null;
 }
 
 /**
@@ -438,6 +440,10 @@ export async function sinkronKamarEl(supabase: SupabaseClient, roomsCb: Cloudbed
   const hasil: RingkasanKamar = { room_cloudbeds: 0, tipe_dibuat: [], kamar_dibuat: [], dipetakan: 0, diubah: 0, dinonaktifkan: [], tetap_aktif_ada_booking: [], diblokir_hari_ini: [] };
   const nyata = roomsCb.filter((r) => !r.isVirtual && r.roomTypeID);
   hasil.room_cloudbeds = nyata.length;
+  const perTipe: Record<string, number> = {};
+  for (const r of roomsCb) perTipe[`${r.roomTypeName ?? "?"}${r.isVirtual ? " (virtual)" : ""}`] = (perTipe[`${r.roomTypeName ?? "?"}${r.isVirtual ? " (virtual)" : ""}`] ?? 0) + 1;
+  const diag = diagnosaGetRooms("el");
+  hasil.cloudbeds = diag ? { ...diag, per_tipe: perTipe } : null;
   hasil.diblokir_hari_ini = nyata.filter((r) => r.roomBlocked).map((r) => r.roomName);
   if (nyata.length === 0) {
     errors.push("Cloudbeds tidak mengembalikan kamar; daftar kamar EL tidak diubah");
