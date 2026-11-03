@@ -476,14 +476,15 @@ export async function sinkronKamarEl(supabase: SupabaseClient, roomsCb: Cloudbed
   }
 
   // Kamar baru + pemetaannya.
-  const blokById = new Map(nyata.map((r) => [r.roomID, !!r.roomBlocked]));
   for (const k of rencana.kamarBaru) {
     const room_type_id = idTipe.get(k.kunciTipe);
     if (!room_type_id) continue;
-    const terblokir = blokById.get(k.cloudbeds_room_id);
+    // Kamar baru selalu masuk sebagai maintenance TANPA penanda blokir:
+    // dibuka manager villa di /manager/kamar-el (owner 2026-11-03), bukan
+    // otomatis saat blokir Cloudbeds dibuka.
     const { data, error } = await supabase
       .from("el_rooms")
-      .insert({ nomor: k.nomor, room_type_id, sort_order: k.sort_order, active: true, status: terblokir ? "maintenance" : "available", catatan: terblokir ? "[Blok Cloudbeds]" : null })
+      .insert({ nomor: k.nomor, room_type_id, sort_order: k.sort_order, active: true, status: "maintenance", catatan: null })
       .select("id")
       .single();
     if (error || !data) {
