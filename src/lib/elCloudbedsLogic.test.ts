@@ -62,12 +62,19 @@ describe("rencanakanKamarEl (kamar dari Cloudbeds)", () => {
     { roomID: "c1", roomName: "101", roomTypeID: "T1", roomTypeName: "Standard Twin" },
     { roomID: "c2", roomName: "201", roomTypeID: "T2", roomTypeName: "Sanctuary Pool", roomTypeNameShort: "SP" },
   ];
-  it("kamar baru dibuat, tipe dicocokkan lewat nama, tipe baru dibuat, placeholder dinonaktifkan", () => {
+  it("kamar baru dibuat, tipe dicocokkan lewat nama, tipe baru dibuat; kamar buatan sistem tidak dinonaktifkan", () => {
     const r = rencanakanKamarEl(cb, tipe, [kamarLokal({ id: "p1", nomor: "ST-01" })], []);
     expect(r.tipeCocok.get("T1")).toBe("t-st");
     expect(r.tipeBaru).toEqual([{ kunci: "T2", kode: "SP", nama: "Sanctuary Pool", sort_order: 2 }]);
     expect(r.kamarBaru.map((k) => k.nomor)).toEqual(["101", "201"]);
-    expect(r.nonaktifkan).toEqual(["p1"]);
+    expect(r.nonaktifkan).toEqual([]);
+  });
+  it("kamar berpeta yang room Cloudbeds-nya hilang dinonaktifkan", () => {
+    const r = rencanakanKamarEl(cb.slice(0, 1), tipe, [kamarLokal({ id: "a", nomor: "101" }), kamarLokal({ id: "b", nomor: "ST-05" })], [
+      { cloudbeds_room_id: "c1", room_id: "a" },
+      { cloudbeds_room_id: "c-hilang", room_id: "b" },
+    ]);
+    expect(r.nonaktifkan).toEqual(["b"]);
   });
   it("kamar lama dengan nomor sama dipetakan, bukan dibuat ulang", () => {
     const r = rencanakanKamarEl(cb.slice(0, 1), tipe, [kamarLokal({ id: "a", nomor: "101" })], []);
@@ -75,9 +82,9 @@ describe("rencanakanKamarEl (kamar dari Cloudbeds)", () => {
     expect(r.kamarBaru).toEqual([]);
     expect(r.nonaktifkan).toEqual([]);
   });
-  it("kamar dipetakan yang nonaktif diaktifkan lagi dan nama mengikuti Cloudbeds", () => {
+  it("kamar dipetakan yang nonaktif diaktifkan lagi; nama tetap nama di sistem", () => {
     const r = rencanakanKamarEl(cb.slice(0, 1), tipe, [kamarLokal({ id: "a", nomor: "ST-01", active: false })], [{ cloudbeds_room_id: "c1", room_id: "a" }]);
-    expect(r.ubahKamar).toEqual([{ id: "a", isi: { active: true, nomor: "101" } }]);
+    expect(r.ubahKamar).toEqual([{ id: "a", isi: { active: true } }]);
   });
   it("blokir Cloudbeds -> maintenance bertanda, dibuka lagi -> available; maintenance manual tidak disentuh", () => {
     const peta = [{ cloudbeds_room_id: "c1", room_id: "a" }];

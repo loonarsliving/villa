@@ -85,8 +85,10 @@ export function jumlahMalam(checkIn: string, checkOut: string): number {
 // ── Kamar dari Cloudbeds ───────────────────────────────────────────────
 // Owner 2026-11-03: "tolong buat dia ambil data dari cloudbeds sj, jdi kt
 // bisa buka tutup kamar dgan mudah". Cloudbeds = sumber daftar kamar EL:
-// kamar & tipe dibuat/dipetakan otomatis, kamar yang hilang dari Cloudbeds
-// dinonaktifkan, kamar yang diblokir hari ini jadi 'maintenance'.
+// kamar & tipe dibuat/dipetakan otomatis, kamar berpeta yang hilang dari
+// Cloudbeds dinonaktifkan, kamar yang diblokir hari ini jadi 'maintenance'.
+// Revisi owner 2026-11-04 ("kt atur dari sini saja"): nama kamar tidak
+// ditimpa, dan kamar tambahan yang dibuat di sistem tidak dinonaktifkan.
 
 export interface RoomCb { roomID: string; roomName: string; roomTypeID?: string; roomTypeName?: string; roomTypeNameShort?: string; roomBlocked?: boolean; isVirtual?: boolean }
 export interface TipeLokal { id: string; kode: string; nama: string; active: boolean }
@@ -180,7 +182,8 @@ export function rencanakanKamarEl(roomsCb: RoomCb[], tipe: TipeLokal[], kamar: K
     const k = kamarById.get(lokal)!;
     const isi: RencanaKamar["ubahKamar"][number]["isi"] = {};
     if (!k.active) isi.active = true;
-    if (k.nomor !== r.roomName.trim() && r.roomName.trim() && !kamar.some((x) => x.id !== k.id && normalNama(x.nomor) === normalNama(r.roomName))) isi.nomor = r.roomName.trim();
+    // Nama kamar diatur di sistem ini (owner 2026-11-04: "kt atur dari sini
+    // saja"), tidak ditimpa nama room Cloudbeds.
     const catatan = k.catatan ?? "";
     const dariBlok = catatan.includes(PENANDA_BLOK);
     if (r.roomBlocked && k.status === "available") {
@@ -194,6 +197,10 @@ export function rencanakanKamarEl(roomsCb: RoomCb[], tipe: TipeLokal[], kamar: K
     if (Object.keys(isi).length || ubahTipe) ubahKamar.push({ id: k.id, isi, ...(ubahTipe ? { kunciTipe: r.roomTypeID! } : {}) });
   });
 
-  const nonaktifkan = kamar.filter((k) => k.active && !terpakai.has(k.id) && !petaBaru.some((p) => p.room_id === k.id)).map((k) => k.id);
+  // Hanya kamar yang DIPETAKAN ke room Cloudbeds yang sudah tidak ada lagi
+  // yang dinonaktifkan. Kamar yang dibuat admin di sistem ini (tanpa room
+  // Cloudbeds sendiri) dibiarkan.
+  const kamarBerpeta = new Set(peta.filter((p) => kamarById.has(p.room_id)).map((p) => p.room_id));
+  const nonaktifkan = kamar.filter((k) => k.active && kamarBerpeta.has(k.id) && !terpakai.has(k.id)).map((k) => k.id);
   return { tipeBaru, tipeCocok, petaBaru, kamarBaru, ubahKamar, nonaktifkan };
 }
