@@ -218,9 +218,9 @@ export interface CloudbedsRoomTypeRate {
  * manager, per owner instruction (2026-09-11) to make villa's own
  * tarif_harian follow it directly rather than maintain a separate price.
  */
-export async function getCloudbedsRoomTypeRate(roomTypeId: string, startDate: string, endDate: string): Promise<CloudbedsRoomTypeRate[]> {
-  const key = apiKey();
-  const propertyId = (process.env.CLOUDBEDS_PROPERTY_ID ?? "").trim();
+export async function getCloudbedsRoomTypeRate(roomTypeId: string, startDate: string, endDate: string, akun: CloudbedsAkun = "utama"): Promise<CloudbedsRoomTypeRate[]> {
+  const key = apiKey(akun);
+  const propertyId = propertyIdAkun(akun);
   const url = new URL(`${CLOUDBEDS_API_BASE}/getRate`);
   if (propertyId) url.searchParams.set("propertyID", propertyId);
   url.searchParams.set("roomTypeID", roomTypeId);

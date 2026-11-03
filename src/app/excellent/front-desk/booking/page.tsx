@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ExcellentShell } from "../../_shell";
-import { api } from "@/lib/api";
+import { api, localApi } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { fmtCurrencyFull, todayISO } from "@/lib/format";
 import { Card, CardHeader, Loading, Empty, Badge } from "@/components/Card";
@@ -48,6 +48,11 @@ export default function ElBookingPage() {
   const [editing, setEditing] = useState<ElBooking | null>(null);
   const [form, setForm] = useState<FormBooking>(FORM_KOSONG);
   const [kamar, setKamar] = useState<ElRoomTersedia[] | null>(null);
+  // Harga dari Cloudbeds per tipe kamar untuk tanggal di form. Total Bayar
+  // diisi otomatis selama resepsionis belum mengetik angka sendiri.
+  const [harga, setHarga] = useState<{ tipeKamar: Record<string, string>; tipe: { room_type_id: string; total: number | null }[] } | null>(null);
+  const [hargaError, setHargaError] = useState<string | null>(null);
+  const [totalManual, setTotalManual] = useState(false);
 
   const [checkinFor, setCheckinFor] = useState<ElBooking | null>(null);
   const [checkoutFor, setCheckoutFor] = useState<ElBooking | null>(null);
@@ -83,6 +88,41 @@ export default function ElBookingPage() {
     };
   }, [open, tanggalValid, form.tgl_checkin, form.tgl_checkout, editing]);
 
+  useEffect(() => {
+    if (!open || !tanggalValid) {
+      setHarga(null);
+      return;
+    }
+    let batal = false;
+    setHargaError(null);
+    localApi<{ tipeKamar: Record<string, string>; tipe: { room_type_id: string; total: number | null }[] }>(
+      `/api/el/harga?${new URLSearchParams({ checkin: form.tgl_checkin, checkout: form.tgl_checkout })}`,
+    )
+      .then((h) => {
+        if (!batal) setHarga(h);
+      })
+      .catch((e) => {
+        if (!batal) {
+          setHarga(null);
+          setHargaError(e instanceof Error ? e.message : String(e));
+        }
+      });
+    return () => {
+      batal = true;
+    };
+  }, [open, tanggalValid, form.tgl_checkin, form.tgl_checkout]);
+
+  const hargaKamar = useMemo(() => {
+    if (!harga || !form.room_id) return undefined;
+    const tipe = harga.tipeKamar[form.room_id];
+    return harga.tipe.find((t) => t.room_type_id === tipe)?.total ?? null;
+  }, [harga, form.room_id]);
+
+  useEffect(() => {
+    if (totalManual || hargaKamar == null) return;
+    setForm((f) => (f.total_bayar === String(hargaKamar) ? f : { ...f, total_bayar: String(hargaKamar) }));
+  }, [hargaKamar, totalManual]);
+
   const kamarPerTipe = useMemo(() => {
     const m = new Map<string, ElRoomTersedia[]>();
     for (const r of kamar ?? []) {
@@ -110,6 +150,7 @@ export default function ElBookingPage() {
   function bukaBaru() {
     setEditing(null);
     setForm({ ...FORM_KOSONG, tgl_checkin: todayISO(), tgl_checkout: besok() });
+    setTotalManual(false);
     setOpen(true);
   }
 
@@ -127,6 +168,8 @@ export default function ElBookingPage() {
       total_bayar: String(b.total_bayar ?? ""),
       catatan: b.catatan ?? "",
     });
+    // Booking yang sudah ada: total yang tersimpan tidak ditimpa harga Cloudbeds.
+    setTotalManual(true);
     setOpen(true);
   }
 
@@ -356,7 +399,31 @@ export default function ElBookingPage() {
             {SUMBER.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </Field>
-        <Field label="Total Bayar (Rp)"><input type="number" min={0} className={inputCls} value={form.total_bayar} onChange={(e) => setForm({ ...form, total_bayar: e.target.value })} /></Field>
+        <Field label="Total Bayar (Rp)">
+          <input
+            type="number"
+            min={0}
+            className={inputCls}
+            value={form.total_bayar}
+            onChange={(e) => {
+              setTotalManual(true);
+              setForm({ ...form, total_bayar: e.target.value });
+            }}
+          />
+          <div className="mt-1 text-[11px] text-ink/50">
+            {hargaError
+              ? `Harga Cloudbeds tidak terbaca: ${hargaError}`
+              : !form.room_id
+                ? "Pilih kamar untuk melihat harga Cloudbeds."
+                : hargaKamar === undefined
+                  ? "Memuat harga Cloudbeds..."
+                  : hargaKamar === null
+                    ? "Harga Cloudbeds belum diatur untuk semua malam ini -- isi manual."
+                    : <>Harga Cloudbeds: {fmtCurrencyFull(hargaKamar)}{totalManual && String(hargaKamar) !== form.total_bayar && (
+                        <button type="button" className="ml-2 underline" onClick={() => { setTotalManual(false); setForm({ ...form, total_bayar: String(hargaKamar) }); }}>pakai harga ini</button>
+                      )}</>}
+          </div>
+        </Field>
         <Field label="Catatan (opsional)"><input className={inputCls} value={form.catatan} onChange={(e) => setForm({ ...form, catatan: e.target.value })} /></Field>
       </Modal>
 
