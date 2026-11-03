@@ -33,17 +33,37 @@ export interface CloudbedsRoom {
  */
 export type CloudbedsAkun = "utama" | "el";
 
+/**
+ * Nama env akun Excellent Living. Owner memasang kunci di Vercel dengan nama
+ * `*_LOONARS2` (2026-11-01), sedangkan kode awalnya hanya membaca
+ * `CLOUDBEDS2_*` -- keduanya diterima, nama `CLOUDBEDS2_*` menang bila ada.
+ */
+export const ENV_EL = {
+  apiKey: ["CLOUDBEDS2_API_KEY", "CLOUDBEDS_API_KEY_LOONARS2"],
+  propertyId: ["CLOUDBEDS2_PROPERTY_ID", "CLOUDBEDS_PROPERTY_ID_LOONARS2"],
+  webhookSecret: ["CLOUDBEDS2_WEBHOOK_SECRET", "CLOUDBEDS_SECRET_LOONARS2"],
+} as const;
+
+/** Nilai env pertama yang terisi dari daftar nama. */
+export function envPertama(nama: readonly string[], env: Record<string, string | undefined> = process.env): string {
+  for (const n of nama) {
+    const v = (env[n] ?? "").trim();
+    if (v) return v;
+  }
+  return "";
+}
+
 function apiKey(akun: CloudbedsAkun = "utama"): string {
-  const nama = akun === "el" ? "CLOUDBEDS2_API_KEY" : "CLOUDBEDS_API_KEY";
-  const key = (process.env[nama] ?? "").trim();
+  const nama: readonly string[] = akun === "el" ? ENV_EL.apiKey : ["CLOUDBEDS_API_KEY"];
+  const key = envPertama(nama);
   if (!key) {
-    throw new CloudbedsApiError(`Cloudbeds API key belum dikonfigurasi (${nama})`, 503);
+    throw new CloudbedsApiError(`Cloudbeds API key belum dikonfigurasi (${nama.join(" / ")})`, 503);
   }
   return key;
 }
 
 function propertyIdAkun(akun: CloudbedsAkun): string {
-  return ((akun === "el" ? process.env.CLOUDBEDS2_PROPERTY_ID : process.env.CLOUDBEDS_PROPERTY_ID) ?? "").trim();
+  return akun === "el" ? envPertama(ENV_EL.propertyId) : (process.env.CLOUDBEDS_PROPERTY_ID ?? "").trim();
 }
 
 /**
