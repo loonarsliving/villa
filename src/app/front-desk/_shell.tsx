@@ -26,8 +26,8 @@ export function FrontDeskShell({
   const { unreadCount: chatUnread } = useChatUnreadPoll(30000, !!user);
 
   // Properti selain PL (multi-properti 2026-11-04): hanya halaman yang
-  // sudah diizinkan villa-api untuk properti lain. Kasir/QRIS, BBQ,
-  // amenities, siteplan villa, dan chat masih khusus Private Living.
+  // sudah diizinkan villa-api untuk properti lain. Siteplan villa (Blok A/B/C)
+  // masih khusus Private Living.
   const sectionsLain: NavSection[] = [
     {
       title: "Operasional",
@@ -38,6 +38,7 @@ export function FrontDeskShell({
         { href: "/front-desk/chat", label: "Chat", icon: "◉", badge: chatUnread },
         { href: "/front-desk/amenities", label: "Amenities", icon: "▧" },
         { href: "/front-desk/bbq", label: "Pesanan BBQ", icon: "🔥" },
+        { href: "/front-desk/payment-gateway", label: "Kasir / QRIS", icon: "◍" },
       ],
     },
     { title: "Log", items: [{ href: "/front-desk/notifikasi", label: "Notifikasi", icon: "◉", badge: unreadCount }] },

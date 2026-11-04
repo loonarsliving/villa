@@ -65,6 +65,7 @@ export function AdminShell({ pageTitle, pageSub, children }: { pageTitle: string
         { href: "/finance/tutup-buku", label: "Tutup Buku", icon: "▣" },
         { href: "/admin/guests", label: "Database Tamu", icon: "◈" },
         { href: "/admin/amenities", label: "Amenities", icon: "▧" },
+        { href: "/front-desk/payment-gateway", label: "Kasir / QRIS", icon: "◍" },
       ],
     },
     {
