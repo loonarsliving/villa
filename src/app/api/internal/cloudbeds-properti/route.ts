@@ -17,13 +17,17 @@ const CLOUDBEDS_API_BASE = "https://api.cloudbeds.com/api/v1.2";
  * villa-api; villa-api memanggil rute ini dengan rahasia cron yang sama
  * (integration_settings.cron.secret, diterima isAuthorizedCronRequest).
  *
- * SENGAJA SEMPIT: hanya MEMBACA blokir kamar dan daftar kamar. Tidak ada
- * penulisan, harga, reservasi, atau endpoint lain. (Cloudbeds EL baru punya
- * satu kamar per tipe; menulis room block per unit menutup satu tipe penuh.)
+ * SENGAJA SEMPIT: hanya room block (baca/buat/ubah/hapus) dan daftar kamar
+ * -- yang dipakai Kesiapan Kamar (owner 2026-11-04: "Ya buat dia bisa buka
+ * tutup kamar", setelah kamar Cloudbeds EL 1:1 dengan kamar sistem). Tidak
+ * ada harga, reservasi, atau endpoint lain.
  */
 const DIIZINKAN: Record<string, string[]> = {
   getRoomBlocks: ["GET"],
   getRooms: ["GET"],
+  postRoomBlock: ["POST"],
+  putRoomBlock: ["PUT"],
+  deleteRoomBlock: ["POST"],
 };
 
 export async function POST(request: Request) {
