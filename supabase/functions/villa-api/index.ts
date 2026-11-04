@@ -26,6 +26,11 @@ function isiProperti(rows, properti){
 // Di luar request (atau bila konteks hilang) = 'PL'.
 const konteksProperti = new AsyncLocalStorage();
 function propertiSaatIni(){ return konteksProperti.getStore()?.properti ?? 'PL'; }
+// Nama properti di pesan WA tamu dan nama cabang MK Connect-nya.
+const NAMA_PROPERTI = { PL: 'Loonars Private Living', EL: 'Loonars Excellent Living' };
+function namaProperti(){ return NAMA_PROPERTI[propertiSaatIni()] ?? 'Loonars'; }
+// Template WA properti selain PL wajib berawalan 'el_' (lihat sendWa).
+function templateProperti(nama){ return propertiSaatIni() === 'PL' ? nama : `el_${nama}`; }
 // Properti yang datanya sudah di tabel bersama DAN pengaman per propertinya
 // (Cloudbeds, QRIS, rumus uang) sudah dipasang. Properti lain selalu
 // diperlakukan PL -- tidak ada perubahan perilaku sampai properti
@@ -809,7 +814,9 @@ function sedangMalamWIB(){
  * Didedup per nomor: satu orang bisa tercatat dua kali di sana.
  */
 async function daftarSecurityMalam(){
-  const {data:cabang} = await supabase.from('branches').select('id').eq('name','Loonars Private Living');
+  // Cabang MK Connect = nama properti (PL: 'Loonars Private Living', EL:
+  // 'Loonars Excellent Living'). Tanpa cabang/security, info malam tidak dikirim.
+  const {data:cabang} = await supabase.from('branches').select('id').eq('name', namaProperti());
   const {data:divisi} = await supabase.from('divisions').select('id').ilike('name','security');
   if(!cabang?.length || !divisi?.length) return [];
   const {data, error} = await supabase.from('employees').select('full_name,phone')
@@ -835,17 +842,17 @@ async function daftarSecurityMalam(){
 function teksInfoMalam({nama, security, bahasa}){
   if(bahasa === 'en'){
     return `Good evening ${nama || 'there'} 🌙\n\n`+
-      `We hope you're having a restful stay at Loonars Private Living.\n\n`+
+      `We hope you're having a restful stay at ${namaProperti()}.\n\n`+
       `Our front desk is on duty until 11 PM (WIB). After that, if you need any help at all, please contact our Security team (24 hours):\n`+
       security.map(s=>`• ${s.nama}: ${s.internasional}`).join('\n')+`\n\n`+
-      `For your information, power outages from the state electricity company (PLN) are very rare in our area. Should one occur, we sincerely apologize for the inconvenience and kindly ask for your patience, as our backup power panel (generator) is currently being upgraded.\n\n`+
+      (propertiSaatIni() === 'PL' ? `For your information, power outages from the state electricity company (PLN) are very rare in our area. Should one occur, we sincerely apologize for the inconvenience and kindly ask for your patience, as our backup power panel (generator) is currently being upgraded.\n\n` : '')+
       `Have a good night's rest 🙏`;
   }
   return `Selamat malam Kak${nama ? ' ' + nama : ''} 🌙\n\n`+
-    `Semoga istirahatnya nyaman di Loonars Private Living.\n\n`+
+    `Semoga istirahatnya nyaman di ${namaProperti()}.\n\n`+
     `Resepsionis kami bertugas sampai pukul 23.00 WIB. Setelah itu, kalau ada kendala atau butuh bantuan apa pun, silakan hubungi Security kami (24 jam):\n`+
     security.map(s=>`• ${s.nama}: ${s.lokal}`).join('\n')+`\n\n`+
-    `Sebagai informasi, pemadaman listrik dari PLN di area kami sangat jarang terjadi. Kalau sampai terjadi, kami mohon maaf atas ketidaknyamanannya dan mohon kesediaan Kakak untuk menunggu sebentar, karena panel listrik cadangan (genset) kami sedang dalam peningkatan.\n\n`+
+    (propertiSaatIni() === 'PL' ? `Sebagai informasi, pemadaman listrik dari PLN di area kami sangat jarang terjadi. Kalau sampai terjadi, kami mohon maaf atas ketidaknyamanannya dan mohon kesediaan Kakak untuk menunggu sebentar, karena panel listrik cadangan (genset) kami sedang dalam peningkatan.\n\n` : '')+
     `Selamat beristirahat 🙏`;
 }
 
@@ -856,7 +863,7 @@ function teksInfoMalam({nama, security, bahasa}){
  */
 async function kirimInfoMalam(booking, securityTersedia = null){
   const {data:sudah} = await supabase.from('wa_messages_log')
-    .select('id').eq('booking_id', booking.id).eq('template_type','info_malam').eq('status','sent').limit(1);
+    .select('id').eq('booking_id', booking.id).eq('template_type', templateProperti('info_malam')).eq('status','sent').limit(1);
   if(sudah?.length) return 'sudah';
 
   let hp = null;
@@ -874,7 +881,7 @@ async function kirimInfoMalam(booking, securityTersedia = null){
     return 'tanpa_security';
   }
   const ok = await sendWa(hp, teksInfoMalam({nama: booking.guest_nama, security, bahasa: bahasaDariNomorHp(hp)}),
-    {booking_id: booking.id, unit_id: booking.unit_id, template_type:'info_malam'});
+    {booking_id: booking.id, unit_id: booking.unit_id, template_type: templateProperti('info_malam')});
   return ok ? 'terkirim' : 'gagal';
 }
 
@@ -893,6 +900,20 @@ async function kirimInfoMalam(booking, securityTersedia = null){
 const SUMBER_TANPA_AJAKAN_DIRECT = ['late-night', 'investor', 'kol'];
 
 function teksAjakPesanDirect({nama, bahasa}){
+  // Excellent Living belum bisa dipesan & dibayar (QRIS) di loonars.id, jadi
+  // ajakannya lewat WhatsApp ini, tanpa janji harga website.
+  if(propertiSaatIni() !== 'PL'){
+    if(bahasa === 'en'){
+      return `Thank you for staying with us at ${namaProperti()}, ${nama || 'dear guest'} 🙏\n\n`+
+        `We hope you enjoyed your stay and have a safe journey onward.\n\n`+
+        `Whenever you'd like to come back, just message us directly on this WhatsApp number and we'll be happy to arrange your stay.\n\n`+
+        `We look forward to welcoming you again 🌿`;
+    }
+    return `Terima kasih sudah menginap di ${namaProperti()}, Kak${nama ? ' ' + nama : ''} 🙏\n\n`+
+      `Semoga istirahatnya menyenangkan dan perjalanan Kakak selanjutnya lancar.\n\n`+
+      `Kalau suatu saat ingin menginap lagi, langsung chat kami di nomor WhatsApp ini ya Kak, kami bantu siapkan kamarnya.\n\n`+
+      `Kami tunggu kedatangan Kakak berikutnya 🌿`;
+  }
   if(bahasa === 'en'){
     return `Thank you for staying with us at Loonars Private Living, ${nama || 'dear guest'} 🙏\n\n`+
       `We hope you enjoyed your stay and have a safe journey onward.\n\n`+
@@ -914,7 +935,7 @@ async function kirimAjakPesanDirect(bookingId){
   if(!bk || bk.is_free_stay || SUMBER_TANPA_AJAKAN_DIRECT.includes(bk.sumber)) return 'dilewati';
 
   const {data:sudah} = await supabase.from('wa_messages_log')
-    .select('id').eq('booking_id', bk.id).eq('template_type','ajak_pesan_direct').eq('status','sent').limit(1);
+    .select('id').eq('booking_id', bk.id).eq('template_type', templateProperti('ajak_pesan_direct')).eq('status','sent').limit(1);
   if(sudah?.length) return 'sudah';
 
   let hp = null;
@@ -925,7 +946,7 @@ async function kirimAjakPesanDirect(bookingId){
   if(!hp) return 'tanpa_hp';
 
   const ok = await sendWa(hp, teksAjakPesanDirect({nama: bk.guest_nama, bahasa: bahasaDariNomorHp(hp)}),
-    {booking_id: bk.id, unit_id: bk.unit_id, template_type:'ajak_pesan_direct'});
+    {booking_id: bk.id, unit_id: bk.unit_id, template_type: templateProperti('ajak_pesan_direct')});
   return ok ? 'terkirim' : 'gagal';
 }
 
@@ -6309,21 +6330,33 @@ async function layani(req){
     if(!await secretsMatch(provided, cron.secret)) return err('Unauthorized',401);
 
     const hariIni = todayWIB();
-    const {data:menginap, error} = await supabase.from('bookings')
-      .select('id,unit_id,guest_id,guest_nama,tgl_checkout')
-      .eq('status','checkin').lte('tgl_checkin', hariIni)
-      .or(`tgl_checkout.gt.${hariIni},tgl_checkout.is.null`);
-    if(error) return err(error.message);
-
-    const security = await daftarSecurityMalam();
-    if(!security.length) return err('Tidak ada security aktif bernomor di Mkhsistem (cabang Loonars Private Living)', 503);
-
-    const hasil = {terkirim:0, sudah:0, tanpa_hp:0, gagal:0};
-    for(const bk of menginap ?? []){
-      const r = await kirimInfoMalam(bk, security);
-      if(r in hasil) hasil[r]++;
+    // Satu putaran per properti; Private Living tetap putaran utama
+    // (jawaban & error sama seperti sebelumnya), properti lain di "lain".
+    const putaran = async () => {
+      const {data:menginap, error} = await supabase.from('bookings')
+        .select('id,unit_id,guest_id,guest_nama,tgl_checkout')
+        .eq('status','checkin').lte('tgl_checkin', hariIni)
+        .or(`tgl_checkout.gt.${hariIni},tgl_checkout.is.null`);
+      if(error) return {error: error.message};
+      const security = await daftarSecurityMalam();
+      if(!security.length) return {tanpa_security: true, tamu: (menginap ?? []).length};
+      const hasil = {terkirim:0, sudah:0, tanpa_hp:0, gagal:0};
+      for(const bk of menginap ?? []){
+        const r = await kirimInfoMalam(bk, security);
+        if(r in hasil) hasil[r]++;
+      }
+      return {tamu: (menginap ?? []).length, ...hasil, security: security.map(s=>s.nama)};
+    };
+    const lain = {};
+    for(const kode of PROPERTI_SIAP){
+      if(kode === 'PL') continue;
+      try { lain[kode] = await konteksProperti.run({ properti: kode }, putaran); }
+      catch(e){ lain[kode] = {error: e?.message ?? String(e)}; }
     }
-    return json({success:true, tamu: (menginap ?? []).length, ...hasil, security: security.map(s=>s.nama)});
+    const pl = await putaran();
+    if(pl.error) return err(pl.error);
+    if(pl.tanpa_security) return err('Tidak ada security aktif bernomor di Mkhsistem (cabang Loonars Private Living)', 503);
+    return json({success:true, ...pl, lain});
   }
 
   if(path==='/cron/cleaning-calls' && m==='POST'){
@@ -8906,6 +8939,10 @@ async function layani(req){
       await sendWa(guestPhone,
         `Halo ${data.guest_nama}, selamat datang di Loonars Excellent Living Yogyakarta!\nCheck-in Anda sudah tercatat (${bkEl?.tgl_checkin ?? ''} s/d ${bkEl?.tgl_checkout ?? ''}). Bila membutuhkan bantuan selama menginap, silakan hubungi resepsionis kami. Terima kasih.`,
         {booking_id:b.booking_id, unit_id:data.unit_id, template_type:'el_checkin'});
+      if(sedangMalamWIB()){
+        try { await kirimInfoMalam({id:b.booking_id, unit_id:data.unit_id, guest_id:data.guest_id, guest_nama:data.guest_nama}); }
+        catch(e){ console.error('[info-malam] check-in', e?.message ?? e); }
+      }
       return json({success:true, pin_kode:null});
     }
     await sendWa(guestPhone,
@@ -8943,11 +8980,10 @@ async function layani(req){
     await notif(data.unit_id,'all','checkout',`Checkout — Unit ${data.unit_nomor}`,`${data.guest_nama} sudah checkout. Housekeeping dijadwalkan.`,b.booking_id);
     // Ajakan pesan langsung di loonars.id. Gagal kirim tidak boleh
     // menggagalkan checkout yang sudah tercatat.
-    // Ajakan pesan di loonars.id milik Private Living.
-    if(propertiSaatIni() === 'PL'){
-      try { await kirimAjakPesanDirect(b.booking_id); }
-      catch(e){ console.error('[ajak-direct] checkout', e?.message ?? e); }
-    }
+    // Ajakan menginap lagi; teks & template mengikuti properti (lihat
+    // teksAjakPesanDirect). Gagal kirim tidak menggagalkan checkout.
+    try { await kirimAjakPesanDirect(b.booking_id); }
+    catch(e){ console.error('[ajak-direct] checkout', e?.message ?? e); }
     return json({success:true});
   }
 
