@@ -257,3 +257,7 @@ Properti kedua (Loonars 2, Jogja), terpisah total dari `units`/`bookings` Privat
 - `20261104000003_multi_properti_housekeeping_notifikasi`: `property_kode` default 'PL' di `housekeeping`, `notifications`, `villa_room_checks`, `villa_room_maintenance`; `villa_commit_checkout` membuat housekeeping dengan properti booking (isi lain identik, SECURITY DEFINER).
 - `20261104000004_el_ke_tabel_bersama`: salinan EL (4 tipe, 31 unit, 4 pemetaan) ke tabel bersama, `property_kode='EL'`. `units.nomor` dan `villa_room_types.code` masih unik global (bukan per properti).
 - View `villa_guest_directory` belum disaring per properti (menghitung booking semua properti).
+
+## Multi-properti: tutup buku & database tamu per properti (2026-11-04, DITERAPKAN)
+- `20261104000005_tutup_buku_per_properti`: `property_kode` di `finance_tutup_buku` (unik `(periode, property_kode)`) dan `finance_audit_log`.
+- `20261104000006_database_tamu_per_properti`: view `villa_guest_directory` = satu baris per tamu PER PROPERTI (kolom `property_kode` di akhir; tamu tanpa booking = PL). Diverifikasi: baris PL identik dengan view lama (8.478 baris, md5 sama). Status berhenti-langganan tetap per tamu.

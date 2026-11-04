@@ -35,6 +35,7 @@ export const TABEL_PER_PROPERTI = new Set([
   "villa_room_maintenance",
   "finance_tutup_buku",
   "finance_audit_log",
+  "villa_guest_directory",
 ]);
 
 export type KodeProperti = "PL" | "EL";
