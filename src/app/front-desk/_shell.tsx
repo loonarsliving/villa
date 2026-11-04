@@ -22,9 +22,8 @@ export function FrontDeskShell({
   const properti = usePropertiAktif(user);
   const pl = properti === "PL";
   const { unreadCount } = useNotifPoll("role=receptionist", "is_read_staff");
-  // Chat WA tamu milik Private Living; untuk properti lain endpoint chat
-  // menolak (dan 401 akan mengakhiri sesi), jadi polling hanya untuk PL.
-  const { unreadCount: chatUnread } = useChatUnreadPoll(30000, !!user && pl);
+  // Chat WA satu nomor untuk semua properti; daftar disaring per properti di server.
+  const { unreadCount: chatUnread } = useChatUnreadPoll(30000, !!user);
 
   // Properti selain PL (multi-properti 2026-11-04): hanya halaman yang
   // sudah diizinkan villa-api untuk properti lain. Kasir/QRIS, BBQ,
@@ -36,6 +35,7 @@ export function FrontDeskShell({
         { href: "/front-desk", label: "Front Desk", icon: "◈" },
         { href: "/front-desk/booking", label: "Booking", icon: "◎" },
         { href: "/front-desk/housekeeping", label: "Housekeeping", icon: "◉" },
+        { href: "/front-desk/chat", label: "Chat", icon: "◉", badge: chatUnread },
       ],
     },
     { title: "Log", items: [{ href: "/front-desk/notifikasi", label: "Notifikasi", icon: "◉", badge: unreadCount }] },

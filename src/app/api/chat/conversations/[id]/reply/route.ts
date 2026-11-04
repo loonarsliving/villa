@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { tolakJikaBedaProperti } from "@/lib/chatAkses";
 import { periksaTokenChat } from "@/lib/villaApiAuth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { terjemahkanChat } from "@/lib/aiBridge";
@@ -35,6 +36,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   const { id } = await params;
+  const bedaProperti = await tolakJikaBedaProperti(request, token, id);
+  if (bedaProperti) return bedaProperti;
   if (!UUID_RE.test(id)) return NextResponse.json({ error: "id percakapan tidak valid" }, { status: 400 });
 
   const body = await request.json().catch(() => null);

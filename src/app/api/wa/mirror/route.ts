@@ -70,7 +70,9 @@ export async function POST(request: Request) {
     mediaUrl: inbound.mediaUrl,
   });
 
-  if (hasil) {
+  // Percakapan Excellent Living (satu nomor WA untuk PL & EL): tanpa push ke
+  // manager PL dan tanpa draf AI (AI resepsionis berisi info villa PL).
+  if (hasil && hasil.properti === "PL") {
     // Notifikasi ke manager (Rebecca) -- push HP + angka di ikon aplikasi
     // (owner 2026-10-23). Lewat after() supaya Mkhsistem tidak menunggu.
     after(async () => {

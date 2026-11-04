@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { periksaTokenChat } from "@/lib/villaApiAuth";
+import { periksaTokenChat, propertiPeminta } from "@/lib/villaApiAuth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -30,6 +30,8 @@ export async function GET(request: Request) {
       "id,phone,nama_tampilan,guest_id,booking_id,status_tamu,last_message_at,last_message_preview,unread_count,bahasa," +
         "guests(nama),bookings(unit_nomor,status,tgl_checkin,tgl_checkout)",
     )
+    // Satu nomor WA untuk semua properti: hanya percakapan properti peminta.
+    .eq("property_kode", propertiPeminta(request, token))
     .order("last_message_at", { ascending: false })
     .limit(200);
 
