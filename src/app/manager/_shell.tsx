@@ -9,9 +9,8 @@ import { ManagerNotifikasi } from "@/components/ManagerNotifikasi";
 export function ManagerShell({ pageTitle, pageSub, children }: { pageTitle: string; pageSub?: string; children: ReactNode }) {
   const { user } = useAuth();
   // Lebih sering dari 30 detik bawaan: angka ini juga memicu bunyi/toast chat tamu baru (2026-10-23).
-  // Manager Excellent Living tidak memakai chat Private Living: polling dimatikan
-  // (endpoint chat menolaknya, dan 401 akan mengeluarkan sesi).
-  const { unreadCount: chatUnread } = useChatUnreadPoll(15000, !!user && user.property_kode !== "EL");
+  // Chat disaring per properti token (manager EL hanya melihat percakapan EL).
+  const { unreadCount: chatUnread } = useChatUnreadPoll(15000, !!user);
 
   // Manager properti selain Private Living (owner 2026-11-04: login manager
   // per properti) hanya melihat menu properti itu; modul manager lain di
@@ -25,6 +24,7 @@ export function ManagerShell({ pageTitle, pageSub, children }: { pageTitle: stri
             { href: "/manager", label: "Kesiapan Kamar", icon: "✓" },
             { href: "/manager/riwayat", label: "Riwayat Cek", icon: "☰" },
             { href: "/manager/kamar-el", label: "Kamar Excellent Living", icon: "▦" },
+            { href: "/manager/chat", label: "Chat", icon: "◉", badge: chatUnread },
           ],
         },
       ]

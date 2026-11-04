@@ -136,16 +136,14 @@ export function propertiPeminta(request: Request, token: string): string {
 
 export async function periksaTokenChat(token: string): Promise<HasilPeriksaToken> {
   const staf = await periksaTokenStaf(token);
-  // Resepsionis properti mana pun boleh membuka Chat; isinya disaring per
-  // properti di rute chat (propertiPeminta). Manager properti lain tidak.
+  // Resepsionis & manager properti mana pun boleh membuka Chat; isinya
+  // disaring per properti di rute chat (propertiPeminta).
   if (staf !== "ditolak") return staf;
-  const manager = await periksaTokenManager(token);
-  // Chat WA tamu milik Private Living: manager properti lain tidak ikut membaca.
-  if (manager === "lolos") {
-    const p = propertiDariToken(token);
-    if (p && p !== "PL") return "ditolak";
-  }
-  return manager;
+  // Manager properti mana pun juga boleh (owner 2026-11-04: chat manager EL);
+  // percakapan disaring per properti token di setiap rute chat
+  // (propertiPeminta / tolakJikaBedaProperti), jadi manager EL hanya melihat
+  // percakapan Excellent Living.
+  return periksaTokenManager(token);
 }
 
 /**

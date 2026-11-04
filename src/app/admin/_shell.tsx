@@ -56,6 +56,7 @@ export function AdminShell({ pageTitle, pageSub, children }: { pageTitle: string
         { href: "/front-desk/booking", label: "Booking", icon: "◎" },
         { href: "/front-desk/housekeeping", label: "Housekeeping", icon: "◉" },
         { href: "/front-desk/chat", label: "Chat WA", icon: "◉", badge: chatUnread },
+        { href: "/manager", label: "Kesiapan Kamar", icon: "✓" },
         { href: "/manager/kamar-el", label: "Buka/Tutup Kamar", icon: "▦" },
         { href: "/admin/excellent-living/harga", label: "Harga (Cloudbeds)", icon: "₨" },
         { href: "/admin/excellent-living/cloudbeds", label: "Cloudbeds", icon: "☁" },
