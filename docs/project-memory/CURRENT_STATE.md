@@ -5,6 +5,7 @@ _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 ## 2026-11-04 — Keputusan owner EL lanjutan + tutup buku per properti
 - Owner: QRIS EL menyusul; WA tamu memakai nomor yang sama (sistem harus membedakan percakapan EL/PL); notifikasi WA EL sama dengan PL; amenities & BBQ sama; kesiapan kamar EL disesuaikan dengan Cloudbeds EL; database tamu dipisah; laporan investor EL seperti PL tapi tanpa kiriman (belum ada investor aktif); tutup buku per properti; komisi OTA tetap sama (`finance_ota_settlement_config` bersama).
+- Database tamu dipisah (migrasi `20261104000006`, diterapkan): view `villa_guest_directory` per tamu per properti, masuk `TABEL_PER_PROPERTI`; `/guests/directory*` + `/guests/marketing` diizinkan untuk EL; menu Admin EL + Database Tamu. Promo WA PL (cron, konteks PL) hanya melihat tamu PL.
 - Migrasi `20261104000005_tutup_buku_per_properti` (diterapkan): `property_kode` di `finance_tutup_buku` (unik `(periode, property_kode)`, tabel kosong) dan `finance_audit_log` (210 baris lama = PL). Kedua tabel masuk `TABEL_PER_PROPERTI`; rute tutup buku + `/finance/audit-log` diizinkan untuk EL. Menu Finance/Admin EL: + Transaksi, + Tutup Buku.
 
 ## 2026-11-04 — Dynamic pricing Excellent Living (owner-approved, termasuk auto-push dengan batas)
