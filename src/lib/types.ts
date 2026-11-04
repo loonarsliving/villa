@@ -11,6 +11,9 @@ export interface SessionUser {
   must_change_password?: boolean;
   /** Properti tempat akun bekerja (multi-properti 2026-11-04). null = semua properti. */
   property_kode?: string | null;
+  /** Fitur operasional properti akun sudah dibuka admin (false = properti baru belum diaktifkan). */
+  property_siap?: boolean;
+  property_nama?: string | null;
 }
 
 export interface Unit {

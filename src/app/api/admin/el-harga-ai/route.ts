@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { bacaSetelanHarga, kunciSetelanHarga, runDynamicPricingProperti } from "@/lib/elDynamicPricing";
 import { supabaseAdminProperti } from "@/lib/supabaseAdmin";
-import { periksaTokenAdmin } from "@/lib/villaApiAuth";
+import { periksaTokenAdmin, propertiNonPl } from "@/lib/villaApiAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,10 +16,9 @@ async function sesiAdmin(request: Request) {
   return null;
 }
 
-/** Kode properti dari ?properti=XX (bawaan EL); bukan PL. */
+/** Properti non-PL: ?properti=XX, atau pilihan admin (header), bawaan EL. */
 function kodeProperti(request: Request): string | null {
-  const k = (new URL(request.url).searchParams.get("properti") ?? "EL").trim().toUpperCase();
-  return /^[A-Z]{2,6}$/.test(k) && k !== "PL" ? k : null;
+  return propertiNonPl(request, request.headers.get("x-villa-token") ?? "");
 }
 
 /** Setelan + rekomendasi terakhir dynamic pricing properti (bawaan EL), dan batas bawah/atas per tipe. */

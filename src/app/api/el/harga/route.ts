@@ -4,7 +4,7 @@ import { CloudbedsApiError } from "@/lib/cloudbedsApi";
 import { siapkanAkunCloudbeds } from "@/lib/propertiConfig";
 import { hargaElDariCloudbeds } from "@/lib/elHarga";
 import { supabaseAdminProperti } from "@/lib/supabaseAdmin";
-import { periksaTokenEl } from "@/lib/villaApiAuth";
+import { periksaTokenEl, propertiNonPl } from "@/lib/villaApiAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,8 +32,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Maksimal 62 malam" }, { status: 400 });
   }
   try {
-    const kode = (url.searchParams.get("properti") ?? "EL").trim().toUpperCase();
-    if (!/^[A-Z]{2,6}$/.test(kode) || kode === "PL") return NextResponse.json({ error: "properti tidak valid" }, { status: 400 });
+    const kode = propertiNonPl(request, token);
+    if (!kode) return NextResponse.json({ error: "properti tidak valid" }, { status: 400 });
     const { akun } = await siapkanAkunCloudbeds(kode);
     return NextResponse.json({ checkin, checkout, ...(await hargaElDariCloudbeds(supabaseAdminProperti(kode), checkin, checkout, akun)) });
   } catch (e) {

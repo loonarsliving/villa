@@ -6,7 +6,8 @@ import { localApi } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { Card, CardHeader, Loading, Badge } from "@/components/Card";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
-import { berandaProperti, type Properti } from "@/lib/properti";
+import { useRouter } from "next/navigation";
+import { propertiSiap, type Properti } from "@/lib/properti";
 
 /**
  * Kelola properti (owner 2026-11-04: "admin itu bisa menambahkan properti
@@ -15,6 +16,7 @@ import { berandaProperti, type Properti } from "@/lib/properti";
  */
 export default function AdminPropertiPage() {
   const toast = useToast();
+  const router = useRouter();
   const [daftar, setDaftar] = useState<Properti[] | null>(null);
   const [form, setForm] = useState<{ kode: string; nama: string; edit: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -43,7 +45,12 @@ export default function AdminPropertiPage() {
     if (form.edit) {
       kirim(() => localApi("/api/admin/properti", { method: "PATCH", body: JSON.stringify({ kode: form.kode, nama: form.nama }) }), "Nama properti diperbarui.");
     } else {
-      kirim(() => localApi("/api/admin/properti", { method: "POST", body: JSON.stringify({ kode: form.kode, nama: form.nama }) }), `${form.nama} ditambahkan.`);
+      const kodeBaru = form.kode;
+      kirim(async () => {
+        await localApi("/api/admin/properti", { method: "POST", body: JSON.stringify({ kode: form.kode, nama: form.nama }) });
+        // Langsung ke pengaturan: isi kunci Cloudbeds, email, QRIS, lalu aktifkan.
+        router.push(`/admin/properti/${kodeBaru}`);
+      }, `${form.nama} ditambahkan. Lanjutkan pengaturannya.`);
     }
   }
 
@@ -66,10 +73,11 @@ export default function AdminPropertiPage() {
                   <div className="text-[11px] text-ink/40 mt-0.5 flex flex-wrap gap-2 items-center">
                     <span>Kode {p.kode}</span>
                     <Badge tone={p.aktif ? "ok" : "danger"}>{p.aktif ? "Aktif" : "Nonaktif"}</Badge>
-                    {!berandaProperti(p.kode, "admin") && <span className="text-gold-600">fitur operasional belum aktif</span>}
+                    {!propertiSiap(p) && <span className="text-gold-600">belum diatur — klik Atur</span>}
                   </div>
                 </div>
                 <span className="flex gap-2">
+                  {p.kode !== "PL" && <Btn variant={propertiSiap(p) ? "ghost" : "primary"} onClick={() => router.push(`/admin/properti/${p.kode}`)}>{propertiSiap(p) ? "Pengaturan" : "Atur"}</Btn>}
                   <Btn disabled={busy} onClick={() => setForm({ kode: p.kode, nama: p.nama, edit: true })}>Ubah nama</Btn>
                   {p.kode !== "PL" && (
                     <Btn
@@ -115,8 +123,8 @@ export default function AdminPropertiPage() {
             )}
             {!form.edit && (
               <div className="text-[11.5px] text-ink/50">
-                Setelah ditambahkan, Anda bisa langsung membuat akun manager dan resepsionis untuk properti ini di Pengguna &amp; Role.
-                Kamar, booking, Cloudbeds, dan finance untuk properti baru menyusul di tahap berikutnya.
+                Setelah ditambahkan, Anda langsung diarahkan mengisi: kunci Cloudbeds, email pembayaran BTN, dan QRIS. Kamar, harga, booking,
+                Front Desk, dan finance properti ini aktif otomatis, tanpa coding. Lalu buat akun manager dan resepsionis di Pengguna &amp; Role.
               </div>
             )}
           </>

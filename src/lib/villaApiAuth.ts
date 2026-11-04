@@ -134,6 +134,18 @@ export function propertiPeminta(request: Request, token: string): string {
   return "PL";
 }
 
+/**
+ * Properti NON-PL yang dimaksud request ini untuk rute yang dulu khusus EL:
+ * ?properti=XX (eksplisit), lalu properti akun / header pilihan admin, lalu
+ * EL (bawaan lama, agar halaman EL tidak berubah). null = tidak valid.
+ */
+export function propertiNonPl(request: Request, token: string): string | null {
+  const param = (new URL(request.url).searchParams.get("properti") ?? "").trim().toUpperCase();
+  let k = /^[A-Z]{2,6}$/.test(param) ? param : propertiPeminta(request, token);
+  if (k === "PL" && !param) k = "EL";
+  return /^[A-Z]{2,6}$/.test(k) && k !== "PL" ? k : null;
+}
+
 export async function periksaTokenChat(token: string): Promise<HasilPeriksaToken> {
   const staf = await periksaTokenStaf(token);
   // Resepsionis & manager properti mana pun boleh membuka Chat; isinya

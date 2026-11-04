@@ -5,7 +5,7 @@ import Link from "next/link";
 import { DashboardShell, type NavSection } from "@/components/DashboardShell";
 import { useAuth } from "@/lib/auth";
 import { useChatUnreadPoll, useNotifPoll } from "@/lib/hooks";
-import { usePropertiAktif } from "@/lib/properti";
+import { usePropertiAktif, usePropertiTerpilih } from "@/lib/properti";
 
 export function FrontDeskShell({
   pageTitle,
@@ -20,6 +20,7 @@ export function FrontDeskShell({
 }) {
   const { user } = useAuth();
   const properti = usePropertiAktif(user);
+  const terpilih = usePropertiTerpilih();
   const pl = properti === "PL";
   const { unreadCount } = useNotifPoll("role=receptionist", "is_read_staff");
   // Chat WA satu nomor untuk semua properti; daftar disaring per properti di server.
@@ -71,7 +72,7 @@ export function FrontDeskShell({
 
   return (
     <DashboardShell
-      property={pl ? undefined : properti === "EL" ? "Loonars Excellent Living" : properti}
+      property={pl ? undefined : (user?.role === "admin" || user?.role === "finance" ? terpilih.nama : user?.property_nama) ?? (properti === "EL" ? "Loonars Excellent Living" : properti)}
       brandTitle="Panel"
       brandSub="Operasional"
       roleLabel="Resepsionis"
