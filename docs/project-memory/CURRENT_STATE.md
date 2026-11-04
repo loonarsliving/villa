@@ -3,6 +3,12 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-11-04 — Multi-properti: pengaman villa-api untuk properti selain PL (saklar EL masih mati)
+- Owner: QRIS EL menyusul (kasir QRIS EL tetap mati); EL TIDAK memakai PIN pintu.
+- Migrasi `20261104000003_multi_properti_housekeeping_notifikasi` (diterapkan): `property_kode` default 'PL' di `housekeeping`, `notifications`, `villa_room_checks`, `villa_room_maintenance`; `villa_commit_checkout` membuat tugas housekeeping dengan properti booking (isi lain identik, tetap SECURITY DEFINER).
+- villa-api: 4 tabel itu masuk `TABEL_PER_PROPERTI` (juga `src/lib/klienProperti.ts`). Dalam konteks non-PL: (1) `RUTE_PROPERTI_LAIN` = daftar izin rute (ringkasan, unit, booking, check-in/out, housekeeping, notifikasi, whoami, finance ringkasan/channel/booking/checklist dana/settlement, admin users); rute lain 409 "Fitur ini belum aktif untuk properti ini"; `/el/*` tetap jalan; (2) `sendWa` hanya template `el_*`; (3) `POST /bookings` memakai `total_bayar` dari form (harga EL dari Cloudbeds), bukan `villa_rates`; (4) `/checkin` mengirim sambutan EL tanpa PIN (`el_checkin`), tanpa info malam, `pin_kode: null`; (5) `/checkout` tanpa ajakan loonars.id. Manager/resepsionis properti non-PL hanya dikunci bila propertinya belum di `PROPERTI_SIAP`.
+- Sengaja TIDAK diizinkan untuk EL: Kesiapan Kamar manager PL (membuat blokir di akun Cloudbeds PL), kasir/QRIS, harga/tarif-preview, promo, laporan/dividen/investor/survival/laba rugi, tutup buku (`finance_tutup_buku.periode` unik global), admin overview (log Cloudbeds/WA PL). Catatan: komisi OTA di finance EL memakai `finance_ota_settlement_config` yang sama dengan PL (belum per properti).
+
 ## 2026-11-04 — Kamar EL diatur di sistem; tipe dari Cloudbeds
 - Hasil getRooms semua halaman: Cloudbeds EL memang hanya punya 4 room (`total` = 4): DOU(1) "Double  Room with Terrace", QUA(1) "Quadruple Room", JSP(1) "Junior Suite with Pool View", KIN(1) "King Suit With Pool" — 1 room per tipe. Sinkron 20:02 UTC membuat 4 tipe itu (kode DOU/QUA/JSP/KIN); tipe placeholder ST/SP/FP jadi nonaktif. Owner menghapus 4 pemetaan manual lewat admin.
 - Owner: "Itu sudah benar, kt atur dari sini saja" = 31 kamar fisik diatur di sistem ini, bukan ditambah di Cloudbeds. Pembagian (disetujui owner): DOU 12 (ST-01..ST-12), QUA 2 (ST-13, ST-14), JSP 12 (SP-01..SP-12), KIN 5 (FP-01..FP-05).

@@ -29,6 +29,10 @@ export const TABEL_PER_PROPERTI = new Set([
   "finance_settlements",
   "cloudbeds_room_mapping",
   "villa_daily_inventory_snapshot",
+  "housekeeping",
+  "notifications",
+  "villa_room_checks",
+  "villa_room_maintenance",
 ]);
 
 export type KodeProperti = "PL" | "EL";
