@@ -42,7 +42,7 @@ export default function KesiapanKamarPage() {
   const tertutup = data?.kamar.filter((k) => k.maintenance && !k.maintenance.berakhir) ?? [];
   const tutupCb = data?.kamar.filter((k) => !tertutup.includes(k) && blokHariIni(k, data.hari_ini)) ?? [];
   // Excellent Living: kamar masih berstatus maintenance (belum dibuka manager).
-  const lokal = !!data?.penutupan_lokal;
+  const lokal = !!data?.ikut_status_unit;
   const belumDibuka = lokal ? (data?.kamar.filter((k) => !tertutup.includes(k) && !tutupCb.includes(k) && k.status_unit === "maintenance") ?? []) : [];
 
   return (
@@ -66,11 +66,6 @@ export default function KesiapanKamarPage() {
               <div className="font-serif text-2xl text-gold-500">{tutupCb.length}</div>
             </Card>
           </div>
-          {lokal && (
-            <div className="mb-4 rounded-xl border border-gold-500/30 bg-gold-500/10 px-4 py-3 text-[12px] text-ink/60">
-              Cloudbeds Excellent Living baru punya satu kamar per tipe, jadi Kamar Maintenance / Kamar Siap di sini hanya berlaku di sistem (Front Desk &amp; loonars.id). Blokir yang dibuat di Cloudbeds tetap terbaca.
-            </div>
-          )}
           {!data.cloudbeds_terbaca && (
             <div className="mb-4 text-[11px] text-ink/40">Blokir di Cloudbeds tidak terbaca saat ini — kamar yang ditutup langsung di Cloudbeds mungkin tidak tertandai.</div>
           )}
@@ -137,7 +132,7 @@ function BarisKamar({ kamar, hariIni, lokal, onClick }: { kamar: KamarKesiapan; 
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-sage-500/15 text-sage-500">DIJUAL</span>
           )}
           {menginap && <span className="text-[10px] text-ink/40">ada tamu menginap</span>}
-          {!kamar.cloudbeds_terpetakan && !lokal && <span className="text-[10px] text-ruby-400">belum terhubung Cloudbeds</span>}
+          {!kamar.cloudbeds_terpetakan && <span className="text-[10px] text-ruby-400">belum terhubung Cloudbeds</span>}
         </div>
         <div className="text-[11px] text-ink/40 mt-1 truncate">
           {kamar.tipe ?? "—"}
