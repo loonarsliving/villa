@@ -544,9 +544,9 @@ export async function getCloudbedsRoomBlocks(startDate: string, endDate: string,
  * penanda closed-to-arrival, yang menyebut penyebabnya dengan namanya
  * sendiri alih-alih menyisakan tebakan.
  */
-export async function getCloudbedsRatePlans(startDate: string, endDate: string): Promise<unknown[]> {
-  const key = apiKey();
-  const propertyId = (process.env.CLOUDBEDS_PROPERTY_ID ?? "").trim();
+export async function getCloudbedsRatePlans(startDate: string, endDate: string, akun: CloudbedsAkun = "utama"): Promise<unknown[]> {
+  const key = apiKey(akun);
+  const propertyId = propertyIdAkun(akun);
   const url = new URL(`${CLOUDBEDS_API_BASE}/getRatePlans`);
   if (propertyId) url.searchParams.set("propertyIDs", propertyId);
   url.searchParams.set("startDate", startDate);
