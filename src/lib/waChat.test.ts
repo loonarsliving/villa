@@ -180,3 +180,22 @@ describe("dariIklan", () => {
     expect(dariIklan("Mau tanya info selengkapnya tentang ini kak, harga per malam berapa?")).toBe(false);
   });
 });
+
+import { tentukanPropertiPercakapan } from "./waChat";
+
+describe("tentukanPropertiPercakapan (satu nomor WA untuk PL & EL)", () => {
+  const dasar = { teks: "halo kak", elAktif: false, plAktif: false, sebelumnya: null as string | null };
+  it("menyebut Excellent -> EL", () => {
+    expect(tentukanPropertiPercakapan({ ...dasar, teks: "Mau menginap di Loonars Excellent Living" })).toBe("EL");
+    expect(tentukanPropertiPercakapan({ ...dasar, teks: "kamar excellent masih ada?", plAktif: true })).toBe("EL");
+  });
+  it("booking aktif menentukan bila hanya di satu properti", () => {
+    expect(tentukanPropertiPercakapan({ ...dasar, elAktif: true })).toBe("EL");
+    expect(tentukanPropertiPercakapan({ ...dasar, plAktif: true, sebelumnya: "EL" })).toBe("PL");
+  });
+  it("selain itu tetap seperti sebelumnya; percakapan baru = PL", () => {
+    expect(tentukanPropertiPercakapan({ ...dasar, sebelumnya: "EL" })).toBe("EL");
+    expect(tentukanPropertiPercakapan({ ...dasar, elAktif: true, plAktif: true, sebelumnya: "PL" })).toBe("PL");
+    expect(tentukanPropertiPercakapan(dasar)).toBe("PL");
+  });
+});

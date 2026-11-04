@@ -79,7 +79,7 @@ export async function kirimPushKePeranAman(supabase: SupabaseClient, role: strin
 
 /** Jumlah pesan tamu yang belum dibaca di seluruh kotak masuk -- angka di ikon aplikasi. */
 export async function totalChatBelumDibaca(supabase: SupabaseClient): Promise<number> {
-  const { data } = await supabase.from("wa_conversations").select("unread_count").gt("unread_count", 0);
+  const { data } = await supabase.from("wa_conversations").select("unread_count").eq("property_kode", "PL").gt("unread_count", 0);
   return (data ?? []).reduce((s, r) => s + ((r as { unread_count: number }).unread_count ?? 0), 0);
 }
 

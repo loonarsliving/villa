@@ -108,13 +108,36 @@ export function propertiDariToken(token: string): string | null {
   }
 }
 
+/** Peran di token sesi (dibaca SETELAH token lolos periksaToken*). */
+export function peranDariToken(token: string): string | null {
+  try {
+    const isi = JSON.parse(Buffer.from(token.split(".")[0].replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8")) as { role?: unknown };
+    return typeof isi.role === "string" ? isi.role : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Properti yang sedang dikerjakan peminta: properti akun (manager/
+ * resepsionis), atau untuk admin/finance properti pilihannya (header
+ * x-villa-property). Bawaan PL. Panggil SETELAH token diverifikasi.
+ */
+export function propertiPeminta(request: Request, token: string): string {
+  const p = propertiDariToken(token);
+  if (p) return p;
+  const peran = peranDariToken(token);
+  if (peran === "admin" || peran === "finance") {
+    const h = (request.headers.get("x-villa-property") ?? "").trim().toUpperCase();
+    if (/^[A-Z]{2,6}$/.test(h)) return h;
+  }
+  return "PL";
+}
+
 export async function periksaTokenChat(token: string): Promise<HasilPeriksaToken> {
   const staf = await periksaTokenStaf(token);
-  // Chat WA tamu milik Private Living: resepsionis properti lain tidak ikut membaca.
-  if (staf === "lolos") {
-    const p = propertiDariToken(token);
-    if (p && p !== "PL") return "ditolak";
-  }
+  // Resepsionis properti mana pun boleh membuka Chat; isinya disaring per
+  // properti di rute chat (propertiPeminta). Manager properti lain tidak.
   if (staf !== "ditolak") return staf;
   const manager = await periksaTokenManager(token);
   // Chat WA tamu milik Private Living: manager properti lain tidak ikut membaca.

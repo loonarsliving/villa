@@ -100,6 +100,7 @@ export async function localApi<T>(path: string, options: RequestInit = {}): Prom
     headers: {
       ...(hasBody ? { "Content-Type": "application/json" } : {}),
       ...(token ? { "x-villa-token": token } : {}),
+      ...propertiHeader(),
       ...(options.headers || {}),
     },
   });

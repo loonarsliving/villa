@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { terjemahkanChat } from "./aiBridge";
 import { kirimDariNomorUtama } from "./mkhsistemWa";
 import { nomorKanonik, samePhoneNumber } from "./phone";
+import { supabaseAdminProperti } from "./supabaseAdmin";
 
 /**
  * Inti penyimpanan percakapan WhatsApp dua-arah (persetujuan owner
@@ -29,6 +30,24 @@ export interface ConversationMatch {
   statusTamu: "prospek" | "menginap" | "selesai";
   /** true hanya untuk pesan yang membuat percakapan ini -- dasar sapaan pertama. */
   baru: boolean;
+  /** Properti percakapan ini (PL/EL), lihat tentukanPropertiPercakapan. */
+  properti: string;
+}
+
+/** Pesan tamu yang menyebut Excellent Living (owner 2026-11-04: satu nomor WA untuk PL & EL). */
+const PENANDA_EXCELLENT = /\bexcellent(\s+living)?\b/i;
+
+/**
+ * Properti sebuah percakapan WA (satu nomor villa untuk PL & EL). Murni,
+ * supaya bisa dites. Urutan: menyebut "Excellent" -> EL; booking aktif EL
+ * tanpa booking aktif PL -> EL; booking aktif PL tanpa EL -> PL; selain itu
+ * properti percakapan sebelumnya (percakapan baru = PL).
+ */
+export function tentukanPropertiPercakapan(input: { teks: string; elAktif: boolean; plAktif: boolean; sebelumnya: string | null }): string {
+  if (PENANDA_EXCELLENT.test(input.teks)) return "EL";
+  if (input.elAktif && !input.plAktif) return "EL";
+  if (input.plAktif && !input.elAktif) return "PL";
+  return input.sebelumnya ?? "PL";
 }
 
 /**
@@ -75,6 +94,9 @@ export function pilihBookingTerbaik(rows: BookingRingkas[]): { bookingId: string
  * karena "booking fee" rumah memakai kata yang sama.
  */
 const PENANDA_SEWA_VILLA: RegExp[] = [
+  // "Loonars Excellent Living" sengaja TIDAK di sini: itu juga produk unit
+  // yang dijual sales di nomor yang sama. Tamu EL masuk lewat kata menginap
+  // (form EL di loonars.id), lalu ditandai EL oleh tentukanPropertiPercakapan.
   /\bloonars\s+(private\s+)?living\b/i,
   /\bprivate\s+living\b/i,
   /\b(menginap|nginap|nginep)\b/i,
@@ -276,11 +298,26 @@ async function orangDalamMkhsistem(supabase: SupabaseClient, phoneMentah: string
   return (karyawan.data ?? []).some((e) => cocok(e.phone)) || (kontraktor.data ?? []).some((c) => cocok(c.phone));
 }
 
-async function cariGuestDanBooking(
-  supabase: SupabaseClient,
-  phone: string,
-): Promise<{ guestId: string | null; bookingId: string | null; statusTamu: ConversationMatch["statusTamu"] }> {
+/** Ada booking aktif (terjadwal/menginap) untuk salah satu baris tamu bernomor ini di properti tsb. */
+async function punyaBookingAktif(properti: string, guestIds: string[]): Promise<boolean> {
+  if (!guestIds.length) return false;
+  const { data } = await supabaseAdminProperti(properti).from("bookings").select("id").in("guest_id", guestIds).in("status", ["checkin", "terjadwal"]).limit(1);
+  return (data ?? []).length > 0;
+}
+
+async function idTamuBernomor(supabase: SupabaseClient, phone: string): Promise<string[]> {
   const { data: guests } = await supabase.from("guests").select("id,hp").not("hp", "is", null).neq("hp", "");
+  return (guests ?? []).filter((g) => samePhoneNumber(g.hp, phone)).map((g) => String(g.id));
+}
+
+async function cariGuestDanBooking(
+  supabaseUmum: SupabaseClient,
+  phone: string,
+  properti = "PL",
+): Promise<{ guestId: string | null; bookingId: string | null; statusTamu: ConversationMatch["statusTamu"] }> {
+  // Booking dibaca dari properti percakapan (klien per properti).
+  const supabase = properti === "PL" ? supabaseUmum : supabaseAdminProperti(properti);
+  const { data: guests } = await supabaseUmum.from("guests").select("id,hp").not("hp", "is", null).neq("hp", "");
   const guest = (guests ?? []).find((g) => samePhoneNumber(g.hp, phone));
   if (!guest) return { guestId: null, bookingId: null, statusTamu: "prospek" };
 
@@ -305,11 +342,19 @@ export async function cariAtauBuatPercakapan(
   supabase: SupabaseClient,
   phoneMentah: string,
   namaTampilan?: string,
+  /** Teks pesan masuk; dipakai menentukan properti (PL/EL). Tanpa teks = properti tidak diubah. */
+  teks?: string,
 ): Promise<ConversationMatch> {
   const phone = nomorKanonik(phoneMentah);
-  const cocok = await cariGuestDanBooking(supabase, phone);
+  const { data: existing } = await supabase.from("wa_conversations").select("id,property_kode").eq("phone", phone).maybeSingle();
 
-  const { data: existing } = await supabase.from("wa_conversations").select("id").eq("phone", phone).maybeSingle();
+  let properti = existing?.property_kode ? String(existing.property_kode) : "PL";
+  if (teks !== undefined) {
+    const ids = await idTamuBernomor(supabase, phone);
+    const [elAktif, plAktif] = await Promise.all([punyaBookingAktif("EL", ids), punyaBookingAktif("PL", ids)]);
+    properti = tentukanPropertiPercakapan({ teks, elAktif, plAktif, sebelumnya: existing?.property_kode ? String(existing.property_kode) : null });
+  }
+  const cocok = await cariGuestDanBooking(supabase, phone, properti);
 
   if (existing) {
     await supabase
@@ -318,10 +363,11 @@ export async function cariAtauBuatPercakapan(
         guest_id: cocok.guestId,
         booking_id: cocok.bookingId,
         status_tamu: cocok.statusTamu,
+        property_kode: properti,
         ...(namaTampilan ? { nama_tampilan: namaTampilan } : {}),
       })
       .eq("id", existing.id);
-    return { conversationId: existing.id, ...cocok, baru: false };
+    return { conversationId: existing.id, ...cocok, baru: false, properti };
   }
 
   const { data: created, error } = await supabase
@@ -332,6 +378,7 @@ export async function cariAtauBuatPercakapan(
       guest_id: cocok.guestId,
       booking_id: cocok.bookingId,
       status_tamu: cocok.statusTamu,
+      property_kode: properti,
     })
     .select("id")
     .single();
@@ -340,10 +387,10 @@ export async function cariAtauBuatPercakapan(
   // Yang kalah tetap dicatat ke percakapan yang sama, tanpa sapaan kedua.
   if (error?.code === "23505") {
     const { data: pemenang } = await supabase.from("wa_conversations").select("id").eq("phone", phone).maybeSingle();
-    if (pemenang) return { conversationId: pemenang.id, ...cocok, baru: false };
+    if (pemenang) return { conversationId: pemenang.id, ...cocok, baru: false, properti };
   }
   if (error || !created) throw new Error(error?.message ?? "Gagal membuat percakapan baru");
-  return { conversationId: created.id, ...cocok, baru: true };
+  return { conversationId: created.id, ...cocok, baru: true, properti };
 }
 
 export interface CatatPesanInput {
@@ -402,7 +449,7 @@ export async function catatPesanMasukAman(
   opts: { namaTampilan?: string; mediaUrl?: string } = {},
 ): Promise<(ConversationMatch & { messageId: string }) | null> {
   try {
-    const match = await cariAtauBuatPercakapan(supabase, phoneMentah, opts.namaTampilan);
+    const match = await cariAtauBuatPercakapan(supabase, phoneMentah, opts.namaTampilan, isi);
     const messageId = await catatPesan(supabase, {
       conversationId: match.conversationId,
       arah: "masuk",
