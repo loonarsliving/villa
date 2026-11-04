@@ -4236,6 +4236,25 @@ async function elKetersediaanPublik(checkin, checkout){
   });
 }
 
+/**
+ * Ketersediaan EL untuk loonars.id dari tabel bersama (harus dipanggil dalam
+ * konteks properti EL). Kamar berstatus 'maintenance' (belum dibuka manager)
+ * tidak dihitung; bentrok = booking aktif, tahanan, Kamar Maintenance, dan
+ * blokir Cloudbeds EL (unitTidakBisaDijualWebsite).
+ */
+async function elKetersediaanBersama(checkin, checkout){
+  const [{ data: tipe }, { data: units }] = await Promise.all([
+    supabase.from('villa_room_types').select('id,code,name,description,capacity').eq('active', true).order('code'),
+    supabase.from('units').select('id,room_type_id,status'),
+  ]);
+  const konflik = await unitTidakBisaDijualWebsite(null, checkin, checkout);
+  return (tipe ?? []).map(t => {
+    const kamar = (units ?? []).filter(u => u.room_type_id === t.id && u.status !== 'maintenance');
+    return { kode: t.code, nama: t.name, deskripsi: t.description, kapasitas: t.capacity,
+      total: kamar.length, tersedia: kamar.filter(u => !konflik.has(u.id)).length };
+  });
+}
+
 async function elOkupansi(from, to){
   const { count: jumlahKamar } = await supabase.from('el_rooms').select('id', { count:'exact', head:true }).eq('active', true);
   const { data } = await supabase.from('el_bookings')
@@ -4797,7 +4816,9 @@ async function layani(req){
     if(!isValidDateStr(checkin) || !isValidDateStr(checkout) || checkout <= checkin) return err('checkin/checkout tidak valid');
     if(checkin < addDaysStr(todayWIB(), -1)) return err('Tanggal check-in sudah lewat');
     if(elMalam(checkin, checkout) > 30) return err('Maksimal 30 malam');
-    return json({ checkin, checkout, tipe: await elKetersediaanPublik(checkin, checkout) });
+    // Tabel bersama (multi-properti, 2026-11-04): kamar & booking EL ada di
+    // units/bookings 'EL', bukan lagi el_* (yang sudah tidak dirawat).
+    return json({ checkin, checkout, tipe: await konteksProperti.run({ properti: 'EL' }, () => elKetersediaanBersama(checkin, checkout)) });
   }
 
   if(path==='/public/payment-info' && m==='GET'){
