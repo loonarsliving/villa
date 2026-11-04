@@ -6788,8 +6788,26 @@ async function layani(req){
     }
 
     const hasil = await scanPaymentInboxBersama(cfg);
+
+    // Kotak email pembayaran properti lain (QRIS BTN sendiri, email berbeda):
+    // integration_settings 'payment_email_<kode>' (mis. payment_email_el), isi
+    // sama dengan 'payment_email'. Dipindai dalam konteks properti itu, jadi
+    // email EL hanya bisa mengonfirmasi booking/pesanan EL (klienProperti),
+    // dan email PL hanya booking PL. Tanpa konfigurasi -> dilewati. Galat EL
+    // tidak mengganggu jawaban PL.
+    const lain = {};
+    for(const kode of PROPERTI_SIAP){
+      if(kode === 'PL') continue;
+      const cfgLain = await getSetting(`payment_email_${kode.toLowerCase()}`);
+      if(!cfgLain.host || !cfgLain.user || !cfgLain.password){ lain[kode] = {dilewati: 'payment_email_'+kode.toLowerCase()+' belum dikonfigurasi'}; continue; }
+      try{
+        const r = await konteksProperti.run({ properti: kode }, () => scanPaymentInbox(cfgLain));
+        lain[kode] = r.gagal ? {gagal: r.gagal} : {diperiksa:r.diperiksa, dikonfirmasi:r.dikonfirmasi, ambigu:r.ambigu};
+      }catch(e){ lain[kode] = {gagal: e?.message ?? String(e)}; }
+    }
+
     if(hasil.gagal) return err(`Gagal membaca email: ${hasil.gagal}`, 502);
-    return json({success:true, diperiksa:hasil.diperiksa, dikonfirmasi:hasil.dikonfirmasi, ambigu:hasil.ambigu});
+    return json({success:true, diperiksa:hasil.diperiksa, dikonfirmasi:hasil.dikonfirmasi, ambigu:hasil.ambigu, lain});
   }
 
   // Dipanggil dari halaman booking begitu QRIS ditampilkan (dan diulang
