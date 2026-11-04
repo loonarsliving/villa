@@ -25,3 +25,21 @@ export function supabaseAdmin() {
     }),
   );
 }
+
+/**
+ * Klien untuk satu properti tertentu (mis. 'EL'): tabel per properti
+ * otomatis disaring/diisi properti itu. Dipakai kode yang memang mengurus
+ * properti lain, seperti sinkron Cloudbeds Excellent Living.
+ */
+export function supabaseAdminProperti(properti: string) {
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceRoleKey) {
+    throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured");
+  }
+  return klienProperti(
+    createClient(SUPABASE_URL, serviceRoleKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    }),
+    properti,
+  );
+}

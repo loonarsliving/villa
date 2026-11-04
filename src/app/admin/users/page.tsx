@@ -27,7 +27,7 @@ function pilihanRole(properti: string): { value: Role; label: string }[] {
     ];
   if (properti === "EL")
     return [
-      { value: "el_receptionist", label: "Resepsionis" },
+      { value: "receptionist", label: "Resepsionis" },
       { value: "manager", label: "Manager (buka/tutup kamar)" },
       { value: "el_investor", label: "Investor" },
     ];

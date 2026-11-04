@@ -10,7 +10,8 @@ import { fmtCurrencyFull, fmtDate, fmtDateTime, fmtFullDate, todayISO } from "@/
 import { Card, CardHeader, Loading } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
-import { CheckinCard, type CheckinCardGuest, type CheckinCardResult } from "@/components/CheckinCard";
+import { CheckinCard, HOUSE_RULES_EXCELLENT_LIVING, type CheckinCardGuest, type CheckinCardResult } from "@/components/CheckinCard";
+import { usePropertiAktif } from "@/lib/properti";
 import { HandoverHarian } from "@/components/HandoverHarian";
 import type { Booking, Summary, Unit, Notification } from "@/lib/types";
 
@@ -31,6 +32,8 @@ const statusLabel: Record<string, string> = {
 
 export default function FrontDeskPage() {
   const { user } = useAuth();
+  // Excellent Living: tata tertib EL di kartu check-in, sebutan "Kamar".
+  const properti = usePropertiAktif(user);
   const toast = useToast();
   const router = useRouter();
   const [sum, setSum] = useState<Summary | null>(null);
@@ -521,6 +524,7 @@ export default function FrontDeskPage() {
           setPendingCheckin(null);
         }}
         onConfirm={finalizeCheckin}
+        {...(properti === "EL" ? { houseRules: HOUSE_RULES_EXCELLENT_LIVING, unitLabel: "Kamar" } : {})}
       />
     </FrontDeskShell>
   );

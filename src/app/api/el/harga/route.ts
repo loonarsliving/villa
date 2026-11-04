@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { CloudbedsApiError, periksaKunciEl } from "@/lib/cloudbedsApi";
 import { hargaElDariCloudbeds } from "@/lib/elHarga";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { supabaseAdminProperti } from "@/lib/supabaseAdmin";
 import { periksaTokenEl } from "@/lib/villaApiAuth";
 
 export const runtime = "nodejs";
@@ -33,7 +33,7 @@ export async function GET(request: Request) {
   try {
     const periksa = await periksaKunciEl();
     if (!periksa.terpilih) return NextResponse.json({ error: "Cloudbeds Excellent Living belum tersambung" }, { status: 503 });
-    return NextResponse.json({ checkin, checkout, ...(await hargaElDariCloudbeds(supabaseAdmin(), checkin, checkout)) });
+    return NextResponse.json({ checkin, checkout, ...(await hargaElDariCloudbeds(supabaseAdminProperti("EL"), checkin, checkout)) });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ error: message }, { status: e instanceof CloudbedsApiError ? e.status : 502 });

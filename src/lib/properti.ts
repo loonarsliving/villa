@@ -43,6 +43,19 @@ export function usePropertiTerpilih(): Properti {
 /** Halaman awal setelah memilih properti. null = fitur properti ini belum tersedia. */
 export function berandaProperti(kode: string, role: string): string | null {
   if (kode === "PL") return role === "finance" ? "/finance" : "/admin";
-  if (kode === "EL") return role === "finance" ? "/finance/excellent-living" : "/excellent/front-desk";
+  // EL memakai halaman Private Living dengan data EL (multi-properti).
+  if (kode === "EL") return role === "finance" ? "/finance/pendapatan" : "/front-desk";
   return null;
+}
+
+/**
+ * Properti yang sedang dikerjakan pengguna: properti akun (manager,
+ * resepsionis) atau pilihan admin/finance. Dipakai halaman bersama untuk
+ * menyesuaikan menu dan teks (mis. tata tertib check-in EL).
+ */
+export function usePropertiAktif(user: { role: string; property_kode?: string | null } | null): string {
+  const pilihan = usePropertiTerpilih();
+  if (!user) return "PL";
+  if (user.role === "admin" || user.role === "finance") return pilihan.kode;
+  return user.property_kode || "PL";
 }

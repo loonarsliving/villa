@@ -110,6 +110,11 @@ export function propertiDariToken(token: string): string | null {
 
 export async function periksaTokenChat(token: string): Promise<HasilPeriksaToken> {
   const staf = await periksaTokenStaf(token);
+  // Chat WA tamu milik Private Living: resepsionis properti lain tidak ikut membaca.
+  if (staf === "lolos") {
+    const p = propertiDariToken(token);
+    if (p && p !== "PL") return "ditolak";
+  }
   if (staf !== "ditolak") return staf;
   const manager = await periksaTokenManager(token);
   // Chat WA tamu milik Private Living: manager properti lain tidak ikut membaca.

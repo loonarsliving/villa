@@ -32,8 +32,13 @@ export function FinanceShell({ pageTitle, pageSub, children }: { pageTitle: stri
       ],
     },
     {
+      // EL memakai halaman Finance PL dengan data EL (multi-properti); rumus
+      // uang khusus PL (laba rugi, survival, rencana kas) tidak untuk EL.
       title: "Excellent Living",
-      items: [{ href: "/finance/excellent-living", label: "Keuangan Excellent Living", icon: "↗" }],
+      items: [
+        { href: "/finance/pendapatan", label: "Pendapatan & Channel", icon: "↗" },
+        { href: "/finance/checklist-dana", label: "Checklist Dana Masuk", icon: "✓" },
+      ],
     },
     {
       title: "Alat",

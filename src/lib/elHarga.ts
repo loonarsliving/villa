@@ -10,7 +10,7 @@ import { getCloudbedsRoomTypeRate, getCloudbedsRooms } from "@/lib/cloudbedsApi"
  * membaca (`getRate`); tidak ada harga yang ditulis ke Cloudbeds dan tidak
  * ada mesin harga AI untuk EL.
  *
- * Kaitan tipe: kamar EL -> el_cloudbeds_room_mapping -> room Cloudbeds ->
+ * Kaitan tipe (tabel bersama, properti EL): unit -> cloudbeds_room_mapping -> room Cloudbeds ->
  * roomTypeID (getRooms akun EL).
  */
 
@@ -39,16 +39,16 @@ export async function hargaElDariCloudbeds(
   const malam = tanggalAntara(checkin, checkout);
   const [roomsCb, { data: peta }, { data: kamar }, { data: tipe }] = await Promise.all([
     getCloudbedsRooms("el"),
-    supabase.from("el_cloudbeds_room_mapping").select("cloudbeds_room_id, room_id"),
-    supabase.from("el_rooms").select("id, room_type_id").eq("active", true),
-    supabase.from("el_room_types").select("id, kode, nama, sort_order").eq("active", true).order("sort_order"),
+    supabase.from("cloudbeds_room_mapping").select("cloudbeds_room_id, unit_id"),
+    supabase.from("units").select("id, room_type_id"),
+    supabase.from("villa_room_types").select("id, code, name").eq("active", true).order("name"),
   ]);
   const tipeCbDariRoom = new Map(roomsCb.map((r) => [r.roomID, r.roomTypeID ?? null]));
   const tipeLokalDariKamar = new Map((kamar ?? []).map((k) => [String(k.id), String(k.room_type_id)]));
   // tipe lokal -> roomTypeID Cloudbeds (dari kamar pertama yang dipetakan)
   const tipeCb = new Map<string, string>();
   for (const p of peta ?? []) {
-    const lokal = tipeLokalDariKamar.get(String(p.room_id));
+    const lokal = tipeLokalDariKamar.get(String(p.unit_id));
     const cb = tipeCbDariRoom.get(String(p.cloudbeds_room_id));
     if (lokal && cb && !tipeCb.has(lokal)) tipeCb.set(lokal, cb);
   }
@@ -65,8 +65,8 @@ export async function hargaElDariCloudbeds(
     const lengkap = per_malam.length > 0 && per_malam.every((x) => x.rate !== null);
     hasil.push({
       room_type_id: String(t.id),
-      kode: String(t.kode),
-      nama: String(t.nama),
+      kode: String(t.code),
+      nama: String(t.name),
       cloudbeds_room_type_id: cbId,
       per_malam,
       total: lengkap ? per_malam.reduce((s, x) => s + (x.rate ?? 0), 0) : null,

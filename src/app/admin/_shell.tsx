@@ -48,14 +48,18 @@ export function AdminShell({ pageTitle, pageSub, children }: { pageTitle: string
       ],
     },
     {
+      // Excellent Living memakai halaman Private Living dengan data EL
+      // (multi-properti 2026-11-04). Hanya halaman yang diizinkan villa-api.
       title: "Excellent Living",
       items: [
-        { href: "/excellent/front-desk", label: "Kamar & Booking EL", icon: "◎" },
-        { href: "/admin/excellent-living/kamar", label: "Atur Kamar EL", icon: "▦" },
-        { href: "/admin/excellent-living/investor", label: "Investor EL", icon: "◈" },
-        { href: "/admin/excellent-living/harga", label: "Harga EL", icon: "₨" },
-        { href: "/admin/excellent-living/cloudbeds", label: "Cloudbeds EL", icon: "☁" },
-        { href: "/finance/excellent-living", label: "Keuangan EL", icon: "↗" },
+        { href: "/front-desk", label: "Front Desk", icon: "◈" },
+        { href: "/front-desk/booking", label: "Booking", icon: "◎" },
+        { href: "/front-desk/housekeeping", label: "Housekeeping", icon: "◉" },
+        { href: "/manager/kamar-el", label: "Buka/Tutup Kamar", icon: "▦" },
+        { href: "/admin/excellent-living/harga", label: "Harga (Cloudbeds)", icon: "₨" },
+        { href: "/admin/excellent-living/cloudbeds", label: "Cloudbeds", icon: "☁" },
+        { href: "/finance/pendapatan", label: "Pendapatan & Channel", icon: "↗" },
+        { href: "/finance/checklist-dana", label: "Checklist Dana Masuk", icon: "✓" },
       ],
     },
     {

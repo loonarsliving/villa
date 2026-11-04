@@ -14,8 +14,19 @@ describe("multi-properti: sesi & beranda", () => {
   it("beranda per properti untuk admin & finance", () => {
     expect(berandaProperti("PL", "admin")).toBe("/admin");
     expect(berandaProperti("PL", "finance")).toBe("/finance");
-    expect(berandaProperti("EL", "admin")).toBe("/excellent/front-desk");
-    expect(berandaProperti("EL", "finance")).toBe("/finance/excellent-living");
+    expect(berandaProperti("EL", "admin")).toBe("/front-desk");
+    expect(berandaProperti("EL", "finance")).toBe("/finance/pendapatan");
     expect(berandaProperti("LB", "admin")).toBeNull();
+  });
+});
+
+import { bookingElMilikSendiri } from "./elCloudbedsSync";
+
+describe("booking EL milik front desk", () => {
+  it("dikenali dari penanda catatan villa-api", () => {
+    expect(bookingElMilikSendiri("[Front Desk EL]")).toBe(true);
+    expect(bookingElMilikSendiri("[Front Desk EL] tamu VIP")).toBe(true);
+    expect(bookingElMilikSendiri(null)).toBe(false);
+    expect(bookingElMilikSendiri("Booking Agoda")).toBe(false);
   });
 });

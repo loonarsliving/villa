@@ -62,7 +62,7 @@ export function roleHome(role: Role, propertyKode?: string | null): string {
   // Akun manager/resepsionis untuk properti yang fiturnya belum aktif.
   const propertiBaru = !!propertyKode && propertyKode !== "PL" && propertyKode !== "EL";
   if ((role === "receptionist" || role === "manager") && propertiBaru) return "/properti-belum-aktif";
-  if (role === "receptionist") return propertyKode === "EL" ? "/properti-belum-aktif" : "/front-desk";
+  if (role === "receptionist") return "/front-desk";
   // Admin & finance mengelola semua properti: pilih properti dulu (owner 2026-11-04).
   if (role === "admin" || role === "finance") return "/pilih-properti";
   // Manager properti selain Private Living memakai halaman properti itu.

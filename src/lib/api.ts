@@ -57,6 +57,21 @@ async function parse<T>(res: Response): Promise<T> {
   return data as T;
 }
 
+/**
+ * Properti yang dipilih admin/finance di /pilih-properti (multi-properti).
+ * villa-api memakai header ini HANYA untuk admin & finance; manager dan
+ * resepsionis memakai properti akunnya sendiri.
+ */
+function propertiHeader(): Record<string, string> {
+  try {
+    const raw = typeof window !== "undefined" ? localStorage.getItem("villa_properti") : null;
+    const kode = raw ? (JSON.parse(raw) as { kode?: string }).kode : null;
+    return kode ? { "x-villa-property": kode } : {};
+  } catch {
+    return {};
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   const res = await fetch(`${API_BASE}${path}`, {
@@ -64,6 +79,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers: {
       "Content-Type": "application/json",
       ...(token ? { "x-villa-token": token } : {}),
+      ...propertiHeader(),
       ...(options.headers || {}),
     },
   });

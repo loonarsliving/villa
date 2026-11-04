@@ -10,6 +10,8 @@ import { fmtDate, todayISO } from "@/lib/format";
 import { addDaysISO } from "@/lib/stayDates";
 import { Card, CardHeader, Loading } from "@/components/Card";
 import { DokumenCheckin } from "@/components/DokumenCheckin";
+import { BookingBaruEl } from "@/components/BookingBaruEl";
+import { usePropertiAktif } from "@/lib/properti";
 import type { Booking, Unit } from "@/lib/types";
 
 const RANGE_OPTIONS = [7, 14, 21] as const;
@@ -84,6 +86,9 @@ function isVisibleOnCalendar(b: Booking, now: number): boolean {
 export default function BookingCalendarPage() {
   const { user } = useAuth();
   const toast = useToast();
+  // Multi-properti: properti selain PL dikelompokkan per tipe (blok = kode
+  // tipe kamar) dan punya form booking walk-in sendiri.
+  const properti = usePropertiAktif(user);
   const [units, setUnits] = useState<Unit[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
@@ -119,7 +124,7 @@ export default function BookingCalendarPage() {
     if (!user) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.role, start, rangeDays]);
+  }, [user?.role, start, rangeDays, properti]);
 
   const Shell = user?.role === "admin" ? AdminShell : FrontDeskShell;
 
@@ -131,7 +136,7 @@ export default function BookingCalendarPage() {
     );
   }
 
-  const bloks = ["A", "B", "C"] as const;
+  const bloks: string[] = properti === "PL" ? ["A", "B", "C"] : [...new Set(units.map((u) => String(u.blok)))];
 
   // Sama-sama UTC seperti addDays di atas -- sebelumnya konsisten secara
   // internal (kedua sisi memakai gaya parsing lokal yang sama), tapi
@@ -150,6 +155,7 @@ export default function BookingCalendarPage() {
           subtitle={`${fmtDate(start, { day: "2-digit", month: "short" })} – ${fmtDate(end, { day: "2-digit", month: "short", year: "numeric" })}`}
           action={
             <div className="flex items-center gap-1.5">
+              {properti !== "PL" && <BookingBaruEl units={units} onSelesai={load} />}
               <button onClick={() => setStart(addDays(start, -rangeDays))} className="w-7 h-7 rounded border border-ink/10 text-ink/50 shrink-0">
                 ‹
               </button>
@@ -210,7 +216,7 @@ export default function BookingCalendarPage() {
               if (blokUnits.length === 0) return null;
               return (
                 <div key={blok}>
-                  <div className="px-2 py-1.5 bg-gold-500/5 text-[9px] font-semibold text-gold-500 tracking-wide">Blok {blok}</div>
+                  <div className="px-2 py-1.5 bg-gold-500/5 text-[9px] font-semibold text-gold-500 tracking-wide">{properti === "PL" ? `Blok ${blok}` : `Tipe ${blok}`}</div>
                   {blokUnits.map((u) => {
                     const unitBookings = bookings.filter((b) => b.unit_id === u.id);
                     return (
