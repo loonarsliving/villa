@@ -1,27 +1,22 @@
 import { NextResponse } from "next/server";
-import { getCloudbedsRooms, CloudbedsApiError, periksaKunciEl } from "@/lib/cloudbedsApi";
+import { getCloudbedsRooms, CloudbedsApiError } from "@/lib/cloudbedsApi";
+import { siapkanAkunCloudbeds } from "@/lib/propertiConfig";
 import { isAdminToken } from "@/lib/villaApiAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** Daftar room di akun Cloudbeds Excellent Living (CLOUDBEDS2_API_KEY), untuk pemetaan kamar oleh admin. */
+/** Daftar room di akun Cloudbeds satu properti non-PL (?properti=XX, bawaan EL), untuk pemetaan kamar oleh admin. */
 export async function GET(request: Request) {
   const token = request.headers.get("x-villa-token") ?? "";
   if (!token || !(await isAdminToken(token))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  // Pilih kunci EL yang diterima Cloudbeds (API key / secret) sebelum membaca room.
-  const periksa = await periksaKunciEl();
-  if (!periksa.terpilih) {
-    const ringkas = periksa.hasil.map((h) => `${h.env}: HTTP ${h.http_x_api_key ?? "-"}${h.pesan ? ` (${h.pesan})` : ""}`).join("; ");
-    return NextResponse.json(
-      { error: periksa.hasil.length ? `Cloudbeds menolak kunci Excellent Living -- ${ringkas}` : "Kunci Cloudbeds Excellent Living belum diisi", kunci: periksa },
-      { status: periksa.hasil.length ? 401 : 503 },
-    );
-  }
+  const kode = (new URL(request.url).searchParams.get("properti") ?? "EL").trim().toUpperCase();
+  if (!/^[A-Z]{2,6}$/.test(kode) || kode === "PL") return NextResponse.json({ error: "properti tidak valid" }, { status: 400 });
   try {
-    return NextResponse.json({ rooms: await getCloudbedsRooms("el"), kunci_dipakai: periksa.terpilih });
+    const { akun, periksa } = await siapkanAkunCloudbeds(kode);
+    return NextResponse.json({ rooms: await getCloudbedsRooms(akun), kunci_dipakai: periksa.terpilih });
   } catch (e) {
     if (e instanceof CloudbedsApiError) {
       return NextResponse.json({ error: e.message }, { status: e.status });

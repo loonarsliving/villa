@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { getCloudbedsRooms, kredensialCloudbeds, periksaKunciEl } from "@/lib/cloudbedsApi";
+import { getCloudbedsRooms, kredensialCloudbeds } from "@/lib/cloudbedsApi";
+import { siapkanAkunCloudbeds } from "@/lib/propertiConfig";
 import { isAuthorizedCronRequest } from "@/lib/cronAuth";
 
 export const runtime = "nodejs";
@@ -44,15 +45,17 @@ function daftarBlok(body: Awaited<ReturnType<typeof cb>>["body"]): BlokCb[] {
 
 export async function POST(request: Request) {
   if (!(await isAuthorizedCronRequest(request))) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const b = (await request.json().catch(() => ({}))) as { sampai?: string; alasan?: string; jalankan?: boolean };
+  const b = (await request.json().catch(() => ({}))) as { sampai?: string; alasan?: string; jalankan?: boolean; properti?: string };
+  const kode = String(b.properti ?? "EL").trim().toUpperCase();
+  if (!/^[A-Z]{2,6}$/.test(kode) || kode === "PL") return NextResponse.json({ error: "properti tidak valid" }, { status: 400 });
   const mulai = hariIniWib();
   const sampai = String(b.sampai ?? "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(sampai) || sampai <= mulai) return NextResponse.json({ error: "sampai (YYYY-MM-DD, hari kamar dibuka lagi) wajib dan harus setelah hari ini" }, { status: 400 });
   const alasan = String(b.alasan ?? "under maintenance").slice(0, 250);
 
-  await periksaKunciEl();
-  const { apiKey, propertyId } = kredensialCloudbeds("el");
-  const rooms = (await getCloudbedsRooms("el")).filter((r) => !r.isVirtual && r.roomTypeID);
+  const { akun } = await siapkanAkunCloudbeds(kode);
+  const { apiKey, propertyId } = kredensialCloudbeds(akun);
+  const rooms = (await getCloudbedsRooms(akun)).filter((r) => !r.isVirtual && r.roomTypeID);
 
   const q = new URLSearchParams({ propertyID: propertyId, startDate: mulai, endDate: mulai, pageSize: "100" });
   const baca = await cb(apiKey, `getRoomBlocks?${q}`);

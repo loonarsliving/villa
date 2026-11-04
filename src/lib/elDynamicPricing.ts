@@ -5,9 +5,9 @@ import {
   getCloudbedsBaseRateId,
   getCloudbedsRoomTypeRate,
   getCloudbedsRooms,
-  periksaKunciEl,
   pushCloudbedsRate,
 } from "@/lib/cloudbedsApi";
+import { siapkanAkunCloudbeds } from "@/lib/propertiConfig";
 import { decideRatesForRoomType, type PricingSettings, type RoomTypeForPricing } from "@/lib/aiPricingEngine";
 import { supabaseAdminProperti } from "@/lib/supabaseAdmin";
 
@@ -36,6 +36,8 @@ import { supabaseAdminProperti } from "@/lib/supabaseAdmin";
  */
 
 export const KUNCI_SETELAN_EL = "el_dynamic_pricing";
+/** Kunci setelan harga properti mana pun: "<kode>_dynamic_pricing" (EL = KUNCI_SETELAN_EL). */
+export const kunciSetelanHarga = (kode: string) => `${kode.trim().toLowerCase()}_dynamic_pricing`;
 const HARI = ["min", "sen", "sel", "rab", "kam", "jum", "sab"] as const;
 type Hari = (typeof HARI)[number];
 const WINDOW_DAYS = 365;
@@ -88,17 +90,21 @@ export function polaHarian(rates: { date: string; rate: number }[]): Partial<Rec
   return out;
 }
 
-export async function bacaSetelanEl(): Promise<SetelanHargaEl> {
-  const db = supabaseAdminProperti("EL");
-  const { data } = await db.from("integration_settings").select("value").eq("key", KUNCI_SETELAN_EL).maybeSingle();
+export function bacaSetelanEl(): Promise<SetelanHargaEl> {
+  return bacaSetelanHarga("EL");
+}
+
+export async function bacaSetelanHarga(kode: string): Promise<SetelanHargaEl> {
+  const db = supabaseAdminProperti(kode);
+  const { data } = await db.from("integration_settings").select("value").eq("key", kunciSetelanHarga(kode)).maybeSingle();
   const v = (data?.value ?? {}) as Partial<SetelanHargaEl>;
   return { autopush: v.autopush === true, harga_dasar: v.harga_dasar ?? {}, harga_dasar_diambil: v.harga_dasar_diambil ?? null, terakhir_jalan: v.terakhir_jalan, rekomendasi: v.rekomendasi, hasil_terakhir: v.hasil_terakhir, harga_online: v.harga_online };
 }
 
-async function simpanSetelanEl(s: SetelanHargaEl) {
-  const db = supabaseAdminProperti("EL");
-  const { error } = await db.from("integration_settings").upsert({ key: KUNCI_SETELAN_EL, value: s }, { onConflict: "key" });
-  if (error) throw new Error(`setelan harga EL gagal disimpan: ${error.message}`);
+async function simpanSetelanHarga(kode: string, s: SetelanHargaEl) {
+  const db = supabaseAdminProperti(kode);
+  const { error } = await db.from("integration_settings").upsert({ key: kunciSetelanHarga(kode), value: s }, { onConflict: "key" });
+  if (error) throw new Error(`setelan harga ${kode} gagal disimpan: ${error.message}`);
 }
 
 export interface HasilTipeEl {
@@ -117,11 +123,17 @@ export interface HasilTipeEl {
  * (false = tidak pernah kirim, true = kirim walau saklar mati, undefined =
  * ikut saklar).
  */
-export async function runElDynamicPricing(opsi: { paksaKirim?: boolean } = {}): Promise<{ autopush: boolean; dikirim: boolean; harga_dasar_baru: boolean; tipe: HasilTipeEl[] }> {
-  const periksa = await periksaKunciEl();
-  if (!periksa.terpilih) throw new Error("Cloudbeds Excellent Living belum tersambung");
-  const db = supabaseAdminProperti("EL");
-  const setelan = await bacaSetelanEl();
+export function runElDynamicPricing(opsi: { paksaKirim?: boolean } = {}) {
+  return runDynamicPricingProperti("EL", opsi);
+}
+
+/** Dynamic pricing untuk satu properti non-PL (aturan sama persis dengan EL, lihat komentar di atas). */
+export async function runDynamicPricingProperti(kodeProperti: string, opsi: { paksaKirim?: boolean } = {}): Promise<{ autopush: boolean; dikirim: boolean; harga_dasar_baru: boolean; tipe: HasilTipeEl[] }> {
+  const kode_ = kodeProperti.trim().toUpperCase();
+  if (kode_ === "PL") throw new Error("Harga Private Living memakai mesin PL, bukan jalur ini");
+  const { akun } = await siapkanAkunCloudbeds(kode_);
+  const db = supabaseAdminProperti(kode_);
+  const setelan = await bacaSetelanHarga(kode_);
   const kirim = opsi.paksaKirim ?? setelan.autopush;
   const hariIni = hariIniWib();
   const tanggal = Array.from({ length: WINDOW_DAYS }, (_, i) => tambahHari(hariIni, i));
@@ -138,7 +150,7 @@ export async function runElDynamicPricing(opsi: { paksaKirim?: boolean } = {}): 
   };
 
   const [roomsCb, { data: peta }, { data: units }, { data: tipe }] = await Promise.all([
-    getCloudbedsRooms("el"),
+    getCloudbedsRooms(akun),
     db.from("cloudbeds_room_mapping").select("cloudbeds_room_id, unit_id"),
     db.from("units").select("id, room_type_id"),
     db.from("villa_room_types").select("id, code, name, description, base_rate, min_rate, max_rate").eq("active", true),
@@ -169,7 +181,7 @@ export async function runElDynamicPricing(opsi: { paksaKirim?: boolean } = {}): 
     }
     // Snapshot harga dasar: sekali saja (atau bila belum ada untuk tipe ini).
     if (!setelan.harga_dasar[kode] || Object.keys(setelan.harga_dasar[kode]).length < 7) {
-      const rates = await getCloudbedsRoomTypeRate(cbId, hariIni, tambahHari(hariIni, 28), "el");
+      const rates = await getCloudbedsRoomTypeRate(cbId, hariIni, tambahHari(hariIni, 28), akun);
       const pola = polaHarian(rates);
       if (Object.keys(pola).length < 7) {
         r.error = "harga Cloudbeds 4 minggu ke depan belum lengkap -- harga dasar belum bisa diambil";
@@ -198,12 +210,12 @@ export async function runElDynamicPricing(opsi: { paksaKirim?: boolean } = {}): 
 
     if (!kirim) continue;
     try {
-      const rateId = await getCloudbedsBaseRateId(cbId, hariIni, "el");
+      const rateId = await getCloudbedsBaseRateId(cbId, hariIni, akun);
       if (!rateId) {
         r.error = "rate Cloudbeds tipe ini turunan/tidak tersedia -- tidak bisa dikirim";
         continue;
       }
-      await pushCloudbedsRate(rateId, collapseRateIntervals(aman.map((k) => ({ date: k.date, rate: k.decided_rate }))), "el");
+      await pushCloudbedsRate(rateId, collapseRateIntervals(aman.map((k) => ({ date: k.date, rate: k.decided_rate }))), akun);
       r.dikirim = true;
       adaKirim = true;
     } catch (e) {
@@ -217,6 +229,6 @@ export async function runElDynamicPricing(opsi: { paksaKirim?: boolean } = {}): 
   // Tipe yang gagal dihitung kali ini tetap memakai harga terakhir yang ada.
   setelan.harga_online = { ...(setelan.harga_online ?? {}), ...hargaOnline };
   setelan.hasil_terakhir = hasil;
-  await simpanSetelanEl(setelan);
+  await simpanSetelanHarga(kode_, setelan);
   return { autopush: setelan.autopush, dikirim: adaKirim, harga_dasar_baru: dasarBaru, tipe: hasil };
 }

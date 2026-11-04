@@ -9,7 +9,6 @@ import {
   getCloudbedsRoomBlocks,
   getCloudbedsRooms,
   kredensialCloudbeds,
-  periksaKunciEl,
   type CloudbedsRoom,
   type HasilPeriksaKunci,
 } from "@/lib/cloudbedsApi";
@@ -18,6 +17,7 @@ import { statusSetelahSync } from "@/lib/bookingStatusSync";
 import { bacaBlokirKamar } from "@/lib/cloudbedsUnitSementara";
 import { buatKodeTipe, jumlahMalam, kamarUntukNamaBerurut, normalNama, pecahNama, PENANDA_BLOK, pilihKamarEl, statusElDariCloudbeds, type PemakaianKamar } from "@/lib/elCloudbedsLogic";
 import { supabaseAdminProperti } from "@/lib/supabaseAdmin";
+import { siapkanAkunCloudbeds } from "@/lib/propertiConfig";
 
 /**
  * Sinkron dua arah Cloudbeds akun Loonars Excellent Living -- versi tabel
@@ -46,6 +46,9 @@ const CLOUDBEDS_API_BASE = "https://api.cloudbeds.com/api/v1.2";
 const STATUS_AKTIF = ["not_confirmed", "confirmed", "checked_in"];
 const STATUS_LOKAL_AKTIF = ["terjadwal", "checkin"];
 export const PENANDA_FRONT_DESK_EL = "[Front Desk EL]";
+/** Penanda booking front desk / website untuk properti mana pun: "[Front Desk XX]" / "[Website XX]". */
+export const penandaFrontDesk = (kode: string) => `[Front Desk ${kode.toUpperCase()}]`;
+export const penandaWebsite = (kode: string) => `[Website ${kode.toUpperCase()}]`;
 /** Booking online dari loonars.id (villa-api /public/el/bookings); ikut dikirim ke Cloudbeds EL setelah lunas. */
 export const PENANDA_WEBSITE_EL = "[Website EL]";
 const SUMBER_BOOKINGS = ["walk-in", "airbnb", "tiket", "agoda", "booking.com", "website", "whatsapp", "other", "cloudbeds", "traveloka", "google"];
@@ -94,7 +97,7 @@ export interface ElSyncRingkasan {
   errors: string[];
 }
 
-/** Dilempar bila tidak satu pun kunci EL diterima Cloudbeds; membawa hasil uji kunci. */
+/** Dilempar bila tidak satu pun kunci properti diterima Cloudbeds; membawa hasil uji kunci. */
 export class KunciElDitolak extends CloudbedsApiError {
   constructor(public periksa: { terpilih: string | null; hasil: HasilPeriksaKunci[] }) {
     super(
@@ -110,8 +113,7 @@ function hariIniWib(): string {
 
 /** Booking EL yang lahir di front desk (bukan salinan Cloudbeds). */
 export function bookingElMilikSendiri(catatan: string | null | undefined): boolean {
-  const c = String(catatan ?? "");
-  return c.includes(PENANDA_FRONT_DESK_EL) || c.includes(PENANDA_WEBSITE_EL);
+  return /\[(Front Desk|Website) [A-Z]{2,6}\]/.test(String(catatan ?? ""));
 }
 
 async function ambilReservasi(apiKey: string, propertyId: string, dariTanggal: string): Promise<ReservasiCb[]> {
@@ -139,11 +141,23 @@ async function catat(log: Log, row: { reservation_id: string | null; event_type:
   await log.from("el_cloudbeds_events_log").insert(row);
 }
 
-export async function syncCloudbedsEl(): Promise<ElSyncRingkasan> {
-  const periksa = await periksaKunciEl();
-  if (!periksa.terpilih) throw new KunciElDitolak(periksa);
-  const { apiKey, propertyId } = kredensialCloudbeds("el");
-  const db = supabaseAdminProperti("EL");
+/** Sinkron Excellent Living (kode lama; kini hanya pembungkus properti 'EL'). */
+export function syncCloudbedsEl(): Promise<ElSyncRingkasan> {
+  return syncCloudbedsProperti("EL");
+}
+
+/**
+ * Sinkron dua arah Cloudbeds untuk SATU properti non-PL (kunci dari
+ * properti_<kode> di database, atau env lama untuk EL). Properti yang belum
+ * punya kamar sama sekali: kamar dibuat otomatis dari room Cloudbeds
+ * (status maintenance sampai manager membukanya).
+ */
+export async function syncCloudbedsProperti(kodeProperti: string): Promise<ElSyncRingkasan> {
+  const kode = kodeProperti.trim().toUpperCase();
+  if (kode === "PL") throw new Error("Sinkron properti ini tidak untuk Private Living");
+  const { akun, periksa } = await siapkanAkunCloudbeds(kode);
+  const { apiKey, propertyId } = kredensialCloudbeds(akun);
+  const db = supabaseAdminProperti(kode);
   const hariIni = hariIniWib();
   const errors: string[] = [];
   const ringkasan: ElSyncRingkasan = {
@@ -154,15 +168,16 @@ export async function syncCloudbedsEl(): Promise<ElSyncRingkasan> {
     errors,
   };
 
-  const roomsCb: CloudbedsRoom[] = await getCloudbedsRooms("el");
-  ringkasan.kamar = await sinkronKamarEl(db, roomsCb, errors);
+  const roomsCb: CloudbedsRoom[] = await getCloudbedsRooms(akun);
+  const { count: jumlahKamarAwal } = await db.from("units").select("id", { count: "exact", head: true });
+  ringkasan.kamar = await sinkronKamarEl(db, roomsCb, errors, { akun, kode, buatKamar: (jumlahKamarAwal ?? 0) === 0 });
   const tipeDariRoomCb = new Map(roomsCb.map((r) => [String(r.roomID), r.roomTypeID ? String(r.roomTypeID) : null]));
 
   const [{ data: peta, error: e1 }, { data: unitRows, error: e2 }] = await Promise.all([
     db.from("cloudbeds_room_mapping").select("cloudbeds_room_id, unit_id"),
     db.from("units").select("id, nomor, room_type_id, status").order("nomor"),
   ]);
-  if (e1 || e2) throw new Error(`data kamar EL tidak terbaca: ${(e1 ?? e2)!.message}`);
+  if (e1 || e2) throw new Error(`data kamar ${kode} tidak terbaca: ${(e1 ?? e2)!.message}`);
   const kamar = (unitRows ?? []) as { id: string; nomor: string; room_type_id: string | null; status: string }[];
   const nomorKamar = new Map(kamar.map((k) => [k.id, k.nomor]));
   const tipeLokalDariKamar = new Map(kamar.map((k) => [k.id, k.room_type_id]));
@@ -189,7 +204,7 @@ export async function syncCloudbedsEl(): Promise<ElSyncRingkasan> {
 
   let total = new Map<string, { grandTotal: number; subTotal: number }>();
   try {
-    total = await getCloudbedsReservationTotals({ checkOutFrom: hariIni }, "el");
+    total = await getCloudbedsReservationTotals({ checkOutFrom: hariIni }, akun);
   } catch {
     // total kosong tidak boleh menghalangi booking tercatat
   }
@@ -214,7 +229,7 @@ export async function syncCloudbedsEl(): Promise<ElSyncRingkasan> {
   }));
   try {
     const sampai = new Date(Date.parse(`${hariIni}T00:00:00Z`) + 34 * 86400000).toISOString().slice(0, 10);
-    for (const blk of bacaBlokirKamar(await getCloudbedsRoomBlocks(hariIni, sampai, "el"))) {
+    for (const blk of bacaBlokirKamar(await getCloudbedsRoomBlocks(hariIni, sampai, akun))) {
       for (const cb of blk.roomIds) {
         const unitId = kamarDariRoomCb.get(cb);
         if (unitId) terpakai.push({ roomId: unitId, checkIn: blk.startDate, checkOut: blk.endDate ?? "9999-12-31", reservationId: "blok-cloudbeds" });
@@ -373,7 +388,14 @@ export async function syncCloudbedsEl(): Promise<ElSyncRingkasan> {
  * kamar: 31 kamar fisik diatur di sistem. Pengaman: getRooms kosong ->
  * tidak ada yang diubah.
  */
-export async function sinkronKamarEl(db: SupabaseClient, roomsCb: CloudbedsRoom[], errors: string[]): Promise<RingkasanKamar> {
+export async function sinkronKamarEl(
+  db: SupabaseClient,
+  roomsCb: CloudbedsRoom[],
+  errors: string[],
+  opsi: { akun?: string; kode?: string; buatKamar?: boolean } = {},
+): Promise<RingkasanKamar> {
+  const akun = opsi.akun ?? "el";
+  const kodeProp = opsi.kode ?? "EL";
   const hasil: RingkasanKamar = { room_cloudbeds: 0, tipe_dibuat: [], kamar_dibuat: [], dipetakan: 0, diubah: 0, dinonaktifkan: [], tetap_aktif_ada_booking: [], diblokir_hari_ini: [], room_belum_dipetakan: [] };
   const nyata = roomsCb.filter((r) => !r.isVirtual && r.roomTypeID);
   hasil.room_cloudbeds = nyata.length;
@@ -382,11 +404,11 @@ export async function sinkronKamarEl(db: SupabaseClient, roomsCb: CloudbedsRoom[
     const k = `${r.roomTypeName ?? "?"}${r.isVirtual ? " (virtual)" : ""}`;
     perTipe[k] = (perTipe[k] ?? 0) + 1;
   }
-  const diag = diagnosaGetRooms("el");
+  const diag = diagnosaGetRooms(akun);
   hasil.cloudbeds = diag ? { ...diag, per_tipe: perTipe } : null;
   hasil.diblokir_hari_ini = nyata.filter((r) => r.roomBlocked).map((r) => r.roomName);
   if (nyata.length === 0) {
-    errors.push("Cloudbeds tidak mengembalikan kamar; data kamar EL tidak diubah");
+    errors.push(`Cloudbeds tidak mengembalikan kamar; data kamar ${kodeProp} tidak diubah`);
     return hasil;
   }
 
@@ -431,6 +453,34 @@ export async function sinkronKamarEl(db: SupabaseClient, roomsCb: CloudbedsRoom[
     if (!sama) {
       const berurut = kamarUntukNamaBerurut(r.roomName, r.roomTypeNameShort, tipe ?? [], kamar ?? []);
       if (berurut && !sudahDipetakan.has(String(berurut.id))) sama = berurut;
+    }
+    if (!sama && opsi.buatKamar) {
+      // Properti baru tanpa kamar: buat unit dari room Cloudbeds (maintenance
+      // sampai manager membukanya). Nomor kamar unik di seluruh sistem;
+      // bentrok dengan properti lain -> diberi awalan kode properti.
+      const tipeLokal = (await db.from("villa_room_types").select("id, code, name")).data ?? [];
+      const jenis = tipeLokal.find(
+        (t) => normalNama(t.name) === normalNama(r.roomTypeName) || (r.roomTypeNameShort && String(t.code).toUpperCase() === r.roomTypeNameShort.trim().toUpperCase()),
+      );
+      if (jenis) {
+        for (const nomor of [r.roomName, `${kodeProp}-${r.roomName}`]) {
+          const { data: baru, error } = await db
+            .from("units")
+            .insert({ nomor, blok: String(jenis.code), status: "maintenance", room_type_id: jenis.id, catatan: null })
+            .select("id, nomor, room_type_id, status, catatan")
+            .single();
+          if (!error && baru) {
+            sama = baru as NonNullable<typeof sama>;
+            (kamar ?? []).push(baru as (typeof kamar extends (infer U)[] | null ? U : never));
+            hasil.kamar_dibuat.push(nomor);
+            break;
+          }
+          if (error?.code !== "23505") {
+            errors.push(`kamar ${r.roomName}: ${error?.message ?? "gagal dibuat"}`);
+            break;
+          }
+        }
+      }
     }
     if (!sama) {
       hasil.room_belum_dipetakan.push(r.roomName);

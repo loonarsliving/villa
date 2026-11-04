@@ -35,7 +35,21 @@ export interface CloudbedsRoom {
  * dan getCloudbedsReservationTotals yang menerima akun "el" -- fungsi
  * harga (getRate/putRate) sengaja tetap khusus akun utama.
  */
-export type CloudbedsAkun = "utama" | "el";
+export type CloudbedsAkun = string;
+
+/**
+ * Akun Cloudbeds properti yang kuncinya disimpan di database (properti baru
+ * tanpa coding): nama akun = kode properti huruf kecil. Diisi oleh
+ * siapkanAkunCloudbeds() (src/lib/propertiConfig.ts) sebelum dipakai; akun
+ * "utama" (PL) dan "el" (env lama) tetap dibaca dari env bila tidak terdaftar.
+ */
+const akunTerdaftar = new Map<string, { apiKey: string; propertyId: string }>();
+export function daftarkanAkunCloudbeds(akun: string, k: { apiKey: string; propertyId: string }): void {
+  akunTerdaftar.set(akun, { apiKey: k.apiKey.trim(), propertyId: k.propertyId.trim() });
+}
+export function akunCloudbedsTerdaftar(akun: string): boolean {
+  return akunTerdaftar.has(akun);
+}
 
 /**
  * Nama env akun Excellent Living. Owner memasang kunci di Vercel dengan nama
@@ -66,6 +80,9 @@ export function envPertama(nama: readonly string[], env: Record<string, string |
 let kunciElTerbukti: string | null = null;
 
 function apiKey(akun: CloudbedsAkun = "utama"): string {
+  const terdaftar = akunTerdaftar.get(akun);
+  if (terdaftar?.apiKey) return terdaftar.apiKey;
+  if (akun !== "utama" && akun !== "el") throw new CloudbedsApiError(`Cloudbeds API key properti ${akun.toUpperCase()} belum dikonfigurasi`, 503);
   if (akun === "el" && kunciElTerbukti) return kunciElTerbukti;
   const nama: readonly string[] = akun === "el" ? ENV_EL.apiKey : ["CLOUDBEDS_API_KEY"];
   const key = envPertama(nama);
@@ -76,6 +93,9 @@ function apiKey(akun: CloudbedsAkun = "utama"): string {
 }
 
 function propertyIdAkun(akun: CloudbedsAkun): string {
+  const terdaftar = akunTerdaftar.get(akun);
+  if (terdaftar) return terdaftar.propertyId;
+  if (akun !== "utama" && akun !== "el") return "";
   return akun === "el" ? envPertama(ENV_EL.propertyId) : (process.env.CLOUDBEDS_PROPERTY_ID ?? "").trim();
 }
 

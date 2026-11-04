@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { bacaKonfigProperti } from "@/lib/propertiConfig";
 import { periksaTokenFinance } from "@/lib/villaApiAuth";
 
 export const runtime = "nodejs";
@@ -14,5 +15,13 @@ export async function GET(request: Request) {
   if (sesi !== "lolos") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { data, error } = await supabaseAdmin().from("villa_properties").select("kode, nama, aktif, created_at").order("created_at");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json(data ?? []);
+  // `siap` = fitur operasional properti dibuka (PL & EL selalu; properti baru
+  // setelah admin menyelesaikan wizard Tambah Properti).
+  const hasil = await Promise.all(
+    (data ?? []).map(async (p) => ({
+      ...p,
+      siap: p.kode === "PL" || p.kode === "EL" ? true : (await bacaKonfigProperti(String(p.kode))).siap === true,
+    })),
+  );
+  return NextResponse.json(hasil);
 }
