@@ -4822,7 +4822,10 @@ async function layani(req){
     const {data:prop} = await supabase.from('villa_users').select('property_kode').eq('id',u.id).maybeSingle();
     const property_kode = prop?.property_kode ?? null;
     const token = await makeToken({uid:u.id, email, role:u.role, unit_id:u.unit_id, unit_nomor:u.unit_nomor, property_kode});
-    return json({token, user:{...u, property_kode}});
+    // property_siap/property_nama: untuk menu & halaman awal (properti baru belum diaktifkan admin = belum siap).
+    const property_siap = !property_kode || PROPERTI_SIAP.has(String(property_kode).toUpperCase());
+    const property_nama = property_kode ? (NAMA_PROPERTI[String(property_kode).toUpperCase()] ?? null) : null;
+    return json({token, user:{...u, property_kode, property_siap, property_nama}});
   }
 
   if(path==='/public/room-types' && m==='GET'){

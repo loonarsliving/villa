@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { PENANDA_BLOK } from "@/lib/elCloudbedsLogic";
 import { supabaseAdminProperti } from "@/lib/supabaseAdmin";
-import { periksaTokenManager, propertiDariToken } from "@/lib/villaApiAuth";
+import { periksaTokenManager, propertiDariToken, propertiNonPl } from "@/lib/villaApiAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,7 +23,7 @@ async function sesi(request: Request) {
   // Token sudah diverifikasi villa-api di atas. Manager properti lain (bukan
   // PL/EL) tidak boleh mengatur kamar EL.
   const p = propertiDariToken(token);
-  if (p && p !== "PL" && p !== "EL") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (p === "PL") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   return null;
 }
 
@@ -31,7 +31,9 @@ export async function GET(request: Request) {
   const tolak = await sesi(request);
   if (tolak) return tolak;
   // Tabel bersama (multi-properti): units properti EL.
-  const { data, error } = await supabaseAdminProperti("EL")
+  const kode = propertiNonPl(request, request.headers.get("x-villa-token") ?? "");
+  if (!kode) return NextResponse.json({ error: "properti tidak valid" }, { status: 400 });
+  const { data, error } = await supabaseAdminProperti(kode)
     .from("units")
     .select("id, nomor, status, catatan, villa_room_types(name)")
     .order("nomor");
@@ -51,7 +53,9 @@ export async function PATCH(request: Request) {
   const b = (await request.json().catch(() => ({}))) as { ids?: unknown; aktif?: unknown };
   const ids = Array.isArray(b.ids) ? b.ids.map(String).filter(Boolean) : [];
   if (!ids.length || typeof b.aktif !== "boolean") return NextResponse.json({ error: "ids dan aktif wajib diisi" }, { status: 400 });
-  const supabase = supabaseAdminProperti("EL");
+  const kode = propertiNonPl(request, request.headers.get("x-villa-token") ?? "");
+  if (!kode) return NextResponse.json({ error: "properti tidak valid" }, { status: 400 });
+  const supabase = supabaseAdminProperti(kode);
   const { data: kamar, error } = await supabase.from("units").select("id, status, catatan").in("id", ids);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   let diubah = 0;

@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { DashboardShell, type NavSection } from "@/components/DashboardShell";
 import { useAuth } from "@/lib/auth";
 import { useChatUnreadPoll } from "@/lib/hooks";
-import { usePropertiTerpilih } from "@/lib/properti";
+import { propertiSiap, usePropertiTerpilih } from "@/lib/properti";
 
 export function AdminShell({ pageTitle, pageSub, children }: { pageTitle: string; pageSub?: string; children: ReactNode }) {
   const { user } = useAuth();
@@ -59,7 +59,7 @@ export function AdminShell({ pageTitle, pageSub, children }: { pageTitle: string
         { href: "/manager", label: "Kesiapan Kamar", icon: "✓" },
         { href: "/manager/kamar-el", label: "Buka/Tutup Kamar", icon: "▦" },
         { href: "/admin/excellent-living/harga", label: "Harga (Cloudbeds)", icon: "₨" },
-        { href: "/admin/excellent-living/cloudbeds", label: "Cloudbeds", icon: "☁" },
+        { href: "/admin/properti", label: "Pengaturan Properti", icon: "⚙" },
         { href: "/finance/pendapatan", label: "Pendapatan & Channel", icon: "↗" },
         { href: "/finance/checklist-dana", label: "Checklist Dana Masuk", icon: "✓" },
         { href: "/finance/tutup-buku", label: "Tutup Buku", icon: "▣" },
@@ -96,9 +96,10 @@ export function AdminShell({ pageTitle, pageSub, children }: { pageTitle: string
   const sections: NavSection[] =
     properti.kode === "PL"
       ? [propertiNav, ...semua.filter((s) => s.title !== "Excellent Living")]
-      : properti.kode === "EL"
-        ? [propertiNav, ...semua.filter((s) => s.title === "Excellent Living")]
-        : [propertiNav];
+      : propertiSiap(properti)
+        ? // Menu EL dipakai semua properti non-PL yang sudah aktif; judulnya nama properti terpilih.
+          [propertiNav, ...semua.filter((s) => s.title === "Excellent Living").map((s) => ({ ...s, title: properti.nama }))]
+        : [propertiNav, { title: properti.nama, items: [{ href: `/admin/properti/${properti.kode}`, label: "Selesaikan Pengaturan", icon: "⚙" }] }];
 
   return (
     <DashboardShell

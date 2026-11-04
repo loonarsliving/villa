@@ -12,7 +12,7 @@ function Isi() {
         <h1 className="font-serif text-2xl font-light text-ink mt-2">Fitur properti Anda belum aktif</h1>
         <p className="text-[12.5px] text-ink/50 mt-3">
           Halo {user?.nama ?? ""}. Akun Anda sudah terdaftar, tetapi halaman kerja untuk properti Anda belum dibuka.
-          Silakan hubungi admin.
+          Admin perlu menyelesaikan pengaturan properti dulu. Setelah admin mengaktifkannya, keluar lalu masuk kembali.
         </p>
         <button onClick={logout} className="mt-6 text-[12px] text-gold-500 underline">
           Keluar

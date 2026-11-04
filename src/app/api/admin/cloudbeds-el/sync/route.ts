@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { CloudbedsApiError } from "@/lib/cloudbedsApi";
 import { KunciElDitolak, syncCloudbedsProperti } from "@/lib/elCloudbedsSync";
-import { isAdminToken } from "@/lib/villaApiAuth";
+import { isAdminToken, propertiNonPl } from "@/lib/villaApiAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,8 +18,8 @@ export async function POST(request: Request) {
   if (!token || !(await isAdminToken(token))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const kode = (new URL(request.url).searchParams.get("properti") ?? "EL").trim().toUpperCase();
-  if (!/^[A-Z]{2,6}$/.test(kode) || kode === "PL") return NextResponse.json({ error: "properti tidak valid" }, { status: 400 });
+  const kode = propertiNonPl(request, token);
+  if (!kode) return NextResponse.json({ error: "properti tidak valid" }, { status: 400 });
   try {
     return NextResponse.json(await syncCloudbedsProperti(kode));
   } catch (e) {

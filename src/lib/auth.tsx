@@ -37,7 +37,7 @@ export function AuthProvider({ children, requireRole }: { children: ReactNode; r
       return;
     }
     if (requireRole && !requireRole.includes(u.role)) {
-      router.replace(roleHome(u.role, u.property_kode));
+      router.replace(roleHome(u.role, u.property_kode, u.property_siap));
       return;
     }
     setToken(t);
@@ -58,9 +58,9 @@ export function useAuth() {
   return useContext(AuthContext);
 }
 
-export function roleHome(role: Role, propertyKode?: string | null): string {
-  // Akun manager/resepsionis untuk properti yang fiturnya belum aktif.
-  const propertiBaru = !!propertyKode && propertyKode !== "PL" && propertyKode !== "EL";
+export function roleHome(role: Role, propertyKode?: string | null, propertySiap?: boolean): string {
+  // Akun manager/resepsionis untuk properti yang fiturnya belum diaktifkan admin.
+  const propertiBaru = !!propertyKode && propertyKode !== "PL" && propertyKode !== "EL" && propertySiap === false;
   if ((role === "receptionist" || role === "manager") && propertiBaru) return "/properti-belum-aktif";
   if (role === "receptionist") return "/front-desk";
   // Admin & finance mengelola semua properti: pilih properti dulu (owner 2026-11-04).

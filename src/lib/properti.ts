@@ -11,6 +11,13 @@ export interface Properti {
   kode: string;
   nama: string;
   aktif: boolean;
+  /** Fitur operasional dibuka (PL & EL selalu; properti baru setelah admin menyelesaikan pengaturannya). */
+  siap?: boolean;
+}
+
+/** PL dan EL selalu siap; properti baru siap setelah diaktifkan admin. */
+export function propertiSiap(p: { kode: string; siap?: boolean } | null | undefined): boolean {
+  return !!p && (p.kode === "PL" || p.kode === "EL" || p.siap === true);
 }
 
 export const PROPERTI_PL: Properti = { kode: "PL", nama: "Loonars Private Living", aktif: true };
@@ -41,10 +48,10 @@ export function usePropertiTerpilih(): Properti {
 }
 
 /** Halaman awal setelah memilih properti. null = fitur properti ini belum tersedia. */
-export function berandaProperti(kode: string, role: string): string | null {
+export function berandaProperti(kode: string, role: string, siap = false): string | null {
   if (kode === "PL") return role === "finance" ? "/finance" : "/admin";
-  // EL memakai halaman Private Living dengan data EL (multi-properti).
-  if (kode === "EL") return role === "finance" ? "/finance/pendapatan" : "/front-desk";
+  // EL dan properti baru yang sudah diaktifkan memakai halaman Private Living dengan data properti itu (multi-properti).
+  if (kode === "EL" || siap) return role === "finance" ? "/finance/pendapatan" : "/front-desk";
   return null;
 }
 

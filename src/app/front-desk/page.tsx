@@ -526,7 +526,7 @@ export default function FrontDeskPage() {
           setPendingCheckin(null);
         }}
         onConfirm={finalizeCheckin}
-        {...(properti === "EL" ? { houseRules: HOUSE_RULES_EXCELLENT_LIVING, unitLabel: "Kamar" } : {})}
+        {...(properti !== "PL" ? { houseRules: HOUSE_RULES_EXCELLENT_LIVING, unitLabel: "Kamar" } : {})}
       />
     </FrontDeskShell>
   );

@@ -15,11 +15,11 @@ export function ManagerShell({ pageTitle, pageSub, children }: { pageTitle: stri
   // Manager properti selain Private Living (owner 2026-11-04: login manager
   // per properti) hanya melihat menu properti itu; modul manager lain di
   // bawah masih khusus Private Living dan dikunci di villa-api.
-  const propertiLain = user?.property_kode === "EL";
+  const propertiLain = !!user?.property_kode && user.property_kode !== "PL";
   const sections: NavSection[] = propertiLain
     ? [
         {
-          title: "Manager Excellent Living",
+          title: user?.property_nama ? `Manager ${user.property_nama}` : "Manager Excellent Living",
           items: [
             { href: "/manager", label: "Kesiapan Kamar", icon: "✓" },
             { href: "/manager/riwayat", label: "Riwayat Cek", icon: "☰" },
@@ -48,7 +48,7 @@ export function ManagerShell({ pageTitle, pageSub, children }: { pageTitle: stri
 
   return (
     <DashboardShell
-      property={propertiLain ? "Loonars Excellent Living" : undefined}
+      property={propertiLain ? (user?.property_nama ?? (user?.property_kode === "EL" ? "Loonars Excellent Living" : user?.property_kode) ?? undefined) : undefined}
       brandTitle="Panel"
       brandSub="Manager"
       roleLabel={user?.role === "admin" ? "Admin" : "Manager"}
@@ -56,7 +56,7 @@ export function ManagerShell({ pageTitle, pageSub, children }: { pageTitle: stri
       pageTitle={pageTitle}
       pageSub={pageSub}
     >
-      {user?.role === "manager" && user.property_kode !== "EL" && <ManagerNotifikasi unread={chatUnread} />}
+      {user?.role === "manager" && !propertiLain && <ManagerNotifikasi unread={chatUnread} />}
       {children}
     </DashboardShell>
   );

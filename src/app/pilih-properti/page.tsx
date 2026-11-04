@@ -29,8 +29,13 @@ export default function PilihPropertiPage() {
   function pilih(p: Properti) {
     if (!user) return;
     simpanProperti(p);
-    const tujuan = berandaProperti(p.kode, user.role);
+    const tujuan = berandaProperti(p.kode, user.role, p.siap === true);
     if (!tujuan) {
+      // Admin langsung diarahkan menyelesaikan pengaturan properti baru (tanpa coding).
+      if (user.role === "admin") {
+        router.replace(`/admin/properti/${p.kode}`);
+        return;
+      }
       setBelumSiap(p);
       return;
     }

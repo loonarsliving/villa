@@ -25,11 +25,12 @@ function pilihanRole(properti: string): { value: Role; label: string }[] {
       { value: "owner", label: "Investor" },
       { value: "late_night", label: "Late Night (loonars.id/late)" },
     ];
-  if (properti === "EL")
+  if (properti !== "PL")
     return [
       { value: "receptionist", label: "Resepsionis" },
       { value: "manager", label: "Manager (buka/tutup kamar)" },
-      { value: "el_investor", label: "Investor" },
+      // Investor khusus EL (laporan investor properti lain belum ada).
+      ...(properti === "EL" ? [{ value: "el_investor" as Role, label: "Investor" }] : []),
     ];
   return [
     { value: "manager", label: "Manager" },
@@ -221,9 +222,9 @@ export default function AdminUsersPage() {
             ))}
           </select>
         </Field>
-        {form.properti !== SEMUA && form.properti !== "PL" && form.properti !== "EL" && (
+        {form.properti !== SEMUA && form.properti !== "PL" && form.properti !== "EL" && !properti?.find((p) => p.kode === form.properti)?.siap && (
           <div className="text-[11px] text-gold-600 -mt-1 mb-2">
-            Akun untuk properti ini sudah bisa dibuat, tetapi fitur operasionalnya belum aktif. Akun bisa login setelah fiturnya tersedia.
+            Akun untuk properti ini sudah bisa dibuat. Fitur operasionalnya aktif setelah Anda menyelesaikan pengaturan properti di Admin &rarr; Pengaturan Properti.
           </div>
         )}
         {form.role === "owner" && (

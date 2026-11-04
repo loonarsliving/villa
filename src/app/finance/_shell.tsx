@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { DashboardShell, type NavSection } from "@/components/DashboardShell";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { usePropertiTerpilih } from "@/lib/properti";
+import { propertiSiap, usePropertiTerpilih } from "@/lib/properti";
 
 export function FinanceShell({ pageTitle, pageSub, children }: { pageTitle: string; pageSub?: string; children: ReactNode }) {
   const { user } = useAuth();
@@ -65,8 +65,8 @@ export function FinanceShell({ pageTitle, pageSub, children }: { pageTitle: stri
   const sections: NavSection[] =
     properti.kode === "PL"
       ? [gantiNav, ...semua.filter((s) => s.title !== "Excellent Living")]
-      : properti.kode === "EL"
-        ? [gantiNav, ...semua.filter((s) => s.title === "Excellent Living")]
+      : propertiSiap(properti)
+        ? [gantiNav, ...semua.filter((s) => s.title === "Excellent Living").map((s) => ({ ...s, title: properti.nama }))]
         : [gantiNav];
 
   return (
