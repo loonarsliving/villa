@@ -16,7 +16,7 @@ import {
 import { mapSourceNameToSumber } from "@/lib/cloudbedsSourceMapping";
 import { statusSetelahSync } from "@/lib/bookingStatusSync";
 import { bacaBlokirKamar } from "@/lib/cloudbedsUnitSementara";
-import { buatKodeTipe, jumlahMalam, normalNama, pecahNama, PENANDA_BLOK, pilihKamarEl, statusElDariCloudbeds, type PemakaianKamar } from "@/lib/elCloudbedsLogic";
+import { buatKodeTipe, jumlahMalam, kamarUntukNamaBerurut, normalNama, pecahNama, PENANDA_BLOK, pilihKamarEl, statusElDariCloudbeds, type PemakaianKamar } from "@/lib/elCloudbedsLogic";
 import { supabaseAdminProperti } from "@/lib/supabaseAdmin";
 
 /**
@@ -424,7 +424,11 @@ export async function sinkronKamarEl(db: SupabaseClient, roomsCb: CloudbedsRoom[
   const sudahDipetakan = new Set(petaByCb.values());
   for (const r of nyata) {
     if (petaByCb.has(r.roomID)) continue;
-    const sama = (kamar ?? []).find((k) => normalNama(k.nomor) === normalNama(r.roomName) && !sudahDipetakan.has(String(k.id)));
+    let sama = (kamar ?? []).find((k) => normalNama(k.nomor) === normalNama(r.roomName) && !sudahDipetakan.has(String(k.id)));
+    if (!sama) {
+      const berurut = kamarUntukNamaBerurut(r.roomName, r.roomTypeNameShort, tipe ?? [], kamar ?? []);
+      if (berurut && !sudahDipetakan.has(String(berurut.id))) sama = berurut;
+    }
     if (!sama) {
       hasil.room_belum_dipetakan.push(r.roomName);
       continue;

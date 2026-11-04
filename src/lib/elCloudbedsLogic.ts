@@ -102,6 +102,30 @@ export function normalNama(v: string | null | undefined): string {
   return (v ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+/**
+ * Room Cloudbeds bernama berurut "KODE(n)" (nama bawaan Cloudbeds, mis.
+ * "DOU(2)") dipetakan ke kamar ke-n tipe KODE, diurut menurut nomor kamar
+ * (owner 2026-11-04: kamar diatur di sistem, Cloudbeds mengikut jumlah kamar
+ * per tipe). DOU(2) -> ST-02, QUA(2) -> ST-14. Nomor di luar jumlah kamar
+ * tipe itu (mis. QUA(3) padahal kamar quad hanya 2) tidak dipetakan.
+ */
+export function kamarUntukNamaBerurut<K extends { id: string | number; nomor: string; room_type_id: string | number | null }>(
+  roomName: string | null | undefined,
+  roomTypeNameShort: string | null | undefined,
+  tipe: { id: string | number; code: string }[],
+  kamar: K[],
+): K | null {
+  const m = /^\s*([A-Za-z0-9]+)\s*\(\s*(\d+)\s*\)\s*$/.exec(roomName ?? "");
+  if (!m) return null;
+  const kode = m[1].toUpperCase();
+  if (roomTypeNameShort && roomTypeNameShort.trim().toUpperCase() !== kode) return null;
+  const t = tipe.find((x) => String(x.code).toUpperCase() === kode);
+  if (!t) return null;
+  const setipe = kamar.filter((k) => String(k.room_type_id) === String(t.id)).sort((a, b) => a.nomor.localeCompare(b.nomor, "en", { numeric: true }));
+  const n = Number(m[2]);
+  return n >= 1 && n <= setipe.length ? setipe[n - 1] : null;
+}
+
 /** Kode tipe kamar unik: singkatan Cloudbeds, atau huruf depan nama. */
 export function buatKodeTipe(nama: string, singkat: string | undefined, dipakai: Set<string>): string {
   const dasar =
