@@ -14,7 +14,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 // Kode untuk properti lain harus memakai klienProperti(supabaseSemua, 'EL')
 // secara eksplisit. Padanan di Next.js: src/lib/klienProperti.ts (ubah
 // keduanya). Migrasi: 20261104000001_multi_properti_fondasi.sql.
-const TABEL_PER_PROPERTI = new Set(['units','villa_room_types','bookings','transactions','finance_settlements','cloudbeds_room_mapping','villa_daily_inventory_snapshot','housekeeping','notifications','villa_room_checks','villa_room_maintenance','finance_tutup_buku','finance_audit_log','villa_guest_directory']);
+const TABEL_PER_PROPERTI = new Set(['units','villa_room_types','bookings','transactions','finance_settlements','cloudbeds_room_mapping','villa_daily_inventory_snapshot','housekeeping','notifications','villa_room_checks','villa_room_maintenance','finance_tutup_buku','finance_audit_log','villa_guest_directory','amenities','amenity_kit_items','amenity_usage_log','addon_orders']);
 function isiProperti(rows, properti){
   const isi = r => (r && typeof r === 'object' && !('property_kode' in r)) ? { ...r, property_kode: properti } : r;
   return Array.isArray(rows) ? rows.map(isi) : isi(rows);
@@ -59,6 +59,10 @@ const RUTE_PROPERTI_LAIN = new Set([
   'GET /finance/audit-log',
   // Database tamu per properti (view villa_guest_directory, migrasi 20261104000006).
   'GET /guests/directory', 'GET /guests/directory/summary', 'PATCH /guests/marketing',
+  // Amenities & pesanan BBQ per properti (migrasi 20261104000008).
+  'GET /amenities', 'POST /amenities', 'PATCH /amenities', 'DELETE /amenities',
+  'GET /amenities/kit', 'POST /amenities/kit', 'DELETE /amenities/kit', 'GET /amenities/usage-log',
+  'GET /addon-orders',
 ]);
 
 function klienProperti(klien, properti){

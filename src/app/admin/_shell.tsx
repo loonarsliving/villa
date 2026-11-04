@@ -63,6 +63,7 @@ export function AdminShell({ pageTitle, pageSub, children }: { pageTitle: string
         { href: "/finance/checklist-dana", label: "Checklist Dana Masuk", icon: "✓" },
         { href: "/finance/tutup-buku", label: "Tutup Buku", icon: "▣" },
         { href: "/admin/guests", label: "Database Tamu", icon: "◈" },
+        { href: "/admin/amenities", label: "Amenities", icon: "▧" },
       ],
     },
     {

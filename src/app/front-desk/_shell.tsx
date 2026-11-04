@@ -36,6 +36,8 @@ export function FrontDeskShell({
         { href: "/front-desk/booking", label: "Booking", icon: "◎" },
         { href: "/front-desk/housekeeping", label: "Housekeeping", icon: "◉" },
         { href: "/front-desk/chat", label: "Chat", icon: "◉", badge: chatUnread },
+        { href: "/front-desk/amenities", label: "Amenities", icon: "▧" },
+        { href: "/front-desk/bbq", label: "Pesanan BBQ", icon: "🔥" },
       ],
     },
     { title: "Log", items: [{ href: "/front-desk/notifikasi", label: "Notifikasi", icon: "◉", badge: unreadCount }] },
