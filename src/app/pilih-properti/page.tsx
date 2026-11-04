@@ -47,7 +47,7 @@ export default function PilihPropertiPage() {
   }
 
   return (
-    <div className="min-h-screen bg-base-950 flex items-center justify-center px-4 py-10">
+    <div className="min-h-screen bg-canvas flex items-center justify-center px-4 py-10">
       <div className="w-full max-w-lg">
         <div className="text-[10px] font-medium text-gold-500 tracking-[0.25em] uppercase">Loonars</div>
         <h1 className="font-serif text-3xl font-light text-ink mt-1">Pilih Properti</h1>
@@ -63,7 +63,7 @@ export default function PilihPropertiPage() {
               key={p.kode}
               onClick={() => pilih(p)}
               className={`w-full text-left rounded-xl border px-5 py-4 transition hover:border-gold-500/60 ${
-                p.kode === sekarang ? "border-gold-500/50 bg-gold-500/5" : "border-ink/10 bg-base-900"
+                p.kode === sekarang ? "border-gold-500/50 bg-gold-500/5" : "border-ink/10 bg-base-900 shadow-sm"
               }`}
             >
               <div className="flex items-center justify-between gap-3">
@@ -78,7 +78,7 @@ export default function PilihPropertiPage() {
         </div>
 
         {belumSiap && (
-          <div className="mt-5 rounded-xl bg-gold-500/10 px-4 py-3 text-[12px] text-gold-700">
+          <div className="mt-5 rounded-xl bg-gold-500/10 px-4 py-3 text-[12px] text-gold-600">
             <b>{belumSiap.nama}</b> sudah terdaftar, tetapi fitur operasionalnya (kamar, booking, finance) belum aktif untuk properti ini.
             Sementara ini Anda bisa mengatur karyawannya di Admin &rarr; Pengguna.
             {user?.role === "admin" && (
