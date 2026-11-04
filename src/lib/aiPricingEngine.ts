@@ -1235,6 +1235,13 @@ export interface SeasonPeriod {
 export interface DateDecisionInput {
   targetDate: string;
   anchorRate: number;
+  /**
+   * true = anchorRate SUDAH memuat pola akhir pekan (harga dasar per tanggal
+   * dari Cloudbeds, dipakai Excellent Living), jadi tambahan akhir pekan
+   * per kode tipe tidak ditambahkan lagi. Bawaan false = perilaku Private
+   * Living tidak berubah.
+   */
+  anchorSudahTermasukAkhirPekan?: boolean;
   /** villa_room_types.code, used to look up this room type's weekend surcharge. Defaults to Rp100.000 if omitted/unknown. */
   roomTypeCode?: string;
   occupancyPct: number;
@@ -1335,7 +1342,7 @@ export function decideRateForDate(input: DateDecisionInput): DatePriceDecision {
   let decidedRate = anchorRate;
 
   // --- 2. Day-of-week seasonality (a known, permanent pattern) ---
-  if (isWeekendJakarta(targetDate)) {
+  if (isWeekendJakarta(targetDate) && !input.anchorSudahTermasukAkhirPekan) {
     const code = input.roomTypeCode ?? "";
     const isFriday = new Date(`${targetDate}T00:00:00Z`).getUTCDay() === 5;
     const fridaySurcharge = isFriday ? FRIDAY_SURCHARGE_BY_ROOM_TYPE_CODE[code] : undefined;
@@ -1735,6 +1742,13 @@ export async function decideRatesForRoomType(
   settings: PricingSettings,
   /** Sisa kamar per tanggal dari Cloudbeds untuk tipe ini; null = pakai jumlah unit (cara lama). */
   roomsAvailableByDate: Map<string, number> | null = null,
+  /**
+   * Excellent Living (owner 2026-11-04: "harga dasarnya ambil dcloudbeds"):
+   * harga dasar per tanggal = harga Cloudbeds tanggal itu (sudah memuat pola
+   * akhir pekan). Tidak diisi = Private Living, anchorRate tetap untuk semua
+   * tanggal seperti sebelumnya.
+   */
+  anchorPerTanggal: Map<string, number> | null = null,
 ): Promise<DatePriceDecision[]> {
   // PENGECUALIAN MALAM GRATIS INVESTOR (cari: is_free_stay).
   // Malam gratis mengunci unit dan tetap masuk Cloudbeds, tapi tidak membawa
@@ -1878,9 +1892,11 @@ export async function decideRatesForRoomType(
     const monthIndex = marketSearch.usable ? marketSearch.byMonth.get(targetDate.slice(0, 7)) : undefined;
     const marketSearchRelative = monthIndex !== undefined && marketSearch.baseline ? (monthIndex - marketSearch.baseline) / marketSearch.baseline : null;
 
+    const anchorTanggal = anchorPerTanggal?.get(targetDate);
     return decideRateForDate({
       targetDate,
-      anchorRate,
+      anchorRate: anchorTanggal ?? anchorRate,
+      anchorSudahTermasukAkhirPekan: anchorTanggal !== undefined,
       roomTypeCode: roomType.code,
       occupancyPct,
       daysToArrival,
