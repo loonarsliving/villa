@@ -30,7 +30,10 @@ function propertiSaatIni(){ return konteksProperti.getStore()?.properti ?? 'PL';
 // (Cloudbeds, QRIS, rumus uang) sudah dipasang. Properti lain selalu
 // diperlakukan PL -- tidak ada perubahan perilaku sampai properti
 // ditambahkan di sini.
-const PROPERTI_SIAP = new Set(['PL']);
+// EL dinyalakan 2026-11-04 (owner: "Sinkronkan dan nyalakan ... bawa ke
+// production"), setelah kamar EL pindah ke tabel bersama dan pengaman
+// (daftar izin rute, WA, harga, check-in tanpa PIN) terpasang.
+const PROPERTI_SIAP = new Set(['PL', 'EL']);
 // Rute yang boleh dipakai properti selain PL (lihat pemeriksaan di layani()).
 // Ditambah satu per satu setelah rutenya diperiksa: data lewat
 // TABEL_PER_PROPERTI, tanpa efek khusus PL.
@@ -8813,6 +8816,10 @@ async function layani(req){
       tgl_checkout:b.tgl_checkout??null, durasi_malam:b.durasi_malam??null,
       checkin_time:b.checkin_time??'14:00:00',
       tarif:computedTarif, total_bayar:computedTarif, status:'terjadwal',
+      // Booking walk-in properti selain PL: penanda ini dipakai sinkron
+      // Cloudbeds properti itu (src/lib/elCloudbedsSync.ts) untuk mengirimnya
+      // ke Cloudbeds dan untuk tidak menimpanya dengan salinan Cloudbeds.
+      ...(propertiSaatIni() !== 'PL' ? { catatan: '[Front Desk EL]' } : {}),
     }).select().single();
     if(error){
       if(error.code === '23P01') return err(`Unit ${b.unit_nomor??''} sudah dibooking untuk tanggal yang bentrok`, 409);

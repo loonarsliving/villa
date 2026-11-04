@@ -252,3 +252,8 @@ Properti kedua (Loonars 2, Jogja), terpisah total dari `units`/`bookings` Privat
 - `villa_commit_checkin`: transaksi pemasukan check-in kini `property_kode = booking.property_kode` (dulu selalu DEFAULT 'PL'). Diverifikasi: isi fungsi identik dengan versi live sebelumnya kecuali INSERT transactions; tetap SECURITY DEFINER + `search_path=public`. Fungsi ini juga membuat `pin_kode` (PIN pintu PL) -- villa-api tidak boleh mengirim PIN itu untuk properti lain.
 - `units_blok_check`: `property_kode <> 'PL' OR blok IN ('A','B','C')`.
 - Mkhsistem 0313/0314 (PR loonarsliving/Mkhsistem#156, sudah diterapkan): `mkc_hosp_units`, `mkc_hosp_report_villa_snapshot`, `cfo_kirim_snapshot_mkh`, dan langkah 1 `mkc_hosp_sync_room_tasks` disaring `property_kode = 'PL'`. Hasil laporan villa identik sebelum/sesudah.
+
+## Multi-properti: housekeeping/notifikasi per properti + EL di tabel bersama (2026-11-04, DITERAPKAN)
+- `20261104000003_multi_properti_housekeeping_notifikasi`: `property_kode` default 'PL' di `housekeeping`, `notifications`, `villa_room_checks`, `villa_room_maintenance`; `villa_commit_checkout` membuat housekeeping dengan properti booking (isi lain identik, SECURITY DEFINER).
+- `20261104000004_el_ke_tabel_bersama`: salinan EL (4 tipe, 31 unit, 4 pemetaan) ke tabel bersama, `property_kode='EL'`. `units.nomor` dan `villa_room_types.code` masih unik global (bukan per properti).
+- View `villa_guest_directory` belum disaring per properti (menghitung booking semua properti).

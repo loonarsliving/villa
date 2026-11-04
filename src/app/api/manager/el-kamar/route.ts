@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { PENANDA_BLOK } from "@/lib/elCloudbedsLogic";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { supabaseAdminProperti } from "@/lib/supabaseAdmin";
 import { periksaTokenManager, propertiDariToken } from "@/lib/villaApiAuth";
 
 export const runtime = "nodejs";
@@ -30,15 +30,18 @@ async function sesi(request: Request) {
 export async function GET(request: Request) {
   const tolak = await sesi(request);
   if (tolak) return tolak;
-  const { data, error } = await supabaseAdmin()
-    .from("el_rooms")
-    .select("id, nomor, status, catatan, sort_order, el_room_types(nama, sort_order)")
-    .eq("active", true)
-    .order("sort_order")
+  // Tabel bersama (multi-properti): units properti EL.
+  const { data, error } = await supabaseAdminProperti("EL")
+    .from("units")
+    .select("id, nomor, status, catatan, villa_room_types(name)")
     .order("nomor");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json(
-    (data ?? []).map((r) => ({ ...r, diblokir_cloudbeds: String(r.catatan ?? "").includes(PENANDA_BLOK) })),
+    (data ?? []).map((r) => {
+      const t = (r as { villa_room_types?: { name: string } | { name: string }[] | null }).villa_room_types;
+      const nama = Array.isArray(t) ? t[0]?.name : t?.name;
+      return { id: r.id, nomor: r.nomor, status: r.status, catatan: r.catatan, el_room_types: { nama: nama ?? "Lainnya", sort_order: 0 }, diblokir_cloudbeds: String(r.catatan ?? "").includes(PENANDA_BLOK) };
+    }),
   );
 }
 
@@ -48,10 +51,9 @@ export async function PATCH(request: Request) {
   const b = (await request.json().catch(() => ({}))) as { ids?: unknown; aktif?: unknown };
   const ids = Array.isArray(b.ids) ? b.ids.map(String).filter(Boolean) : [];
   if (!ids.length || typeof b.aktif !== "boolean") return NextResponse.json({ error: "ids dan aktif wajib diisi" }, { status: 400 });
-  const supabase = supabaseAdmin();
-  const { data: kamar, error } = await supabase.from("el_rooms").select("id, status, catatan").in("id", ids).eq("active", true);
+  const supabase = supabaseAdminProperti("EL");
+  const { data: kamar, error } = await supabase.from("units").select("id, status, catatan").in("id", ids);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  const sekarang = new Date().toISOString();
   let diubah = 0;
   const dilewati: string[] = [];
   for (const k of kamar ?? []) {
@@ -63,14 +65,14 @@ export async function PATCH(request: Request) {
         dilewati.push(k.id);
         continue;
       }
-      await supabase.from("el_rooms").update({ status: "available", updated_at: sekarang }).eq("id", k.id).eq("status", "maintenance");
+      await supabase.from("units").update({ status: "available" }).eq("id", k.id).eq("status", "maintenance");
       diubah++;
     } else {
       if (k.status !== "available") {
         dilewati.push(k.id);
         continue;
       }
-      await supabase.from("el_rooms").update({ status: "maintenance", updated_at: sekarang }).eq("id", k.id).eq("status", "available");
+      await supabase.from("units").update({ status: "maintenance" }).eq("id", k.id).eq("status", "available");
       diubah++;
     }
   }

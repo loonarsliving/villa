@@ -3,6 +3,15 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-11-04 — Excellent Living DINYALAKAN di sistem bersama (multi-properti)
+- Owner: "Sinkronkan dan nyalakan, kamar hanya ada 31 dan bawa ke production, dan jgan lupa dynamic pricing jga harus ada di el" (dynamic pricing EL = menyangkut harga, dijelaskan dulu ke owner, BELUM dikerjakan).
+- Data (migrasi `20261104000004_el_ke_tabel_bersama`, diterapkan SEBELUM deploy): 4 tipe (DOU 12, QUA 2, JSP 12, KIN 5 kamar) -> `villa_room_types`, 31 kamar -> `units` (blok = kode tipe, semua maintenance), 4 pemetaan -> `cloudbeds_room_mapping`, semuanya `property_kode='EL'`. Tabel `el_*` tidak diubah (tidak lagi ditulis). PL tetap 13 unit.
+- villa-api: `PROPERTI_SIAP = ['PL','EL']`. Booking walk-in EL (`POST /bookings` konteks EL) diberi catatan `[Front Desk EL]`.
+- Sinkron Cloudbeds EL (`src/lib/elCloudbedsSync.ts`, ditulis ulang) memakai tabel bersama lewat `supabaseAdminProperti('EL')`: tidak membuat kamar (31 kamar diatur di sistem); tipe Cloudbeds baru -> `villa_room_types` EL; room belum dipetakan dicocokkan ke unit bernomor sama; blokir hari ini -> maintenance `[Blok Cloudbeds]`. Tarik: reservasi -> `bookings` EL (+ tamu di `guests`), kamar berpeta / kamar kosong setipe; tanpa kamar kosong -> tidak disimpan + log `sync.tanpa_kamar`. Kirim: booking `[Front Desk EL]` tanpa ID reservasi -> postReservation.
+- `/api/manager/el-kamar` dan `/api/el/harga` membaca `units`/`villa_room_types`/`cloudbeds_room_mapping` EL.
+- Frontend: `api.ts` mengirim header `x-villa-property` (pilihan admin/finance). Front Desk: menu EL (Front Desk, Booking, Housekeeping, Notifikasi), polling chat mati untuk EL, kartu check-in memakai tata tertib EL + "Kamar", kalender booking mengelompokkan per tipe, tombol "+ Booking" (`src/components/BookingBaruEl.tsx`, total dari harga Cloudbeds). Admin/Finance menu EL -> halaman bersama (Front Desk, Booking, Housekeeping, Buka/Tutup Kamar, Harga, Cloudbeds, Pendapatan & Channel, Checklist Dana). Beranda EL: admin `/front-desk`, finance `/finance/pendapatan`. Resepsionis EL = role `receptionist` + properti EL (`roleHome` -> `/front-desk`); `periksaTokenChat` menolak resepsionis non-PL.
+- Belum untuk EL: kasir/QRIS (menunggu QRIS dari owner), chat WA, amenities/BBQ, promo, laporan uang (dividen/laba rugi/survival/rencana kas), tutup buku, dynamic pricing. `villa_guest_directory` (database tamu promo) masih menggabungkan booking semua properti.
+
 ## 2026-11-04 — Multi-properti: pengaman villa-api untuk properti selain PL (saklar EL masih mati)
 - Owner: QRIS EL menyusul (kasir QRIS EL tetap mati); EL TIDAK memakai PIN pintu.
 - Migrasi `20261104000003_multi_properti_housekeeping_notifikasi` (diterapkan): `property_kode` default 'PL' di `housekeeping`, `notifications`, `villa_room_checks`, `villa_room_maintenance`; `villa_commit_checkout` membuat tugas housekeeping dengan properti booking (isi lain identik, tetap SECURITY DEFINER).

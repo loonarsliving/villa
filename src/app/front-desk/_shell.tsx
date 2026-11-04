@@ -5,6 +5,7 @@ import Link from "next/link";
 import { DashboardShell, type NavSection } from "@/components/DashboardShell";
 import { useAuth } from "@/lib/auth";
 import { useChatUnreadPoll, useNotifPoll } from "@/lib/hooks";
+import { usePropertiAktif } from "@/lib/properti";
 
 export function FrontDeskShell({
   pageTitle,
@@ -18,10 +19,32 @@ export function FrontDeskShell({
   children: ReactNode;
 }) {
   const { user } = useAuth();
+  const properti = usePropertiAktif(user);
+  const pl = properti === "PL";
   const { unreadCount } = useNotifPoll("role=receptionist", "is_read_staff");
-  const { unreadCount: chatUnread } = useChatUnreadPoll();
+  // Chat WA tamu milik Private Living; untuk properti lain endpoint chat
+  // menolak (dan 401 akan mengakhiri sesi), jadi polling hanya untuk PL.
+  const { unreadCount: chatUnread } = useChatUnreadPoll(30000, !!user && pl);
 
-  const sections: NavSection[] = [
+  // Properti selain PL (multi-properti 2026-11-04): hanya halaman yang
+  // sudah diizinkan villa-api untuk properti lain. Kasir/QRIS, BBQ,
+  // amenities, siteplan villa, dan chat masih khusus Private Living.
+  const sectionsLain: NavSection[] = [
+    {
+      title: "Operasional",
+      items: [
+        { href: "/front-desk", label: "Front Desk", icon: "◈" },
+        { href: "/front-desk/booking", label: "Booking", icon: "◎" },
+        { href: "/front-desk/housekeeping", label: "Housekeeping", icon: "◉" },
+      ],
+    },
+    { title: "Log", items: [{ href: "/front-desk/notifikasi", label: "Notifikasi", icon: "◉", badge: unreadCount }] },
+    ...(user?.role === "admin"
+      ? [{ title: "Admin", items: [{ href: "/pilih-properti", label: "Ganti Properti", icon: "⇄" }, { href: "/admin/excellent-living/harga", label: "Panel Admin", icon: "◈" }] }]
+      : []),
+  ];
+
+  const sectionsPl: NavSection[] = [
     {
       title: "Operasional",
       items: [
@@ -41,8 +64,11 @@ export function FrontDeskShell({
     },
   ];
 
+  const sections = pl ? sectionsPl : sectionsLain;
+
   return (
     <DashboardShell
+      property={pl ? undefined : properti === "EL" ? "Loonars Excellent Living" : properti}
       brandTitle="Panel"
       brandSub="Operasional"
       roleLabel="Resepsionis"

@@ -3,7 +3,6 @@ import { NextResponse } from "next/server";
 import { CloudbedsApiError } from "@/lib/cloudbedsApi";
 import { isAuthorizedCronRequest } from "@/lib/cronAuth";
 import { KunciElDitolak, syncCloudbedsEl } from "@/lib/elCloudbedsSync";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,7 +19,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   try {
-    return NextResponse.json(await syncCloudbedsEl(supabaseAdmin()));
+    return NextResponse.json(await syncCloudbedsEl());
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     console.error("[cron/sync-cloudbeds-el] gagal", message);
