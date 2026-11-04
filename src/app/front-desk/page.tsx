@@ -284,7 +284,7 @@ export default function FrontDeskPage() {
     >
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 mb-3.5">
         <StatCard label="Tersedia" value={String(sum?.available ?? "—")} accent="sage" />
-        <StatCard label="Terisi" value={String(sum?.occupied ?? "—")} sub="dari 13 unit" accent="gold" />
+        <StatCard label="Terisi" value={String(sum?.occupied ?? "—")} sub={units.length ? `dari ${units.length} unit` : undefined} accent="gold" />
         {kedatangan ? (
           <StatCard
             label="Check-In Hari Ini"
@@ -302,7 +302,9 @@ export default function FrontDeskPage() {
       <div className="grid lg:grid-cols-[2fr_1fr] gap-3.5">
         <div className="flex flex-col gap-3.5">
           <Card>
-            <CardHeader title="Peta Unit — 13 Villa" action={<a href="/front-desk/siteplan" className="text-[10.5px] text-gold-500">Siteplan lengkap →</a>} />
+            <CardHeader title={`Peta Unit — ${units.length || "…"} ${properti === "PL" ? "Villa" : "Kamar"}`}
+              // Siteplan (Blok A/B/C) hanya ada untuk Private Living.
+              action={properti === "PL" ? <a href="/front-desk/siteplan" className="text-[10.5px] text-gold-500">Siteplan lengkap →</a> : undefined} />
             <div className="p-4 sm:p-5">
               {loading ? (
                 <Loading />
