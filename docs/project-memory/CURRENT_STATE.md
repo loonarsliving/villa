@@ -3,6 +3,10 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-11-04 — Keputusan owner EL lanjutan + tutup buku per properti
+- Owner: QRIS EL menyusul; WA tamu memakai nomor yang sama (sistem harus membedakan percakapan EL/PL); notifikasi WA EL sama dengan PL; amenities & BBQ sama; kesiapan kamar EL disesuaikan dengan Cloudbeds EL; database tamu dipisah; laporan investor EL seperti PL tapi tanpa kiriman (belum ada investor aktif); tutup buku per properti; komisi OTA tetap sama (`finance_ota_settlement_config` bersama).
+- Migrasi `20261104000005_tutup_buku_per_properti` (diterapkan): `property_kode` di `finance_tutup_buku` (unik `(periode, property_kode)`, tabel kosong) dan `finance_audit_log` (210 baris lama = PL). Kedua tabel masuk `TABEL_PER_PROPERTI`; rute tutup buku + `/finance/audit-log` diizinkan untuk EL. Menu Finance/Admin EL: + Transaksi, + Tutup Buku.
+
 ## 2026-11-04 — Dynamic pricing Excellent Living (owner-approved, termasuk auto-push dengan batas)
 - Owner: "Harga dasarnya ambil dcloudbeds ... ya bawa dynamic procing dsni" lalu "Auto push pun tidak masalah jaga sj batas bawah dan batas atasnya".
 - `src/lib/elDynamicPricing.ts` (+tes `polaHarian`): mesin PL `decideRatesForRoomType` untuk tipe EL (okupansi bookings EL, pace, high season Jogja, permintaan pasar). HARGA DASAR = snapshot harga Cloudbeds EL 28 hari (modus per hari dalam minggu), diambil SEKALI dan disimpan di `integration_settings.el_dynamic_pricing.harga_dasar` -- tidak pernah dibaca ulang dari harga live (mencegah harga naik bertumpuk, bug PL 2026-09-11). `aiPricingEngine`: opsi baru `anchorPerTanggal` / `anchorSudahTermasukAkhirPekan` (tanpa opsi = perilaku PL identik; 105 tes engine lolos). Batas = `villa_room_types.min_rate/max_rate` EL, dijepit lagi di luar mesin. Riset pesaing TIDAK dipakai untuk EL (alamat di `revenue_engine.location_label` milik PL, Sleman) sampai alamat EL diisi. Auto-push EL = `el_dynamic_pricing.autopush` (terpisah dari saklar PL); `getCloudbedsBaseRateId`/`pushCloudbedsRate` menerima akun.
