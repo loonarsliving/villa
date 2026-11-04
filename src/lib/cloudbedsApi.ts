@@ -304,9 +304,9 @@ export async function getCloudbedsRoomTypeRate(roomTypeId: string, startDate: st
  * rate plan (isDerived: true), since pushing to that would be rejected by
  * Cloudbeds -- caller should surface this rather than guess a different ID.
  */
-export async function getCloudbedsBaseRateId(roomTypeId: string, onDate: string): Promise<string | null> {
-  const key = apiKey();
-  const propertyId = (process.env.CLOUDBEDS_PROPERTY_ID ?? "").trim();
+export async function getCloudbedsBaseRateId(roomTypeId: string, onDate: string, akun: CloudbedsAkun = "utama"): Promise<string | null> {
+  const key = apiKey(akun);
+  const propertyId = propertyIdAkun(akun);
 
   // getRate rejects startDate === endDate ("Parameter endDate should be
   // greater than startDate"). This lookup ran BEFORE every push, so that
@@ -364,8 +364,8 @@ export interface RateInterval {
  */
 const MAX_INTERVALS_PER_CALL = 90;
 
-export async function pushCloudbedsRate(rateId: string, intervals: RateInterval[]): Promise<{ jobReferenceId: string | null }> {
-  const key = apiKey();
+export async function pushCloudbedsRate(rateId: string, intervals: RateInterval[], akun: CloudbedsAkun = "utama"): Promise<{ jobReferenceId: string | null }> {
+  const key = apiKey(akun);
   let lastJobReferenceId: string | null = null;
 
   for (let offset = 0; offset < intervals.length; offset += MAX_INTERVALS_PER_CALL) {

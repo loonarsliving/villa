@@ -3,6 +3,11 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-11-04 — Dynamic pricing Excellent Living (owner-approved, termasuk auto-push dengan batas)
+- Owner: "Harga dasarnya ambil dcloudbeds ... ya bawa dynamic procing dsni" lalu "Auto push pun tidak masalah jaga sj batas bawah dan batas atasnya".
+- `src/lib/elDynamicPricing.ts` (+tes `polaHarian`): mesin PL `decideRatesForRoomType` untuk tipe EL (okupansi bookings EL, pace, high season Jogja, permintaan pasar). HARGA DASAR = snapshot harga Cloudbeds EL 28 hari (modus per hari dalam minggu), diambil SEKALI dan disimpan di `integration_settings.el_dynamic_pricing.harga_dasar` -- tidak pernah dibaca ulang dari harga live (mencegah harga naik bertumpuk, bug PL 2026-09-11). `aiPricingEngine`: opsi baru `anchorPerTanggal` / `anchorSudahTermasukAkhirPekan` (tanpa opsi = perilaku PL identik; 105 tes engine lolos). Batas = `villa_room_types.min_rate/max_rate` EL, dijepit lagi di luar mesin. Riset pesaing TIDAK dipakai untuk EL (alamat di `revenue_engine.location_label` milik PL, Sleman) sampai alamat EL diisi. Auto-push EL = `el_dynamic_pricing.autopush` (terpisah dari saklar PL); `getCloudbedsBaseRateId`/`pushCloudbedsRate` menerima akun.
+- Rute: `GET /api/cron/ai-dynamic-pricing-el` (pg_cron harian), `GET/POST /api/admin/el-harga-ai` (admin: hitung ulang tanpa kirim, saklar auto-push, batas bawah/atas). `/admin/excellent-living/harga`: kartu Dynamic Pricing AI + baris "AI" di kalender.
+
 ## 2026-11-04 — Excellent Living DINYALAKAN di sistem bersama (multi-properti)
 - Owner: "Sinkronkan dan nyalakan, kamar hanya ada 31 dan bawa ke production, dan jgan lupa dynamic pricing jga harus ada di el" (dynamic pricing EL = menyangkut harga, dijelaskan dulu ke owner, BELUM dikerjakan).
 - Data (migrasi `20261104000004_el_ke_tabel_bersama`, diterapkan SEBELUM deploy): 4 tipe (DOU 12, QUA 2, JSP 12, KIN 5 kamar) -> `villa_room_types`, 31 kamar -> `units` (blok = kode tipe, semua maintenance), 4 pemetaan -> `cloudbeds_room_mapping`, semuanya `property_kode='EL'`. Tabel `el_*` tidak diubah (tidak lagi ditulis). PL tetap 13 unit.
