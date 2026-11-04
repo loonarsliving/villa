@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bertumpuk, elDibuatDiSini, jumlahMalam, pecahNama, pilihKamarEl, statusElDariCloudbeds, sumberEl } from "./elCloudbedsLogic";
+import { bertumpuk, elDibuatDiSini, jumlahMalam, kamarUntukNamaBerurut, pecahNama, pilihKamarEl, statusElDariCloudbeds, sumberEl } from "./elCloudbedsLogic";
 
 const dasar = { checkIn: "2026-11-10", checkOut: "2026-11-12", reservationId: "R1", kamarSebelumnya: null };
 
@@ -103,5 +103,27 @@ describe("rencanakanKamarEl (kamar dari Cloudbeds)", () => {
     const dipakai = new Set(["ST"]);
     expect(buatKodeTipe("Standard Twin", undefined, dipakai)).toBe("ST2");
     expect(buatKodeTipe("Family Private Pool", undefined, dipakai)).toBe("FPP");
+  });
+});
+
+describe("kamarUntukNamaBerurut", () => {
+  const tipe = [{ id: "d", code: "DOU" }, { id: "q", code: "QUA" }];
+  const kamar = [
+    { id: 1, nomor: "ST-10", room_type_id: "d" },
+    { id: 2, nomor: "ST-02", room_type_id: "d" },
+    { id: 3, nomor: "ST-01", room_type_id: "d" },
+    { id: 4, nomor: "ST-14", room_type_id: "q" },
+    { id: 5, nomor: "ST-13", room_type_id: "q" },
+  ];
+  it("memetakan KODE(n) ke kamar ke-n tipe itu (urut nomor)", () => {
+    expect(kamarUntukNamaBerurut("DOU(2)", "DOU", tipe, kamar)?.nomor).toBe("ST-02");
+    expect(kamarUntukNamaBerurut("DOU(3)", undefined, tipe, kamar)?.nomor).toBe("ST-10");
+    expect(kamarUntukNamaBerurut("QUA(2)", "QUA", tipe, kamar)?.nomor).toBe("ST-14");
+  });
+  it("tidak memetakan nomor di luar jumlah kamar, kode lain, atau nama bebas", () => {
+    expect(kamarUntukNamaBerurut("QUA(3)", "QUA", tipe, kamar)).toBeNull();
+    expect(kamarUntukNamaBerurut("DOU(2)", "QUA", tipe, kamar)).toBeNull();
+    expect(kamarUntukNamaBerurut("KIN(1)", "KIN", tipe, kamar)).toBeNull();
+    expect(kamarUntukNamaBerurut("ST-02", "DOU", tipe, kamar)).toBeNull();
   });
 });
