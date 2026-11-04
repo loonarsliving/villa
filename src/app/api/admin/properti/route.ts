@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { supabaseAdmin, supabaseAdminProperti } from "@/lib/supabaseAdmin";
 import { periksaTokenAdmin } from "@/lib/villaApiAuth";
 
 export const runtime = "nodejs";
@@ -56,4 +56,43 @@ export async function PATCH(request: Request) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!data) return NextResponse.json({ error: "Properti tidak ditemukan" }, { status: 404 });
   return NextResponse.json(data);
+}
+
+/**
+ * Hapus properti (owner 2026-11-04: "sy tidak punya tombol hapus property").
+ * Hanya properti yang SUDAH NONAKTIF, bukan PL/EL, dan belum punya data apa
+ * pun (kamar, booking, akun karyawan). Pengaturannya (kunci Cloudbeds, email,
+ * QRIS, harga) ikut dihapus. Properti yang sudah dipakai cukup dinonaktifkan.
+ */
+export async function DELETE(request: Request) {
+  const tolak = await sesiAdmin(request);
+  if (tolak) return tolak;
+  const kode = String(new URL(request.url).searchParams.get("kode") ?? "").trim().toUpperCase();
+  if (!/^[A-Z]{2,6}$/.test(kode)) return NextResponse.json({ error: "kode tidak valid" }, { status: 400 });
+  if (kode === "PL" || kode === "EL") return NextResponse.json({ error: "Properti ini tidak bisa dihapus" }, { status: 400 });
+  const db = supabaseAdmin();
+  const { data: p } = await db.from("villa_properties").select("kode, nama, aktif").eq("kode", kode).maybeSingle();
+  if (!p) return NextResponse.json({ error: "Properti tidak ditemukan" }, { status: 404 });
+  if (p.aktif) return NextResponse.json({ error: "Nonaktifkan properti dulu sebelum menghapus" }, { status: 409 });
+
+  const pb = supabaseAdminProperti(kode);
+  const [kamar, booking, akun] = await Promise.all([
+    pb.from("units").select("id", { count: "exact", head: true }),
+    pb.from("bookings").select("id", { count: "exact", head: true }),
+    db.from("villa_users").select("id", { count: "exact", head: true }).eq("property_kode", kode),
+  ]);
+  const ada: string[] = [];
+  if ((kamar.count ?? 0) > 0) ada.push(`${kamar.count} kamar`);
+  if ((booking.count ?? 0) > 0) ada.push(`${booking.count} booking`);
+  if ((akun.count ?? 0) > 0) ada.push(`${akun.count} akun karyawan`);
+  if (ada.length) return NextResponse.json({ error: `Tidak bisa dihapus karena sudah punya data: ${ada.join(", ")}. Cukup biarkan nonaktif.` }, { status: 409 });
+
+  const kecil = kode.toLowerCase();
+  await db.from("integration_settings").delete().in("key", [`properti_${kecil}`, `payment_email_${kecil}`, `${kecil}_qris`, `${kecil}_dynamic_pricing`]);
+  const { error } = await db.from("villa_properties").delete().eq("kode", kode);
+  if (error) {
+    const pesan = error.code === "23503" ? "Properti ini masih dipakai data lain, jadi tidak bisa dihapus. Biarkan nonaktif." : error.message;
+    return NextResponse.json({ error: pesan }, { status: error.code === "23503" ? 409 : 500 });
+  }
+  return NextResponse.json({ ok: true, kode, nama: p.nama });
 }

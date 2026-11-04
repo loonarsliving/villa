@@ -92,6 +92,18 @@ export default function AdminPropertiPage() {
                       {p.aktif ? "Nonaktifkan" : "Aktifkan"}
                     </Btn>
                   )}
+                  {/* Hapus hanya untuk properti nonaktif yang belum punya data (dicek lagi di server). */}
+                  {p.kode !== "PL" && p.kode !== "EL" && !p.aktif && (
+                    <Btn
+                      disabled={busy}
+                      onClick={() => {
+                        if (!window.confirm(`Hapus properti "${p.nama}" (${p.kode}) beserta pengaturannya? Tidak bisa dibatalkan.`)) return;
+                        kirim(() => localApi(`/api/admin/properti?kode=${p.kode}`, { method: "DELETE" }), `${p.nama} dihapus.`);
+                      }}
+                    >
+                      Hapus
+                    </Btn>
+                  )}
                 </span>
               </div>
             ))}
