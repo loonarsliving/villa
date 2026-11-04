@@ -41,6 +41,9 @@ export default function KesiapanKamarPage() {
 
   const tertutup = data?.kamar.filter((k) => k.maintenance && !k.maintenance.berakhir) ?? [];
   const tutupCb = data?.kamar.filter((k) => !tertutup.includes(k) && blokHariIni(k, data.hari_ini)) ?? [];
+  // Excellent Living: kamar masih berstatus maintenance (belum dibuka manager).
+  const lokal = !!data?.penutupan_lokal;
+  const belumDibuka = lokal ? (data?.kamar.filter((k) => !tertutup.includes(k) && !tutupCb.includes(k) && k.status_unit === "maintenance") ?? []) : [];
 
   return (
     <ManagerShell pageTitle="Kesiapan Kamar" pageSub="Checklist kamar & buka-tutup penjualan di Cloudbeds">
@@ -52,17 +55,22 @@ export default function KesiapanKamarPage() {
           <div className="grid grid-cols-3 gap-3 mb-4">
             <Card className="px-4 py-3">
               <div className="text-[10px] uppercase tracking-wide text-ink/40">Dijual</div>
-              <div className="font-serif text-2xl text-sage-500">{data.kamar.length - tertutup.length - tutupCb.length}</div>
+              <div className="font-serif text-2xl text-sage-500">{data.kamar.length - tertutup.length - tutupCb.length - belumDibuka.length}</div>
             </Card>
             <Card className="px-4 py-3">
               <div className="text-[10px] uppercase tracking-wide text-ink/40">Maintenance</div>
-              <div className="font-serif text-2xl text-ruby-400">{tertutup.length}</div>
+              <div className="font-serif text-2xl text-ruby-400">{tertutup.length + belumDibuka.length}</div>
             </Card>
             <Card className="px-4 py-3">
               <div className="text-[10px] uppercase tracking-wide text-ink/40">Ditutup di Cloudbeds</div>
               <div className="font-serif text-2xl text-gold-500">{tutupCb.length}</div>
             </Card>
           </div>
+          {lokal && (
+            <div className="mb-4 rounded-xl border border-gold-500/30 bg-gold-500/10 px-4 py-3 text-[12px] text-ink/60">
+              Cloudbeds Excellent Living baru punya satu kamar per tipe, jadi Kamar Maintenance / Kamar Siap di sini hanya berlaku di sistem (Front Desk &amp; loonars.id). Blokir yang dibuat di Cloudbeds tetap terbaca.
+            </div>
+          )}
           {!data.cloudbeds_terbaca && (
             <div className="mb-4 text-[11px] text-ink/40">Blokir di Cloudbeds tidak terbaca saat ini — kamar yang ditutup langsung di Cloudbeds mungkin tidak tertandai.</div>
           )}
@@ -70,7 +78,7 @@ export default function KesiapanKamarPage() {
           <Card>
             <CardHeader title="Semua Kamar" subtitle="Ketuk kamar untuk mengecek" />
             {data.kamar.map((k) => (
-              <BarisKamar key={k.unit_id} kamar={k} hariIni={data.hari_ini} onClick={() => setPilih(k)} />
+              <BarisKamar key={k.unit_id} kamar={k} hariIni={data.hari_ini} lokal={lokal} onClick={() => setPilih(k)} />
             ))}
           </Card>
         </>
@@ -99,7 +107,7 @@ function blokHariIni(kamar: KamarKesiapan, hariIni: string) {
   return kamar.blok_cloudbeds_lain.find((b) => (b.startDate ?? "") <= hariIni && hariIni <= (b.endDate ?? ""));
 }
 
-function BarisKamar({ kamar, hariIni, onClick }: { kamar: KamarKesiapan; hariIni: string; onClick: () => void }) {
+function BarisKamar({ kamar, hariIni, lokal, onClick }: { kamar: KamarKesiapan; hariIni: string; lokal: boolean; onClick: () => void }) {
   const mt = kamar.maintenance;
   const aktif = mt && !mt.berakhir;
   const blokCb = !aktif ? blokHariIni(kamar, hariIni) : undefined;
@@ -123,11 +131,13 @@ function BarisKamar({ kamar, hariIni, onClick }: { kamar: KamarKesiapan; hariIni
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-gold-500/15 text-gold-500">
               DITUTUP DI CLOUDBEDS{blokCb.endDate ? ` s/d ${fmtDate(blokCb.endDate)}` : ""}
             </span>
+          ) : lokal && kamar.status_unit === "maintenance" ? (
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-ruby-500/15 text-ruby-400">MAINTENANCE · belum dibuka</span>
           ) : (
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-sage-500/15 text-sage-500">DIJUAL</span>
           )}
           {menginap && <span className="text-[10px] text-ink/40">ada tamu menginap</span>}
-          {!kamar.cloudbeds_terpetakan && <span className="text-[10px] text-ruby-400">belum terhubung Cloudbeds</span>}
+          {!kamar.cloudbeds_terpetakan && !lokal && <span className="text-[10px] text-ruby-400">belum terhubung Cloudbeds</span>}
         </div>
         <div className="text-[11px] text-ink/40 mt-1 truncate">
           {kamar.tipe ?? "—"}

@@ -821,6 +821,8 @@ export interface KesiapanKamarResponse {
   hari_ini: string;
   /** false = blok Cloudbeds tidak bisa dibaca saat ini; tanda "ditutup di Cloudbeds" mungkin tidak lengkap. */
   cloudbeds_terbaca: boolean;
+  /** true (Excellent Living) = buka/tutup kamar hanya di sistem, Cloudbeds tidak ditulis. */
+  penutupan_lokal?: boolean;
   checklist: string[];
   maks_malam: number;
   kamar: KamarKesiapan[];

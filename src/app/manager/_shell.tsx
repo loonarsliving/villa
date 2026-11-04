@@ -18,7 +18,16 @@ export function ManagerShell({ pageTitle, pageSub, children }: { pageTitle: stri
   // bawah masih khusus Private Living dan dikunci di villa-api.
   const propertiLain = user?.property_kode === "EL";
   const sections: NavSection[] = propertiLain
-    ? [{ title: "Manager Excellent Living", items: [{ href: "/manager/kamar-el", label: "Kamar Excellent Living", icon: "▦" }] }]
+    ? [
+        {
+          title: "Manager Excellent Living",
+          items: [
+            { href: "/manager", label: "Kesiapan Kamar", icon: "✓" },
+            { href: "/manager/riwayat", label: "Riwayat Cek", icon: "☰" },
+            { href: "/manager/kamar-el", label: "Kamar Excellent Living", icon: "▦" },
+          ],
+        },
+      ]
     : [
     {
       title: "Manager",
