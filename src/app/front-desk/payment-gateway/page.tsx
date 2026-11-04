@@ -5,6 +5,7 @@ import { AdminShell } from "../../admin/_shell";
 import { FrontDeskShell } from "../_shell";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { usePropertiAktif } from "@/lib/properti";
 import { useToast } from "@/lib/toast";
 import { fmtCurrencyFull, fmtDate, fmtDateTime, fmtFullDate, todayISO } from "@/lib/format";
 import { addDaysISO, defaultCheckout, nightsBetween, validateStayRange } from "@/lib/stayDates";
@@ -92,6 +93,8 @@ function bookingToDisplay(b: Booking): DisplayPayment {
 
 export default function PaymentGatewayPage() {
   const { user } = useAuth();
+  const properti = usePropertiAktif(user);
+  const pl = properti === "PL";
   const toast = useToast();
   const [rows, setRows] = useState<WalkinPayment[]>([]);
   const [villaBookings, setVillaBookings] = useState<Booking[]>([]);
@@ -205,8 +208,15 @@ export default function PaymentGatewayPage() {
   const villaEstimasiFlat = form.tipe === "harian" ? villaTarif * malam : villaTarif;
   const villaEstimasi = tarifServer ?? villaEstimasiFlat;
 
+  // Selain Private Living (Excellent Living): tidak ada cafe/spa/sewa villa baru
+  // di kasir -- hanya tagihan "Lainnya" dan pembayaran booking yang sudah dibuat
+  // di halaman Booking (harga EL diisi di sana, bukan dihitung kasir).
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (!pl) setForm((f) => (f.kategori === "lainnya" ? f : { ...f, kategori: "lainnya" }));
+  }, [pl]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !pl) return;
     if (new URLSearchParams(window.location.search).get("kategori") === "villa") {
       setForm((f) => ({ ...f, kategori: "villa" }));
     }
@@ -465,7 +475,7 @@ export default function PaymentGatewayPage() {
               signature_data_url: capturedKtpSig.signatureDataUrl,
             });
             setVillaBookings((prev) => prev.map((b) => (b.id === payment.id ? { ...b, status: "checkin" } : b)));
-            toast("🛎️", "Check-In Berhasil", `${payment.guest_nama} — Unit ${payment.unit_nomor} sudah check-in. PIN pintu terkirim via WA.`, "sage");
+            toast("🛎️", "Check-In Berhasil", `${payment.guest_nama} — Unit ${payment.unit_nomor} sudah check-in.${pl ? " PIN pintu terkirim via WA." : " Info check-in terkirim via WA."}`, "sage");
             setActivePayment(null);
             setCapturedKtpSig(null);
           } catch (e) {
@@ -534,7 +544,7 @@ export default function PaymentGatewayPage() {
           signature_data_url: data.signatureDataUrl,
         });
         setVillaBookings((prev) => prev.map((b) => (b.id === pendingCheckin.id ? { ...b, status: "checkin" } : b)));
-        toast("🛎️", "Check-In Berhasil", `${pendingCheckin.guest_nama} — Unit ${pendingCheckin.unit_nomor} sudah check-in. PIN pintu terkirim via WA.`, "sage");
+        toast("🛎️", "Check-In Berhasil", `${pendingCheckin.guest_nama} — Unit ${pendingCheckin.unit_nomor} sudah check-in.${pl ? " PIN pintu terkirim via WA." : " Info check-in terkirim via WA."}`, "sage");
       } catch (e) {
         toast("⚠", "Gagal", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby");
         return;
@@ -619,7 +629,7 @@ export default function PaymentGatewayPage() {
               </Field>
               <Field label="Kategori">
                 <div className="flex gap-2">
-                  {(Object.keys(kategoriLabel) as KasirKategori[]).map((k) => (
+                  {(Object.keys(kategoriLabel) as KasirKategori[]).filter((k) => pl || k === "lainnya").map((k) => (
                     <button
                       key={k}
                       onClick={() => resetForm(k)}

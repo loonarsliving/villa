@@ -14,7 +14,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 // Kode untuk properti lain harus memakai klienProperti(supabaseSemua, 'EL')
 // secara eksplisit. Padanan di Next.js: src/lib/klienProperti.ts (ubah
 // keduanya). Migrasi: 20261104000001_multi_properti_fondasi.sql.
-const TABEL_PER_PROPERTI = new Set(['units','villa_room_types','bookings','transactions','finance_settlements','cloudbeds_room_mapping','villa_daily_inventory_snapshot','housekeeping','notifications','villa_room_checks','villa_room_maintenance','finance_tutup_buku','finance_audit_log','villa_guest_directory','amenities','amenity_kit_items','amenity_usage_log','addon_orders']);
+const TABEL_PER_PROPERTI = new Set(['units','villa_room_types','bookings','transactions','finance_settlements','cloudbeds_room_mapping','villa_daily_inventory_snapshot','housekeeping','notifications','villa_room_checks','villa_room_maintenance','finance_tutup_buku','finance_audit_log','villa_guest_directory','amenities','amenity_kit_items','amenity_usage_log','addon_orders','walkin_payments']);
 function isiProperti(rows, properti){
   const isi = r => (r && typeof r === 'object' && !('property_kode' in r)) ? { ...r, property_kode: properti } : r;
   return Array.isArray(rows) ? rows.map(isi) : isi(rows);
@@ -67,7 +67,18 @@ const RUTE_PROPERTI_LAIN = new Set([
   // (Cloudbeds EL baru punya 1 kamar per tipe -- menutupnya = menutup satu
   // tipe di OTA); blokir Cloudbeds EL hanya DIBACA lewat jembatan Vercel.
   'GET /manager/kamar', 'POST /manager/kamar/cek', 'GET /manager/riwayat',
+  // Kasir/QRIS per properti (migrasi 20261104000009). QRIS tiap properti ada
+  // di integration_settings: PL 'walkin_qris', lainnya '<kode>_qris' (el_qris).
+  'GET /walkin-payments', 'POST /walkin-payments', 'PATCH /walkin-payments',
+  'GET /walkin-qris', 'POST /walkin-qris',
 ]);
+
+// Kunci integration_settings untuk QRIS kasir properti yang sedang dilayani.
+// PL tetap 'walkin_qris' (tidak berubah); properti lain '<kode>_qris'.
+function kunciQrisKasir(){
+  const kode = propertiSaatIni();
+  return kode === 'PL' ? 'walkin_qris' : `${kode.toLowerCase()}_qris`;
+}
 
 function klienProperti(klien, properti){
   const kode = () => (typeof properti === 'function' ? properti() : properti);
@@ -824,7 +835,10 @@ function sedangMalamWIB(){
 async function daftarSecurityMalam(){
   // Cabang MK Connect = nama properti (PL: 'Loonars Private Living', EL:
   // 'Loonars Excellent Living'). Tanpa cabang/security, info malam tidak dikirim.
-  const {data:cabang} = await supabase.from('branches').select('id').eq('name', namaProperti());
+  // Nama cabang di MK Connect tidak selalu persis nama properti (EL dibuat
+  // owner sebagai "Excellent living"), jadi beberapa penulisan diterima.
+  const NAMA_CABANG = {PL: ['Loonars Private Living'], EL: ['Loonars Excellent Living', 'Excellent Living', 'Excellent living']};
+  const {data:cabang} = await supabase.from('branches').select('id').in('name', NAMA_CABANG[propertiSaatIni()] ?? [namaProperti()]);
   const {data:divisi} = await supabase.from('divisions').select('id').ilike('name','security');
   if(!cabang?.length || !divisi?.length) return [];
   const {data, error} = await supabase.from('employees').select('full_name,phone')
@@ -6675,52 +6689,70 @@ async function layani(req){
     if(!cron.secret) return err('Cron belum dikonfigurasi (integration_settings.cron.secret)',503);
     if(!await secretsMatch(provided, cron.secret)) return err('Unauthorized',401);
 
-    const hariIni = todayWIB();
-    const jamWib = Number(new Date().toLocaleString('en-US', {timeZone: WIB_TZ, hour: '2-digit', hour12: false})) % 24;
-    const sudahLewatJam = jamWib >= AUTO_CHECKOUT_JAM_WIB;
+    // Satu putaran per properti: cron berjalan dalam konteks PL, jadi tanpa
+    // putaran ini booking Excellent Living tidak pernah di-check-out
+    // otomatis. PL tetap putaran utama (jawaban & galat sama seperti dulu),
+    // properti lain di "lain" dan galatnya tidak mengganggu PL.
+    const putaran = async () => {
+      const hariIni = todayWIB();
+      const jamWib = Number(new Date().toLocaleString('en-US', {timeZone: WIB_TZ, hour: '2-digit', hour12: false})) % 24;
+      const sudahLewatJam = jamWib >= AUTO_CHECKOUT_JAM_WIB;
 
-    const {data:kandidat, error:kErr} = await supabase.from('bookings')
-      .select('id,unit_id,unit_nomor,guest_nama,tgl_checkout,catatan')
-      .eq('status','checkin').not('tgl_checkout','is',null).lte('tgl_checkout', hariIni);
-    if(kErr) return err(kErr.message);
+      const {data:kandidat, error:kErr} = await supabase.from('bookings')
+        .select('id,unit_id,unit_nomor,guest_nama,tgl_checkout,catatan')
+        .eq('status','checkin').not('tgl_checkout','is',null).lte('tgl_checkout', hariIni);
+      if(kErr) return {error: kErr.message};
 
-    const penuh = [], diam = [], gagal = [];
-    for(const bk of kandidat ?? []){
-      if(bk.tgl_checkout === hariIni && !sudahLewatJam) continue;
-      const catatanBaru = (label) => `${bk.catatan ? `${bk.catatan} ` : ''}${label}`.trim();
-      let unitDitempatiLain = false;
-      if(bk.unit_id){
-        const {data:lain} = await supabase.from('bookings').select('id')
-          .eq('unit_id', bk.unit_id).eq('status','checkin').neq('id', bk.id).limit(1);
-        unitDitempatiLain = !!lain?.length;
+      const penuh = [], diam = [], gagal = [];
+      for(const bk of kandidat ?? []){
+        if(bk.tgl_checkout === hariIni && !sudahLewatJam) continue;
+        const catatanBaru = (label) => `${bk.catatan ? `${bk.catatan} ` : ''}${label}`.trim();
+        let unitDitempatiLain = false;
+        if(bk.unit_id){
+          const {data:lain} = await supabase.from('bookings').select('id')
+            .eq('unit_id', bk.unit_id).eq('status','checkin').neq('id', bk.id).limit(1);
+          unitDitempatiLain = !!lain?.length;
+        }
+        const baruSaja = bk.tgl_checkout === hariIni;
+        if(baruSaja && !unitDitempatiLain){
+          const {error} = await supabase.rpc('villa_commit_checkout', {
+            p_booking_id: bk.id, p_checkout_by: 'otomatis',
+            p_kondisi: catatanBaru(`[Check-out otomatis ${AUTO_CHECKOUT_JAM_WIB}.00]`),
+          });
+          if(error){ gagal.push({id: bk.id, alasan: error.message}); continue; }
+          await notif(bk.unit_id, 'all', 'checkout', `Checkout — Unit ${bk.unit_nomor}`, `${bk.guest_nama} di-check-out otomatis (jam ${AUTO_CHECKOUT_JAM_WIB}.00). Housekeeping dijadwalkan.`, bk.id);
+          try { await kirimAjakPesanDirect(bk.id); } catch(e){ console.error('[ajak-direct] auto-checkout', e?.message ?? e); }
+          penuh.push(bk);
+        } else {
+          const {data:ok, error} = await supabase.from('bookings').update({
+            status: 'checkout', checkout_at: new Date().toISOString(), checkout_by: 'otomatis',
+            catatan: catatanBaru(unitDitempatiLain && baruSaja
+              ? '[Check-out otomatis: unit sudah ditempati tamu berikutnya]'
+              : '[Check-out otomatis: data lama dirapikan]'),
+          }).eq('id', bk.id).eq('status','checkin').select('id');
+          if(error){ gagal.push({id: bk.id, alasan: error.message}); continue; }
+          if(ok?.length) diam.push(bk);
+        }
       }
-      const baruSaja = bk.tgl_checkout === hariIni;
-      if(baruSaja && !unitDitempatiLain){
-        const {error} = await supabase.rpc('villa_commit_checkout', {
-          p_booking_id: bk.id, p_checkout_by: 'otomatis',
-          p_kondisi: catatanBaru(`[Check-out otomatis ${AUTO_CHECKOUT_JAM_WIB}.00]`),
-        });
-        if(error){ gagal.push({id: bk.id, alasan: error.message}); continue; }
-        await notif(bk.unit_id, 'all', 'checkout', `Checkout — Unit ${bk.unit_nomor}`, `${bk.guest_nama} di-check-out otomatis (jam ${AUTO_CHECKOUT_JAM_WIB}.00). Housekeeping dijadwalkan.`, bk.id);
-        try { await kirimAjakPesanDirect(bk.id); } catch(e){ console.error('[ajak-direct] auto-checkout', e?.message ?? e); }
-        penuh.push(bk);
-      } else {
-        const {data:ok, error} = await supabase.from('bookings').update({
-          status: 'checkout', checkout_at: new Date().toISOString(), checkout_by: 'otomatis',
-          catatan: catatanBaru(unitDitempatiLain && baruSaja
-            ? '[Check-out otomatis: unit sudah ditempati tamu berikutnya]'
-            : '[Check-out otomatis: data lama dirapikan]'),
-        }).eq('id', bk.id).eq('status','checkin').select('id');
-        if(error){ gagal.push({id: bk.id, alasan: error.message}); continue; }
-        if(ok?.length) diam.push(bk);
-      }
-    }
 
-    if(penuh.length){
-      await notif(null, 'receptionist', 'checkout', `Check-out otomatis ${AUTO_CHECKOUT_JAM_WIB}.00 -- ${penuh.length} unit`,
-        `${penuh.map(b=>`${b.unit_nomor} ${b.guest_nama}`).join(', ')} tidak diperpanjang dan sudah di-check-out otomatis. Unit ditandai perlu dibersihkan.`, null);
+      if(penuh.length){
+        await notif(null, 'receptionist', 'checkout', `Check-out otomatis ${AUTO_CHECKOUT_JAM_WIB}.00 -- ${penuh.length} unit`,
+          `${penuh.map(b=>`${b.unit_nomor} ${b.guest_nama}`).join(', ')} tidak diperpanjang dan sudah di-check-out otomatis. Unit ditandai perlu dibersihkan.`, null);
+      }
+      return {penuh, diam, gagal};
+    };
+    const ringkas = (r) => ({penuh: r.penuh.map(b=>b.id), dirapikan: r.diam.map(b=>b.id), gagal: r.gagal});
+    const pl = await putaran();
+    const lain = {};
+    for(const kode of PROPERTI_SIAP){
+      if(kode === 'PL') continue;
+      try {
+        const r = await konteksProperti.run({ properti: kode }, putaran);
+        lain[kode] = r.error ? {error: r.error} : ringkas(r);
+      } catch(e){ lain[kode] = {error: e?.message ?? String(e)}; }
     }
-    return json({success:true, penuh: penuh.map(b=>b.id), dirapikan: diam.map(b=>b.id), gagal});
+    if(pl.error) return err(pl.error);
+    return json({success:true, ...ringkas(pl), lain});
   }
 
   if(path==='/cron/check-payment-email' && m==='POST'){
@@ -8279,14 +8311,14 @@ async function layani(req){
 
   if(path==='/walkin-qris' && m==='GET'){
     if(!isStaff) return forbidden();
-    const setting = await getSetting('walkin_qris');
+    const setting = await getSetting(kunciQrisKasir());
     return json({data_url: setting?.data_url ?? null});
   }
   if(path==='/walkin-qris' && m==='POST'){
     if(!isStaff) return forbidden();
     const b = await req.json();
     const {error} = await supabase.from('integration_settings')
-      .upsert({key:'walkin_qris', value:{data_url:b.data_url ?? null}, updated_at:new Date().toISOString(), updated_by:session.email});
+      .upsert({key:kunciQrisKasir(), value:{data_url:b.data_url ?? null}, updated_at:new Date().toISOString(), updated_by:session.email});
     if(error) return err(error.message);
     return json({success:true});
   }
