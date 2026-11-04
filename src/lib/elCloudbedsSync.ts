@@ -46,6 +46,8 @@ const CLOUDBEDS_API_BASE = "https://api.cloudbeds.com/api/v1.2";
 const STATUS_AKTIF = ["not_confirmed", "confirmed", "checked_in"];
 const STATUS_LOKAL_AKTIF = ["terjadwal", "checkin"];
 export const PENANDA_FRONT_DESK_EL = "[Front Desk EL]";
+/** Booking online dari loonars.id (villa-api /public/el/bookings); ikut dikirim ke Cloudbeds EL setelah lunas. */
+export const PENANDA_WEBSITE_EL = "[Website EL]";
 const SUMBER_BOOKINGS = ["walk-in", "airbnb", "tiket", "agoda", "booking.com", "website", "whatsapp", "other", "cloudbeds", "traveloka", "google"];
 
 interface KamarResv { roomID?: string | null; roomTypeID?: string | null; roomCheckIn?: string; roomCheckOut?: string; guestID?: string }
@@ -108,7 +110,8 @@ function hariIniWib(): string {
 
 /** Booking EL yang lahir di front desk (bukan salinan Cloudbeds). */
 export function bookingElMilikSendiri(catatan: string | null | undefined): boolean {
-  return String(catatan ?? "").includes(PENANDA_FRONT_DESK_EL);
+  const c = String(catatan ?? "");
+  return c.includes(PENANDA_FRONT_DESK_EL) || c.includes(PENANDA_WEBSITE_EL);
 }
 
 async function ambilReservasi(apiKey: string, propertyId: string, dariTanggal: string): Promise<ReservasiCb[]> {

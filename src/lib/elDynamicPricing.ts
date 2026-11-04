@@ -50,6 +50,12 @@ export interface SetelanHargaEl {
   /** Rekomendasi 31 hari dari run terakhir, untuk halaman Harga EL. */
   rekomendasi?: Record<string, { date: string; rate: number; alasan: string; guardrail: string }[]>;
   hasil_terakhir?: unknown;
+  /**
+   * Harga per malam yang sama dengan yang dikirim ke Cloudbeds, 365 hari,
+   * untuk booking online di loonars.id (kode tipe -> tanggal -> rupiah).
+   * Dihitung dari mesin yang sama, sudah dijepit batas bawah/atas.
+   */
+  harga_online?: Record<string, Record<string, number>>;
 }
 
 function tambahHari(iso: string, n: number): string {
@@ -86,7 +92,7 @@ export async function bacaSetelanEl(): Promise<SetelanHargaEl> {
   const db = supabaseAdminProperti("EL");
   const { data } = await db.from("integration_settings").select("value").eq("key", KUNCI_SETELAN_EL).maybeSingle();
   const v = (data?.value ?? {}) as Partial<SetelanHargaEl>;
-  return { autopush: v.autopush === true, harga_dasar: v.harga_dasar ?? {}, harga_dasar_diambil: v.harga_dasar_diambil ?? null, terakhir_jalan: v.terakhir_jalan, rekomendasi: v.rekomendasi, hasil_terakhir: v.hasil_terakhir };
+  return { autopush: v.autopush === true, harga_dasar: v.harga_dasar ?? {}, harga_dasar_diambil: v.harga_dasar_diambil ?? null, terakhir_jalan: v.terakhir_jalan, rekomendasi: v.rekomendasi, hasil_terakhir: v.hasil_terakhir, harga_online: v.harga_online };
 }
 
 async function simpanSetelanEl(s: SetelanHargaEl) {
@@ -149,6 +155,7 @@ export async function runElDynamicPricing(opsi: { paksaKirim?: boolean } = {}): 
   let dasarBaru = false;
   const hasil: HasilTipeEl[] = [];
   const rekomendasi: NonNullable<SetelanHargaEl["rekomendasi"]> = {};
+  const hargaOnline: NonNullable<SetelanHargaEl["harga_online"]> = {};
   let adaKirim = false;
 
   for (const t of tipe ?? []) {
@@ -186,6 +193,7 @@ export async function runElDynamicPricing(opsi: { paksaKirim?: boolean } = {}): 
     const aman = keputusan.map((k) => ({ ...k, decided_rate: Math.min(maxRate, Math.max(minRate, Math.round(k.decided_rate))) }));
     r.dasar_hari_ini = anchor.get(hariIni) ?? null;
     r.rekomendasi_hari_ini = aman[0]?.decided_rate ?? null;
+    hargaOnline[kode] = Object.fromEntries(aman.map((k) => [k.date, k.decided_rate]));
     rekomendasi[kode] = aman.slice(0, TAMPIL_DAYS).map((k) => ({ date: k.date, rate: k.decided_rate, alasan: k.reason_text, guardrail: k.guardrail_status }));
 
     if (!kirim) continue;
@@ -206,6 +214,8 @@ export async function runElDynamicPricing(opsi: { paksaKirim?: boolean } = {}): 
   if (dasarBaru) setelan.harga_dasar_diambil = hariIni;
   setelan.terakhir_jalan = new Date().toISOString();
   setelan.rekomendasi = rekomendasi;
+  // Tipe yang gagal dihitung kali ini tetap memakai harga terakhir yang ada.
+  setelan.harga_online = { ...(setelan.harga_online ?? {}), ...hargaOnline };
   setelan.hasil_terakhir = hasil;
   await simpanSetelanEl(setelan);
   return { autopush: setelan.autopush, dikirim: adaKirim, harga_dasar_baru: dasarBaru, tipe: hasil };
