@@ -38,6 +38,8 @@ export function FinanceShell({ pageTitle, pageSub, children }: { pageTitle: stri
       items: [
         { href: "/finance/pendapatan", label: "Pendapatan & Channel", icon: "↗" },
         { href: "/finance/checklist-dana", label: "Checklist Dana Masuk", icon: "✓" },
+        { href: "/finance/transaksi", label: "Transaksi", icon: "☷" },
+        { href: "/finance/tutup-buku", label: "Tutup Buku", icon: "▣" },
       ],
     },
     {

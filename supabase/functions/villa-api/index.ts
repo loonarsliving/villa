@@ -14,7 +14,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 // Kode untuk properti lain harus memakai klienProperti(supabaseSemua, 'EL')
 // secara eksplisit. Padanan di Next.js: src/lib/klienProperti.ts (ubah
 // keduanya). Migrasi: 20261104000001_multi_properti_fondasi.sql.
-const TABEL_PER_PROPERTI = new Set(['units','villa_room_types','bookings','transactions','finance_settlements','cloudbeds_room_mapping','villa_daily_inventory_snapshot','housekeeping','notifications','villa_room_checks','villa_room_maintenance']);
+const TABEL_PER_PROPERTI = new Set(['units','villa_room_types','bookings','transactions','finance_settlements','cloudbeds_room_mapping','villa_daily_inventory_snapshot','housekeeping','notifications','villa_room_checks','villa_room_maintenance','finance_tutup_buku','finance_audit_log']);
 function isiProperti(rows, properti){
   const isi = r => (r && typeof r === 'object' && !('property_kode' in r)) ? { ...r, property_kode: properti } : r;
   return Array.isArray(rows) ? rows.map(isi) : isi(rows);
@@ -49,6 +49,9 @@ const RUTE_PROPERTI_LAIN = new Set([
   'GET /finance/checklist-dana', 'POST /finance/settlements/receive', 'POST /finance/settlements/receive-bulk',
   'POST /finance/settlements/unreceive', 'POST /finance/settlements/process',
   'GET /admin/users', 'POST /admin/users', 'PATCH /admin/users',
+  // Tutup buku & log audit per properti (migrasi 20261104000005).
+  'GET /finance/tutup-buku', 'GET /finance/tutup-buku/detail', 'POST /finance/tutup-buku/tutup', 'POST /finance/tutup-buku/buka',
+  'GET /finance/audit-log',
 ]);
 
 function klienProperti(klien, properti){
