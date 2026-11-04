@@ -14,7 +14,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 // Kode untuk properti lain harus memakai klienProperti(supabaseSemua, 'EL')
 // secara eksplisit. Padanan di Next.js: src/lib/klienProperti.ts (ubah
 // keduanya). Migrasi: 20261104000001_multi_properti_fondasi.sql.
-const TABEL_PER_PROPERTI = new Set(['units','villa_room_types','bookings','transactions','finance_settlements','cloudbeds_room_mapping','villa_daily_inventory_snapshot']);
+const TABEL_PER_PROPERTI = new Set(['units','villa_room_types','bookings','transactions','finance_settlements','cloudbeds_room_mapping','villa_daily_inventory_snapshot','housekeeping','notifications','villa_room_checks','villa_room_maintenance']);
 function isiProperti(rows, properti){
   const isi = r => (r && typeof r === 'object' && !('property_kode' in r)) ? { ...r, property_kode: properti } : r;
   return Array.isArray(rows) ? rows.map(isi) : isi(rows);
@@ -31,6 +31,22 @@ function propertiSaatIni(){ return konteksProperti.getStore()?.properti ?? 'PL';
 // diperlakukan PL -- tidak ada perubahan perilaku sampai properti
 // ditambahkan di sini.
 const PROPERTI_SIAP = new Set(['PL']);
+// Rute yang boleh dipakai properti selain PL (lihat pemeriksaan di layani()).
+// Ditambah satu per satu setelah rutenya diperiksa: data lewat
+// TABEL_PER_PROPERTI, tanpa efek khusus PL.
+const RUTE_PROPERTI_LAIN = new Set([
+  'GET /summary', 'GET /dashboard/hari-ini',
+  'GET /units', 'PATCH /units', 'GET /room-types',
+  'GET /bookings', 'POST /bookings', 'PATCH /bookings',
+  'POST /checkin', 'POST /checkout',
+  'GET /housekeeping', 'PATCH /housekeeping/done',
+  'GET /notifications', 'PATCH /notifications/read',
+  'GET /manager/whoami', 'GET /finance/whoami',
+  'GET /finance/summary', 'GET /finance/channel-breakdown', 'GET /finance/bookings', 'GET /finance/booking',
+  'GET /finance/checklist-dana', 'POST /finance/settlements/receive', 'POST /finance/settlements/receive-bulk',
+  'POST /finance/settlements/unreceive', 'POST /finance/settlements/process',
+  'GET /admin/users', 'POST /admin/users', 'PATCH /admin/users',
+]);
 
 function klienProperti(klien, properti){
   const kode = () => (typeof properti === 'function' ? properti() : properti);
@@ -1361,6 +1377,14 @@ async function sendWa(phone, message, meta){
     if(error) console.error('[sendWa] gagal mencatat log WA', error.message);
   };
 
+  // Properti selain Private Living hanya boleh mengirim template miliknya
+  // sendiri (template_type 'el_*'): semua pesan lain di file ini bertuliskan
+  // Private Living / loonars.id / PIN pintu villa (owner 2026-11-04: EL
+  // tidak memakai PIN pintu).
+  if(propertiSaatIni() !== 'PL' && !String(metaAman.template_type ?? '').startsWith('el_')){
+    await catat({...metaAman, phone, message, status:'skipped_property_' + propertiSaatIni()});
+    return false;
+  }
   if(!phone){
     await catat({...metaAman, phone:null, message, status:'skipped_no_phone'});
     return false;
@@ -6773,11 +6797,11 @@ async function layani(req){
   // Manager properti lain (mis. Excellent Living) tidak boleh membuka modul
   // manager Private Living; ia memakai halaman Next.js properti itu sendiri,
   // yang memeriksa sesinya lewat /manager/whoami.
-  if(session.role==='manager' && session.property_kode && session.property_kode!=='PL' && path!=='/manager/whoami') return forbidden();
+  if(session.role==='manager' && session.property_kode && session.property_kode!=='PL' && !PROPERTI_SIAP.has(session.property_kode) && path!=='/manager/whoami') return forbidden();
   // Sama untuk resepsionis yang diberi properti selain Private Living: modul
   // front desk di villa-api ini masih khusus Private Living (resepsionis
   // Excellent Living memakai role el_receptionist dan rute /el/*).
-  if(session.role==='receptionist' && session.property_kode && session.property_kode!=='PL') return forbidden();
+  if(session.role==='receptionist' && session.property_kode && session.property_kode!=='PL' && !PROPERTI_SIAP.has(session.property_kode)) return forbidden();
 
   // Properti request ini. Manager/resepsionis = properti akunnya; admin &
   // finance = properti yang dipilih (header x-villa-property). Hanya properti
@@ -6789,6 +6813,14 @@ async function layani(req){
     if(diminta && diminta !== 'PL' && PROPERTI_SIAP.has(diminta)){
       konteksProperti.getStore().properti = diminta;
     }
+  }
+  // DAFTAR IZIN properti selain Private Living. Banyak fitur PL punya efek
+  // khusus PL (WA bertuliskan Private Living, PIN pintu, QRIS rekening PL,
+  // harga villa_rates, blokir kamar di akun Cloudbeds PL, rumus uang dengan
+  // konstanta PL). Rute di bawah sudah diperiksa aman untuk properti lain;
+  // selain itu dijawab "belum aktif". Modul /el/* (tabel el_*) tetap jalan.
+  if(propertiSaatIni() !== 'PL' && !path.startsWith('/el/') && !RUTE_PROPERTI_LAIN.has(`${m} ${path}`)){
+    return err('Fitur ini belum aktif untuk properti ini', 409);
   }
 
   // Role late_night (Laila) HANYA boleh memakai modul late night -- dikunci
@@ -8750,7 +8782,13 @@ async function layani(req){
     if(unitErr || !unit) return err('Unit tidak ditemukan', 404);
 
     let computedTarif;
-    if(b.tipe === 'bulanan'){
+    if(propertiSaatIni() !== 'PL'){
+      // Harga properti selain PL tidak ada di villa_rates (harga EL dibaca
+      // dari Cloudbeds lewat /api/el/harga dan diisi di form). Yang dipakai
+      // nominal dari form; mesin harga PL tidak disentuh.
+      computedTarif = Number(b.total_bayar ?? 0);
+      if(!Number.isFinite(computedTarif) || computedTarif <= 0) return err('Total bayar wajib diisi', 400);
+    } else if(b.tipe === 'bulanan'){
       computedTarif = Number(unit.tarif_bulanan ?? 0);
     } else {
       const nights = b.tgl_checkout
@@ -8849,6 +8887,15 @@ async function layani(req){
     // ("ini kamarnya A1 apa C1?"). notif() di atas (ke staf, bukan ke tamu)
     // tetap menyebut unit_nomor apa adanya -- itu untuk resepsionis, yang
     // tahu unit fisik mana yang sebenarnya dipakai.
+    if(propertiSaatIni() !== 'PL'){
+      // Excellent Living tidak memakai PIN pintu (owner 2026-11-04): sambutan
+      // tanpa PIN, sama dengan teks check-in EL sebelumnya.
+      const {data:bkEl} = await supabase.from('bookings').select('tgl_checkin,tgl_checkout').eq('id', b.booking_id).maybeSingle();
+      await sendWa(guestPhone,
+        `Halo ${data.guest_nama}, selamat datang di Loonars Excellent Living Yogyakarta!\nCheck-in Anda sudah tercatat (${bkEl?.tgl_checkin ?? ''} s/d ${bkEl?.tgl_checkout ?? ''}). Bila membutuhkan bantuan selama menginap, silakan hubungi resepsionis kami. Terima kasih.`,
+        {booking_id:b.booking_id, unit_id:data.unit_id, template_type:'el_checkin'});
+      return json({success:true, pin_kode:null});
+    }
     await sendWa(guestPhone,
       `Halo ${data.guest_nama}, selamat datang di Loonars Private Living!\nKode PIN pintu Anda: *${data.pin_kode}*\nMohon jaga kerahasiaan kode ini selama menginap. Terima kasih.`,
       {booking_id:b.booking_id, unit_id:data.unit_id, template_type:'pin_checkin'});
@@ -8884,8 +8931,11 @@ async function layani(req){
     await notif(data.unit_id,'all','checkout',`Checkout — Unit ${data.unit_nomor}`,`${data.guest_nama} sudah checkout. Housekeeping dijadwalkan.`,b.booking_id);
     // Ajakan pesan langsung di loonars.id. Gagal kirim tidak boleh
     // menggagalkan checkout yang sudah tercatat.
-    try { await kirimAjakPesanDirect(b.booking_id); }
-    catch(e){ console.error('[ajak-direct] checkout', e?.message ?? e); }
+    // Ajakan pesan di loonars.id milik Private Living.
+    if(propertiSaatIni() === 'PL'){
+      try { await kirimAjakPesanDirect(b.booking_id); }
+      catch(e){ console.error('[ajak-direct] checkout', e?.message ?? e); }
+    }
     return json({success:true});
   }
 
