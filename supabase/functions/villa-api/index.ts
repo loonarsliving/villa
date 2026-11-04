@@ -732,6 +732,7 @@ async function scanPaymentInbox(cfg, {onlyBookingId} = {}){
  * kali.
  */
 let pemindaianBerjalan = null;
+let pemindaianEl = null;
 function scanPaymentInboxBersama(cfg){
   if(!pemindaianBerjalan){
     pemindaianBerjalan = scanPaymentInbox(cfg).finally(()=>{ pemindaianBerjalan = null; });
@@ -985,14 +986,14 @@ function teksTerimaKasihLunas({nama, bahasa, checkin, checkout, unit, addon, tot
   const rp = `Rp ${Math.round(Number(total ?? 0)).toLocaleString('id-ID')}`;
   if(bahasa === 'en'){
     return `Hi ${nama || 'there'} 👋\n\n`+
-      `Congratulations, your payment has been received! Thank you for booking Loonars Private Living Yogyakarta 🎉\n\n`+
-      `Stay: ${rentang}${unit ? `\nVilla: ${unit}` : ''}${addon ? `\nAdd-on: ${addon}` : ''}\nTotal paid: ${rp}${invoice ? `\nInvoice: ${invoice}` : ''}\n\n`+
+      `Congratulations, your payment has been received! Thank you for booking ${namaProperti()} Yogyakarta 🎉\n\n`+
+      `Stay: ${rentang}${unit ? `\n${propertiSaatIni()==='PL' ? 'Villa' : 'Room'}: ${unit}` : ''}${addon ? `\nAdd-on: ${addon}` : ''}\nTotal paid: ${rp}${invoice ? `\nInvoice: ${invoice}` : ''}\n\n`+
       `Check-in from 14.00, check-out by 12.00. Your invoice can be downloaded on the loonars.id booking page. `+
       `If you have any questions, just reply to this message. See you soon at Loonars! 🌿`;
   }
   return `Halo Kak${nama ? ` ${nama}` : ''} 👋\n\n`+
-    `Selamat, pembayaran Kakak sudah kami terima! Terima kasih sudah memesan di Loonars Private Living Yogyakarta 🎉\n\n`+
-    `Menginap: ${rentang}${unit ? `\nVilla: ${unit}` : ''}${addon ? `\nAdd-on: ${addon}` : ''}\nTotal dibayar: ${rp}${invoice ? `\nNo. invoice: ${invoice}` : ''}\n\n`+
+    `Selamat, pembayaran Kakak sudah kami terima! Terima kasih sudah memesan di ${namaProperti()} Yogyakarta 🎉\n\n`+
+    `Menginap: ${rentang}${unit ? `\n${propertiSaatIni()==='PL' ? 'Villa' : 'Kamar'}: ${unit}` : ''}${addon ? `\nAdd-on: ${addon}` : ''}\nTotal dibayar: ${rp}${invoice ? `\nNo. invoice: ${invoice}` : ''}\n\n`+
     `Check-in mulai pukul 14.00, check-out paling lambat 12.00. Invoice bisa diunduh di halaman pemesanan loonars.id. `+
     `Kalau ada pertanyaan, silakan balas pesan ini ya. Sampai jumpa di Loonars! 🌿`;
 }
@@ -1004,7 +1005,7 @@ async function kirimTerimaKasihLunas(bookingId){
       .eq('id', bookingId).maybeSingle();
     if(!bk?.guest_id) return 'tanpa_tamu';
     const {data:sudah} = await supabase.from('wa_messages_log').select('id')
-      .eq('booking_id', bk.id).eq('template_type','booking_paid_thanks').eq('status','sent').limit(1);
+      .eq('booking_id', bk.id).eq('template_type', templateProperti('booking_paid_thanks')).eq('status','sent').limit(1);
     if(sudah?.length) return 'sudah';
     const {data:g} = await supabase.from('guests').select('hp').eq('id', bk.guest_id).maybeSingle();
     if(!g?.hp) return 'tanpa_hp';
@@ -1013,7 +1014,7 @@ async function kirimTerimaKasihLunas(bookingId){
       nama: bk.guest_nama, bahasa, checkin: bk.tgl_checkin, checkout: bk.tgl_checkout,
       unit: bk.unit_nomor, addon: bk.paket_dekorasi, total: tagihanTamu(bk), invoice: bk.invoice_no,
     });
-    return (await sendWa(g.hp, teks, {booking_id: bk.id, unit_id: bk.unit_id, template_type:'booking_paid_thanks'})) ? 'terkirim' : 'gagal';
+    return (await sendWa(g.hp, teks, {booking_id: bk.id, unit_id: bk.unit_id, template_type: templateProperti('booking_paid_thanks')})) ? 'terkirim' : 'gagal';
   } catch(e){
     // Ucapan terima kasih tidak boleh menggagalkan konfirmasi pembayaran.
     console.error('[terima-kasih-lunas]', e?.message ?? e);
@@ -1056,13 +1057,13 @@ function teksPengingatPembayaran({nama, unit, checkin, checkout, batasWaktu, bah
   const batas = `${jamWIB(batasWaktu)} WIB`;
   if(bahasa === 'en'){
     return `Hi ${nama || 'there'} 👋\n\n`+
-      `We noticed your booking for Unit ${unit} (${rentang}) at Loonars Private Living Yogyakarta is still waiting for QRIS payment.\n\n`+
-      `Your private pool and garden are ready for you 🏊🌿 If we don't receive it by ${batas}, this unit will be automatically released for other guests.\n\n`+
+      `We noticed your booking for Unit ${unit} (${rentang}) at ${namaProperti()} Yogyakarta is still waiting for QRIS payment.\n\n`+
+      `${propertiSaatIni()==='PL' ? 'Your private pool and garden are ready for you 🏊🌿' : 'Your room is waiting for you 🌿'} If we don't receive it by ${batas}, this unit will be automatically released for other guests.\n\n`+
       `Already paid? No need to send proof -- our system detects it automatically within a few minutes. Any trouble? Just reply to this message, our team is happy to help.`;
   }
   return `Halo Kak${nama ? ' ' + nama : ''} 👋\n\n`+
-    `Kami lihat booking Kakak untuk Unit ${unit} (${rentang}) di Loonars Private Living Yogyakarta masih menunggu pembayaran QRIS.\n\n`+
-    `Kolam renang privat dan taman di unit ini sudah menunggu Kakak 🏊🌿 Kalau belum kami terima sampai pukul ${batas}, unit ini akan otomatis dilepas untuk tamu lain.\n\n`+
+    `Kami lihat booking Kakak untuk Unit ${unit} (${rentang}) di ${namaProperti()} Yogyakarta masih menunggu pembayaran QRIS.\n\n`+
+    `${propertiSaatIni()==='PL' ? 'Kolam renang privat dan taman di unit ini sudah menunggu Kakak 🏊🌿' : 'Kamar Kakak sudah menunggu 🌿'} Kalau belum kami terima sampai pukul ${batas}, unit ini akan otomatis dilepas untuk tamu lain.\n\n`+
     `Kalau sudah transfer, tidak perlu kirim bukti apa pun -- sistem kami otomatis mendeteksinya dalam beberapa menit. Ada kendala? Balas pesan ini, tim kami siap bantu.`;
 }
 
@@ -1112,7 +1113,7 @@ function prevMonthWIB(d = new Date()){
 // sudah terbit -- hanya yang baru.
 function invoiceNoFor(booking){
   const ymd = todayWIB(new Date(booking.created_at)).replace(/-/g,'');
-  return `INV-LV-${ymd}-${String(booking.id).slice(0,8).toUpperCase()}`;
+  return `INV-${propertiSaatIni()==='PL' ? 'LV' : propertiSaatIni()}-${ymd}-${String(booking.id).slice(0,8).toUpperCase()}`;
 }
 
 async function notif(unit_id, role, tipe, judul, pesan, ref_id){
@@ -4236,23 +4237,86 @@ async function elKetersediaanPublik(checkin, checkout){
   });
 }
 
+const EL_MAKS_MALAM_ONLINE = 30;
+const URL_KETERSEDIAAN_CLOUDBEDS_EL = 'https://living.haluoleo.id/api/internal/cloudbeds-el/ketersediaan';
+
 /**
- * Ketersediaan EL untuk loonars.id dari tabel bersama (harus dipanggil dalam
- * konteks properti EL). Kamar berstatus 'maintenance' (belum dibuka manager)
- * tidak dihitung; bentrok = booking aktif, tahanan, Kamar Maintenance, dan
- * blokir Cloudbeds EL (unitTidakBisaDijualWebsite).
+ * Harga online EL untuk satu tipe: jumlah harga per malam yang SAMA dengan
+ * yang dikirim ke Cloudbeds (integration_settings 'el_dynamic_pricing'
+ * .harga_online, dari mesin dynamic pricing EL, sudah dijepit batas
+ * bawah/atas). null kalau ada malam tanpa harga -- tidak pernah ditebak.
+ */
+async function elHargaOnline(kodeTipe, checkin, checkout){
+  const set = await getSetting('el_dynamic_pricing');
+  const peta = set?.harga_online?.[kodeTipe];
+  if(!peta) return null;
+  let total = 0, malam = 0;
+  for(let d = checkin; d < checkout; d = addDaysStr(d, 1)){
+    const h = Number(peta[d]);
+    if(!(h > 0)) return null;
+    total += h; malam++;
+  }
+  return malam ? {total, rata: Math.round(total / malam), malam} : null;
+}
+
+/**
+ * Berapa kamar per tipe yang masih DIJUAL Cloudbeds EL untuk [checkin,
+ * checkout) -- Cloudbeds yang jadi penentu terakhir (reservasi OTA yang belum
+ * tersinkron dan blokir kamar ikut terhitung). Lewat jembatan Vercel (kunci EL
+ * hanya di sana). null = tidak terbaca.
+ */
+async function elKetersediaanCloudbeds(checkin, checkout){
+  const cron = await getSetting('cron');
+  if(!cron?.secret) return null;
+  try{
+    const res = await fetch(`${URL_KETERSEDIAAN_CLOUDBEDS_EL}?${new URLSearchParams({checkin, checkout})}`, {
+      headers: {'Authorization': `Bearer ${cron.secret}`}, signal: AbortSignal.timeout(20000),
+    });
+    if(!res.ok) return null;
+    const j = await res.json().catch(()=>null);
+    return j?.tipe ?? null;
+  }catch{ return null; }
+}
+
+/**
+ * Ketersediaan + harga EL untuk loonars.id dari tabel bersama (harus dipanggil
+ * dalam konteks properti EL). Kamar berstatus 'maintenance' (belum dibuka
+ * manager) tidak dihitung; bentrok = booking aktif, tahanan, Kamar Maintenance,
+ * blokir Cloudbeds EL (unitTidakBisaDijualWebsite), dan jumlah kamar yang
+ * masih dijual menurut Cloudbeds.
  */
 async function elKetersediaanBersama(checkin, checkout){
-  const [{ data: tipe }, { data: units }] = await Promise.all([
+  const [{ data: tipe }, { data: units }, { data: peta }] = await Promise.all([
     supabase.from('villa_room_types').select('id,code,name,description,capacity').eq('active', true).order('code'),
     supabase.from('units').select('id,room_type_id,status'),
+    supabase.from('cloudbeds_room_mapping').select('unit_id,cloudbeds_room_id'),
   ]);
   const konflik = await unitTidakBisaDijualWebsite(null, checkin, checkout);
-  return (tipe ?? []).map(t => {
+  const hasil = (tipe ?? []).map(t => {
     const kamar = (units ?? []).filter(u => u.room_type_id === t.id && u.status !== 'maintenance');
-    return { kode: t.code, nama: t.name, deskripsi: t.description, kapasitas: t.capacity,
-      total: kamar.length, tersedia: kamar.filter(u => !konflik.has(u.id)).length };
+    return { id: t.id, kode: t.code, nama: t.name, deskripsi: t.description, kapasitas: t.capacity,
+      total: kamar.length, tersedia: kamar.filter(u => !konflik.has(u.id)).length,
+      unitIds: (units ?? []).filter(u => u.room_type_id === t.id).map(u => u.id) };
   });
+  // Cloudbeds hanya ditanya kalau memang ada yang tersedia di sini.
+  let cb = null;
+  if(hasil.some(t => t.tersedia > 0)) cb = await elKetersediaanCloudbeds(checkin, checkout);
+  const tipeCbDari = (unitIds) => {
+    const id = (peta ?? []).find(r => unitIds.includes(r.unit_id))?.cloudbeds_room_id;
+    return id ? String(id).replace(/-\d+$/, '') : null;
+  };
+  const keluar = [];
+  for(const t of hasil){
+    let tersedia = t.tersedia;
+    if(cb && t.tersedia > 0){
+      const idCb = tipeCbDari(t.unitIds);
+      tersedia = idCb ? Math.min(tersedia, Number(cb[idCb] ?? 0)) : 0;
+    }
+    const harga = await elHargaOnline(t.kode, checkin, checkout);
+    keluar.push({ kode: t.kode, nama: t.nama, deskripsi: t.deskripsi, kapasitas: t.capacity ?? t.kapasitas,
+      total: t.total, tersedia, malam: harga?.malam ?? null, harga_total: harga?.total ?? null, harga_per_malam: harga?.rata ?? null });
+  }
+  return { tipe: keluar, cloudbeds_terbaca: hasil.some(t => t.tersedia > 0) ? cb !== null : true };
 }
 
 async function elOkupansi(from, to){
@@ -4811,14 +4875,195 @@ async function layani(req){
     return json({ konteks_bekerja: hasil.every(Boolean), properti_request: propertiSaatIni(), properti_siap: [...PROPERTI_SIAP] });
   }
 
-  if(path==='/public/el/availability' && m==='GET'){
-    const checkin = url.searchParams.get('checkin'), checkout = url.searchParams.get('checkout');
-    if(!isValidDateStr(checkin) || !isValidDateStr(checkout) || checkout <= checkin) return err('checkin/checkout tidak valid');
-    if(checkin < addDaysStr(todayWIB(), -1)) return err('Tanggal check-in sudah lewat');
-    if(elMalam(checkin, checkout) > 30) return err('Maksimal 30 malam');
-    // Tabel bersama (multi-properti, 2026-11-04): kamar & booking EL ada di
-    // units/bookings 'EL', bukan lagi el_* (yang sudah tidak dirawat).
-    return json({ checkin, checkout, tipe: await konteksProperti.run({ properti: 'EL' }, () => elKetersediaanBersama(checkin, checkout)) });
+  // ── Booking online Excellent Living (loonars.id) ─────────────────────────
+  // Owner 2026-11-04: website EL dibuka bersamaan dengan kamar dibuka manager.
+  // Semua rute di sini berjalan dalam konteks properti EL (tabel bersama
+  // disaring 'EL'); jalur PL (/public/bookings dst.) tidak disentuh. Harga =
+  // harga dynamic pricing EL yang sama dengan yang dikirim ke Cloudbeds;
+  // pembayaran QRIS EL (el_qris) dikonfirmasi otomatis dari email BTN EL
+  // (payment_email_el) lewat /cron/check-payment-email dan rute
+  // /public/el/bookings/check-payment.
+  if(path.startsWith('/public/el/')){
+    return await konteksProperti.run({ properti: 'EL' }, async () => {
+      if(path==='/public/el/status' && m==='GET'){
+        // Dibuka otomatis begitu ada kamar EL yang tidak lagi 'maintenance'.
+        const {count} = await supabase.from('units').select('id', {count:'exact', head:true}).neq('status','maintenance');
+        return json({ buka: (count ?? 0) > 0 });
+      }
+
+      if(path==='/public/el/availability' && m==='GET'){
+        const checkin = url.searchParams.get('checkin'), checkout = url.searchParams.get('checkout');
+        if(!isValidDateStr(checkin) || !isValidDateStr(checkout) || checkout <= checkin) return err('checkin/checkout tidak valid');
+        if(checkin < todayWIB()) return err('Tanggal check-in sudah lewat');
+        if(elMalam(checkin, checkout) > EL_MAKS_MALAM_ONLINE) return err(`Maksimal ${EL_MAKS_MALAM_ONLINE} malam`);
+        return json({ checkin, checkout, ...(await elKetersediaanBersama(checkin, checkout)) });
+      }
+
+      if(path==='/public/el/payment-info' && m==='GET'){
+        const setting = await getSetting('el_qris');
+        return json({
+          qris_data_url: setting?.data_url ?? null,
+          note: setting?.note ?? 'QRIS pembayaran belum tersedia -- silakan hubungi kami di WhatsApp untuk info pembayaran.',
+        });
+      }
+
+      if(path==='/public/el/bookings' && m==='POST'){
+        const b = await req.json().catch(()=>null);
+        if(!b) return err('Body tidak valid');
+        const nama = String(b.nama??'').trim();
+        const hp = String(b.hp??'').trim();
+        const email = String(b.email??'').trim();
+        const room_type = String(b.room_type??'').trim();
+        const catatan = String(b.catatan??'').trim().slice(0, 500);
+        const tgl_checkin = b.tgl_checkin, tgl_checkout = b.tgl_checkout;
+        const adults = Number.isFinite(Number(b.adults)) ? Math.trunc(Number(b.adults)) : 1;
+        const children = Number.isFinite(Number(b.children)) ? Math.trunc(Number(b.children)) : 0;
+        if(nama.length<2) return err('Nama wajib diisi');
+        if(!room_type) return err('Silakan pilih tipe kamar terlebih dahulu.');
+        if(!/^[0-9+][0-9+\-\s]{7,}$/.test(hp)) return err('Nomor WhatsApp tidak valid');
+        if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return err('Email tidak valid');
+        if(adults < 1 || adults > 20) return err('Jumlah dewasa tidak valid');
+        if(children < 0 || children > 20) return err('Jumlah anak tidak valid');
+        if(!isValidDateStr(tgl_checkin) || !isValidDateStr(tgl_checkout)) return err('Tanggal tidak valid');
+        if(tgl_checkout <= tgl_checkin) return err('Tanggal checkout harus setelah checkin');
+        if(tgl_checkin < todayWIB()) return err('Tanggal check-in sudah lewat');
+        const nights = elMalam(tgl_checkin, tgl_checkout);
+        if(nights > EL_MAKS_MALAM_ONLINE) return err(`Maksimal ${EL_MAKS_MALAM_ONLINE} malam`);
+
+        const {data:rt} = await supabase.from('villa_room_types').select('id,code,name').eq('code', room_type).eq('active', true).maybeSingle();
+        if(!rt) return err('Tipe kamar tidak dikenali', 404);
+        const {data:candidateUnits} = await supabase.from('units').select('id,nomor,room_type_id,status').eq('room_type_id', rt.id).neq('status','maintenance').order('nomor');
+        const kosong = 'Maaf, kamar untuk tanggal yang dipilih sudah penuh. Silakan pilih tanggal/tipe lain atau hubungi kami di WhatsApp.';
+        if(!candidateUnits?.length) return err(kosong, 409);
+        const conflicts = await unitTidakBisaDijualWebsite(candidateUnits.map(u=>u.id), tgl_checkin, tgl_checkout);
+        const freeUnit = candidateUnits.find(u=>!conflicts.has(u.id));
+        if(!freeUnit) return err(kosong, 409);
+
+        // Cloudbeds EL ditanya langsung sebelum menjual (reservasi OTA yang
+        // belum tersinkron, blokir kamar). Tidak terbaca = DITOLAK: kamar yang
+        // sama tidak boleh terjual dua kali.
+        const cb = await elKetersediaanCloudbeds(tgl_checkin, tgl_checkout);
+        if(cb === null){
+          console.error('public/el/bookings: ketersediaan Cloudbeds EL tidak terbaca, pesanan ditolak', {tgl_checkin, tgl_checkout, room_type});
+          return err('Maaf, ketersediaan kamar sedang tidak bisa dipastikan. Silakan coba lagi beberapa menit lagi atau hubungi kami di WhatsApp.', 503);
+        }
+        const {data:petaCb} = await supabase.from('cloudbeds_room_mapping').select('unit_id,cloudbeds_room_id').eq('unit_id', freeUnit.id).maybeSingle();
+        const tipeCb = petaCb?.cloudbeds_room_id ? String(petaCb.cloudbeds_room_id).replace(/-\d+$/, '') : null;
+        if(!tipeCb || Number(cb[tipeCb] ?? 0) <= 0) return err(kosong, 409);
+
+        const harga = await elHargaOnline(rt.code, tgl_checkin, tgl_checkout);
+        if(!harga) return err('Harga untuk tanggal ini belum tersedia, silakan hubungi kami di WhatsApp.', 409);
+
+        const {data:g} = await supabase.from('guests').insert({nama, hp, email}).select('id').single();
+        const kodeUnik = await generateKodeUnikPembayaran();
+        const totalDitagih = harga.total + kodeUnik;
+        const {data:booking, error:bookErr} = await supabase.from('bookings').insert({
+          unit_id: freeUnit.id, unit_nomor: freeUnit.nomor, guest_id: g?.id ?? null, guest_nama: nama,
+          tipe: 'harian', sumber: 'website', tgl_checkin, tgl_checkout,
+          durasi_malam: nights, checkin_time: '14:00:00', adults, children,
+          tarif: harga.total, total_bayar: totalDitagih, status: 'menunggu_pembayaran', is_free_stay: false,
+          catatan: `[Website EL] Booking mandiri dari loonars.id (${rt.name}) -- menunggu pembayaran QRIS.${catatan ? ` ${catatan}` : ''}`,
+        }).select().single();
+        if(bookErr){
+          if(bookErr.code === '23P01') return err('Maaf, kamar baru saja dibooking tamu lain. Silakan pilih tanggal/tipe lain.', 409);
+          return err(bookErr.message);
+        }
+
+        await notif(freeUnit.id, 'all', 'booking', `Booking baru dari Website EL (menunggu pembayaran) -- ${freeUnit.nomor}`,
+          `${nama} (${hp}) - ${rt.name} - ${tgl_checkin} s/d ${tgl_checkout} - Rp ${Math.round(totalDitagih).toLocaleString('id-ID')} -- kamar belum terkunci, menunggu konfirmasi pembayaran (kode ${paymentCode(booking.id)})`, booking.id);
+        const notifySetting = await getSetting('villa_notify');
+        await sendWa(notifySetting?.owner_hp ?? null,
+          `Booking baru dari website Excellent Living\n\n${nama} (${hp})\n${rt.name} - kamar ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\nTotal (dengan kode unik): Rp ${Math.round(totalDitagih).toLocaleString('id-ID')}\n\nSistem mengonfirmasi otomatis begitu email pembayaran BTN masuk.`,
+          {booking_id: booking.id, unit_id: freeUnit.id, template_type: 'el_website_booking_awaiting_payment'});
+
+        return json({
+          booking_id: booking.id, unit_nomor: freeUnit.nomor, tipe_nama: rt.name,
+          tgl_checkin, tgl_checkout, durasi_malam: nights,
+          tarif: harga.total, total_bayar: totalDitagih, kode_unik: kodeUnik, status: booking.status,
+        }, 201);
+      }
+
+      // Status / cek pembayaran / invoice: kunci = nomor WA tamu (sama seperti PL).
+      const ambilBookingEl = async (booking_id, hp, kolom) => {
+        if(!/^[0-9a-f-]{36}$/i.test(booking_id)) return {gagal: err('booking_id tidak valid')};
+        if(!hp) return {gagal: err('Nomor WhatsApp wajib diisi')};
+        const {data:booking} = await supabase.from('bookings').select(kolom).eq('id', booking_id).maybeSingle();
+        if(!booking) return {gagal: err('Booking tidak ditemukan', 404)};
+        if(!SUMBER_BOOKING_WEBSITE.includes(booking.sumber)) return {gagal: err('Booking ini tidak bisa dicek lewat jalur ini', 403)};
+        let guestHp = null;
+        if(booking.guest_id){
+          const {data:g} = await supabase.from('guests').select('hp').eq('id', booking.guest_id).maybeSingle();
+          guestHp = g?.hp ?? null;
+        }
+        if(!guestHp || guestHp.trim() !== hp) return {gagal: err('Nomor WhatsApp tidak cocok dengan booking ini', 403)};
+        return {booking, guestHp};
+      };
+
+      if(path==='/public/el/bookings/status' && m==='GET'){
+        const {booking, gagal} = await ambilBookingEl(url.searchParams.get('booking_id') ?? '', (url.searchParams.get('hp') ?? '').trim(),
+          'id,guest_id,sumber,status,invoice_no,catatan,created_at,unit_id,unit_nomor,tgl_checkin,tgl_checkout');
+        if(gagal) return gagal;
+        const created = Date.parse(booking.created_at);
+        const holdExpiresAt = Number.isFinite(created) ? new Date(created + PENDING_PAYMENT_HOLD_MINUTES*60*1000).toISOString() : null;
+        // QRIS hanya tampil kalau kamarnya masih bisa diberikan.
+        let unit = {tersedia:true, unit_nomor: booking.unit_nomor};
+        if(booking.status === 'menunggu_pembayaran' && booking.unit_id) unit = await pastikanUnitBookingWebsite(booking);
+        return json({
+          status: booking.status, unit_nomor: unit.unit_nomor, unit_tersedia: unit.tersedia,
+          confirmed: booking.status === 'terjadwal',
+          cancelled: booking.status === 'batal',
+          expired: booking.status === 'batal' && String(booking.catatan ?? '').includes(EXPIRED_HOLD_MARK),
+          hold_expires_at: booking.status === 'menunggu_pembayaran' ? holdExpiresAt : null,
+          hold_minutes: PENDING_PAYMENT_HOLD_MINUTES,
+          invoice_no: booking.invoice_no ?? null,
+        });
+      }
+
+      if(path==='/public/el/bookings/check-payment' && m==='POST'){
+        const b = await req.json().catch(()=>null);
+        if(!b) return err('Body tidak valid');
+        const {booking, gagal} = await ambilBookingEl(String(b.booking_id??'').trim(), String(b.hp??'').trim(), 'id,guest_id,sumber,status,catatan,created_at');
+        if(gagal) return gagal;
+        const kedaluwarsaMasihBisaHidup = booking.status === 'batal'
+          && String(booking.catatan ?? '').includes(EXPIRED_HOLD_MARK)
+          && Date.now() - Date.parse(booking.created_at) < BATAS_HIDUP_KEMBALI_JAM*3600*1000;
+        if(booking.status !== 'menunggu_pembayaran' && !kedaluwarsaMasihBisaHidup){
+          return json({success:true, checked:false, confirmed: booking.status === 'terjadwal'});
+        }
+        const cfg = await getSetting('payment_email_el');
+        if(!cfg.host || !cfg.user || !cfg.password) return json({success:true, checked:false, confirmed:false});
+        // Pemindaian penuh kotak email EL (bukan hanya booking ini), dibagi
+        // bersama selama masih berjalan -- terpisah dari pemindaian PL.
+        if(!pemindaianEl) pemindaianEl = scanPaymentInbox(cfg).finally(()=>{ pemindaianEl = null; });
+        const hasil = await pemindaianEl;
+        if(hasil.gagal){
+          console.error(`[el check-payment] booking ${String(booking.id).slice(0,8)}: ${hasil.gagal}`);
+          return json({success:true, checked:false, confirmed:false});
+        }
+        return json({success:true, checked:true, confirmed: hasil.dikonfirmasi.some(d=>d.booking_id===booking.id)});
+      }
+
+      if(path==='/public/el/bookings/invoice' && m==='GET'){
+        const {booking, guestHp, gagal} = await ambilBookingEl(url.searchParams.get('booking_id') ?? '', (url.searchParams.get('hp') ?? '').trim(),
+          'id,unit_nomor,guest_id,sumber,guest_nama,tgl_checkin,tgl_checkout,durasi_malam,tarif,total_bayar,harga_paket,paket_dekorasi,status,invoice_no,bukti_pembayaran_at,created_at,unit_id');
+        if(gagal) return gagal;
+        if(!booking.invoice_no || !booking.bukti_pembayaran_at) return err('Pembayaran belum terkonfirmasi untuk booking ini', 409);
+        const {data:u} = await supabase.from('units').select('room_type_id').eq('id', booking.unit_id).maybeSingle();
+        const {data:rt} = u?.room_type_id ? await supabase.from('villa_room_types').select('name').eq('id', u.room_type_id).maybeSingle() : {data:null};
+        return json({
+          properti: namaProperti(), invoice_no: booking.invoice_no, booking_id: booking.id,
+          unit_nomor: booking.unit_nomor, tipe_nama: rt?.name ?? null,
+          guest_nama: booking.guest_nama, guest_hp: guestHp,
+          tgl_checkin: booking.tgl_checkin, tgl_checkout: booking.tgl_checkout, durasi_malam: booking.durasi_malam,
+          tarif: Number(booking.tarif),
+          kode_unik: Math.max(0, Number(booking.total_bayar ?? booking.tarif) - Number(booking.tarif)),
+          total_bayar: tagihanTamu(booking),
+          paid_at: booking.bukti_pembayaran_at, created_at: booking.created_at,
+        });
+      }
+
+      return err('Rute tidak ditemukan', 404);
+    });
   }
 
   if(path==='/public/payment-info' && m==='GET'){
@@ -6363,69 +6608,82 @@ async function layani(req){
     if(!cron.secret) return err('Cron belum dikonfigurasi (integration_settings.cron.secret)',503);
     if(!await secretsMatch(provided, cron.secret)) return err('Unauthorized',401);
 
-    // Pengingat pembayaran (owner 2026-09-28), ditumpangkan di jadwal 5 menit
-    // yang sama karena kandidatnya sama persis: booking website yang masih
-    // 'menunggu_pembayaran'. Dijalankan SEBELUM langkah pembatalan di bawah,
-    // supaya booking yang baru lewat separuh waktu masih sempat diingatkan
-    // sebelum akhirnya (kalau tetap tidak dibayar) dibatalkan di langkah itu.
-    // Sekali per booking: wa_messages_log dicek dulu, bukan diklaim-insert --
-    // pg_cron di sini hanya satu jadwal berurutan (tidak paralel), jadi
-    // risiko dua proses berebut baris yang sama praktis nol, sama seperti
-    // langkah pembatalan di bawah yang juga tidak memakainya.
-    const reminderCutoff = new Date(Date.now() - PAYMENT_REMINDER_AT_MINUTES*60*1000).toISOString();
-    const {data:pendingUntukDiingatkan} = await supabase.from('bookings')
-      .select('id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,created_at')
-      .in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran').lte('created_at', reminderCutoff)
-      // Hanya yang tahanannya belum habis: cron ini jalan tiap 5 menit, jadi
-      // tanpa batas ini booking menit ke-16 masih bisa diingatkan "dilepas
-      // pukul X" untuk jam yang sudah lewat, lalu dibatalkan detik itu juga.
-      .gt('created_at', new Date(Date.now() - PENDING_PAYMENT_HOLD_MINUTES*60*1000).toISOString());
+    // Satu putaran per properti (cron berjalan dalam konteks PL; booking
+    // online EL ikut dibatalkan/diingatkan lewat putaran EL). PL tetap
+    // putaran utama dengan jawaban yang sama seperti dulu.
+    const putaran = async () => {
+      // Pengingat pembayaran (owner 2026-09-28), ditumpangkan di jadwal 5 menit
+      // yang sama karena kandidatnya sama persis: booking website yang masih
+      // 'menunggu_pembayaran'. Dijalankan SEBELUM langkah pembatalan di bawah,
+      // supaya booking yang baru lewat separuh waktu masih sempat diingatkan
+      // sebelum akhirnya (kalau tetap tidak dibayar) dibatalkan di langkah itu.
+      // Sekali per booking: wa_messages_log dicek dulu, bukan diklaim-insert --
+      // pg_cron di sini hanya satu jadwal berurutan (tidak paralel), jadi
+      // risiko dua proses berebut baris yang sama praktis nol, sama seperti
+      // langkah pembatalan di bawah yang juga tidak memakainya.
+      const reminderCutoff = new Date(Date.now() - PAYMENT_REMINDER_AT_MINUTES*60*1000).toISOString();
+      const {data:pendingUntukDiingatkan} = await supabase.from('bookings')
+        .select('id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,created_at')
+        .in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran').lte('created_at', reminderCutoff)
+        // Hanya yang tahanannya belum habis: cron ini jalan tiap 5 menit, jadi
+        // tanpa batas ini booking menit ke-16 masih bisa diingatkan "dilepas
+        // pukul X" untuk jam yang sudah lewat, lalu dibatalkan detik itu juga.
+        .gt('created_at', new Date(Date.now() - PENDING_PAYMENT_HOLD_MINUTES*60*1000).toISOString());
 
-    let diingatkan = 0;
-    for(const bk of pendingUntukDiingatkan ?? []){
-      const {data:sudahDiingatkan} = await supabase.from('wa_messages_log')
-        .select('id').eq('booking_id', bk.id).eq('template_type','payment_reminder').limit(1);
-      if(sudahDiingatkan && sudahDiingatkan.length) continue;
+      let diingatkan = 0;
+      for(const bk of pendingUntukDiingatkan ?? []){
+        const {data:sudahDiingatkan} = await supabase.from('wa_messages_log')
+          .select('id').eq('booking_id', bk.id).eq('template_type', templateProperti('payment_reminder')).limit(1);
+        if(sudahDiingatkan && sudahDiingatkan.length) continue;
 
-      let hp = null;
-      if(bk.guest_id){
-        const {data:g} = await supabase.from('guests').select('hp').eq('id', bk.guest_id).maybeSingle();
-        hp = g?.hp ?? null;
+        let hp = null;
+        if(bk.guest_id){
+          const {data:g} = await supabase.from('guests').select('hp').eq('id', bk.guest_id).maybeSingle();
+          hp = g?.hp ?? null;
+        }
+        if(!hp) continue; // Tanpa nomor tidak ada yang bisa dikirimi dan tidak ada booking_id yang berarti untuk dicatat 'skipped_no_phone'.
+
+        const batasWaktu = new Date(new Date(bk.created_at).getTime() + PENDING_PAYMENT_HOLD_MINUTES*60*1000);
+        const isi = teksPengingatPembayaran({
+          nama: bk.guest_nama, unit: bk.unit_nomor, checkin: bk.tgl_checkin, checkout: bk.tgl_checkout,
+          batasWaktu, bahasa: bahasaDariNomorHp(hp),
+        });
+        const terkirim = await sendWa(hp, isi, {booking_id: bk.id, template_type: templateProperti('payment_reminder')});
+        if(terkirim) diingatkan++;
       }
-      if(!hp) continue; // Tanpa nomor tidak ada yang bisa dikirimi dan tidak ada booking_id yang berarti untuk dicatat 'skipped_no_phone'.
 
-      const batasWaktu = new Date(new Date(bk.created_at).getTime() + PENDING_PAYMENT_HOLD_MINUTES*60*1000);
-      const isi = teksPengingatPembayaran({
-        nama: bk.guest_nama, unit: bk.unit_nomor, checkin: bk.tgl_checkin, checkout: bk.tgl_checkout,
-        batasWaktu, bahasa: bahasaDariNomorHp(hp),
-      });
-      const terkirim = await sendWa(hp, isi, {booking_id: bk.id, template_type:'payment_reminder'});
-      if(terkirim) diingatkan++;
+      const cutoff = new Date(Date.now() - PENDING_PAYMENT_HOLD_MINUTES*60*1000).toISOString();
+      const {data:stale} = await supabase.from('bookings')
+        .select('id,unit_nomor,guest_nama,tgl_checkin,tgl_checkout,catatan,created_at')
+        .in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran').lt('created_at', cutoff);
+
+      const expired = [];
+      for(const bk of stale ?? []){
+        // Dicek ulang per baris, bukan lewat satu UPDATE massal, supaya sebuah
+        // booking yang baru saja dikonfirmasi owner di detik yang sama tidak
+        // ikut terbatalkan: .eq('status','menunggu_pembayaran') di bawah
+        // membuat update-nya kalah kalau statusnya sudah berubah.
+        const catatan = `${bk.catatan ?? ''} ${EXPIRED_HOLD_MARK} ${new Date().toISOString()}`.trim();
+        const {data:updated, error:upErr} = await supabase.from('bookings')
+          .update({status:'batal', catatan})
+          .eq('id', bk.id).eq('status','menunggu_pembayaran')
+          .select('id');
+        if(upErr || !(updated ?? []).length) continue;
+        expired.push({id:bk.id, unit_nomor:bk.unit_nomor, guest_nama:bk.guest_nama});
+        await notif(null, 'all', 'booking', `Booking kedaluwarsa -- Unit ${bk.unit_nomor}`,
+          `${bk.guest_nama} (${bk.tgl_checkin} s/d ${bk.tgl_checkout}) tidak menyelesaikan pembayaran dalam ${PENDING_PAYMENT_HOLD_MINUTES} menit, booking dibatalkan otomatis.`, bk.id);
+      }
+
+      return {diingatkan, expired: expired.length, bookings: expired};
+    };
+    const pl = await putaran();
+    const lain = {};
+    for(const kode of PROPERTI_SIAP){
+      if(kode === 'PL') continue;
+      try { lain[kode] = await konteksProperti.run({ properti: kode }, putaran); }
+      catch(e){ lain[kode] = {error: e?.message ?? String(e)}; }
     }
-
-    const cutoff = new Date(Date.now() - PENDING_PAYMENT_HOLD_MINUTES*60*1000).toISOString();
-    const {data:stale} = await supabase.from('bookings')
-      .select('id,unit_nomor,guest_nama,tgl_checkin,tgl_checkout,catatan,created_at')
-      .in('sumber', SUMBER_BOOKING_WEBSITE).eq('status','menunggu_pembayaran').lt('created_at', cutoff);
-
-    const expired = [];
-    for(const bk of stale ?? []){
-      // Dicek ulang per baris, bukan lewat satu UPDATE massal, supaya sebuah
-      // booking yang baru saja dikonfirmasi owner di detik yang sama tidak
-      // ikut terbatalkan: .eq('status','menunggu_pembayaran') di bawah
-      // membuat update-nya kalah kalau statusnya sudah berubah.
-      const catatan = `${bk.catatan ?? ''} ${EXPIRED_HOLD_MARK} ${new Date().toISOString()}`.trim();
-      const {data:updated, error:upErr} = await supabase.from('bookings')
-        .update({status:'batal', catatan})
-        .eq('id', bk.id).eq('status','menunggu_pembayaran')
-        .select('id');
-      if(upErr || !(updated ?? []).length) continue;
-      expired.push({id:bk.id, unit_nomor:bk.unit_nomor, guest_nama:bk.guest_nama});
-      await notif(null, 'all', 'booking', `Booking kedaluwarsa -- Unit ${bk.unit_nomor}`,
-        `${bk.guest_nama} (${bk.tgl_checkin} s/d ${bk.tgl_checkout}) tidak menyelesaikan pembayaran dalam ${PENDING_PAYMENT_HOLD_MINUTES} menit, booking dibatalkan otomatis.`, bk.id);
-    }
-
-    return json({diingatkan, expired: expired.length, bookings: expired});
+    return json({...pl, lain});
   }
 
   // Info malam pukul 21.00 WIB (pg_cron '0 14 * * *' UTC): kontak security
