@@ -6,7 +6,7 @@ function Isi() {
   const { user, ready, logout } = useAuth();
   if (!ready) return <div className="min-h-screen flex items-center justify-center text-ink/30 text-xs">Memuat sesi...</div>;
   return (
-    <div className="min-h-screen bg-base-950 flex items-center justify-center px-4">
+    <div className="min-h-screen bg-canvas flex items-center justify-center px-4">
       <div className="max-w-md text-center">
         <div className="text-[10px] font-medium text-gold-500 tracking-[0.25em] uppercase">Loonars</div>
         <h1 className="font-serif text-2xl font-light text-ink mt-2">Fitur properti Anda belum aktif</h1>
