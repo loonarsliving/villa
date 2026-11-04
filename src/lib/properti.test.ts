@@ -28,5 +28,9 @@ describe("booking EL milik front desk", () => {
     expect(bookingElMilikSendiri("[Front Desk EL] tamu VIP")).toBe(true);
     expect(bookingElMilikSendiri(null)).toBe(false);
     expect(bookingElMilikSendiri("Booking Agoda")).toBe(false);
+    // Properti baru (kode apa pun): penanda front desk & website sama polanya.
+    expect(bookingElMilikSendiri("[Front Desk LVA] tamu")).toBe(true);
+    expect(bookingElMilikSendiri("[Website XYZ] booking mandiri")).toBe(true);
+    expect(bookingElMilikSendiri("[Website] tanpa kode")).toBe(false);
   });
 });

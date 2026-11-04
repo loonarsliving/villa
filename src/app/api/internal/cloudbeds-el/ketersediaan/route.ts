@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { getCloudbedsRatePlans, parseRoomsAvailableByRoomType, periksaKunciEl } from "@/lib/cloudbedsApi";
+import { getCloudbedsRatePlans, parseRoomsAvailableByRoomType } from "@/lib/cloudbedsApi";
+import { siapkanAkunCloudbeds } from "@/lib/propertiConfig";
 import { isAuthorizedCronRequest } from "@/lib/cronAuth";
 
 export const runtime = "nodejs";
@@ -20,12 +21,14 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const checkin = url.searchParams.get("checkin") ?? "";
   const checkout = url.searchParams.get("checkout") ?? "";
+  const kode = (url.searchParams.get("properti") ?? "EL").trim().toUpperCase();
+  if (!/^[A-Z]{2,6}$/.test(kode) || kode === "PL") return NextResponse.json({ error: "properti tidak valid" }, { status: 400 });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(checkin) || !/^\d{4}-\d{2}-\d{2}$/.test(checkout) || checkout <= checkin) {
     return NextResponse.json({ error: "checkin/checkout tidak valid" }, { status: 400 });
   }
   try {
-    await periksaKunciEl();
-    const plans = await getCloudbedsRatePlans(checkin, checkout, "el");
+    const { akun } = await siapkanAkunCloudbeds(kode);
+    const plans = await getCloudbedsRatePlans(checkin, checkout, akun);
     const perTipe = parseRoomsAvailableByRoomType(plans);
     const malam: string[] = [];
     for (let d = Date.parse(`${checkin}T00:00:00Z`); d < Date.parse(`${checkout}T00:00:00Z`); d += 86400000) malam.push(new Date(d).toISOString().slice(0, 10));

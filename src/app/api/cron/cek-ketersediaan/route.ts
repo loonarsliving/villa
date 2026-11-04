@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { getCloudbedsRatePlans, getCloudbedsRoomBlocks, getCloudbedsRooms, parseRoomsAvailableByRoomType, periksaKunciEl, type CloudbedsAkun } from "@/lib/cloudbedsApi";
+import { getCloudbedsRatePlans, getCloudbedsRoomBlocks, getCloudbedsRooms, parseRoomsAvailableByRoomType, type CloudbedsAkun } from "@/lib/cloudbedsApi";
+import { siapkanAkunCloudbeds } from "@/lib/propertiConfig";
 import { isAuthorizedCronRequest } from "@/lib/cronAuth";
 
 export const runtime = "nodejs";
@@ -16,9 +17,10 @@ export const maxDuration = 60;
 export async function GET(request: Request) {
   if (!(await isAuthorizedCronRequest(request))) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const url = new URL(request.url);
-  const akun: CloudbedsAkun = url.searchParams.get("akun") === "el" ? "el" : "utama";
+  const akunParam = (url.searchParams.get("akun") ?? "utama").trim().toLowerCase();
+  let akun: CloudbedsAkun = "utama";
   const hari = Math.min(120, Math.max(7, Number(url.searchParams.get("hari") ?? 60) || 60));
-  if (akun === "el") await periksaKunciEl();
+  if (akunParam !== "utama") akun = (await siapkanAkunCloudbeds(akunParam)).akun;
   const mulai = new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10);
   const tambah = (n: number) => new Date(Date.parse(`${mulai}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
   try {

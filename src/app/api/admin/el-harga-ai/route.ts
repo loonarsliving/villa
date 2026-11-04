@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { bacaSetelanEl, KUNCI_SETELAN_EL, runElDynamicPricing } from "@/lib/elDynamicPricing";
+import { bacaSetelanHarga, kunciSetelanHarga, runDynamicPricingProperti } from "@/lib/elDynamicPricing";
 import { supabaseAdminProperti } from "@/lib/supabaseAdmin";
 import { periksaTokenAdmin } from "@/lib/villaApiAuth";
 
@@ -16,12 +16,20 @@ async function sesiAdmin(request: Request) {
   return null;
 }
 
-/** Setelan + rekomendasi terakhir dynamic pricing EL, dan batas bawah/atas per tipe. */
+/** Kode properti dari ?properti=XX (bawaan EL); bukan PL. */
+function kodeProperti(request: Request): string | null {
+  const k = (new URL(request.url).searchParams.get("properti") ?? "EL").trim().toUpperCase();
+  return /^[A-Z]{2,6}$/.test(k) && k !== "PL" ? k : null;
+}
+
+/** Setelan + rekomendasi terakhir dynamic pricing properti (bawaan EL), dan batas bawah/atas per tipe. */
 export async function GET(request: Request) {
   const tolak = await sesiAdmin(request);
   if (tolak) return tolak;
-  const setelan = await bacaSetelanEl();
-  const { data: tipe } = await supabaseAdminProperti("EL").from("villa_room_types").select("id, code, name, min_rate, max_rate").eq("active", true).order("name");
+  const kode = kodeProperti(request);
+  if (!kode) return NextResponse.json({ error: "properti tidak valid" }, { status: 400 });
+  const setelan = await bacaSetelanHarga(kode);
+  const { data: tipe } = await supabaseAdminProperti(kode).from("villa_room_types").select("id, code, name, min_rate, max_rate").eq("active", true).order("name");
   return NextResponse.json({ ...setelan, tipe: tipe ?? [] });
 }
 
@@ -34,18 +42,20 @@ export async function POST(request: Request) {
   const tolak = await sesiAdmin(request);
   if (tolak) return tolak;
   const b = (await request.json().catch(() => ({}))) as { aksi?: string; nilai?: unknown; kode?: unknown; min_rate?: unknown; max_rate?: unknown };
-  const db = supabaseAdminProperti("EL");
+  const kode = kodeProperti(request);
+  if (!kode) return NextResponse.json({ error: "properti tidak valid" }, { status: 400 });
+  const db = supabaseAdminProperti(kode);
   try {
-    if (b.aksi === "jalankan") return NextResponse.json(await runElDynamicPricing({ paksaKirim: false }));
+    if (b.aksi === "jalankan") return NextResponse.json(await runDynamicPricingProperti(kode, { paksaKirim: false }));
     if (b.aksi === "autopush") {
       if (typeof b.nilai !== "boolean") return NextResponse.json({ error: "nilai harus true/false" }, { status: 400 });
-      const s = await bacaSetelanEl();
+      const s = await bacaSetelanHarga(kode);
       if (b.nilai) {
         const { data: tipe } = await db.from("villa_room_types").select("code, min_rate, max_rate").eq("active", true);
         const kurang = (tipe ?? []).filter((t) => !t.min_rate || !t.max_rate).map((t) => t.code);
         if (kurang.length) return NextResponse.json({ error: `Batas bawah/atas belum diatur untuk: ${kurang.join(", ")}` }, { status: 409 });
       }
-      const { error } = await db.from("integration_settings").upsert({ key: KUNCI_SETELAN_EL, value: { ...s, autopush: b.nilai } }, { onConflict: "key" });
+      const { error } = await db.from("integration_settings").upsert({ key: kunciSetelanHarga(kode), value: { ...s, autopush: b.nilai } }, { onConflict: "key" });
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ autopush: b.nilai });
     }

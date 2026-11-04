@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { CloudbedsApiError, periksaKunciEl } from "@/lib/cloudbedsApi";
+import { CloudbedsApiError } from "@/lib/cloudbedsApi";
+import { siapkanAkunCloudbeds } from "@/lib/propertiConfig";
 import { hargaElDariCloudbeds } from "@/lib/elHarga";
 import { supabaseAdminProperti } from "@/lib/supabaseAdmin";
 import { periksaTokenEl } from "@/lib/villaApiAuth";
@@ -31,9 +32,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Maksimal 62 malam" }, { status: 400 });
   }
   try {
-    const periksa = await periksaKunciEl();
-    if (!periksa.terpilih) return NextResponse.json({ error: "Cloudbeds Excellent Living belum tersambung" }, { status: 503 });
-    return NextResponse.json({ checkin, checkout, ...(await hargaElDariCloudbeds(supabaseAdminProperti("EL"), checkin, checkout)) });
+    const kode = (url.searchParams.get("properti") ?? "EL").trim().toUpperCase();
+    if (!/^[A-Z]{2,6}$/.test(kode) || kode === "PL") return NextResponse.json({ error: "properti tidak valid" }, { status: 400 });
+    const { akun } = await siapkanAkunCloudbeds(kode);
+    return NextResponse.json({ checkin, checkout, ...(await hargaElDariCloudbeds(supabaseAdminProperti(kode), checkin, checkout, akun)) });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ error: message }, { status: e instanceof CloudbedsApiError ? e.status : 502 });

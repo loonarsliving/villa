@@ -29,8 +29,10 @@ function propertiSaatIni(){ return konteksProperti.getStore()?.properti ?? 'PL';
 // Nama properti di pesan WA tamu dan nama cabang MK Connect-nya.
 const NAMA_PROPERTI = { PL: 'Loonars Private Living', EL: 'Loonars Excellent Living' };
 function namaProperti(){ return NAMA_PROPERTI[propertiSaatIni()] ?? 'Loonars'; }
-// Template WA properti selain PL wajib berawalan 'el_' (lihat sendWa).
-function templateProperti(nama){ return propertiSaatIni() === 'PL' ? nama : `el_${nama}`; }
+// Template WA properti selain PL wajib berawalan '<kode huruf kecil>_' (EL: 'el_'; lihat sendWa).
+function templateProperti(nama){ const k = propertiSaatIni(); return k === 'PL' ? nama : `${k.toLowerCase()}_${nama}`; }
+// Nama cabang MK Connect (daftar security) per properti; bawaan: nama properti.
+const CABANG_PROPERTI = {};
 // Properti yang datanya sudah di tabel bersama DAN pengaman per propertinya
 // (Cloudbeds, QRIS, rumus uang) sudah dipasang. Properti lain selalu
 // diperlakukan PL -- tidak ada perubahan perilaku sampai properti
@@ -38,7 +40,36 @@ function templateProperti(nama){ return propertiSaatIni() === 'PL' ? nama : `el_
 // EL dinyalakan 2026-11-04 (owner: "Sinkronkan dan nyalakan ... bawa ke
 // production"), setelah kamar EL pindah ke tabel bersama dan pengaman
 // (daftar izin rute, WA, harga, check-in tanpa PIN) terpasang.
+// Properti BARU (dibuat admin di halaman Properti, tanpa coding) ikut bila
+// integration_settings 'properti_<kode>'.siap = true -- dimuat dari database
+// paling sering sekali per menit per isolate (muatPropertiSiap).
 const PROPERTI_SIAP = new Set(['PL', 'EL']);
+let propertiDimuatPada = 0;
+async function muatPropertiSiap(){
+  if(Date.now() - propertiDimuatPada < 60_000) return;
+  propertiDimuatPada = Date.now();
+  try{
+    const {data:props, error:e1} = await supabaseSemua.from('villa_properties').select('kode,nama').eq('aktif', true);
+    const {data:konf, error:e2} = await supabaseSemua.from('integration_settings').select('key,value').like('key', 'properti\\_%');
+    if(e1 || e2) throw new Error((e1 ?? e2).message);
+    const peta = new Map((konf ?? []).map(r=>[String(r.key).slice('properti_'.length).toUpperCase(), r.value ?? {}]));
+    const siap = new Set(['PL', 'EL']);
+    for(const p of props ?? []){
+      const kode = String(p.kode).toUpperCase();
+      if(!/^[A-Z]{2,6}$/.test(kode) || kode === 'PL') continue;
+      NAMA_PROPERTI[kode] = String(p.nama);
+      const k = peta.get(kode);
+      if(k?.siap === true) siap.add(kode);
+      if(Array.isArray(k?.cabang_mkconnect) && k.cabang_mkconnect.length) CABANG_PROPERTI[kode] = k.cabang_mkconnect.map(String);
+    }
+    // EL tidak boleh hilang dari daftar walau dinonaktifkan di tabel: tetap seperti sebelumnya.
+    PROPERTI_SIAP.clear();
+    siap.forEach(k=>PROPERTI_SIAP.add(k));
+  }catch(e){
+    console.error('[properti] gagal memuat daftar properti, memakai daftar sebelumnya:', e?.message ?? e);
+    propertiDimuatPada = Date.now() - 50_000;
+  }
+}
 // Rute yang boleh dipakai properti selain PL (lihat pemeriksaan di layani()).
 // Ditambah satu per satu setelah rutenya diperiksa: data lewat
 // TABEL_PER_PROPERTI, tanpa efek khusus PL.
@@ -732,7 +763,7 @@ async function scanPaymentInbox(cfg, {onlyBookingId} = {}){
  * kali.
  */
 let pemindaianBerjalan = null;
-let pemindaianEl = null;
+const pemindaianProp = {};
 function scanPaymentInboxBersama(cfg){
   if(!pemindaianBerjalan){
     pemindaianBerjalan = scanPaymentInbox(cfg).finally(()=>{ pemindaianBerjalan = null; });
@@ -839,7 +870,8 @@ async function daftarSecurityMalam(){
   // Nama cabang di MK Connect tidak selalu persis nama properti (EL dibuat
   // owner sebagai "Excellent living"), jadi beberapa penulisan diterima.
   const NAMA_CABANG = {PL: ['Loonars Private Living'], EL: ['Loonars Excellent Living', 'Excellent Living', 'Excellent living']};
-  const {data:cabang} = await supabase.from('branches').select('id').in('name', NAMA_CABANG[propertiSaatIni()] ?? [namaProperti()]);
+  const namaCabang = CABANG_PROPERTI[propertiSaatIni()] ?? NAMA_CABANG[propertiSaatIni()] ?? [namaProperti()];
+  const {data:cabang} = await supabase.from('branches').select('id').in('name', namaCabang);
   const {data:divisi} = await supabase.from('divisions').select('id').ilike('name','security');
   if(!cabang?.length || !divisi?.length) return [];
   const {data, error} = await supabase.from('employees').select('full_name,phone')
@@ -1433,7 +1465,7 @@ async function sendWa(phone, message, meta){
   // sendiri (template_type 'el_*'): semua pesan lain di file ini bertuliskan
   // Private Living / loonars.id / PIN pintu villa (owner 2026-11-04: EL
   // tidak memakai PIN pintu).
-  if(propertiSaatIni() !== 'PL' && !String(metaAman.template_type ?? '').startsWith('el_')){
+  if(propertiSaatIni() !== 'PL' && !String(metaAman.template_type ?? '').startsWith(propertiSaatIni().toLowerCase() + '_')){
     await catat({...metaAman, phone, message, status:'skipped_property_' + propertiSaatIni()});
     return false;
   }
@@ -4247,7 +4279,7 @@ const URL_KETERSEDIAAN_CLOUDBEDS_EL = 'https://living.haluoleo.id/api/internal/c
  * bawah/atas). null kalau ada malam tanpa harga -- tidak pernah ditebak.
  */
 async function elHargaOnline(kodeTipe, checkin, checkout){
-  const set = await getSetting('el_dynamic_pricing');
+  const set = await getSetting(`${propertiSaatIni().toLowerCase()}_dynamic_pricing`);
   const peta = set?.harga_online?.[kodeTipe];
   if(!peta) return null;
   let total = 0, malam = 0;
@@ -4269,7 +4301,7 @@ async function elKetersediaanCloudbeds(checkin, checkout){
   const cron = await getSetting('cron');
   if(!cron?.secret) return null;
   try{
-    const res = await fetch(`${URL_KETERSEDIAAN_CLOUDBEDS_EL}?${new URLSearchParams({checkin, checkout})}`, {
+    const res = await fetch(`${URL_KETERSEDIAAN_CLOUDBEDS_EL}?${new URLSearchParams({checkin, checkout, properti: propertiSaatIni()})}`, {
       headers: {'Authorization': `Bearer ${cron.secret}`}, signal: AbortSignal.timeout(20000),
     });
     if(!res.ok) return null;
@@ -4766,7 +4798,7 @@ async function routeExcellentLiving(req, path, m, url, session){
   return err('Not found', 404);
 }
 
-Deno.serve((req)=>konteksProperti.run({ properti: 'PL' }, ()=>layani(req)));
+Deno.serve((req)=>konteksProperti.run({ properti: 'PL' }, async ()=>{ await muatPropertiSiap(); return layani(req); }));
 
 async function layani(req){
   if(req.method==='OPTIONS') return new Response('ok',{headers:CORS});
@@ -4867,7 +4899,7 @@ async function layani(req){
   // menjaga properti per request melewati await dan query. Tanpa data
   // pribadi; hanya true/false.
   if(path==='/public/cek-konteks-properti' && m==='GET'){
-    const hasil = await Promise.all(['PL','EL','PL','EL'].map(kode => konteksProperti.run({ properti: kode }, async () => {
+    const hasil = await Promise.all([...PROPERTI_SIAP, ...PROPERTI_SIAP].map(kode => konteksProperti.run({ properti: kode }, async () => {
       await new Promise(r => setTimeout(r, Math.random() * 20));
       await supabase.from('villa_room_types').select('id', { count:'exact', head:true });
       return propertiSaatIni() === kode;
@@ -4883,15 +4915,22 @@ async function layani(req){
   // pembayaran QRIS EL (el_qris) dikonfirmasi otomatis dari email BTN EL
   // (payment_email_el) lewat /cron/check-payment-email dan rute
   // /public/el/bookings/check-payment.
-  if(path.startsWith('/public/el/')){
-    return await konteksProperti.run({ properti: 'EL' }, async () => {
-      if(path==='/public/el/status' && m==='GET'){
+  // /public/p/<kode>/... = properti mana pun yang siap (dibuat admin tanpa coding);
+  // /public/el/... = alias lama untuk EL (dipakai loonars.id sebelum halaman umum).
+  const rutePublikProp = path.match(/^\/public\/(?:el|p\/([A-Za-z]{2,6}))\/(.+)$/);
+  if(rutePublikProp){
+    const kodeP = rutePublikProp[1] ? rutePublikProp[1].toUpperCase() : 'EL';
+    const sub = rutePublikProp[2];
+    if(kodeP === 'PL' || !PROPERTI_SIAP.has(kodeP)) return err('Properti tidak tersedia', 404);
+    return await konteksProperti.run({ properti: kodeP }, async () => {
+      const kodeKecil = kodeP.toLowerCase();
+      if(sub==='status' && m==='GET'){
         // Dibuka otomatis begitu ada kamar EL yang tidak lagi 'maintenance'.
         const {count} = await supabase.from('units').select('id', {count:'exact', head:true}).neq('status','maintenance');
-        return json({ buka: (count ?? 0) > 0 });
+        return json({ kode: kodeP, nama: namaProperti(), buka: (count ?? 0) > 0 });
       }
 
-      if(path==='/public/el/availability' && m==='GET'){
+      if(sub==='availability' && m==='GET'){
         const checkin = url.searchParams.get('checkin'), checkout = url.searchParams.get('checkout');
         if(!isValidDateStr(checkin) || !isValidDateStr(checkout) || checkout <= checkin) return err('checkin/checkout tidak valid');
         if(checkin < todayWIB()) return err('Tanggal check-in sudah lewat');
@@ -4899,15 +4938,15 @@ async function layani(req){
         return json({ checkin, checkout, ...(await elKetersediaanBersama(checkin, checkout)) });
       }
 
-      if(path==='/public/el/payment-info' && m==='GET'){
-        const setting = await getSetting('el_qris');
+      if(sub==='payment-info' && m==='GET'){
+        const setting = await getSetting(kunciQrisKasir());
         return json({
           qris_data_url: setting?.data_url ?? null,
           note: setting?.note ?? 'QRIS pembayaran belum tersedia -- silakan hubungi kami di WhatsApp untuk info pembayaran.',
         });
       }
 
-      if(path==='/public/el/bookings' && m==='POST'){
+      if(sub==='bookings' && m==='POST'){
         const b = await req.json().catch(()=>null);
         if(!b) return err('Body tidak valid');
         const nama = String(b.nama??'').trim();
@@ -4962,19 +5001,19 @@ async function layani(req){
           tipe: 'harian', sumber: 'website', tgl_checkin, tgl_checkout,
           durasi_malam: nights, checkin_time: '14:00:00', adults, children,
           tarif: harga.total, total_bayar: totalDitagih, status: 'menunggu_pembayaran', is_free_stay: false,
-          catatan: `[Website EL] Booking mandiri dari loonars.id (${rt.name}) -- menunggu pembayaran QRIS.${catatan ? ` ${catatan}` : ''}`,
+          catatan: `[Website ${kodeP}] Booking mandiri dari loonars.id (${rt.name}) -- menunggu pembayaran QRIS.${catatan ? ` ${catatan}` : ''}`,
         }).select().single();
         if(bookErr){
           if(bookErr.code === '23P01') return err('Maaf, kamar baru saja dibooking tamu lain. Silakan pilih tanggal/tipe lain.', 409);
           return err(bookErr.message);
         }
 
-        await notif(freeUnit.id, 'all', 'booking', `Booking baru dari Website EL (menunggu pembayaran) -- ${freeUnit.nomor}`,
+        await notif(freeUnit.id, 'all', 'booking', `Booking baru dari Website ${kodeP} (menunggu pembayaran) -- ${freeUnit.nomor}`,
           `${nama} (${hp}) - ${rt.name} - ${tgl_checkin} s/d ${tgl_checkout} - Rp ${Math.round(totalDitagih).toLocaleString('id-ID')} -- kamar belum terkunci, menunggu konfirmasi pembayaran (kode ${paymentCode(booking.id)})`, booking.id);
         const notifySetting = await getSetting('villa_notify');
         await sendWa(notifySetting?.owner_hp ?? null,
-          `Booking baru dari website Excellent Living\n\n${nama} (${hp})\n${rt.name} - kamar ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\nTotal (dengan kode unik): Rp ${Math.round(totalDitagih).toLocaleString('id-ID')}\n\nSistem mengonfirmasi otomatis begitu email pembayaran BTN masuk.`,
-          {booking_id: booking.id, unit_id: freeUnit.id, template_type: 'el_website_booking_awaiting_payment'});
+          `Booking baru dari website ${namaProperti()}\n\n${nama} (${hp})\n${rt.name} - kamar ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\nTotal (dengan kode unik): Rp ${Math.round(totalDitagih).toLocaleString('id-ID')}\n\nSistem mengonfirmasi otomatis begitu email pembayaran BTN masuk.`,
+          {booking_id: booking.id, unit_id: freeUnit.id, template_type: templateProperti('website_booking_awaiting_payment')});
 
         return json({
           booking_id: booking.id, unit_nomor: freeUnit.nomor, tipe_nama: rt.name,
@@ -4999,7 +5038,7 @@ async function layani(req){
         return {booking, guestHp};
       };
 
-      if(path==='/public/el/bookings/status' && m==='GET'){
+      if(sub==='bookings/status' && m==='GET'){
         const {booking, gagal} = await ambilBookingEl(url.searchParams.get('booking_id') ?? '', (url.searchParams.get('hp') ?? '').trim(),
           'id,guest_id,sumber,status,invoice_no,catatan,created_at,unit_id,unit_nomor,tgl_checkin,tgl_checkout');
         if(gagal) return gagal;
@@ -5019,7 +5058,7 @@ async function layani(req){
         });
       }
 
-      if(path==='/public/el/bookings/check-payment' && m==='POST'){
+      if(sub==='bookings/check-payment' && m==='POST'){
         const b = await req.json().catch(()=>null);
         if(!b) return err('Body tidak valid');
         const {booking, gagal} = await ambilBookingEl(String(b.booking_id??'').trim(), String(b.hp??'').trim(), 'id,guest_id,sumber,status,catatan,created_at');
@@ -5030,12 +5069,12 @@ async function layani(req){
         if(booking.status !== 'menunggu_pembayaran' && !kedaluwarsaMasihBisaHidup){
           return json({success:true, checked:false, confirmed: booking.status === 'terjadwal'});
         }
-        const cfg = await getSetting('payment_email_el');
+        const cfg = await getSetting(`payment_email_${kodeKecil}`);
         if(!cfg.host || !cfg.user || !cfg.password) return json({success:true, checked:false, confirmed:false});
         // Pemindaian penuh kotak email EL (bukan hanya booking ini), dibagi
         // bersama selama masih berjalan -- terpisah dari pemindaian PL.
-        if(!pemindaianEl) pemindaianEl = scanPaymentInbox(cfg).finally(()=>{ pemindaianEl = null; });
-        const hasil = await pemindaianEl;
+        if(!pemindaianProp[kodeP]) pemindaianProp[kodeP] = scanPaymentInbox(cfg).finally(()=>{ pemindaianProp[kodeP] = null; });
+        const hasil = await pemindaianProp[kodeP];
         if(hasil.gagal){
           console.error(`[el check-payment] booking ${String(booking.id).slice(0,8)}: ${hasil.gagal}`);
           return json({success:true, checked:false, confirmed:false});
@@ -5043,7 +5082,7 @@ async function layani(req){
         return json({success:true, checked:true, confirmed: hasil.dikonfirmasi.some(d=>d.booking_id===booking.id)});
       }
 
-      if(path==='/public/el/bookings/invoice' && m==='GET'){
+      if(sub==='bookings/invoice' && m==='GET'){
         const {booking, guestHp, gagal} = await ambilBookingEl(url.searchParams.get('booking_id') ?? '', (url.searchParams.get('hp') ?? '').trim(),
           'id,unit_nomor,guest_id,sumber,guest_nama,tgl_checkin,tgl_checkout,durasi_malam,tarif,total_bayar,harga_paket,paket_dekorasi,status,invoice_no,bukti_pembayaran_at,created_at,unit_id');
         if(gagal) return gagal;
@@ -8714,6 +8753,36 @@ async function layani(req){
     return json({key:data.key, updated_at:data.updated_at, value: redact(data.value)});
   }
 
+  // Uji login kotak email pembayaran SEBELUM disimpan (wizard Tambah Properti,
+  // src/app/api/admin/properti/konfigurasi): hanya LOGIN + SELECT INBOX +
+  // hitung email BTN belum dibaca. Password tidak pernah ikut ke jawaban.
+  if(path==='/admin/tes-email' && m==='POST'){
+    const b = await req.json().catch(()=>null);
+    const host = String(b?.host ?? '').trim(), user = String(b?.user ?? '').trim(), password = String(b?.password ?? '');
+    const port = Number(b?.port ?? 993);
+    if(!host || !user || !password) return err('host, user, dan password wajib diisi');
+    if(!/^[A-Za-z0-9.\-]+$/.test(host)) return err('host tidak valid');
+    let client = null, timedOut = false;
+    const timer = setTimeout(()=>{ timedOut = true; client?.close(); }, 15000);
+    try{
+      const conn = await Deno.connectTls({hostname: host, port: Number.isFinite(port) ? port : 993});
+      client = new MiniImap(conn);
+      await client.greeting();
+      await client.cmd(`LOGIN ${imapQuote(user)} ${imapQuote(password)}`);
+      await client.cmd('SELECT INBOX');
+      const subjek = String(b?.subject_contains ?? 'Payment Merchant Success');
+      const hasil = await client.cmd(`UID SEARCH UNSEEN SUBJECT ${imapQuote(subjek)}`);
+      const uids = hasil.map(u=>u.line.match(/^\* SEARCH\b(.*)$/i)?.[1] ?? '').join(' ').trim().split(/\s+/).filter(x=>/^\d+$/.test(x));
+      try { await client.cmd('LOGOUT'); } catch {}
+      return json({ok:true, notifikasi_belum_dibaca: uids.length});
+    }catch(e){
+      return json({ok:false, pesan: timedOut ? 'Server email tidak menjawab dalam 15 detik' : String(e?.message ?? e).slice(0, 200)});
+    }finally{
+      clearTimeout(timer);
+      client?.close();
+    }
+  }
+
   if(path==='/admin/users' && m==='GET'){
     const {data,error} = await supabase.from('villa_users').select('id,nama,email,role,unit_id,unit_nomor,hp,is_active,must_change_password,last_login,created_at,property_kode').order('created_at',{ascending:false});
     if(error) return err(error.message);
@@ -9278,7 +9347,7 @@ async function layani(req){
       // Booking walk-in properti selain PL: penanda ini dipakai sinkron
       // Cloudbeds properti itu (src/lib/elCloudbedsSync.ts) untuk mengirimnya
       // ke Cloudbeds dan untuk tidak menimpanya dengan salinan Cloudbeds.
-      ...(propertiSaatIni() !== 'PL' ? { catatan: '[Front Desk EL]' } : {}),
+      ...(propertiSaatIni() !== 'PL' ? { catatan: `[Front Desk ${propertiSaatIni()}]` } : {}),
     }).select().single();
     if(error){
       if(error.code === '23P01') return err(`Unit ${b.unit_nomor??''} sudah dibooking untuk tanggal yang bentrok`, 409);
@@ -9358,8 +9427,8 @@ async function layani(req){
       // tanpa PIN, sama dengan teks check-in EL sebelumnya.
       const {data:bkEl} = await supabase.from('bookings').select('tgl_checkin,tgl_checkout').eq('id', b.booking_id).maybeSingle();
       await sendWa(guestPhone,
-        `Halo ${data.guest_nama}, selamat datang di Loonars Excellent Living Yogyakarta!\nCheck-in Anda sudah tercatat (${bkEl?.tgl_checkin ?? ''} s/d ${bkEl?.tgl_checkout ?? ''}). Bila membutuhkan bantuan selama menginap, silakan hubungi resepsionis kami. Terima kasih.`,
-        {booking_id:b.booking_id, unit_id:data.unit_id, template_type:'el_checkin'});
+        `Halo ${data.guest_nama}, selamat datang di ${namaProperti()} Yogyakarta!\nCheck-in Anda sudah tercatat (${bkEl?.tgl_checkin ?? ''} s/d ${bkEl?.tgl_checkout ?? ''}). Bila membutuhkan bantuan selama menginap, silakan hubungi resepsionis kami. Terima kasih.`,
+        {booking_id:b.booking_id, unit_id:data.unit_id, template_type: templateProperti('checkin')});
       if(sedangMalamWIB()){
         try { await kirimInfoMalam({id:b.booking_id, unit_id:data.unit_id, guest_id:data.guest_id, guest_nama:data.guest_nama}); }
         catch(e){ console.error('[info-malam] check-in', e?.message ?? e); }

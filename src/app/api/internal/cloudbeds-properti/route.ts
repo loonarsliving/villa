@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { kredensialCloudbeds, periksaKunciEl } from "@/lib/cloudbedsApi";
+import { kredensialCloudbeds } from "@/lib/cloudbedsApi";
+import { siapkanAkunCloudbeds } from "@/lib/propertiConfig";
 import { isAuthorizedCronRequest } from "@/lib/cronAuth";
 
 export const runtime = "nodejs";
@@ -33,15 +34,16 @@ const DIIZINKAN: Record<string, string[]> = {
 export async function POST(request: Request) {
   if (!(await isAuthorizedCronRequest(request))) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const b = (await request.json().catch(() => ({}))) as { properti?: string; method?: string; endpoint?: string; query?: [string, string][]; form?: string | null };
-  if (b.properti !== "EL") return NextResponse.json({ error: "properti tidak didukung" }, { status: 400 });
+  const kode = String(b.properti ?? "").trim().toUpperCase();
+  if (!/^[A-Z]{2,6}$/.test(kode) || kode === "PL") return NextResponse.json({ error: "properti tidak didukung" }, { status: 400 });
   const endpoint = String(b.endpoint ?? "");
   const method = String(b.method ?? "GET").toUpperCase();
   if (!DIIZINKAN[endpoint]?.includes(method)) return NextResponse.json({ error: "endpoint tidak diizinkan" }, { status: 400 });
 
-  await periksaKunciEl();
   let apiKey: string, propertyId: string;
   try {
-    ({ apiKey, propertyId } = kredensialCloudbeds("el"));
+    const { akun } = await siapkanAkunCloudbeds(kode);
+    ({ apiKey, propertyId } = kredensialCloudbeds(akun));
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 503 });
   }

@@ -35,10 +35,11 @@ export async function hargaElDariCloudbeds(
   supabase: SupabaseClient,
   checkin: string,
   checkout: string,
+  akun = "el",
 ): Promise<{ tipe: HargaTipe[]; tipeKamar: Record<string, string> }> {
   const malam = tanggalAntara(checkin, checkout);
   const [roomsCb, { data: peta }, { data: kamar }, { data: tipe }] = await Promise.all([
-    getCloudbedsRooms("el"),
+    getCloudbedsRooms(akun),
     supabase.from("cloudbeds_room_mapping").select("cloudbeds_room_id, unit_id"),
     supabase.from("units").select("id, room_type_id"),
     supabase.from("villa_room_types").select("id, code, name").eq("active", true).order("name"),
@@ -58,7 +59,7 @@ export async function hargaElDariCloudbeds(
     const cbId = tipeCb.get(String(t.id)) ?? null;
     let rates = new Map<string, number>();
     if (cbId && malam.length) {
-      const r = await getCloudbedsRoomTypeRate(cbId, malam[0], malam[malam.length - 1], "el");
+      const r = await getCloudbedsRoomTypeRate(cbId, malam[0], malam[malam.length - 1], akun);
       rates = new Map(r.map((x) => [x.date.slice(0, 10), x.rate]));
     }
     const per_malam = malam.map((d) => ({ date: d, rate: rates.get(d) ?? null }));

@@ -26,7 +26,7 @@ export async function POST(request: Request) {
   const b = (await request.json().catch(() => ({}))) as { kode?: unknown; nama?: unknown };
   const kode = String(b.kode ?? "").trim().toUpperCase();
   const nama = String(b.nama ?? "").trim();
-  if (!/^[A-Z]{2,6}$/.test(kode)) return NextResponse.json({ error: "Kode properti 2-6 huruf (contoh: LV3)" }, { status: 400 });
+  if (!/^[A-Z]{2,6}$/.test(kode)) return NextResponse.json({ error: "Kode properti 2-6 huruf (contoh: LVB)" }, { status: 400 });
   if (nama.length < 3 || nama.length > 80) return NextResponse.json({ error: "Nama properti 3-80 karakter" }, { status: 400 });
   const { data, error } = await supabaseAdmin().from("villa_properties").insert({ kode, nama, aktif: true }).select("kode, nama, aktif").single();
   if (error) {
