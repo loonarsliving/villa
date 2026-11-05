@@ -899,6 +899,8 @@ export interface FinanceChecklistItem {
   kotor: number;
   seharusnya: number;
   cloudbeds_reservation_id: string | null;
+  /** Nomor booking OTA (diisi saat mencocokkan daftar payout); null kalau belum pernah. */
+  ota_booking_number?: string | null;
   masuk: boolean;
   settlement_status: string | null;
   expected_settlement_date: string | null;

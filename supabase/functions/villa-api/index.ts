@@ -82,7 +82,7 @@ const RUTE_PROPERTI_LAIN = new Set([
   'GET /notifications', 'PATCH /notifications/read',
   'GET /manager/whoami', 'GET /finance/whoami',
   'GET /finance/summary', 'GET /finance/channel-breakdown', 'GET /finance/bookings', 'GET /finance/booking',
-  'GET /finance/checklist-dana', 'POST /finance/settlements/receive', 'POST /finance/settlements/receive-bulk',
+  'GET /finance/checklist-dana', 'POST /finance/settlements/receive', 'POST /finance/settlements/receive-bulk', 'POST /finance/settlements/receive-payout',
   'POST /finance/settlements/unreceive', 'POST /finance/settlements/process',
   'GET /admin/users', 'POST /admin/users', 'PATCH /admin/users',
   // Tutup buku & log audit per properti (migrasi 20261104000005).
@@ -3123,6 +3123,8 @@ function calculateExpectedSettlement({ sumber, tgl_checkin, tgl_checkout, config
  * survival KPI, dan settlement semuanya memakainya.
  */
 const STATUS_PEMASUKAN_DIAKUI = ['terjadwal', 'checkin', 'checkout'];
+// Checklist Dana: booking dihitung mulai pukul 12.01 WIB di tanggal checkout (menit sejak 00.00).
+const MENIT_HITUNG_CHECKOUT_WIB = 12 * 60 + 1;
 // Satu argumen saja: dipakai sebagai .filter(isPemasukanDiakui), yang
 // mengoper index sebagai argumen kedua.
 function isPemasukanDiakui(b){
@@ -3210,7 +3212,7 @@ async function ensureFinanceSettlements(bookings, configMap){
 // tutup buku (/finance/tutup-buku*), supaya angka keduanya selalu sama.
 async function hitungChecklistDana(from, to, sumber = null){
   const { data: rows, error } = await supabase.from('bookings')
-    .select('id,unit_nomor,guest_nama,sumber,status,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_subtotal,cloudbeds_reservation_id')
+    .select('id,unit_nomor,guest_nama,sumber,status,tgl_checkin,tgl_checkout,durasi_malam,total_bayar,tarif,cloudbeds_subtotal,cloudbeds_reservation_id,ota_booking_number')
     .gte('tgl_checkin', from).lte('tgl_checkin', to)
     .in('status', STATUS_PEMASUKAN_DIAKUI)
     .order('tgl_checkin',{ascending:true}).limit(1000);
@@ -3219,8 +3221,15 @@ async function hitungChecklistDana(from, to, sumber = null){
   // <= hari ini WIB), bukan sejak check-in, supaya finance tidak bingung
   // melihat dana booking yang tamunya belum pulang. Hanya berlaku di checklist
   // dan tutup buku; pengakuan pendapatan (isPemasukanDiakui) tidak berubah.
+  // Koreksi owner 2026-11-06: hari checkout baru dihitung mulai pukul 12.01
+  // WIB (bukan sejak 00.00), jadi pukul 00.01 di tanggal checkout belum masuk.
   const hariIni = todayWIB();
-  let bookings = (rows ?? []).filter(b=>STATUS_PEMASUKAN_DIAKUI.includes(b.status) && String(b.tgl_checkout ?? '') <= hariIni && String(b.tgl_checkout ?? '') !== '');
+  const [jamWIB, menitWIB] = new Date().toLocaleString('en-GB', { timeZone: WIB_TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).split(/[^0-9]+/).filter(Boolean).slice(-2).map(Number);
+  const sudahLewatJamCheckout = jamWIB * 60 + menitWIB >= MENIT_HITUNG_CHECKOUT_WIB;
+  let bookings = (rows ?? []).filter(b=>{
+    const co = String(b.tgl_checkout ?? '');
+    return STATUS_PEMASUKAN_DIAKUI.includes(b.status) && co !== '' && (co < hariIni || (co === hariIni && sudahLewatJamCheckout));
+  });
   if(sumber) bookings = bookings.filter(b=>b.sumber===sumber);
 
   const configMap = await getSettlementConfigMap();
@@ -3243,6 +3252,7 @@ async function hitungChecklistDana(from, to, sumber = null){
       kotor: pendapatanKotor(b),
       seharusnya: s ? Number(s.amount) : pendapatanBersih(b),
       cloudbeds_reservation_id: b.cloudbeds_reservation_id ?? null,
+      ota_booking_number: b.ota_booking_number ?? null,
       masuk,
       settlement_status: s?.settlement_status ?? null,
       expected_settlement_date: s?.expected_settlement_date ?? null,
@@ -8290,6 +8300,53 @@ async function layani(req){
       updated++;
     }
     return json({ updated, skipped, not_found: ids.length - (list ?? []).length });
+  }
+
+  // Catat dana masuk dari DAFTAR PAYOUT OTA (owner 2026-11-06): finance
+  // mengunggah daftar payout Booking.com/Agoda, halaman mencocokkan per
+  // booking, lalu baris yang cocok dikirim ke sini. Jumlah diterima per
+  // booking = Net dari OTA (bukan estimasi komisi); selisih dengan angka
+  // seharusnya tercatat sebagai VARIANCE. Nomor booking OTA disimpan di
+  // bookings.ota_booking_number (hanya kalau masih kosong) supaya cocok lewat
+  // nomor berikutnya.
+  if(path==='/finance/settlements/receive-payout' && m==='POST'){
+    if(!isFinance) return forbidden();
+    const body = await req.json();
+    const rows = Array.isArray(body.rows) ? body.rows : [];
+    if(!rows.length) return err('rows wajib diisi');
+    if(rows.length > 200) return err('Maksimal 200 booking sekali catat');
+    if(!body.received_date) return err('received_date wajib diisi');
+    const norm = [];
+    for(const r of rows){
+      const net = Math.round(Number(r?.net));
+      if(!r?.booking_id || !Number.isFinite(net) || net < 0) return err('Setiap baris wajib punya booking_id dan net yang valid');
+      norm.push({ booking_id: String(r.booking_id), net, nomor: r.ota_booking_number ? String(r.ota_booking_number).slice(0,40) : null });
+    }
+    const { data: list, error } = await supabase.from('finance_settlements').select('*').in('booking_id', norm.map(r=>r.booking_id));
+    if(error) return err(error.message);
+    const byBooking = new Map((list ?? []).map((s)=>[s.booking_id, s]));
+    let updated = 0, skipped = 0, not_found = 0, nomor_bentrok = 0;
+    for(const r of norm){
+      const s = byBooking.get(r.booking_id);
+      if(!s){ not_found++; continue; }
+      if(s.settlement_status==='RECEIVED'){ skipped++; continue; }
+      const variance_amount = r.net - Number(s.amount);
+      const patch = {
+        settlement_status:'RECEIVED', amount_received: r.net, received_date: body.received_date,
+        bank_reference: body.bank_reference ?? null, notes: body.notes ?? s.notes ?? null,
+        reconciliation_status: variance_amount === 0 ? 'MATCHED' : 'VARIANCE', variance_amount, updated_at: new Date().toISOString(),
+      };
+      const { data: saved, error: uErr } = await supabase.from('finance_settlements').update(patch).eq('id', s.id).select('*').single();
+      if(uErr) return err(uErr.message);
+      await writeFinanceAudit({ entity_type:'finance_settlement', entity_id: s.id, session, action:'mark_received_payout', old_value: s, new_value: saved, reason: body.reason ?? ('Daftar payout OTA' + (r.nomor ? ' ' + r.nomor : '')) });
+      if(r.nomor){
+        const { data: sudah, error: nErr } = await supabase.from('bookings').update({ ota_booking_number: r.nomor }).eq('id', r.booking_id).is('ota_booking_number', null).select('id');
+        if(nErr) console.error('[receive-payout] gagal menyimpan ota_booking_number:', nErr.message);
+        else if(!sudah?.length) nomor_bentrok++;
+      }
+      updated++;
+    }
+    return json({ updated, skipped, not_found, nomor_sudah_terisi: nomor_bentrok });
   }
 
   // Batalkan centang "sudah masuk" (salah centang). Alasan wajib, tercatat

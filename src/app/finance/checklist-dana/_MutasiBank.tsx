@@ -24,10 +24,10 @@ interface Bacaan {
 }
 
 /** Mutasi berisi teks kecil: lebih besar dari foto chat (1600px), tetap di bawah batas body server. */
-const SISI_MAKS_GAMBAR = 2400;
-const MAKS_PDF_BYTE = 3_000_000;
+export const SISI_MAKS_GAMBAR = 2400;
+export const MAKS_PDF_BYTE = 3_000_000;
 
-function kecilkanGambar(file: File): Promise<string> {
+export function kecilkanGambar(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
@@ -52,7 +52,7 @@ function kecilkanGambar(file: File): Promise<string> {
   });
 }
 
-function bacaSebagaiDataUrl(file: File): Promise<string> {
+export function bacaSebagaiDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(String(r.result));

@@ -378,3 +378,38 @@ export async function bacaMutasiBank(data: string, mimeType: string, hariIni: st
     catatan: typeof json.catatan === "string" ? json.catatan : "",
   };
 }
+
+export interface PayoutOtaBacaan {
+  readable: boolean;
+  ota: "booking.com" | "agoda" | null;
+  rows: { nomor: string; tipe: string; tamu: string; checkin: string; checkout: string; kotor: number | null; net: number }[];
+  total: number | null;
+  catatan: string;
+}
+
+/**
+ * Daftar payout OTA (owner 2026-11-06): foto/screenshot/PDF daftar payout
+ * Booking.com atau Agoda dibaca AI Mkhsistem (hanya menyalin). Pencocokan di
+ * src/lib/payoutOta.ts; pencatatan lewat tombol finance.
+ */
+export async function bacaDaftarPayoutOta(data: string, mimeType: string, hariIni: string): Promise<PayoutOtaBacaan> {
+  const { baseUrl, secret } = await loadAiBridgeConfig();
+  const res = await fetch(`${baseUrl}/api/villa/ai/bank-statement`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-internal-secret": secret },
+    body: JSON.stringify({ data, mimeType, hariIni, jenis: "payout" }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(55_000),
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json || json.success !== true) {
+    throw new Error(`Membaca daftar payout gagal: ${json?.error || `HTTP ${res.status}`}`);
+  }
+  return {
+    readable: json.readable === true,
+    ota: json.ota === "booking.com" || json.ota === "agoda" ? json.ota : null,
+    rows: Array.isArray(json.rows) ? json.rows : [],
+    total: typeof json.total === "number" ? json.total : null,
+    catatan: typeof json.catatan === "string" ? json.catatan : "",
+  };
+}

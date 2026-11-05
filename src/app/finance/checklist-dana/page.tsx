@@ -12,6 +12,7 @@ import type { FinanceChecklist, FinanceChecklistItem, TutupBukuDaftar } from "@/
 import { kelompokkanPerPencairan, rentangCheckinUntukPencairan, type PencairanGroup } from "@/lib/financePencairan";
 import type { MutasiBaris } from "@/lib/mutasiBank";
 import { MutasiBankCard } from "./_MutasiBank";
+import { PayoutOtaCard } from "./_PayoutOta";
 
 /**
  * Checklist dana masuk (owner 2026-10-07): "checklist manual dana yg masuk
@@ -182,6 +183,17 @@ export default function ChecklistDanaPage() {
     setNilaiMutasi(String(baris.nominal));
     setTglMasuk(baris.tanggal);
     setRefBank(baris.keterangan.slice(0, 100));
+  }
+
+  async function catatPayoutOta(rows: { booking_id: string; ota_booking_number: string; net: number }[], tanggal: string, ref: string): Promise<string> {
+    const r = await api.post<{ updated: number; skipped: number; not_found: number; nomor_sudah_terisi: number }>(`/finance/settlements/receive-payout`, {
+      rows,
+      received_date: tanggal,
+      bank_reference: ref || undefined,
+    });
+    load();
+    const lain = [r.skipped ? `${r.skipped} sudah tercatat sebelumnya` : "", r.not_found ? `${r.not_found} settlement tidak ditemukan` : ""].filter(Boolean);
+    return `${r.updated} booking ditandai sudah masuk${lain.length ? ` (${lain.join(", ")})` : ""}.`;
   }
 
   async function tandaiTerpilih() {
@@ -369,6 +381,7 @@ export default function ChecklistDanaPage() {
             </div>
           </Card>
 
+          <PayoutOtaCard items={dataCair?.items ?? []} onCatat={catatPayoutOta} />
           <MutasiBankCard groups={pencairanSemua} bulanLabel={namaBulan(bulan)} onPakai={pakaiMutasi} />
 
           {selected.size > 0 && (
