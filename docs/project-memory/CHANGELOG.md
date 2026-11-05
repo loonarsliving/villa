@@ -4,6 +4,13 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-11-05 — Chat 0822: menu sapaan otomatis untuk "Halo kak"
+- Permintaan owner: orang asing yang membuka dengan salam saja ("Halo kak", "Malam kak", "Permisi kak") sebelumnya tidak dibalas siapa pun (tidak lolos `menyebutSewaVilla`, dan Mkhsistem diam karena `ai_lead_manual_takeover`). Sekarang `/api/wa/mirror` membalas menu: 1 Menginap/booking Private Living, 2 Properti & investasi, 3 Lainnya. Jawaban "1" membuka percakapan di Chat resepsionis (dicatat "1 (pilihan menu sapaan: Menginap / booking)", lalu sapaan pertama seperti biasa); "2"/"3" dibalas singkat dan tetap milik Mkhsistem/owner. Pertanyaan bebas yang dikenali `menyebutSewaVilla` tetap langsung masuk.
+- Syarat menu (`bolehDapatMenuSapaan`, `src/lib/waChat.ts`): salam saja tanpa pak/bu, bukan iklan Meta (`ad_reply` / teks iklan), bukan pelanggan refund, bukan karyawan/kontraktor, dan nomor tidak chat ke 0822 dalam 14 hari (dibaca dari `ai_conversations` Mkhsistem). Status "menu menunggu jawaban" juga dihitung dari `ai_conversations` -- tanpa tabel atau migrasi baru. Saat menu dikirim, mirror menjawab `villa: true` agar Mkhsistem tidak ikut membalas. Logika murni di `src/lib/menuSapaan.ts` (+ tes).
+
+### 2026-11-05 — Chat resepsionis: kata kunci tamu yang terlewat
+- Audit `ai_conversations` 21 hari: banyak tamu villa dari nomor 0822 tidak pernah masuk Chat resepsionis karena `menyebutSewaVilla` (`src/lib/waChat.ts`) tidak mengenali kata yang mereka pakai. Ditambahkan ke penanda longgar (tetap kalah oleh `PENANDA_PROPERTI`): `kamar`/`room` tanpa "kosong", `pl` (pricelist), `agoda`/`agodaa`/`agooda`/`traveloka`/`tiket.com`/`booking.com`, `bookingnya`/`boking`/`book`, `pemesanan`, `avail`, `tersedia`, `cek in` (dulu regex `che?k` tidak cocok "cek"), `permalamnya`, `floating breakfast`/`honeymoon`/`birthday`/`dekor`/`pool`. Penanda baru `PENANDA_BUKAN_TAMU` (lowongan/loker/lamaran) supaya pelamar kerja tidak ikut masuk. Pesan lama tidak dipindahkan; berlaku untuk pesan berikutnya.
+
 ### 2026-11-01 — CI: font lokal
 - `src/app/layout.tsx` pindah dari `next/font/google` ke `next/font/local` (file di `src/app/fonts/`), karena build CI GitHub gagal acak saat mengambil Google Fonts. Tampilan tidak berubah.
 
