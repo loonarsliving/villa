@@ -266,7 +266,7 @@ export default function ChecklistDanaPage() {
       {!loading && data && t && (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-            <StatCard label="Seharusnya masuk" value={fmtCurrencyFull(t.seharusnya)} sub={`${t.count} booking, angka bersih`} />
+            <StatCard label="Seharusnya masuk" value={fmtCurrencyFull(t.seharusnya)} sub={`${t.count} booking sudah checkout, angka bersih`} />
             <StatCard label="Sudah masuk" value={fmtCurrencyFull(t.diterima)} accent="sage" sub={`${t.count_masuk} booking dicentang`} />
             <StatCard label="Belum masuk" value={fmtCurrencyFull(t.belum)} sub={`${t.count_belum} booking belum dicentang`} />
             <StatCard
