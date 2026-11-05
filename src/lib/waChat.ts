@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { terjemahkanChat } from "./aiBridge";
+import { hanyaSapaan } from "./menuSapaan";
 import { kirimDariNomorUtama } from "./mkhsistemWa";
 import { nomorKanonik, samePhoneNumber } from "./phone";
 import { supabaseAdminProperti } from "./supabaseAdmin";
@@ -270,6 +271,68 @@ export async function bolehMasukResepsionis(supabase: SupabaseClient, phoneMenta
   const { data: guests, error: guestError } = await supabase.from("guests").select("hp").not("hp", "is", null).neq("hp", "");
   if (guestError) console.error("[waChat] gagal memeriksa data tamu", guestError.message);
   return (guests ?? []).some((g) => samePhoneNumber(g.hp, phone));
+}
+
+/**
+ * Menu sapaan (src/lib/menuSapaan.ts) hanya untuk orang asing yang membuka
+ * dengan salam saja: bukan pelanggan refund, bukan karyawan/kontraktor, bukan
+ * dari iklan Meta (urusan sales), dan nomornya tidak chat ke 0822 dalam 14 hari
+ * terakhir (ai_conversations Mkhsistem). Syarat terakhir ini yang menjaga rekan
+ * bisnis atau investor yang sedang aktif chat tidak tiba-tiba menerima menu,
+ * dan menu tidak terkirim dua kali ke orang yang sama.
+ * Gagal baca = tidak dikirim (lebih baik diam daripada salah kirim).
+ */
+export async function bolehDapatMenuSapaan(supabase: SupabaseClient, phoneMentah: string, teks: string, adaIklan: boolean): Promise<boolean> {
+  if (adaIklan || dariIklan(teks) || !hanyaSapaan(teks)) return false;
+  if (await nomorPelangganRefund(supabase, phoneMentah)) return false;
+  if (await orangDalamMkhsistem(supabase, phoneMentah)) return false;
+  const riwayat = await riwayatChatTerakhir(supabase, phoneMentah, 14 * 24);
+  return riwayat !== null && riwayat.length === 0;
+}
+
+/**
+ * Nomor ini baru saja menerima menu sapaan: pesan sebelumnya ada dalam 24 jam,
+ * dan semua pesannya dalam 15 hari terakhir hanya salam (jadi salam pertamanya
+ * memenuhi syarat menu di atas). Dihitung dari ai_conversations, tanpa tabel baru.
+ */
+export async function menuSapaanTertunda(supabase: SupabaseClient, phoneMentah: string): Promise<boolean> {
+  if (await nomorPelangganRefund(supabase, phoneMentah)) return false;
+  if (await orangDalamMkhsistem(supabase, phoneMentah)) return false;
+  const riwayat = await riwayatChatTerakhir(supabase, phoneMentah, 15 * 24);
+  if (!riwayat?.length) return false;
+  const terakhir = riwayat[0];
+  const umurJam = (Date.now() - new Date(terakhir.created_at).getTime()) / 3_600_000;
+  return umurJam <= 24 && hanyaSapaan(terakhir.inbound_text ?? "") && riwayat.every((r) => hanyaSapaan(r.inbound_text ?? ""));
+}
+
+/**
+ * Pesan masuk sebelumnya dari nomor ini di ai_conversations (milik Mkhsistem,
+ * project Supabase yang sama), terbaru dulu. Pesan yang sedang diproses belum
+ * tersimpan di sana (Mkhsistem baru menyimpan setelah menerima jawaban villa);
+ * 10 detik terakhir tetap dilewati untuk berjaga-jaga. null = gagal dibaca.
+ */
+async function riwayatChatTerakhir(
+  supabase: SupabaseClient,
+  phoneMentah: string,
+  jam: number,
+): Promise<Array<{ inbound_text: string | null; created_at: string }> | null> {
+  const akhiran = akhiranNomor(phoneMentah);
+  if (akhiran.length < 9) return null;
+  const sejak = new Date(Date.now() - jam * 3_600_000).toISOString();
+  const sampai = new Date(Date.now() - 10_000).toISOString();
+  const { data, error } = await supabase
+    .from("ai_conversations")
+    .select("sender,inbound_text,created_at")
+    .like("sender", `%${akhiran}`)
+    .gte("created_at", sejak)
+    .lt("created_at", sampai)
+    .order("created_at", { ascending: false })
+    .limit(20);
+  if (error) {
+    console.error("[waChat] gagal membaca riwayat ai_conversations", error.message);
+    return null;
+  }
+  return (data ?? []).filter((r) => akhiranNomor(String(r.sender ?? "")) === akhiran);
 }
 
 /** Nomor ada di daftar refund Mkhsistem. Gagal baca = dianggap bukan (Mkhsistem tetap mengurus refund lebih dulu). */

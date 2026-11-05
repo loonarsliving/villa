@@ -3,7 +3,16 @@ import { after, NextResponse } from "next/server";
 import { buatDrafAiAman } from "@/lib/aiResepsionis";
 import { secretsMatch } from "@/lib/internalSecret";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { bolehMasukResepsionis, catatPesanMasukAman, kirimSapaanPertamaAman, terjemahkanPesanMasukAman } from "@/lib/waChat";
+import { bacaPilihanMenu, isiPilihanMenginap, teksMenuSapaan, TEKS_PILIHAN_LAIN } from "@/lib/menuSapaan";
+import { kirimDariNomorUtama } from "@/lib/mkhsistemWa";
+import {
+  bolehDapatMenuSapaan,
+  bolehMasukResepsionis,
+  catatPesanMasukAman,
+  kirimSapaanPertamaAman,
+  menuSapaanTertunda,
+  terjemahkanPesanMasukAman,
+} from "@/lib/waChat";
 import { isiNotifChatTamu, kirimPushKePeranAman, totalChatBelumDibaca } from "@/lib/webPush";
 import { PERAN_NOTIF_CHAT_TAMU } from "@/lib/webPushConfig";
 import { normalizeInbound } from "@/lib/whacenter";
@@ -41,10 +50,23 @@ export const maxDuration = 60;
  * lewat after(). Draf itu hanya tampil di layar Chat -- tidak ada yang terkirim ke
  * tamu tanpa resepsionis menekan Kirim.
  *
+ * Menu sapaan (owner 2026-11-05, src/lib/menuSapaan.ts): orang asing yang
+ * membuka dengan salam saja ("Halo kak") dibalas menu 1/2/3. Jawaban "1" dicatat
+ * di Chat resepsionis (lalu disapa seperti biasa); "2"/"3" dibalas singkat dan
+ * tetap milik Mkhsistem/owner. Saat menu dikirim, jawabannya `villa: true` agar
+ * Mkhsistem tidak ikut membalas.
+ *
  * HANYA mencatat -- tidak menjalankan LUNAS/PROMO/dll. Perintah-perintah itu
  * sudah diproses Mkhsistem untuk nomor ini; memprosesnya lagi di sini berarti
  * owner menerima balasan konfirmasi dua kali.
  */
+/** Payload WhaCenter membawa ad_reply berisi (klik iklan Meta) -- urusan sales, tanpa menu sapaan. */
+function adaIklan(payload: unknown): boolean {
+  const ad = (payload as Record<string, unknown> | null)?.ad_reply;
+  if (!ad || typeof ad !== "object") return false;
+  return Object.values(ad as Record<string, unknown>).some((v) => v !== null && v !== undefined && v !== "");
+}
+
 export async function POST(request: Request) {
   const expected = (process.env.VILLA_BRIDGE_SECRET ?? "").trim();
   if (!expected) {
@@ -61,11 +83,35 @@ export async function POST(request: Request) {
   if (!inbound) return NextResponse.json({ ok: true, villa: false, skipped: "bukan pesan perorangan" });
 
   const supabase = supabaseAdmin();
+  let isiDicatat = inbound.text;
   if (!(await bolehMasukResepsionis(supabase, inbound.sender, inbound.text))) {
-    return NextResponse.json({ ok: true, villa: false, skipped: "bukan tamu atau penanya villa" });
+    // Menu sapaan (src/lib/menuSapaan.ts, owner 2026-11-05): salam saja dari
+    // orang asing dijawab menu; jawaban "1" baru dibawa ke resepsionis.
+    const pilihan = inbound.mediaUrl ? null : bacaPilihanMenu(inbound.text);
+    if (pilihan && (await menuSapaanTertunda(supabase, inbound.sender))) {
+      if (pilihan !== "menginap") {
+        after(async () => {
+          const sent = await kirimDariNomorUtama(inbound.sender, TEKS_PILIHAN_LAIN);
+          if (!sent.success) console.error("[wa/mirror] balasan pilihan menu gagal dikirim", sent.error);
+        });
+        return NextResponse.json({ ok: true, villa: false, skipped: `pilihan menu sapaan: ${pilihan}` });
+      }
+      isiDicatat = isiPilihanMenginap(inbound.text);
+    } else if (!inbound.mediaUrl && (await bolehDapatMenuSapaan(supabase, inbound.sender, inbound.text, adaIklan(payload)))) {
+      after(async () => {
+        const sent = await kirimDariNomorUtama(inbound.sender, teksMenuSapaan(inbound.senderName));
+        if (!sent.success) console.error("[wa/mirror] menu sapaan gagal dikirim", sent.error);
+      });
+      // villa: true supaya Mkhsistem tidak ikut membalas (tidak dobel dengan
+      // "pilih proyek" kalau ai_lead_manual_takeover suatu saat dimatikan).
+      // Percakapan resepsionis belum dibuat -- baru setelah tamu memilih 1.
+      return NextResponse.json({ ok: true, villa: true, menu: true, tercatat: false });
+    } else {
+      return NextResponse.json({ ok: true, villa: false, skipped: "bukan tamu atau penanya villa" });
+    }
   }
 
-  const hasil = await catatPesanMasukAman(supabase, inbound.sender, inbound.text, {
+  const hasil = await catatPesanMasukAman(supabase, inbound.sender, isiDicatat, {
     namaTampilan: inbound.senderName,
     mediaUrl: inbound.mediaUrl,
   });
