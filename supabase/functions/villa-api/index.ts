@@ -3215,7 +3215,12 @@ async function hitungChecklistDana(from, to, sumber = null){
     .in('status', STATUS_PEMASUKAN_DIAKUI)
     .order('tgl_checkin',{ascending:true}).limit(1000);
   if(error) throw new GalatQueryFinance(error.message);
-  let bookings = (rows ?? []).filter(isPemasukanDiakui);
+  // Owner 2026-11-06: dana estimasi baru dihitung SETELAH checkout (tgl_checkout
+  // <= hari ini WIB), bukan sejak check-in, supaya finance tidak bingung
+  // melihat dana booking yang tamunya belum pulang. Hanya berlaku di checklist
+  // dan tutup buku; pengakuan pendapatan (isPemasukanDiakui) tidak berubah.
+  const hariIni = todayWIB();
+  let bookings = (rows ?? []).filter(b=>STATUS_PEMASUKAN_DIAKUI.includes(b.status) && String(b.tgl_checkout ?? '') <= hariIni && String(b.tgl_checkout ?? '') !== '');
   if(sumber) bookings = bookings.filter(b=>b.sumber===sumber);
 
   const configMap = await getSettlementConfigMap();
