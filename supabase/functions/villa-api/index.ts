@@ -3123,8 +3123,8 @@ function calculateExpectedSettlement({ sumber, tgl_checkin, tgl_checkout, config
  * survival KPI, dan settlement semuanya memakainya.
  */
 const STATUS_PEMASUKAN_DIAKUI = ['terjadwal', 'checkin', 'checkout'];
-// Checklist Dana: booking dihitung setelah pukul ini (WIB) di tanggal checkout.
-const JAM_HITUNG_CHECKOUT_WIB = 15;
+// Checklist Dana: booking dihitung mulai pukul 12.01 WIB di tanggal checkout (menit sejak 00.00).
+const MENIT_HITUNG_CHECKOUT_WIB = 12 * 60 + 1;
 // Satu argumen saja: dipakai sebagai .filter(isPemasukanDiakui), yang
 // mengoper index sebagai argumen kedua.
 function isPemasukanDiakui(b){
@@ -3221,11 +3221,11 @@ async function hitungChecklistDana(from, to, sumber = null){
   // <= hari ini WIB), bukan sejak check-in, supaya finance tidak bingung
   // melihat dana booking yang tamunya belum pulang. Hanya berlaku di checklist
   // dan tutup buku; pengakuan pendapatan (isPemasukanDiakui) tidak berubah.
-  // Koreksi owner 2026-11-06: hari checkout baru dihitung mulai pukul 15.00
+  // Koreksi owner 2026-11-06: hari checkout baru dihitung mulai pukul 12.01
   // WIB (bukan sejak 00.00), jadi pukul 00.01 di tanggal checkout belum masuk.
   const hariIni = todayWIB();
-  const jamWIB = Number(new Date().toLocaleString('en-GB', { timeZone: WIB_TZ, hour: '2-digit', hourCycle: 'h23' }));
-  const sudahLewatJamCheckout = jamWIB >= JAM_HITUNG_CHECKOUT_WIB;
+  const [jamWIB, menitWIB] = new Date().toLocaleString('en-GB', { timeZone: WIB_TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).split(/[^0-9]+/).filter(Boolean).slice(-2).map(Number);
+  const sudahLewatJamCheckout = jamWIB * 60 + menitWIB >= MENIT_HITUNG_CHECKOUT_WIB;
   let bookings = (rows ?? []).filter(b=>{
     const co = String(b.tgl_checkout ?? '');
     return STATUS_PEMASUKAN_DIAKUI.includes(b.status) && co !== '' && (co < hariIni || (co === hariIni && sudahLewatJamCheckout));
