@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-11-05 — Chat 0822: lead sales tidak lagi masuk resepsionis / menerima menu sapaan
+- Nomor yang punya lead terbuka di `mkc_wa_leads` (Chat sales Loonars Connect, Mkhsistem 0303) tidak lagi lolos `bolehMasukResepsionis` (kecuali lewat tombol website), termasuk yang percakapan resepsionisnya terlanjur ada, dan tidak pernah menerima menu sapaan. Kasus nyata: 4 calon pembeli (25 Okt, 4 Nov) tercatat di Chat sales DAN resepsionis, dan resepsionis membalas mereka seperti tamu. Pesan lead tidak tercatat di `ai_conversations`, jadi tanpa cek ini follow-up "Halo kak" dari lead bisa dibalas menu.
+
 ### 2026-11-05 — Chat 0822: menu sapaan otomatis untuk "Halo kak"
 - Permintaan owner: orang asing yang membuka dengan salam saja ("Halo kak", "Malam kak", "Permisi kak") sebelumnya tidak dibalas siapa pun (tidak lolos `menyebutSewaVilla`, dan Mkhsistem diam karena `ai_lead_manual_takeover`). Sekarang `/api/wa/mirror` membalas menu: 1 Menginap/booking Private Living, 2 Properti & investasi, 3 Lainnya. Jawaban "1" membuka percakapan di Chat resepsionis (dicatat "1 (pilihan menu sapaan: Menginap / booking)", lalu sapaan pertama seperti biasa); "2"/"3" dibalas singkat dan tetap milik Mkhsistem/owner. Pertanyaan bebas yang dikenali `menyebutSewaVilla` tetap langsung masuk.
 - Syarat menu (`bolehDapatMenuSapaan`, `src/lib/waChat.ts`): salam saja tanpa pak/bu, bukan iklan Meta (`ad_reply` / teks iklan), bukan pelanggan refund, bukan karyawan/kontraktor, dan nomor tidak chat ke 0822 dalam 14 hari (dibaca dari `ai_conversations` Mkhsistem). Status "menu menunggu jawaban" juga dihitung dari `ai_conversations` -- tanpa tabel atau migrasi baru. Saat menu dikirim, mirror menjawab `villa: true` agar Mkhsistem tidak ikut membalas. Logika murni di `src/lib/menuSapaan.ts` (+ tes).

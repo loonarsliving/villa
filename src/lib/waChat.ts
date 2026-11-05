@@ -259,6 +259,13 @@ export async function bolehMasukResepsionis(supabase: SupabaseClient, phoneMenta
   // pernah jadi tamu atau pesannya menyebut villa/pricelist.
   if (await nomorPelangganRefund(supabase, phoneMentah)) return false;
   if (await orangDalamMkhsistem(supabase, phoneMentah)) return dariTombolWebsite(teks);
+  // Lead iklan yang sedang dilayani sales di Loonars Connect (mkc_wa_leads,
+  // Mkhsistem 0303): Mkhsistem sudah memasukkannya ke Chat sales SEBELUM
+  // jawaban villa dipakai, jadi kalau ikut lolos di sini chat yang sama muncul
+  // di dua tempat dan resepsionis membalas calon pembeli (kasus nyata 25 Okt &
+  // 4 Nov: "Ada layout dan price list?", "jatah nginep per tahun?"). Berlaku
+  // juga untuk percakapan resepsionis yang terlanjur dibuat.
+  if (await leadSalesTerbuka(supabase, phoneMentah)) return dariTombolWebsite(teks);
   const iklan = dariIklan(teks);
   if (!iklan && menyebutSewaVilla(teks)) return true;
 
@@ -286,6 +293,7 @@ export async function bolehDapatMenuSapaan(supabase: SupabaseClient, phoneMentah
   if (adaIklan || dariIklan(teks) || !hanyaSapaan(teks)) return false;
   if (await nomorPelangganRefund(supabase, phoneMentah)) return false;
   if (await orangDalamMkhsistem(supabase, phoneMentah)) return false;
+  if (await leadSalesTerbuka(supabase, phoneMentah)) return false;
   const riwayat = await riwayatChatTerakhir(supabase, phoneMentah, 14 * 24);
   return riwayat !== null && riwayat.length === 0;
 }
@@ -298,6 +306,7 @@ export async function bolehDapatMenuSapaan(supabase: SupabaseClient, phoneMentah
 export async function menuSapaanTertunda(supabase: SupabaseClient, phoneMentah: string): Promise<boolean> {
   if (await nomorPelangganRefund(supabase, phoneMentah)) return false;
   if (await orangDalamMkhsistem(supabase, phoneMentah)) return false;
+  if (await leadSalesTerbuka(supabase, phoneMentah)) return false;
   const riwayat = await riwayatChatTerakhir(supabase, phoneMentah, 15 * 24);
   if (!riwayat?.length) return false;
   const terakhir = riwayat[0];
@@ -333,6 +342,23 @@ async function riwayatChatTerakhir(
     return null;
   }
   return (data ?? []).filter((r) => akhiranNomor(String(r.sender ?? "")) === akhiran);
+}
+
+/**
+ * Nomor ini lead iklan yang masih terbuka di Chat sales Mkhsistem (mkc_wa_leads).
+ * Pesan lead tidak tercatat di ai_conversations, jadi tanpa cek ini lead juga
+ * bisa menerima menu sapaan. Gagal baca = dianggap lead (tertutup, sama seperti
+ * orangDalamMkhsistem): chat sales tidak boleh bocor ke resepsionis.
+ */
+async function leadSalesTerbuka(supabase: SupabaseClient, phoneMentah: string): Promise<boolean> {
+  const akhiran = akhiranNomor(phoneMentah);
+  if (akhiran.length < 9) return false;
+  const { data, error } = await supabase.from("mkc_wa_leads").select("phone").eq("status", "open").like("phone", `%${akhiran}`);
+  if (error) {
+    console.error("[waChat] gagal memeriksa lead sales", error.message);
+    return true;
+  }
+  return (data ?? []).some((r) => !!r.phone && akhiranNomor(String(r.phone)) === akhiran);
 }
 
 /** Nomor ada di daftar refund Mkhsistem. Gagal baca = dianggap bukan (Mkhsistem tetap mengurus refund lebih dulu). */
