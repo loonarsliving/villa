@@ -378,6 +378,20 @@ export default function ChatPage() {
     });
   }
 
+  function pindahProperti(conversationId: string, properti: "PL" | "EL") {
+    const c = conversations.find((x) => x.id === conversationId);
+    if (!c || (c.property_kode ?? "PL") === properti) return;
+    const nama = properti === "EL" ? "Excellent Living" : "Private Living";
+    if (!window.confirm(`Pindahkan chat ini ke ${nama}? Chat akan hilang dari daftar ini dan muncul di resepsionis ${nama}.`)) return;
+    localApi(`/api/chat/conversations/${conversationId}`, { method: "PATCH", body: JSON.stringify({ properti }) })
+      .then(() => {
+        setConversations((prev) => prev.filter((x) => x.id !== conversationId));
+        setActiveId(null);
+        toast("✓", `Dipindah ke ${nama}`, "Chat sekarang ada di daftar resepsionis properti itu.", "sage");
+      })
+      .catch((e) => toast("⚠", "Gagal memindahkan chat", e instanceof ApiError ? e.message : "Coba lagi.", "ruby"));
+  }
+
   function kirimUlang(p: PesanTertunda) {
     setPending((prev) => prev.map((x) => (x.tempId === p.tempId ? { ...x, status: "mengirim" } : x)));
     kirim({ ...p, status: "mengirim" });
@@ -583,6 +597,18 @@ export default function ChatPage() {
                   ))}
                 </select>
                 {diterjemahkan(active.bahasa) && <span className="hidden sm:inline text-ink/40">Balasan Anda diterjemahkan otomatis.</span>}
+                <label htmlFor="properti-tamu" className="shrink-0 ml-auto">
+                  Properti
+                </label>
+                <select
+                  id="properti-tamu"
+                  value={active.property_kode === "EL" ? "EL" : "PL"}
+                  onChange={(e) => pindahProperti(active.id, e.target.value as "PL" | "EL")}
+                  className="h-8 px-2 rounded-lg border border-ink/10 bg-base-800/60 text-base sm:text-xs text-ink outline-none focus:border-gold-500"
+                >
+                  <option value="PL">Private Living</option>
+                  <option value="EL">Excellent Living</option>
+                </select>
               </div>
 
               <div ref={threadRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 md:px-6 py-4 space-y-2">

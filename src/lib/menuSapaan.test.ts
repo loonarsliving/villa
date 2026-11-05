@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { bacaPilihanMenu, hanyaSapaan, isiPilihanMenginap, teksMenuSapaan } from "./menuSapaan";
+import { bacaPilihanMenu, hanyaSapaan, isiPilihanMenginap, isiPilihanMenginapEl, teksMenuSapaan } from "./menuSapaan";
 
 describe("hanyaSapaan", () => {
   it("salam pembuka nyata dari tamu (23 Okt - 5 Nov) dikenali", () => {
@@ -22,11 +22,13 @@ describe("bacaPilihanMenu", () => {
     expect(bacaPilihanMenu("1 kak")).toBe("menginap");
     expect(bacaPilihanMenu("no 1")).toBe("menginap");
     expect(bacaPilihanMenu("satu")).toBe("menginap");
-    expect(bacaPilihanMenu("2")).toBe("properti");
-    expect(bacaPilihanMenu("3")).toBe("lainnya");
+    expect(bacaPilihanMenu("2")).toBe("menginap_el");
+    expect(bacaPilihanMenu("dua")).toBe("menginap_el");
+    expect(bacaPilihanMenu("3")).toBe("properti");
+    expect(bacaPilihanMenu("4")).toBe("lainnya");
   });
   it("bukan jawaban menu", () => {
-    expect(bacaPilihanMenu("4")).toBeNull();
+    expect(bacaPilihanMenu("5")).toBeNull();
     expect(bacaPilihanMenu("10")).toBeNull();
     expect(bacaPilihanMenu("1792141088 ini ka")).toBeNull();
     expect(bacaPilihanMenu("1 kamar untuk 2 orang")).toBeNull();
@@ -37,11 +39,18 @@ describe("teks menu", () => {
   it("menyapa dengan nama dan tidak menjanjikan sarapan gratis", () => {
     const t = teksMenuSapaan("Rina");
     expect(t.startsWith("Halo Kak Rina,")).toBe(true);
-    expect(t).toContain("1. Menginap / booking");
+    expect(t).toContain("1. Menginap / booking di Loonars Private Living");
+    expect(t).toContain("2. Menginap / booking di Loonars Excellent Living");
     expect(t.toLowerCase()).not.toContain("sarapan");
     expect(teksMenuSapaan(null).startsWith("Halo Kak,")).toBe(true);
   });
   it("isi yang dicatat untuk resepsionis menjelaskan arti angka", () => {
     expect(isiPilihanMenginap("1")).toBe("1 (pilihan menu sapaan: Menginap / booking)");
+  });
+  it("pilihan EL tercatat sebagai Excellent Living", async () => {
+    const { tentukanPropertiPercakapan, teksSapaanPertama } = await import("./waChat");
+    const isi = isiPilihanMenginapEl("2");
+    expect(tentukanPropertiPercakapan({ teks: isi, elAktif: false, plAktif: false, sebelumnya: null })).toBe("EL");
+    expect(teksSapaanPertama("Rina", isi)).toContain("Loonars Excellent Living");
   });
 });

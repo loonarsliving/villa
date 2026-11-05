@@ -4,6 +4,11 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-11-05 — Chat 0822: pisah PL / EL (tombol Pindah properti + pilihan EL di menu sapaan)
+- Semua 444 percakapan resepsionis tercatat PL (pemisahan PL/EL baru aktif 4 Nov), termasuk tamu yang jelas menulis "Excellent Living". Layar Chat kini punya pilihan **Properti** (Private Living / Excellent Living) di bawah header percakapan; memindahkan chat membuatnya hilang dari daftar properti lama dan muncul di properti baru (`PATCH /api/chat/conversations/[id]` dengan `{properti}`; `booking_id` dikosongkan dan `status_tamu` jadi prospek, dihitung ulang saat pesan berikutnya masuk). Booking aktif tetap penentu utama di `tentukanPropertiPercakapan`.
+- Menu sapaan menjadi 4 pilihan: 1 Menginap PL, 2 Menginap EL, 3 Properti & investasi, 4 Lainnya. Jawaban "2" dicatat sebagai EL (menyebut "Excellent Living") dan disapa dengan nama propertinya. Catatan: menu lama (3 pilihan) yang sudah terkirim dalam 24 jam terakhir dibaca dengan penomoran baru.
+- Percakapan Fransiska Dina (1 Nov, "info pembukaan Loonars Excellent Living") dipindah ke EL lewat SQL.
+
 ### 2026-11-05 — Chat 0822: lead sales tidak lagi masuk resepsionis / menerima menu sapaan
 - Nomor yang punya lead terbuka di `mkc_wa_leads` (Chat sales Loonars Connect, Mkhsistem 0303) tidak lagi lolos `bolehMasukResepsionis` (kecuali lewat tombol website), termasuk yang percakapan resepsionisnya terlanjur ada, dan tidak pernah menerima menu sapaan. Kasus nyata: 4 calon pembeli (25 Okt, 4 Nov) tercatat di Chat sales DAN resepsionis, dan resepsionis membalas mereka seperti tamu. Pesan lead tidak tercatat di `ai_conversations`, jadi tanpa cek ini follow-up "Halo kak" dari lead bisa dibalas menu.
 

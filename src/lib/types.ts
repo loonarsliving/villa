@@ -722,6 +722,8 @@ export interface WaConversationRow {
   unread_count: number;
   /** Bahasa tamu (ISO 639-1); null = belum diketahui, "id" = tanpa terjemahan. */
   bahasa: string | null;
+  /** Properti percakapan (PL/EL) -- satu nomor WA dipakai bersama. */
+  property_kode: string | null;
   guests: { nama: string } | null;
   bookings: { unit_nomor: string; status: string; tgl_checkin: string; tgl_checkout: string | null } | null;
 }

@@ -3,7 +3,7 @@ import { after, NextResponse } from "next/server";
 import { buatDrafAiAman } from "@/lib/aiResepsionis";
 import { secretsMatch } from "@/lib/internalSecret";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { bacaPilihanMenu, isiPilihanMenginap, teksMenuSapaan, TEKS_PILIHAN_LAIN } from "@/lib/menuSapaan";
+import { bacaPilihanMenu, isiPilihanMenginap, isiPilihanMenginapEl, teksMenuSapaan, TEKS_PILIHAN_LAIN } from "@/lib/menuSapaan";
 import { kirimDariNomorUtama } from "@/lib/mkhsistemWa";
 import {
   bolehDapatMenuSapaan,
@@ -89,14 +89,14 @@ export async function POST(request: Request) {
     // orang asing dijawab menu; jawaban "1" baru dibawa ke resepsionis.
     const pilihan = inbound.mediaUrl ? null : bacaPilihanMenu(inbound.text);
     if (pilihan && (await menuSapaanTertunda(supabase, inbound.sender))) {
-      if (pilihan !== "menginap") {
+      if (pilihan === "properti" || pilihan === "lainnya") {
         after(async () => {
           const sent = await kirimDariNomorUtama(inbound.sender, TEKS_PILIHAN_LAIN);
           if (!sent.success) console.error("[wa/mirror] balasan pilihan menu gagal dikirim", sent.error);
         });
         return NextResponse.json({ ok: true, villa: false, skipped: `pilihan menu sapaan: ${pilihan}` });
       }
-      isiDicatat = isiPilihanMenginap(inbound.text);
+      isiDicatat = pilihan === "menginap_el" ? isiPilihanMenginapEl(inbound.text) : isiPilihanMenginap(inbound.text);
     } else if (!inbound.mediaUrl && (await bolehDapatMenuSapaan(supabase, inbound.sender, inbound.text, adaIklan(payload)))) {
       after(async () => {
         const sent = await kirimDariNomorUtama(inbound.sender, teksMenuSapaan(inbound.senderName));
