@@ -4,8 +4,11 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
-### 2026-11-06 — Checklist Dana Masuk: tombol "Tandai semua yang Cocok" dari mutasi bank
-- Setelah finance mengunggah mutasi bank, semua transfer berstatus "Cocok" (selisih ≤ 0,5%) bisa dicatat sekali klik (dengan konfirmasi), satu panggilan `/finance/settlements/receive-bulk` per pencairan dengan `total_diterima` = nominal transfer. Baris "Ada selisih"/"Tidak ketemu" tetap manual. Hanya frontend; tanpa perubahan villa-api atau skema.
+### 2026-11-06 — Checklist Dana Masuk: cocokkan dari daftar payout OTA (Booking.com/Agoda)
+- Finance mengunggah foto/screenshot/PDF daftar payout (atau CSV Booking.com) di kartu "Cocokkan dari Daftar Payout OTA". Foto/PDF disalin AI Mkhsistem (mode `jenis: "payout"` di `/api/villa/ai/bank-statement`; hanya menyalin), CSV dibaca langsung tanpa AI (`src/lib/payoutOta.ts`). Pencocokan per booking: nomor booking OTA bila sudah tersimpan, kalau tidak nama + check-in + check-out (hanya bila tepat satu kandidat). Total di dokumen dibandingkan dengan jumlah baris terbaca.
+- Rute villa-api baru `POST /finance/settlements/receive-payout`: mencatat `amount_received` = Net dari OTA per booking (selisih dengan estimasi tercatat sebagai VARIANCE), audit log `mark_received_payout`, dan mengisi `bookings.ota_booking_number` bila masih kosong. Migrasi `20261106000001` (kolom nullable + indeks parsial; additive). Checklist dana kini juga mengembalikan `ota_booking_number`.
+- Format CSV Booking.com dikenali dari nama header; belum diverifikasi dengan file CSV asli. Pembaca Agoda lewat foto/PDF; CSV Agoda belum ada.
+- Tombol "Tandai semua yang Cocok" dari mutasi bank (PR #298 awal) dibatalkan; digantikan alur ini.
 
 ### 2026-11-06 — Checklist Dana Masuk: dana estimasi dihitung setelah checkout
 - Sebelumnya "Seharusnya masuk" menghitung booking sejak tanggal check-in (≤ hari ini WIB), sehingga membingungkan finance. Kini `hitungChecklistDana` hanya menghitung booking berstatus terjadwal/checkin/checkout dengan `tgl_checkout` ≤ hari ini WIB. Berlaku juga untuk tutup buku (memakai fungsi yang sama). `isPemasukanDiakui` (pengakuan pendapatan) tidak diubah. Perlu deploy edge function `villa-api`.

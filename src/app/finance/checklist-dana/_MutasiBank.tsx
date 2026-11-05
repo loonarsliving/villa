@@ -72,13 +72,10 @@ export function MutasiBankCard({
   groups,
   bulanLabel,
   onPakai,
-  onTandaiSemua,
 }: {
   groups: PencairanGroup[];
   bulanLabel: string;
   onPakai: (g: PencairanGroup, baris: MutasiBaris) => void;
-  /** Mencatat semua pasangan berstatus "Cocok" sekaligus; melempar galat kalau ada yang gagal. */
-  onTandaiSemua: (pasangan: { group: PencairanGroup; baris: MutasiBaris }[]) => Promise<string>;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [bacaan, setBacaan] = useState<Bacaan | null>(null);
@@ -87,31 +84,6 @@ export function MutasiBankCard({
   const [error, setError] = useState<string | null>(null);
 
   const hasil = useMemo(() => (bacaan ? cocokkanMutasi(bacaan.rows, groups) : []), [bacaan, groups]);
-  const [hasilTandai, setHasilTandai] = useState<string | null>(null);
-  const [menandai, setMenandai] = useState(false);
-  const cocokSemua = useMemo(
-    () => hasil.filter((h): h is HasilCocok & { group: PencairanGroup } => h.status === "cocok" && !!h.group),
-    [hasil],
-  );
-  const totalCocok = cocokSemua.reduce((a, h) => a + h.baris.nominal, 0);
-
-  async function tandaiSemuaCocok() {
-    if (!cocokSemua.length || menandai) return;
-    const ok = window.confirm(
-      `Tandai ${cocokSemua.length} transfer sebagai sudah masuk (total ${fmtCurrencyFull(totalCocok)})?\n\nPastikan nominal di tabel sudah sama dengan dokumen mutasi asli.`,
-    );
-    if (!ok) return;
-    setMenandai(true);
-    setHasilTandai(null);
-    try {
-      setHasilTandai(await onTandaiSemua(cocokSemua.map((h) => ({ group: h.group, baris: h.baris }))));
-      setBacaan(null);
-    } catch (e) {
-      setHasilTandai(e instanceof Error ? e.message : String(e));
-    } finally {
-      setMenandai(false);
-    }
-  }
   const jumlahKeluar = bacaan ? bacaan.rows.filter((r) => r.arah === "keluar").length : 0;
 
   async function pilihFile(file: File | undefined) {
@@ -158,7 +130,6 @@ export function MutasiBankCard({
         {busy && <span className="text-[10.5px] text-ink/40">Biasanya 10–30 detik.</span>}
       </div>
       {error && <div className="px-4 pb-4 text-ruby-500 text-xs">{error}</div>}
-      {hasilTandai && <div className="px-4 pb-4 text-gold-600 text-xs">{hasilTandai}</div>}
 
       {bacaan && !bacaan.readable && (
         <div className="px-4 pb-4 text-ruby-400 text-[11px]">
@@ -174,14 +145,6 @@ export function MutasiBankCard({
             sebelum menekan Pakai.
             {bacaan.catatan && <div className="text-gold-600 mt-1">Catatan pembaca: {bacaan.catatan}</div>}
           </div>
-          {cocokSemua.length > 0 && (
-            <div className="px-4 pb-3">
-              <Btn variant="primary" disabled={menandai} onClick={tandaiSemuaCocok}>
-                {menandai ? "Mencatat…" : `Tandai semua yang Cocok (${cocokSemua.length} transfer · ${fmtCurrencyFull(totalCocok)})`}
-              </Btn>
-              <span className="text-[10.5px] text-ink/40 ml-3">Baris “Ada selisih” dan “Tidak ketemu” tetap dicek manual.</span>
-            </div>
-          )}
           {hasil.length > 0 && (
             <div className="overflow-x-auto">
               <table className="w-full text-[11.5px]">
