@@ -101,7 +101,7 @@ const PENANDA_SEWA_VILLA: RegExp[] = [
   /\bprivate\s+living\b/i,
   /\b(menginap|nginap|nginep)\b/i,
   /\bstay\s?cation\b/i,
-  /\bper\s?malam\b/i,
+  /\bper\s?malam(nya)?\b/i,
   /\bsewa\s+villa\b/i,
 ];
 
@@ -119,14 +119,22 @@ const PENANDA_TANYA_VILLA: RegExp[] = [
   /\bdaftar\s+(harga|tarif)\b/i,
   /\b(list|info)\s+(harga|tarif)\b/i,
   /\btarif\b/i,
-  /\bcheck[\s-]?(in|out)\b/i,
-  /\bche?k\s?(in|out)\b/i,
+  /\b(check|chek|chk|cek)[\s-]?(in|out)\b/i,
   /\b(kamar|room)\s+(kosong|tersedia|available)\b/i,
-  /\b(available|availability|ketersediaan)\b/i,
+  /\b(avail|available|availability|ketersediaan|tersedia)\b/i,
   /\b(weekend|weekday|long\s?weekend)\b/i,
   /\b(reservasi|reservation)\b/i,
   /\b(extra\s?bed|kolam\s+renang|private\s+pool|bbq)\b/i,
-  /\bbooking\b/i,
+  // Ditambahkan 2026-11-05 dari chat tamu nyata di ai_conversations yang
+  // tidak pernah masuk Chat resepsionis (lihat CHANGELOG): "kamar"/"room"
+  // tanpa "kosong", "pl" = pricelist, OTA, "bookingnya"/"boking", paket
+  // dekor/floating breakfast, "pool". Tetap kalah oleh PENANDA_PROPERTI.
+  /\b(kamar|room)(nya)?\b/i,
+  /\bpl\b/i,
+  /\b(ag+o+da+|traveloka|tiket\.com|booking\.com)\b/i,
+  /\bpemesan(an|nya)?\b/i,
+  /\b(book|booking|boking)(nya|an)?\b/i,
+  /\b(floating\s+breakfast|honeymoon|birthday|ulang\s+tahun|anniversary|dekor(asi)?|pool(nya)?)\b/i,
 ];
 
 const PENANDA_PROPERTI: RegExp[] = [
@@ -136,9 +144,13 @@ const PENANDA_PROPERTI: RegExp[] = [
   /\b(tipe|type)\s?\d+/i,
 ];
 
+/** Pelamar kerja: "lowongan ... masih tersedia?" bukan tamu, walau kena penanda longgar. */
+const PENANDA_BUKAN_TAMU: RegExp[] = [/\b(lowongan|loker|lamaran|melamar|rekrutmen)\b/i];
+
 export function menyebutSewaVilla(teks: string): boolean {
   if (PENANDA_SEWA_VILLA.some((re) => re.test(teks))) return true;
   if (PENANDA_PROPERTI.some((re) => re.test(teks))) return false;
+  if (PENANDA_BUKAN_TAMU.some((re) => re.test(teks))) return false;
   return PENANDA_TANYA_VILLA.some((re) => re.test(teks));
 }
 

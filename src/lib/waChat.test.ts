@@ -102,6 +102,32 @@ describe("menyebutSewaVilla", () => {
   it("sapaan kosong seperti 'Halo' tidak cukup", () => {
     expect(menyebutSewaVilla("Halooo")).toBe(false);
   });
+  it("chat tamu nyata yang dulu terlewat (23 Okt - 5 Nov) sekarang lolos", () => {
+    for (const t of [
+      "Halo kak. Selamat petang. Boleh bertanya mengenai harga kamar permalamnya?",
+      "siang ka, mau tanya jenis kamar dan fasilitasnya?",
+      "Kak untuk tanggal 31 Oktober sabtu ada room!",
+      "Hi min info pl",
+      "sore kak bisa minta pl nya?",
+      "halo, kak. mau nanya, untuk bookingnya apakah bisa via agoda ya?",
+      "mau tanya kak boking lewat agodaa unttuuk bulan depan langsung pyment bisa kan kak?",
+      "Kak kan aku udah pesen lewat agooda yaa",
+      "Permisi kka, mau tanya kalo cek in jam 1/2 bisa?",
+      "halo kak untuk hari ini apakah masih ad yg avail",
+      "Kak sekarang masih tersedia gak ya ?",
+      "Kak mau tanya kalau tambah floating breakfast brp ya kak?",
+      "hai kakak, maaf mengganggu saya bisa req birthday room setup ga ya?",
+      "lalu tambahan dekor honeymoon bs kak?",
+      "halo kak, ini utk semua kamar apa ada pool nya?",
+      "Selamat sore,\nuntuk pemesanan\natas nama Bagus rifai,\ntgl 10/11 november apakah sudah terkonfirmasi?",
+    ]) expect(menyebutSewaVilla(t), t).toBe(true);
+  });
+  it("penanda baru tetap kalah oleh properti dan lowongan kerja", () => {
+    expect(menyebutSewaVilla("Rumah 3 kamar tipe 45 masih tersedia?")).toBe(false);
+    expect(menyebutSewaVilla("Kavling masih available? bisa booking?")).toBe(false);
+    expect(menyebutSewaVilla("Maaf untuk lowongan kerja ini masih tersedia tidak ya?")).toBe(false);
+    expect(menyebutSewaVilla("Utk bagi hasil Oktober saya ditransfer ya")).toBe(false);
+  });
 });
 
 describe("pilihBookingTerbaik", () => {

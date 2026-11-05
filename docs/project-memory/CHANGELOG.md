@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-11-05 — Chat resepsionis: kata kunci tamu yang terlewat
+- Audit `ai_conversations` 21 hari: banyak tamu villa dari nomor 0822 tidak pernah masuk Chat resepsionis karena `menyebutSewaVilla` (`src/lib/waChat.ts`) tidak mengenali kata yang mereka pakai. Ditambahkan ke penanda longgar (tetap kalah oleh `PENANDA_PROPERTI`): `kamar`/`room` tanpa "kosong", `pl` (pricelist), `agoda`/`agodaa`/`agooda`/`traveloka`/`tiket.com`/`booking.com`, `bookingnya`/`boking`/`book`, `pemesanan`, `avail`, `tersedia`, `cek in` (dulu regex `che?k` tidak cocok "cek"), `permalamnya`, `floating breakfast`/`honeymoon`/`birthday`/`dekor`/`pool`. Penanda baru `PENANDA_BUKAN_TAMU` (lowongan/loker/lamaran) supaya pelamar kerja tidak ikut masuk. Pesan lama tidak dipindahkan; berlaku untuk pesan berikutnya.
+
 ### 2026-11-01 — CI: font lokal
 - `src/app/layout.tsx` pindah dari `next/font/google` ke `next/font/local` (file di `src/app/fonts/`), karena build CI GitHub gagal acak saat mengambil Google Fonts. Tampilan tidak berubah.
 
