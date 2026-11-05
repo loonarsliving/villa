@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-11-06 — Checklist Dana Masuk: hari checkout dihitung mulai pukul 15.00 WIB
+- Koreksi aturan "dana estimasi setelah checkout": sebelumnya booking terhitung sejak 00.00 di tanggal checkout. Kini `hitungChecklistDana` menghitung booking jika `tgl_checkout` sebelum hari ini, atau hari ini dan sudah pukul 15.00 WIB (`JAM_HITUNG_CHECKOUT_WIB`).
+
 ### 2026-11-06 — Checklist Dana Masuk: cocokkan dari daftar payout OTA (Booking.com/Agoda)
 - Finance mengunggah foto/screenshot/PDF daftar payout (atau CSV Booking.com) di kartu "Cocokkan dari Daftar Payout OTA". Foto/PDF disalin AI Mkhsistem (mode `jenis: "payout"` di `/api/villa/ai/bank-statement`; hanya menyalin), CSV dibaca langsung tanpa AI (`src/lib/payoutOta.ts`). Pencocokan per booking: nomor booking OTA bila sudah tersimpan, kalau tidak nama + check-in + check-out (hanya bila tepat satu kandidat). Total di dokumen dibandingkan dengan jumlah baris terbaca.
 - Rute villa-api baru `POST /finance/settlements/receive-payout`: mencatat `amount_received` = Net dari OTA per booking (selisih dengan estimasi tercatat sebagai VARIANCE), audit log `mark_received_payout`, dan mengisi `bookings.ota_booking_number` bila masih kosong. Migrasi `20261106000001` (kolom nullable + indeks parsial; additive). Checklist dana kini juga mengembalikan `ota_booking_number`.
