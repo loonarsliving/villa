@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-11-06 — Checklist Dana Masuk: tombol "Tandai semua yang Cocok" dari mutasi bank
+- Setelah finance mengunggah mutasi bank, semua transfer berstatus "Cocok" (selisih ≤ 0,5%) bisa dicatat sekali klik (dengan konfirmasi), satu panggilan `/finance/settlements/receive-bulk` per pencairan dengan `total_diterima` = nominal transfer. Baris "Ada selisih"/"Tidak ketemu" tetap manual. Hanya frontend; tanpa perubahan villa-api atau skema.
+
 ### 2026-11-06 — Checklist Dana Masuk: dana estimasi dihitung setelah checkout
 - Sebelumnya "Seharusnya masuk" menghitung booking sejak tanggal check-in (≤ hari ini WIB), sehingga membingungkan finance. Kini `hitungChecklistDana` hanya menghitung booking berstatus terjadwal/checkin/checkout dengan `tgl_checkout` ≤ hari ini WIB. Berlaku juga untuk tutup buku (memakai fungsi yang sama). `isPemasukanDiakui` (pengakuan pendapatan) tidak diubah. Perlu deploy edge function `villa-api`.
 

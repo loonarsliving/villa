@@ -184,6 +184,33 @@ export default function ChecklistDanaPage() {
     setRefBank(baris.keterangan.slice(0, 100));
   }
 
+  // Catat semua transfer berstatus "Cocok" dari mutasi bank. Satu panggilan
+  // receive-bulk per pencairan (nilai transfer asli dibagi villa-api); yang
+  // gagal tidak menghentikan yang lain dan dilaporkan di akhir.
+  async function tandaiSemuaCocok(pasangan: { group: PencairanGroup; baris: MutasiBaris }[]): Promise<string> {
+    let ok = 0;
+    const gagal: string[] = [];
+    for (const { group, baris } of pasangan) {
+      const ids = group.items.filter((i) => !i.masuk).map((i) => i.booking_id);
+      if (!ids.length) continue;
+      try {
+        await api.post(`/finance/settlements/receive-bulk`, {
+          booking_ids: ids,
+          received_date: baris.tanggal,
+          bank_reference: baris.keterangan.slice(0, 100) || undefined,
+          total_diterima: baris.nominal,
+        });
+        ok++;
+      } catch (e) {
+        gagal.push(`${group.sumber} ${group.tanggal}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    load();
+    return gagal.length
+      ? `${ok} transfer tercatat, ${gagal.length} gagal (${gagal.join("; ")}). Yang gagal belum tercatat.`
+      : `${ok} transfer berhasil ditandai sudah masuk.`;
+  }
+
   async function tandaiTerpilih() {
     if (!selected.size || !tglMasuk) return;
     setBusy(true);
@@ -369,7 +396,7 @@ export default function ChecklistDanaPage() {
             </div>
           </Card>
 
-          <MutasiBankCard groups={pencairanSemua} bulanLabel={namaBulan(bulan)} onPakai={pakaiMutasi} />
+          <MutasiBankCard groups={pencairanSemua} bulanLabel={namaBulan(bulan)} onPakai={pakaiMutasi} onTandaiSemua={tandaiSemuaCocok} />
 
           {selected.size > 0 && (
             <Card className="mb-4 border-gold-500/40">
