@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { normalizeInbound, sendWhatsAppText, whacenterDeviceId } from "@/lib/whacenter";
+import { secretsMatch } from "@/lib/internalSecret";
+import { normalizeInbound,sendWhatsAppText, whacenterDeviceId } from "@/lib/whacenter";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { catatBalasanOtomatisAman, catatPesanMasukAman } from "@/lib/waChat";
 
@@ -133,6 +134,23 @@ export async function POST(request: Request) {
   // dicocokkan di sini. Yang menjaga: device_id di payload harus perangkat
   // KITA, dan setiap perintah tetap diverifikasi ulang oleh villa-api
   // terhadap nomor owner. Endpoint ini sendiri tidak punya wewenang apa pun.
+  //
+  // Karena `from` dan `device_id` di payload bisa dipalsukan siapa pun yang
+  // tahu URL ini, ada penjaga tambahan yang OPT-IN: kalau WA_WEBHOOK_SECRET
+  // diisi di Vercel, permintaan wajib membawa nilai yang sama sebagai
+  // `?secret=` di URL webhook WhaCenter (atau header x-webhook-secret).
+  // Selama belum diisi perilakunya tidak berubah (fail-open, supaya deploy
+  // ini tidak memutus balasan owner "LUNAS <kode>"); mulai berlaku begitu
+  // env var diisi dan URL webhook di WhaCenter diperbarui.
+  const webhookSecret = (process.env.WA_WEBHOOK_SECRET ?? "").trim();
+  if (webhookSecret) {
+    const provided = (request.headers.get("x-webhook-secret") ?? new URL(request.url).searchParams.get("secret") ?? "").trim();
+    if (!provided || !secretsMatch(provided, webhookSecret)) {
+      console.warn("[wa/webhook] secret webhook tidak cocok, ditolak");
+      return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+    }
+  }
+
   let payload: unknown;
   try {
     payload = await request.json();

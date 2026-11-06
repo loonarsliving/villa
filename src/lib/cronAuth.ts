@@ -1,3 +1,4 @@
+import { secretsMatch } from "@/lib/internalSecret";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 /**
@@ -22,9 +23,9 @@ export async function isAuthorizedCronRequest(request: Request): Promise<boolean
   if (!presented) return false;
 
   const envSecret = (process.env.CRON_SECRET || "").trim();
-  if (envSecret && presented === envSecret) return true;
+  if (envSecret && secretsMatch(presented, envSecret)) return true;
 
   const { data } = await supabaseAdmin().from("integration_settings").select("value").eq("key", "cron").maybeSingle();
   const dbSecret = ((data?.value as { secret?: string } | undefined)?.secret ?? "").trim();
-  return !!dbSecret && presented === dbSecret;
+  return !!dbSecret && secretsMatch(presented, dbSecret);
 }
