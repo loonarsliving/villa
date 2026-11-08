@@ -2602,6 +2602,85 @@ function hitungFeeReferral(ref, nilaiBooking){
   return {fee_persen: persen, fee: Math.round(Number(nilaiBooking) * persen / 100)};
 }
 
+/**
+ * Kupon diskon investor (owner 2026-11-08, migrasi 20261108000001).
+ *
+ * Investor Private Living memegang 5 kode "INV-XXXXXX" yang diisi ulang
+ * otomatis: begitu satu kode menempel pada booking, kode baru dibuat saat
+ * dashboard investor dibuka berikutnya (isiUlangKuponInvestor). Kode boleh
+ * disebar investor ke siapa saja. Diskonnya 20% dari harga online EL dan
+ * MENGURANGI pendapatan EL (bookings.tarif = harga setelah diskon). Hanya
+ * berlaku di properti PROPERTI_KUPON_INVESTOR; Private Living tidak ikut.
+ *
+ * Satu kode = satu booking selamanya (unique index bookings_investor_kupon_
+ * sekali_pakai), termasuk booking yang lalu batal -- lihat migrasinya.
+ * Tabel kupon tidak per properti; bookings dibaca lewat supabaseSemua supaya
+ * pemakaian di properti mana pun terlihat.
+ */
+const KUPON_INVESTOR_RE = /^INV-[A-Z0-9]{6}$/;
+const KUPON_INVESTOR_JUMLAH = 5;
+const PROPERTI_KUPON_INVESTOR = new Set(['EL']);
+// Tanpa huruf/angka yang mudah tertukar saat dibacakan (O/0, I/1, L).
+const HURUF_KUPON = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+
+function acakKodeKupon(){
+  const acak = crypto.getRandomValues(new Uint8Array(6));
+  return 'INV-' + Array.from(acak, b => HURUF_KUPON[b % HURUF_KUPON.length]).join('');
+}
+
+async function periksaKuponInvestor(kode){
+  const bersih = String(kode ?? '').trim().toUpperCase();
+  const tidakAda = {ok:false, alasan:'Kode referral tidak ditemukan'};
+  if(!KUPON_INVESTOR_RE.test(bersih)) return tidakAda;
+  const {data:k} = await supabaseSemua.from('villa_investor_kupon').select('id,kode,user_id,diskon_persen,aktif').eq('kode', bersih).maybeSingle();
+  if(!k) return tidakAda;
+  if(k.aktif !== true) return {ok:false, alasan:'Kode ini sudah tidak aktif'};
+  const {data:pemilik} = await supabaseSemua.from('villa_users').select('role,is_active').eq('id', k.user_id).maybeSingle();
+  if(!pemilik || pemilik.role !== 'owner' || pemilik.is_active !== true) return {ok:false, alasan:'Kode ini sudah tidak aktif'};
+  const {data:pakai} = await supabaseSemua.from('bookings').select('id').eq('investor_kupon_id', k.id).limit(1);
+  if(pakai?.length) return {ok:false, alasan:'Kode ini sudah dipakai. Minta kode lain ke investor yang membagikannya.'};
+  return {ok:true, kupon:k};
+}
+
+/** Diskon kupon dari harga online (rupiah dibulatkan). */
+function hitungDiskonKupon(kupon, hargaNormal){
+  const persen = Number(kupon.diskon_persen ?? 20);
+  const diskon = Math.round(Number(hargaNormal) * persen / 100);
+  return {persen, diskon, total: Math.max(0, Number(hargaNormal) - diskon)};
+}
+
+/**
+ * Kode milik satu investor + riwayat pemakaiannya, setelah memastikan ada
+ * KUPON_INVESTOR_JUMLAH kode yang belum dipakai (yang kurang dibuat baru).
+ */
+async function isiUlangKuponInvestor(userId){
+  const baca = async () => {
+    const {data:kode, error} = await supabaseSemua.from('villa_investor_kupon')
+      .select('id,kode,diskon_persen,created_at').eq('user_id', userId).eq('aktif', true).order('created_at');
+    if(error) return {error:error.message};
+    const ids = (kode ?? []).map(k=>k.id);
+    const {data:pakai, error:e2} = ids.length
+      ? await supabaseSemua.from('bookings').select('investor_kupon_id,property_kode,tgl_checkin,tgl_checkout,status,diskon_kupon,created_at').in('investor_kupon_id', ids)
+      : {data:[], error:null};
+    if(e2) return {error:e2.message};
+    const peta = new Map((pakai ?? []).map(p=>[String(p.investor_kupon_id), p]));
+    return {kode: kode ?? [], peta};
+  };
+  let r = await baca();
+  if(r.error) return r;
+  const kurang = KUPON_INVESTOR_JUMLAH - r.kode.filter(k=>!r.peta.has(String(k.id))).length;
+  if(kurang > 0){
+    for(let i=0, dibuat=0; dibuat<kurang && i<kurang*5; i++){
+      const {error} = await supabaseSemua.from('villa_investor_kupon').insert({user_id:userId, kode:acakKodeKupon()});
+      if(!error) dibuat++;
+      else if(error.code !== '23505') return {error:error.message};
+    }
+    r = await baca();
+    if(r.error) return r;
+  }
+  return r;
+}
+
 /** 'menunggu_lunas' | 'sah' | 'gugur', dari status booking saat ini. */
 function statusFeeReferral(bookingStatus){
   if(['terjadwal','checkin','checkout'].includes(bookingStatus)) return 'sah';
@@ -4956,6 +5035,32 @@ async function layani(req){
         return json({ checkin, checkout, ...(await elKetersediaanBersama(checkin, checkout)) });
       }
 
+      // Pratinjau kupon investor (kolom kode referral form EL). Harga dihitung
+      // di sini dengan fungsi yang sama dengan /bookings, jadi angka di form =
+      // angka yang ditagih. Pemilik kode tidak dibocorkan ke halaman publik.
+      if(sub==='kupon' && m==='GET'){
+        if(!PROPERTI_KUPON_INVESTOR.has(kodeP)) return json({berlaku:false, alasan:'Kode referral tidak berlaku untuk properti ini'});
+        const kode = String(url.searchParams.get('code') ?? '').trim().toUpperCase();
+        if(!kode) return err('Kode wajib diisi');
+        const cek = await periksaKuponInvestor(kode);
+        if(!cek.ok) return json({berlaku:false, alasan:cek.alasan});
+        const checkin = url.searchParams.get('checkin') ?? '', checkout = url.searchParams.get('checkout') ?? '';
+        const roomType = String(url.searchParams.get('room_type') ?? '').trim();
+        let harga_normal = null, diskon = null, total = null;
+        if(roomType && isValidDateStr(checkin) && isValidDateStr(checkout) && checkout > checkin){
+          const harga = await elHargaOnline(roomType, checkin, checkout);
+          if(harga){
+            const h = hitungDiskonKupon(cek.kupon, harga.total);
+            harga_normal = harga.total; diskon = h.diskon; total = h.total;
+          }
+        }
+        return json({
+          berlaku:true, kode:cek.kupon.kode, persen:Number(cek.kupon.diskon_persen ?? 20),
+          harga_normal, diskon, total,
+          keterangan:`Kupon Investor Loonars: diskon ${Number(cek.kupon.diskon_persen ?? 20)}% untuk menginap ini.`,
+        });
+      }
+
       if(sub==='payment-info' && m==='GET'){
         const setting = await getSetting(kunciQrisKasir());
         return json({
@@ -4987,6 +5092,17 @@ async function layani(req){
         const nights = elMalam(tgl_checkin, tgl_checkout);
         if(nights > EL_MAKS_MALAM_ONLINE) return err(`Maksimal ${EL_MAKS_MALAM_ONLINE} malam`);
 
+        // Kupon investor (kolom kode referral). Diperiksa sebelum apa pun
+        // ditulis; kode yang tidak berlaku = pesanan ditolak dengan alasannya,
+        // bukan diam-diam diteruskan dengan harga normal.
+        const kupon_code = String(b.kupon_code ?? '').trim().toUpperCase() || null;
+        let kuponCek = null;
+        if(kupon_code){
+          if(!PROPERTI_KUPON_INVESTOR.has(kodeP)) return err('Kode referral tidak berlaku untuk properti ini', 409);
+          kuponCek = await periksaKuponInvestor(kupon_code);
+          if(!kuponCek.ok) return err(`Kode referral tidak bisa dipakai: ${kuponCek.alasan}`, 409);
+        }
+
         const {data:rt} = await supabase.from('villa_room_types').select('id,code,name').eq('code', room_type).eq('active', true).maybeSingle();
         if(!rt) return err('Tipe kamar tidak dikenali', 404);
         const {data:candidateUnits} = await supabase.from('units').select('id,nomor,room_type_id,status').eq('room_type_id', rt.id).neq('status','maintenance').order('nomor');
@@ -5011,32 +5127,45 @@ async function layani(req){
         const harga = await elHargaOnline(rt.code, tgl_checkin, tgl_checkout);
         if(!harga) return err('Harga untuk tanggal ini belum tersedia, silakan hubungi kami di WhatsApp.', 409);
 
+        // Diskon kupon mengurangi tarif = pendapatan EL (keputusan owner).
+        const kuponHasil = kuponCek?.ok ? hitungDiskonKupon(kuponCek.kupon, harga.total) : null;
+        const tarifAkhir = kuponHasil ? kuponHasil.total : harga.total;
+        const rp = (n) => `Rp ${Math.round(n).toLocaleString('id-ID')}`;
+        const catatanKupon = kuponHasil
+          ? ` [Kupon investor ${kuponCek.kupon.kode} -${kuponHasil.persen}%: harga normal ${rp(harga.total)}, diskon ${rp(kuponHasil.diskon)}]`
+          : '';
+
         const {data:g} = await supabase.from('guests').insert({nama, hp, email}).select('id').single();
         const kodeUnik = await generateKodeUnikPembayaran();
-        const totalDitagih = harga.total + kodeUnik;
+        const totalDitagih = tarifAkhir + kodeUnik;
         const {data:booking, error:bookErr} = await supabase.from('bookings').insert({
           unit_id: freeUnit.id, unit_nomor: freeUnit.nomor, guest_id: g?.id ?? null, guest_nama: nama,
           tipe: 'harian', sumber: 'website', tgl_checkin, tgl_checkout,
           durasi_malam: nights, checkin_time: '14:00:00', adults, children,
-          tarif: harga.total, total_bayar: totalDitagih, status: 'menunggu_pembayaran', is_free_stay: false,
-          catatan: `[Website ${kodeP}] Booking mandiri dari loonars.id (${rt.name}) -- menunggu pembayaran QRIS.${catatan ? ` ${catatan}` : ''}`,
+          tarif: tarifAkhir, total_bayar: totalDitagih, status: 'menunggu_pembayaran', is_free_stay: false,
+          catatan: `[Website ${kodeP}] Booking mandiri dari loonars.id (${rt.name}) -- menunggu pembayaran QRIS.${catatanKupon}${catatan ? ` ${catatan}` : ''}`,
+          // Kolom kupon hanya dikirim bila kupon dipakai, supaya pemesanan
+          // biasa tidak bergantung pada migrasi 20261108000001.
+          ...(kuponHasil ? {investor_kupon_id: kuponCek.kupon.id, diskon_kupon: kuponHasil.diskon} : {}),
         }).select().single();
         if(bookErr){
           if(bookErr.code === '23P01') return err('Maaf, kamar baru saja dibooking tamu lain. Silakan pilih tanggal/tipe lain.', 409);
+          if(bookErr.code === '23505' && kuponHasil) return err('Kode referral ini baru saja dipakai pemesanan lain. Minta kode lain ke investor yang membagikannya.', 409);
           return err(bookErr.message);
         }
 
         await notif(freeUnit.id, 'all', 'booking', `Booking baru dari Website ${kodeP} (menunggu pembayaran) -- ${freeUnit.nomor}`,
-          `${nama} (${hp}) - ${rt.name} - ${tgl_checkin} s/d ${tgl_checkout} - Rp ${Math.round(totalDitagih).toLocaleString('id-ID')} -- kamar belum terkunci, menunggu konfirmasi pembayaran (kode ${paymentCode(booking.id)})`, booking.id);
+          `${nama} (${hp}) - ${rt.name} - ${tgl_checkin} s/d ${tgl_checkout} - ${rp(totalDitagih)}${kuponHasil ? ` (kupon investor ${kuponCek.kupon.kode}, diskon ${rp(kuponHasil.diskon)})` : ''} -- kamar belum terkunci, menunggu konfirmasi pembayaran (kode ${paymentCode(booking.id)})`, booking.id);
         const notifySetting = await getSetting('villa_notify');
         await sendWa(notifySetting?.owner_hp ?? null,
-          `Booking baru dari website ${namaProperti()}\n\n${nama} (${hp})\n${rt.name} - kamar ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\nTotal (dengan kode unik): Rp ${Math.round(totalDitagih).toLocaleString('id-ID')}\n\nSistem mengonfirmasi otomatis begitu email pembayaran BTN masuk.`,
+          `Booking baru dari website ${namaProperti()}\n\n${nama} (${hp})\n${rt.name} - kamar ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\n${kuponHasil ? `Kupon investor ${kuponCek.kupon.kode}: harga normal ${rp(harga.total)}, diskon ${kuponHasil.persen}% (${rp(kuponHasil.diskon)})\n` : ''}Total (dengan kode unik): ${rp(totalDitagih)}\n\nSistem mengonfirmasi otomatis begitu email pembayaran BTN masuk.`,
           {booking_id: booking.id, unit_id: freeUnit.id, template_type: templateProperti('website_booking_awaiting_payment')});
 
         return json({
           booking_id: booking.id, unit_nomor: freeUnit.nomor, tipe_nama: rt.name,
           tgl_checkin, tgl_checkout, durasi_malam: nights,
-          tarif: harga.total, total_bayar: totalDitagih, kode_unik: kodeUnik, status: booking.status,
+          tarif: tarifAkhir, total_bayar: totalDitagih, kode_unik: kodeUnik, status: booking.status,
+          harga_normal: harga.total, diskon_kupon: kuponHasil?.diskon ?? 0, kupon_kode: kuponHasil ? kuponCek.kupon.kode : null,
         }, 201);
       }
 
@@ -9178,6 +9307,40 @@ async function layani(req){
   // bulan berjalan. Dua-duanya tampil tercoret di dashboard, persis seperti
   // yang diminta owner -- tapi dengan sebab yang berbeda, dan investor
   // berhak tahu bedanya.
+  // Kupon diskon investor 20% Excellent Living + data Kartu Priority Investor
+  // (owner 2026-11-08). Selalu ada KUPON_INVESTOR_JUMLAH kode siap dibagikan:
+  // yang sudah dipakai diganti kode baru di sini. Riwayat pemakaian sengaja
+  // tanpa nama/nomor tamu -- kodenya boleh disebar ke orang lain.
+  if(path==='/investor/kupon' && m==='GET'){
+    if(!isOwner) return forbidden();
+    const r = await isiUlangKuponInvestor(session.uid);
+    if(r.error) return err(r.error);
+    const {data:u} = await supabaseSemua.from('villa_users').select('id,nama,unit_nomor,created_at').eq('id', session.uid).maybeSingle();
+    const statusPakai = (s) => ['terjadwal','checkin','checkout'].includes(s) ? 'lunas' : s === 'menunggu_pembayaran' ? 'menunggu_pembayaran' : 'batal';
+    const tersedia = r.kode.filter(k=>!r.peta.has(String(k.id))).map(k=>({kode:k.kode, persen:Number(k.diskon_persen ?? 20)}));
+    const riwayat = r.kode.filter(k=>r.peta.has(String(k.id))).map(k=>{
+      const p = r.peta.get(String(k.id));
+      return {
+        kode: k.kode, properti: NAMA_PROPERTI[p.property_kode] ?? p.property_kode,
+        tgl_checkin: p.tgl_checkin, tgl_checkout: p.tgl_checkout,
+        status: statusPakai(p.status), diskon: Number(p.diskon_kupon ?? 0), dipakai_pada: p.created_at,
+      };
+    }).sort((a,b)=>String(b.dipakai_pada).localeCompare(String(a.dipakai_pada)));
+    return json({
+      persen: 20,
+      tautan_pemesanan: 'https://www.loonars.id/excellent-living',
+      tersedia, riwayat,
+      aturan: 'Satu kode untuk satu pemesanan Loonars Excellent Living di loonars.id (diketik di kolom kode referral). Kode boleh Anda bagikan ke keluarga, teman, atau relasi. Begitu satu kode dipakai, kode baru otomatis menggantikannya, jadi Anda selalu punya 5 kode.',
+      kartu: {
+        nama: u?.nama ?? null,
+        no_anggota: `PI-${String(session.uid).replace(/-/g,'').slice(0,6).toUpperCase()}`,
+        sejak: u?.created_at ? String(u.created_at).slice(0,10) : null,
+        persen: 20,
+        berlaku_di: ['Loonars Coffee', 'Loonars Beauty'],
+      },
+    });
+  }
+
   if(path==='/investor/vouchers' && m==='GET'){
     if(!isOwner) return forbidden();
 

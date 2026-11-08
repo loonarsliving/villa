@@ -30,6 +30,13 @@ export function InvestorShell({
       ],
     },
     {
+      title: "Priority Investor",
+      items: [
+        { href: "/investor/kupon", label: "Kupon Diskon 20%", icon: "✧" },
+        { href: "/investor/kartu", label: "Kartu Priority", icon: "▭" },
+      ],
+    },
+    {
       title: "Laporan",
       items: [
         { href: "/investor/laporan", label: "Laporan Bulanan", icon: "▤" },

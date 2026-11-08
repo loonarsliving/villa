@@ -15,7 +15,7 @@ import {
 import { mapSourceNameToSumber } from "@/lib/cloudbedsSourceMapping";
 import { statusSetelahSync } from "@/lib/bookingStatusSync";
 import { bacaBlokirKamar } from "@/lib/cloudbedsUnitSementara";
-import { buatKodeTipe, jumlahMalam, kamarUntukNamaBerurut, normalNama, pecahNama, PENANDA_BLOK, pilihKamarEl, statusElDariCloudbeds, type PemakaianKamar } from "@/lib/elCloudbedsLogic";
+import { buatKodeTipe, jumlahMalam, kamarUntukNamaBerurut, normalNama, pecahNama, PENANDA_BLOK, pilihKamarEl, statusElDariCloudbeds, tarifDikunciLokal, type PemakaianKamar } from "@/lib/elCloudbedsLogic";
 import { supabaseAdminProperti } from "@/lib/supabaseAdmin";
 import { siapkanAkunCloudbeds } from "@/lib/propertiConfig";
 
@@ -314,7 +314,10 @@ export async function syncCloudbedsProperti(kodeProperti: string): Promise<ElSyn
       cloudbeds_reservation_id: r.reservationID,
       updated_at: new Date().toISOString(),
     };
-    if (t && t.grandTotal > 0) {
+    if (ada && tarifDikunciLokal(ada.catatan)) {
+      // Kupon investor: tarif lokal = harga setelah diskon (yang dibayar
+      // tamu); Cloudbeds tidak tahu diskonnya, jadi angkanya tidak dipakai.
+    } else if (t && t.grandTotal > 0) {
       isi.tarif = t.grandTotal;
       isi.total_bayar = t.grandTotal;
       isi.cloudbeds_subtotal = t.subTotal;
