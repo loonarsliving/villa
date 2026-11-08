@@ -261,3 +261,8 @@ Properti kedua (Loonars 2, Jogja), terpisah total dari `units`/`bookings` Privat
 ## Multi-properti: tutup buku & database tamu per properti (2026-11-04, DITERAPKAN)
 - `20261104000005_tutup_buku_per_properti`: `property_kode` di `finance_tutup_buku` (unik `(periode, property_kode)`) dan `finance_audit_log`.
 - `20261104000006_database_tamu_per_properti`: view `villa_guest_directory` = satu baris per tamu PER PROPERTI (kolom `property_kode` di akhir; tamu tanpa booking = PL). Diverifikasi: baris PL identik dengan view lama (8.478 baris, md5 sama). Status berhenti-langganan tetap per tamu.
+
+## Kupon diskon investor Excellent Living — `villa_investor_kupon` (2026-11-08, DITERAPKAN, disetujui owner)
+- Migrasi `20261108000001_kupon_investor_el.sql`, diuji dulu di Postgres lokal (`supabase/tests/kupon_investor`, 12 cek PASS), lalu diterapkan 2026-11-08 lewat `execute_sql` satu panggilan (isi pernyataan = file) dan dicatat manual di `supabase_migrations.schema_migrations` (`20261108000001`, `kupon_investor_el`). `apply_migration` dicoba dua kali dan timeout (konfirmasi tak tampil) -- lihat PELAJARAN di CURRENT_STATE.md; tidak ada yang tertinggal (dicek read-only).
+- `villa_investor_kupon(id, user_id → villa_users, kode 'INV-XXXXXX' unik, diskon_persen default 20, aktif, created_at)`. RLS ON, policy service_role saja, revoke anon/authenticated. Tidak per properti (bukan TABEL_PER_PROPERTI).
+- `bookings.investor_kupon_id` (FK restrict) + `bookings.diskon_kupon` (rupiah). Unique index `bookings_investor_kupon_sekali_pakai`: satu kode = satu booking selamanya, termasuk booking batal.

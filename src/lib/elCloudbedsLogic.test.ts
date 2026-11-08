@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bertumpuk, elDibuatDiSini, jumlahMalam, kamarUntukNamaBerurut, pecahNama, pilihKamarEl, statusElDariCloudbeds, sumberEl } from "./elCloudbedsLogic";
+import { bertumpuk, elDibuatDiSini, jumlahMalam, kamarUntukNamaBerurut, pecahNama, pilihKamarEl, statusElDariCloudbeds, sumberEl, tarifDikunciLokal } from "./elCloudbedsLogic";
 
 const dasar = { checkIn: "2026-11-10", checkOut: "2026-11-12", reservationId: "R1", kamarSebelumnya: null };
 
@@ -125,5 +125,15 @@ describe("kamarUntukNamaBerurut", () => {
     expect(kamarUntukNamaBerurut("DOU(2)", "QUA", tipe, kamar)).toBeNull();
     expect(kamarUntukNamaBerurut("KIN(1)", "KIN", tipe, kamar)).toBeNull();
     expect(kamarUntukNamaBerurut("ST-02", "DOU", tipe, kamar)).toBeNull();
+  });
+});
+
+describe("tarifDikunciLokal", () => {
+  it("booking dengan kupon investor tidak ditimpa harga Cloudbeds", () => {
+    expect(tarifDikunciLokal("[Website EL] Booking mandiri dari loonars.id (Deluxe) -- menunggu pembayaran QRIS. [Kupon investor INV-ABC234 -20%: harga normal Rp 1.000.000, diskon Rp 200.000]")).toBe(true);
+  });
+  it("booking biasa / tanpa catatan tetap mengikuti Cloudbeds", () => {
+    expect(tarifDikunciLokal("[Website EL] Booking mandiri dari loonars.id (Deluxe)")).toBe(false);
+    expect(tarifDikunciLokal(null)).toBe(false);
   });
 });

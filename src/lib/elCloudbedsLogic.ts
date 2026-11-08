@@ -228,3 +228,15 @@ export function rencanakanKamarEl(roomsCb: RoomCb[], tipe: TipeLokal[], kamar: K
   const nonaktifkan = kamar.filter((k) => k.active && kamarBerpeta.has(k.id) && !terpakai.has(k.id)).map((k) => k.id);
   return { tipeBaru, tipeCocok, petaBaru, kamarBaru, ubahKamar, nonaktifkan };
 }
+
+/**
+ * Penanda booking EL yang memakai kupon diskon investor (ditulis villa-api di
+ * catatan booking, /public/el/bookings). Booking seperti itu dikirim ke
+ * Cloudbeds tanpa harga, jadi Cloudbeds memberinya harga penuh; tarif lokal
+ * (harga setelah diskon = yang benar-benar dibayar tamu) TIDAK boleh ditimpa
+ * angka Cloudbeds saat TARIK -- sama seperti booking late night di PL.
+ */
+export const PENANDA_KUPON_INVESTOR = "[Kupon investor ";
+export function tarifDikunciLokal(catatan: string | null | undefined): boolean {
+  return String(catatan ?? "").includes(PENANDA_KUPON_INVESTOR);
+}
