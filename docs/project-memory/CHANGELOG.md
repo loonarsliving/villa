@@ -4,6 +4,9 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-11-08 — Penerima tambahan WA investor (tanpa akun aktif)
+- Owner: investor kedua yang dirahasiakan ikut menerima laporan mingguan sesuai jadwal dan pengumuman, tanpa akun investor aktif (tidak bisa login, tidak muncul di daftar investor/bukti transfer/dividen). `integration_settings.laporan_investor_penerima_tambahan = {user_ids: [...]}` (`src/lib/investorPenerimaTambahan.ts`), dibaca laporan mingguan (teks sama) dan pengumuman (`PENGUMUMAN.teksTanpaAkses`: fasilitas Priority Investor "setelah memiliki akses ke sistem Loonars", tanpa menu/tautan dashboard). Teks laporan tidak menyebut kepemilikan unit. Penerima pertama: Liza Indira (akun lama A1, nonaktif). Investor kedua A4 belum punya nomor -- tidak dikirimi.
+
 ### 2026-11-08 — Pengumuman WA sekali kirim ke investor Private Living
 - Teks disetujui owner (pembukaan EL 12 Nov, permintaan maaf grand opening PL yang akan digelar bersama pembukaan Loonars Coffee awal Desember, diskon 20% Priority Investor, kalimat penutup). Disapa per nama akun yang dirapikan (`rapikanNama`); akun "Investor A1" dilewati (`PENGUMUMAN.lewati`, owner); satu nomor satu pesan.
 - Hasil: 11 terkirim 14.05 WIB. Akun "Investor A1" ternyata investor sungguhan (rekening BNI a.n. MUSAFA, dari data bukti transfer); atas persetujuan owner `villa_users.nama` A1 diganti "Musafa" dan pengumuman dikirim kepadanya (total 12/12 nomor investor aktif; A5 & C3 satu orang). "Investor Unit A4" tanpa HP/rekening -- tidak menerima.

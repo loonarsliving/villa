@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { todayISO } from "./format";
 import { kirimDariNomorUtama } from "./mkhsistemWa";
 import { addDaysISO } from "./stayDates";
+import { ambilPenerimaTambahan } from "./investorPenerimaTambahan";
 import {
   awalBulan,
   STATUS_DIHITUNG,
@@ -102,9 +103,12 @@ export async function kirimLaporanMingguanInvestor(
     .eq("is_active", true);
   if (eI) throw new Error(`gagal membaca investor: ${eI.message}`);
 
+  // Penerima tambahan tanpa akun aktif (owner 2026-11-08), teks laporan sama.
+  const tambahan = await ambilPenerimaTambahan(supabase);
+
   const nomor = new Set<string>();
   let tanpaNomor = 0;
-  for (const inv of investor ?? []) {
+  for (const inv of [...(investor ?? []), ...tambahan]) {
     const hp = String(inv.hp ?? "").replace(/\D/g, "");
     if (hp.length < 8) tanpaNomor++;
     else nomor.add(hp);

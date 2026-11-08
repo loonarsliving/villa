@@ -13,7 +13,27 @@ export interface Pengumuman {
   /** Nama akun (persis, tanpa beda huruf besar/kecil) yang tidak dikirimi pengumuman ini. */
   lewati: string[];
   teks: (nama: string) => string;
+  /** Versi untuk penerima tambahan tanpa akses dashboard (lihat investorPenerimaTambahan.ts). */
+  teksTanpaAkses: (nama: string) => string;
 }
+
+const bagianAwal = (nama: string) => [
+  "*Pengumuman untuk Investor Loonars Private Living*",
+  "",
+  `Yth. Bapak/Ibu *${nama}*,`,
+  "",
+  "Dengan penuh syukur kami mengabarkan bahwa *Loonars Excellent Living resmi dibuka pada Kamis, 12 November 2026.*",
+  "",
+  "Kami juga memohon maaf karena *grand opening Loonars Private Living belum terealisasi* hingga saat ini. Kami berencana mengadakan grand opening Loonars Private Living *bersamaan dengan pembukaan Loonars Coffee*, yang dijadwalkan pada *awal Desember 2026*. Undangan dan detail acaranya akan kami sampaikan kemudian.",
+  "",
+];
+const bagianAkhir = [
+  "",
+  "Loonars tidak akan ada tanpa Bapak/Ibu. Sejauh apa pun Loonars berkembang, selama itu pula Bapak/Ibu akan selalu menjadi prioritas kami. 🙏",
+  "",
+  "Hormat kami,",
+  "*Manajemen Loonars*",
+];
 
 export const PENGUMUMAN: Pengumuman = {
   id: "investor_pengumuman_20261108",
@@ -24,14 +44,7 @@ export const PENGUMUMAN: Pengumuman = {
   lewati: [],
   teks: (nama) =>
     [
-      "*Pengumuman untuk Investor Loonars Private Living*",
-      "",
-      `Yth. Bapak/Ibu *${nama}*,`,
-      "",
-      "Dengan penuh syukur kami mengabarkan bahwa *Loonars Excellent Living resmi dibuka pada Kamis, 12 November 2026.*",
-      "",
-      "Kami juga memohon maaf karena *grand opening Loonars Private Living belum terealisasi* hingga saat ini. Kami berencana mengadakan grand opening Loonars Private Living *bersamaan dengan pembukaan Loonars Coffee*, yang dijadwalkan pada *awal Desember 2026*. Undangan dan detail acaranya akan kami sampaikan kemudian.",
-      "",
+      ...bagianAwal(nama),
       "Sebagai ucapan terima kasih atas kepercayaan Bapak/Ibu, kini tersedia fasilitas *Priority Investor Loonars* berupa *diskon 20% untuk semua produk Loonars*: Loonars Excellent Living, Loonars Coffee, dan Loonars Beauty.",
       "",
       "🏡 *Loonars Excellent Living*",
@@ -41,11 +54,17 @@ export const PENGUMUMAN: Pengumuman = {
       "Buka menu *Kartu Priority* di Dashboard Investor, lalu tunjukkan kartu langsung dari layar HP ke kasir.",
       "",
       "Dashboard Investor: https://living.haluoleo.id",
+      ...bagianAkhir,
+    ].join("\n"),
+  // Owner 2026-11-08: untuk penerima tambahan, fasilitas aktif "stlah anda
+  // sdh memiliki akses ke sistem loonars" (bukan "setelah pelunasan").
+  teksTanpaAkses: (nama) =>
+    [
+      ...bagianAwal(nama),
+      "Sebagai ucapan terima kasih atas kepercayaan Bapak/Ibu, Loonars menghadirkan fasilitas *Priority Investor Loonars* berupa *diskon 20% untuk semua produk Loonars*: Loonars Excellent Living, Loonars Coffee, dan Loonars Beauty.",
       "",
-      "Loonars tidak akan ada tanpa Bapak/Ibu. Sejauh apa pun Loonars berkembang, selama itu pula Bapak/Ibu akan selalu menjadi prioritas kami. 🙏",
-      "",
-      "Hormat kami,",
-      "*Manajemen Loonars*",
+      "Fasilitas ini berupa kupon diskon yang bisa Bapak/Ibu pakai sendiri atau bagikan ke keluarga, teman, dan relasi, serta Kartu Priority Investor yang cukup ditunjukkan ke kasir. Semuanya dapat Bapak/Ibu nikmati *setelah Bapak/Ibu memiliki akses ke sistem Loonars*.",
+      ...bagianAkhir,
     ].join("\n"),
 };
 
