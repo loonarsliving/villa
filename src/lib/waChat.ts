@@ -2,7 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { terjemahkanChat } from "./aiBridge";
-import { hanyaSapaan } from "./menuSapaan";
+import { bacaPilihanMenu, hanyaSapaan, JAWABAN_KEBEBASAN, pertanyaanKebebasan } from "./menuSapaan";
 import { kirimDariNomorUtama } from "./mkhsistemWa";
 import { nomorKanonik, samePhoneNumber } from "./phone";
 import { supabaseAdminProperti } from "./supabaseAdmin";
@@ -115,7 +115,7 @@ const PENANDA_SEWA_VILLA: RegExp[] = [
  * (PENANDA_PROPERTI) -- pesan seperti itu tetap milik sales.
  */
 const PENANDA_TANYA_VILLA: RegExp[] = [
-  /\bvilla(nya)?\b/i,
+  /\bvill?a(nya)?\b/i,
   /\bprice\s?list(nya)?\b/i,
   /\bdaftar\s+(harga|tarif)\b/i,
   /\b(list|info)\s+(harga|tarif)\b/i,
@@ -280,38 +280,96 @@ export async function bolehMasukResepsionis(supabase: SupabaseClient, phoneMenta
   return (guests ?? []).some((g) => samePhoneNumber(g.hp, phone));
 }
 
-/**
- * Menu sapaan (src/lib/menuSapaan.ts) hanya untuk orang asing yang membuka
- * dengan salam saja: bukan pelanggan refund, bukan karyawan/kontraktor, bukan
- * dari iklan Meta (urusan sales), dan nomornya tidak chat ke 0822 dalam 14 hari
- * terakhir (ai_conversations Mkhsistem). Syarat terakhir ini yang menjaga rekan
- * bisnis atau investor yang sedang aktif chat tidak tiba-tiba menerima menu,
- * dan menu tidak terkirim dua kali ke orang yang sama.
- * Gagal baca = tidak dikirim (lebih baik diam daripada salah kirim).
- */
-export async function bolehDapatMenuSapaan(supabase: SupabaseClient, phoneMentah: string, teks: string, adaIklan: boolean): Promise<boolean> {
-  if (adaIklan || dariIklan(teks) || !hanyaSapaan(teks)) return false;
-  if (await nomorPelangganRefund(supabase, phoneMentah)) return false;
-  if (await orangDalamMkhsistem(supabase, phoneMentah)) return false;
-  if (await leadSalesTerbuka(supabase, phoneMentah)) return false;
-  const riwayat = await riwayatChatTerakhir(supabase, phoneMentah, 14 * 24);
-  return riwayat !== null && riwayat.length === 0;
+/** Jawaban tetap "bebas / syariah" sudah dikirim ke percakapan ini dalam 24 jam terakhir (jangan mengulang). */
+export async function sudahDijawabKebebasan(supabase: SupabaseClient, conversationId: string): Promise<boolean> {
+  const sejak = new Date(Date.now() - 24 * 3_600_000).toISOString();
+  const { data, error } = await supabase
+    .from("wa_conversation_messages")
+    .select("id")
+    .eq("conversation_id", conversationId)
+    .eq("arah", "keluar")
+    .eq("isi", JAWABAN_KEBEBASAN)
+    .gte("created_at", sejak)
+    .limit(1);
+  if (error) {
+    console.error("[waChat] gagal memeriksa jawaban kebebasan", error.message);
+    return true; // gagal baca = anggap sudah, lebih baik tidak mengirim dobel
+  }
+  return (data ?? []).length > 0;
+}
+
+/** Pesan yang sudah menyebut propertinya (Private/Excellent Living): tidak perlu ditanya lagi lewat menu. */
+export function menyebutPropertiEksplisit(teks: string): boolean {
+  return /\b(private|excellent)\s+living\b/i.test(teks) || /\bloonars\s+living\b/i.test(teks);
 }
 
 /**
- * Nomor ini baru saja menerima menu sapaan: pesan sebelumnya ada dalam 24 jam,
- * dan semua pesannya dalam 15 hari terakhir hanya salam (jadi salam pertamanya
- * memenuhi syarat menu di atas). Dihitung dari ai_conversations, tanpa tabel baru.
+ * Pesan pembuka orang asing yang harus dijawab menu dulu (pemilihan awal diperketat,
+ * owner 2026-11-08): salam saja, ATAU pertanyaan menginap yang tidak menyebut
+ * properti mana ("Info villa loonars") sehingga PL/EL tidak bisa ditentukan.
+ * Pesan yang menyebut propertinya, bukan soal menginap, atau dari tombol website
+ * tidak memakai menu.
  */
-export async function menuSapaanTertunda(supabase: SupabaseClient, phoneMentah: string): Promise<boolean> {
-  if (await nomorPelangganRefund(supabase, phoneMentah)) return false;
-  if (await orangDalamMkhsistem(supabase, phoneMentah)) return false;
-  if (await leadSalesTerbuka(supabase, phoneMentah)) return false;
-  const riwayat = await riwayatChatTerakhir(supabase, phoneMentah, 15 * 24);
-  if (!riwayat?.length) return false;
-  const terakhir = riwayat[0];
-  const umurJam = (Date.now() - new Date(terakhir.created_at).getTime()) / 3_600_000;
-  return umurJam <= 24 && hanyaSapaan(terakhir.inbound_text ?? "") && riwayat.every((r) => hanyaSapaan(r.inbound_text ?? ""));
+export function perluMenu(teks: string): boolean {
+  if (hanyaSapaan(teks) || pertanyaanKebebasan(teks)) return true;
+  return menyebutSewaVilla(teks) && !menyebutPropertiEksplisit(teks) && !dariTombolWebsite(teks);
+}
+
+export interface RiwayatPesan {
+  inbound_text: string | null;
+  created_at: string;
+}
+
+export type TahapMenu =
+  | { tahap: "baru" }
+  | { tahap: "menunggu"; /** tamu sudah pernah diingatkan "balas dengan angka" */ pengingatSudah: boolean; /** pertanyaan bebas yang ditulis sebelum memilih, urut lama -> baru */ pertanyaan: string[] };
+
+/**
+ * Menu sapaan dihitung dari riwayat ai_conversations (milik Mkhsistem), tanpa
+ * tabel baru. `riwayat` = pesan masuk nomor ini dalam 14 hari, terbaru dulu,
+ * di luar pesan yang sedang diproses.
+ *  - kosong -> "baru": kontak pertama.
+ *  - pesan tertua ada dalam 24 jam, tadinya memicu menu (perluMenu), dan belum
+ *    ada jawaban angka -> "menunggu".
+ *  - selain itu null: sudah memilih, sudah lama, atau chat biasa.
+ */
+export function tentukanTahapMenu(riwayat: RiwayatPesan[], sekarang = Date.now()): TahapMenu | null {
+  if (!riwayat.length) return { tahap: "baru" };
+  const urut = [...riwayat].reverse();
+  const pertama = urut[0];
+  if (sekarang - new Date(pertama.created_at).getTime() > 24 * 3_600_000) return null;
+  if (!perluMenu(pertama.inbound_text ?? "")) return null;
+  const sisa = urut.slice(1);
+  if (sisa.some((r) => bacaPilihanMenu(r.inbound_text ?? "") !== null)) return null;
+  const bebas = (t: string | null) => !!t && t.trim() !== "" && !t.startsWith("[") && !hanyaSapaan(t);
+  return {
+    tahap: "menunggu",
+    pengingatSudah: sisa.some((r) => bebas(r.inbound_text)),
+    pertanyaan: urut.map((r) => r.inbound_text ?? "").filter(bebas).slice(-5),
+  };
+}
+
+/**
+ * Posisi nomor ini dalam menu sapaan, atau null kalau menu tidak berlaku: iklan
+ * Meta (urusan sales), pelanggan refund, karyawan/kontraktor, lead sales, tamu
+ * yang sudah punya percakapan resepsionis atau data tamu (propertinya sudah
+ * diketahui dari booking), atau riwayat gagal dibaca (lebih baik diam daripada
+ * salah kirim). Untuk "baru", pesan ini sendiri harus memenuhi perluMenu.
+ */
+export async function statusMenuSapaan(supabase: SupabaseClient, phoneMentah: string, teks: string, adaIklan: boolean): Promise<TahapMenu | null> {
+  if (adaIklan || dariIklan(teks)) return null;
+  if (await nomorPelangganRefund(supabase, phoneMentah)) return null;
+  if (await orangDalamMkhsistem(supabase, phoneMentah)) return null;
+  if (await leadSalesTerbuka(supabase, phoneMentah)) return null;
+  const phone = nomorKanonik(phoneMentah);
+  const { data: percakapan, error } = await supabase.from("wa_conversations").select("id").eq("phone", phone).maybeSingle();
+  if (error || percakapan) return null;
+  if ((await idTamuBernomor(supabase, phone)).length > 0) return null;
+  const riwayat = await riwayatChatTerakhir(supabase, phoneMentah, 14 * 24);
+  if (riwayat === null) return null;
+  const tahap = tentukanTahapMenu(riwayat);
+  if (tahap?.tahap === "baru" && !perluMenu(teks)) return null;
+  return tahap;
 }
 
 /**

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { bacaPilihanMenu, hanyaSapaan, isiPilihanMenginap, isiPilihanMenginapEl, teksMenuSapaan } from "./menuSapaan";
+import { bacaPilihanMenu, hanyaSapaan, isiPilihanMenginap, isiPilihanMenginapEl, JAWABAN_KEBEBASAN, pertanyaanKebebasan, teksMenuSapaan, teksPengingatMenu } from "./menuSapaan";
 
 describe("hanyaSapaan", () => {
   it("salam pembuka nyata dari tamu (23 Okt - 5 Nov) dikenali", () => {
@@ -44,6 +44,15 @@ describe("teks menu", () => {
     expect(t.toLowerCase()).not.toContain("sarapan");
     expect(teksMenuSapaan(null).startsWith("Halo Kak,")).toBe(true);
   });
+  it("menu wajib: tidak menawarkan pertanyaan bebas, dan pengingat memuat pilihan yang sama", () => {
+    for (const t of [teksMenuSapaan("Rina"), teksMenuSapaan("Rina", true), teksPengingatMenu()]) {
+      expect(t.toLowerCase()).not.toContain("tuliskan pertanyaan");
+      expect(t).toContain("4. Lainnya");
+      expect(t.toLowerCase()).not.toContain("sarapan");
+    }
+    expect(teksMenuSapaan("Rina", true)).toContain("pertanyaan Kakak sudah kami terima");
+    expect(teksPengingatMenu()).toContain("balas dengan angka saja");
+  });
   it("isi yang dicatat untuk resepsionis menjelaskan arti angka", () => {
     expect(isiPilihanMenginap("1")).toBe("1 (pilihan menu sapaan: Menginap / booking)");
   });
@@ -52,5 +61,31 @@ describe("teks menu", () => {
     const isi = isiPilihanMenginapEl("2");
     expect(tentukanPropertiPercakapan({ teks: isi, elAktif: false, plAktif: false, sebelumnya: null })).toBe("EL");
     expect(teksSapaanPertama("Rina", isi)).toContain("Loonars Excellent Living");
+  });
+});
+
+describe("pertanyaanKebebasan", () => {
+  it("pertanyaan bebas / syariah / konvensional dikenali", () => {
+    for (const t of [
+      "untuk vila loonars itu termasuk bebas atau tidak ya",
+      "Villa nya syariah atau konvensional?",
+      "ini hotel syariah ga",
+      "Konvensional kak?",
+      "bebas atau tidak kak",
+      "loonars bebas ga?",
+      "apakah ini penginapan non-syariah",
+    ]) {
+      expect(pertanyaanKebebasan(t), t).toBe(true);
+    }
+  });
+  it("kata 'bebas' biasa dan pertanyaan lain bukan", () => {
+    for (const t of ["bebas biaya parkir?", "bebas sarapan ga?", "wifi bebas?", "Halo kak", "harga kamar berapa", "bisa check in bebas jam berapa saja?"]) {
+      expect(pertanyaanKebebasan(t), t).toBe(false);
+    }
+  });
+  it("jawaban tetap persis kalimat owner dan tidak menjanjikan sarapan", () => {
+    expect(JAWABAN_KEBEBASAN.startsWith("Halo Kak, Loonars merupakan akomodasi private villa yang terbuka untuk tamu individu, pasangan, maupun keluarga.")).toBe(true);
+    expect(JAWABAN_KEBEBASAN).toContain("selama mengikuti house rules yang telah ditetapkan, kami dengan senang hati menyambut kedatangan Kakak. 😊");
+    expect(JAWABAN_KEBEBASAN.toLowerCase()).not.toContain("sarapan");
   });
 });

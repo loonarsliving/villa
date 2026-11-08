@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { akhiranNomor, cukupUntukMenebakBahasa, dariIklan, dariTombolWebsite, menyebutSewaVilla, pilihBookingTerbaik, teksSapaanPertama } from "./waChat";
+import { akhiranNomor, cukupUntukMenebakBahasa, dariIklan, dariTombolWebsite, menyebutPropertiEksplisit, menyebutSewaVilla, perluMenu, pilihBookingTerbaik, teksSapaanPertama, tentukanTahapMenu } from "./waChat";
 
 describe("cukupUntukMenebakBahasa", () => {
   it("jawaban pendek tidak dipakai menebak bahasa (tamu Indonesia yang menjawab 'ok')", () => {
@@ -84,6 +84,7 @@ describe("menyebutSewaVilla", () => {
     expect(menyebutSewaVilla("Halo, saya ingin tanya produk Loonars Beauty")).toBe(false);
   });
   it("pertanyaan menginap yang diketik sendiri lolos", () => {
+    expect(menyebutSewaVilla("untuk vila loonars itu termasuk bebas atau tidak ya")).toBe(true);
     expect(menyebutSewaVilla("kak mau nginep tgl 5-7 bisa?")).toBe(true);
     expect(menyebutSewaVilla("harga per malam berapa ya")).toBe(true);
     expect(menyebutSewaVilla("Mau sewa villa buat staycation")).toBe(true);
@@ -223,5 +224,60 @@ describe("tentukanPropertiPercakapan (satu nomor WA untuk PL & EL)", () => {
     expect(tentukanPropertiPercakapan({ ...dasar, sebelumnya: "EL" })).toBe("EL");
     expect(tentukanPropertiPercakapan({ ...dasar, elAktif: true, plAktif: true, sebelumnya: "PL" })).toBe("PL");
     expect(tentukanPropertiPercakapan(dasar)).toBe("PL");
+  });
+});
+
+describe("perluMenu (pemilihan awal diperketat)", () => {
+  it("salam saja dan pertanyaan menginap tanpa nama properti harus lewat menu", () => {
+    for (const t of ["Halo kak", "Malam kak", "Apakah syariah atau konvensional?", "Info villa loonars", "untuk vila loonars itu termasuk bebas atau tidak ya", "Harga kamar berapa kak?", "info pl", "bisa via agoda?"]) {
+      expect(perluMenu(t), t).toBe(true);
+    }
+  });
+  it("yang menyebut properti, bukan soal menginap, atau dari tombol website tidak memakai menu", () => {
+    for (const t of [
+      "Halo, saya ingin tanya soal menginap di Loonars Private Living Yogyakarta",
+      "Halo, saya ingin info pembukaan Loonars Excellent Living Yogyakarta untuk menginap",
+      "Harga kamar dan investasi",
+      "Ada layout dan price list unit yang dijual?",
+      "HT 35 Y, 35 kva yanmar engine",
+      "Selamat siang pak, kami supplier kaca",
+    ]) {
+      expect(perluMenu(t), t).toBe(false);
+    }
+    expect(menyebutPropertiEksplisit("Loonars Excellent Living")).toBe(true);
+    expect(menyebutPropertiEksplisit("info villa loonars")).toBe(false);
+  });
+});
+
+describe("tentukanTahapMenu", () => {
+  const sekarang = Date.parse("2026-11-08T07:30:00Z");
+  const menit = (m: number) => new Date(sekarang - m * 60_000).toISOString();
+  // terbaru dulu, seperti hasil query
+  const r = (...p: Array<[string, number]>) => p.map(([inbound_text, m]) => ({ inbound_text, created_at: menit(m) }));
+
+  it("tanpa riwayat = kontak pertama", () => {
+    expect(tentukanTahapMenu([], sekarang)).toEqual({ tahap: "baru" });
+  });
+  it("salam lalu belum membalas menu = menunggu, belum diingatkan", () => {
+    expect(tentukanTahapMenu(r(["halo kak", 1]), sekarang)).toEqual({ tahap: "menunggu", pengingatSudah: false, pertanyaan: [] });
+  });
+  it("salam, lalu pertanyaan bebas (kasus nyata): menunggu, pertanyaan dikenali, pengingat sudah dikirim", () => {
+    const t = tentukanTahapMenu(r(["untuk vila loonars itu termasuk bebas atau tidak ya", 1], ["halo kak", 2]), sekarang);
+    expect(t).toEqual({ tahap: "menunggu", pengingatSudah: true, pertanyaan: ["untuk vila loonars itu termasuk bebas atau tidak ya"] });
+  });
+  it("pertanyaan menginap tanpa properti sebagai pesan pertama juga memicu menu", () => {
+    const t = tentukanTahapMenu(r(["Info villa loonars", 3]), sekarang);
+    expect(t).toEqual({ tahap: "menunggu", pengingatSudah: false, pertanyaan: ["Info villa loonars"] });
+  });
+  it("sudah memilih angka = menu selesai", () => {
+    expect(tentukanTahapMenu(r(["3", 1], ["halo kak", 2]), sekarang)).toBeNull();
+  });
+  it("menu lebih dari 24 jam lalu atau chat biasa = bukan menu", () => {
+    expect(tentukanTahapMenu(r(["halo kak", 25 * 60]), sekarang)).toBeNull();
+    expect(tentukanTahapMenu(r(["Selamat siang pak, kami supplier kaca", 5]), sekarang)).toBeNull();
+  });
+  it("pesan tanpa teks ([non-text message]) tidak dianggap pertanyaan", () => {
+    const t = tentukanTahapMenu(r(["[non-text message]", 1], ["halo kak", 2]), sekarang);
+    expect(t).toEqual({ tahap: "menunggu", pengingatSudah: false, pertanyaan: [] });
   });
 });
