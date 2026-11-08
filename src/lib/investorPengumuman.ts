@@ -25,6 +25,7 @@ export interface HasilPengumuman {
   terkirim: number;
   gagal: number;
   dilewati_sudah_terkirim: number;
+  dilewati_atas_permintaan_owner: number;
   tanpa_nomor: number;
   dry_run: boolean;
 }
@@ -43,6 +44,7 @@ export async function kirimPengumumanInvestor(
     terkirim: 0,
     gagal: 0,
     dilewati_sudah_terkirim: 0,
+    dilewati_atas_permintaan_owner: 0,
     tanpa_nomor: 0,
     dry_run: !!opts.dryRun,
   };
@@ -55,7 +57,8 @@ export async function kirimPengumumanInvestor(
     .eq("is_active", true)
     .order("created_at");
   if (eI) throw new Error(`gagal membaca investor: ${eI.message}`);
-  const { penerima, tanpaNomor } = penerimaPengumuman((investor ?? []) as InvestorWa[]);
+  const { penerima, tanpaNomor, dilewati } = penerimaPengumuman((investor ?? []) as InvestorWa[], p.lewati);
+  hasil.dilewati_atas_permintaan_owner = dilewati;
   hasil.penerima = penerima.length;
   hasil.nama_penerima = penerima.map((r) => r.nama);
   hasil.tanpa_nomor = tanpaNomor;

@@ -10,12 +10,16 @@ export interface Pengumuman {
   id: string;
   /** Hari terakhir (WIB, YYYY-MM-DD) pengumuman boleh dikirim; sesudahnya rute tidak mengirim apa pun. */
   berlakuSampai: string;
+  /** Nama akun (persis, tanpa beda huruf besar/kecil) yang tidak dikirimi pengumuman ini. */
+  lewati: string[];
   teks: (nama: string) => string;
 }
 
 export const PENGUMUMAN: Pengumuman = {
   id: "investor_pengumuman_20261108",
   berlakuSampai: "2026-11-09",
+  // Owner 2026-11-08: "investor A1 dilewati sj" (akun berlabel unit, bukan nama orang).
+  lewati: ["Investor A1"],
   teks: (nama) =>
     [
       "*Pengumuman untuk Investor Loonars Private Living*",
@@ -49,19 +53,43 @@ export interface InvestorWa {
 }
 
 /**
+ * Nama untuk sapaan (owner 2026-11-08: "rapikan namanya"): huruf besar di
+ * awal tiap kata, sisanya kecil; titik yang menempel diberi spasi
+ * ("IR.AGUSTAM" -> "Ir. Agustam").
+ */
+export function rapikanNama(nama: string): string {
+  return nama
+    .replace(/\.(?=\S)/g, ". ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((k) => k.charAt(0).toLocaleUpperCase("id-ID") + k.slice(1).toLocaleLowerCase("id-ID"))
+    .join(" ");
+}
+
+/**
  * Satu penerima per nomor (investor multi-akun memakai nama akun pertama
  * sesuai urutan masukan). Nomor < 8 digit dihitung tanpa_nomor.
  */
-export function penerimaPengumuman(investor: InvestorWa[]): { penerima: { hp: string; nama: string }[]; tanpaNomor: number } {
+export function penerimaPengumuman(
+  investor: InvestorWa[],
+  lewati: string[] = [],
+): { penerima: { hp: string; nama: string }[]; tanpaNomor: number; dilewati: number } {
   const peta = new Map<string, string>();
+  const dilewatiSet = new Set(lewati.map((n) => n.trim().toLowerCase()));
   let tanpaNomor = 0;
+  let dilewati = 0;
   for (const inv of investor) {
+    if (dilewatiSet.has(String(inv.nama ?? "").trim().toLowerCase())) {
+      dilewati++;
+      continue;
+    }
     const hp = String(inv.hp ?? "").replace(/\D/g, "");
     if (hp.length < 8) {
       tanpaNomor++;
       continue;
     }
-    if (!peta.has(hp)) peta.set(hp, String(inv.nama ?? "").trim() || "Investor Loonars");
+    if (!peta.has(hp)) peta.set(hp, rapikanNama(String(inv.nama ?? "")) || "Investor Loonars");
   }
-  return { penerima: [...peta].map(([hp, nama]) => ({ hp, nama })), tanpaNomor };
+  return { penerima: [...peta].map(([hp, nama]) => ({ hp, nama })), tanpaNomor, dilewati };
 }
