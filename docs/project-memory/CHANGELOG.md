@@ -4,6 +4,10 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-11-08 — Pengumuman WA sekali kirim ke investor Private Living
+- Teks disetujui owner (pembukaan EL 12 Nov, permintaan maaf grand opening PL yang akan digelar bersama pembukaan Loonars Coffee awal Desember, diskon 20% Priority Investor, kalimat penutup). Disapa per nama akun; satu nomor satu pesan.
+- Jalur sama dengan laporan mingguan Rabu (`kirimDariNomorUtama`, 0822 via Mkhsistem, log `wa_messages_log`). `src/lib/investorPengumuman(Text).ts` + rute `/api/cron/investor-pengumuman` (`isAuthorizedCronRequest`, `?dry=1`). Sekali per nomor SELAMANYA per `PENGUMUMAN.id` (`investor_pengumuman_20261108`) dan tidak mengirim apa pun setelah `berlakuSampai` 2026-11-09, sehingga cron `0 8 8 11 *` di vercel.json tidak berbuat apa-apa di tahun berikutnya. Pengumuman berikutnya: ganti `PENGUMUMAN` (id baru) hanya atas permintaan owner.
+
 ### 2026-11-08 — Kupon diskon investor 20% Excellent Living + Kartu Priority Investor (LIVE, PR #299 + loonars#37)
 - Permintaan owner: promosi ke investor lama Private Living saat pembukaan EL (12 Nov 2026). Setiap investor (role owner, aktif) memegang 5 kode `INV-XXXXXX` yang terisi ulang otomatis saat dashboard dibuka (`GET /investor/kupon`, `isiUlangKuponInvestor`). Kode boleh disebar; satu kode = satu booking selamanya (termasuk booking yang batal/kedaluwarsa, supaya booking kedaluwarsa yang hidup lagi tidak bentrok).
 - Dipakai di kolom "Kode referral" form pemesanan EL loonars.id (repo loonars; `?ref=KODE` mengisi otomatis). Pratinjau `GET /public/el|p/EL/kupon`; `POST .../bookings` menerima `kupon_code`, diskon 20% dihitung di server dan MENGURANGI `bookings.tarif` (pendapatan EL, keputusan owner). Hanya properti EL (`PROPERTI_KUPON_INVESTOR`); Private Living tidak berubah.

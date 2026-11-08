@@ -43,6 +43,10 @@
       "schedule": "0 9 * * 3"
     },
     {
+      "path": "/api/cron/investor-pengumuman",
+      "schedule": "0 8 8 11 *"
+    },
+    {
       "path": "/api/cron/peak-competitor-research",
       "schedule": "0 18 * * *"
     }
