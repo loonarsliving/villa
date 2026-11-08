@@ -40,17 +40,31 @@ export function bacaPilihanMenu(teks: string): PilihanMenu | null {
   return n === "1" ? "menginap" : n === "2" ? "menginap_el" : n === "3" ? "properti" : "lainnya";
 }
 
-export function teksMenuSapaan(namaTampilan?: string | null): string {
+const DAFTAR_PILIHAN =
+  "1. Menginap / booking di Loonars Private Living Yogyakarta\n" +
+  "2. Menginap / booking di Loonars Excellent Living Yogyakarta\n" +
+  "3. Properti & investasi\n" +
+  "4. Lainnya";
+
+/**
+ * Menu wajib (owner 2026-11-08): tidak lagi menawarkan "atau tulis pertanyaan",
+ * karena pertanyaan bebas membuat pembagian PL / EL / properti tidak bisa dipastikan.
+ * `denganPertanyaan` = tamu sudah menulis pertanyaan menginap tanpa menyebut properti.
+ */
+export function teksMenuSapaan(namaTampilan?: string | null, denganPertanyaan = false): string {
   const nama = (namaTampilan ?? "").trim();
   const sapa = nama && nama.length <= 40 ? `Halo Kak ${nama},` : "Halo Kak,";
+  const buka = denganPertanyaan
+    ? `${sapa} terima kasih, pertanyaan Kakak sudah kami terima 🙏\nAgar diteruskan ke tim yang tepat, mohon pilih dulu dengan membalas angka:`
+    : `${sapa} terima kasih sudah menghubungi kami 🙏\nAgar Kakak langsung terhubung dengan tim yang tepat, mohon balas dengan angka:`;
+  return `${buka}\n\n${DAFTAR_PILIHAN}\n\nCukup ketik angkanya saja ya Kak.`;
+}
+
+/** Tamu menulis pertanyaan bebas padahal menu belum dijawab: diingatkan sekali. */
+export function teksPengingatMenu(): string {
   return (
-    `${sapa} terima kasih sudah menghubungi kami 🙏\n` +
-    "Ada yang bisa kami bantu? Silakan balas dengan angka:\n\n" +
-    "1. Menginap / booking di Loonars Private Living Yogyakarta\n" +
-    "2. Menginap / booking di Loonars Excellent Living Yogyakarta\n" +
-    "3. Properti & investasi\n" +
-    "4. Lainnya\n\n" +
-    "Atau langsung tuliskan pertanyaan Kakak ya."
+    "Mohon maaf Kak, agar pesan Kakak sampai ke tim yang tepat, mohon balas dengan angka saja ya 🙏\n\n" +
+    `${DAFTAR_PILIHAN}\n\nSetelah itu pertanyaan Kakak langsung kami teruskan.`
   );
 }
 
@@ -70,3 +84,23 @@ export function isiPilihanMenginap(teksAsli: string): string {
 export function isiPilihanMenginapEl(teksAsli: string): string {
   return `${teksAsli.trim()} (pilihan menu sapaan: Menginap / booking Loonars Excellent Living)`;
 }
+
+/**
+ * Pertanyaan "bebas atau tidak" / "syariah atau konvensional" dijawab otomatis
+ * dengan kalimat tetap dari owner (2026-11-08), bukan ditulis AI: kebijakan
+ * menginap tidak boleh berubah-ubah redaksinya. Sengaja sempit: "bebas" saja
+ * tidak cukup ("bebas biaya parkir?", "bebas wifi?" bukan pertanyaan ini).
+ */
+const POLA_KEBEBASAN: RegExp[] = [
+  /syariah|syariat|\bsyar'?i\b|konvensional/i,
+  /\bbebas\s+(atau|ato|apa)\s+(tidak|tdk|nggak|ngga|gak|ga|enggak|engga|tak)\b/i,
+  /\b(villa|vila|loonars|penginapan(nya)?|tempat(nya)?)\s+(ini\s+|itu\s+)?(termasuk\s+)?bebas\s*(\?|$|kah|ga\b|gak\b|nggak\b|ngga\b)/i,
+];
+
+export function pertanyaanKebebasan(teks: string): boolean {
+  return POLA_KEBEBASAN.some((re) => re.test(teks));
+}
+
+export const JAWABAN_KEBEBASAN =
+  "Halo Kak, Loonars merupakan akomodasi private villa yang terbuka untuk tamu individu, pasangan, maupun keluarga.\n\n" +
+  "Untuk ketentuan menginap, kami mengikuti kebijakan hospitality yang berlaku. Jadi, Kakak tidak perlu khawatir, selama mengikuti house rules yang telah ditetapkan, kami dengan senang hati menyambut kedatangan Kakak. 😊";

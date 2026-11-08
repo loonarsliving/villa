@@ -3,14 +3,25 @@ import { after, NextResponse } from "next/server";
 import { buatDrafAiAman } from "@/lib/aiResepsionis";
 import { secretsMatch } from "@/lib/internalSecret";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { bacaPilihanMenu, isiPilihanMenginap, isiPilihanMenginapEl, teksMenuSapaan, TEKS_PILIHAN_LAIN } from "@/lib/menuSapaan";
+import {
+  bacaPilihanMenu,
+  hanyaSapaan,
+  isiPilihanMenginap,
+  isiPilihanMenginapEl,
+  JAWABAN_KEBEBASAN,
+  pertanyaanKebebasan,
+  teksMenuSapaan,
+  teksPengingatMenu,
+  TEKS_PILIHAN_LAIN,
+} from "@/lib/menuSapaan";
 import { kirimDariNomorUtama } from "@/lib/mkhsistemWa";
 import {
-  bolehDapatMenuSapaan,
   bolehMasukResepsionis,
+  catatBalasanOtomatisAman,
   catatPesanMasukAman,
   kirimSapaanPertamaAman,
-  menuSapaanTertunda,
+  statusMenuSapaan,
+  sudahDijawabKebebasan,
   terjemahkanPesanMasukAman,
 } from "@/lib/waChat";
 import { isiNotifChatTamu, kirimPushKePeranAman, totalChatBelumDibaca } from "@/lib/webPush";
@@ -50,11 +61,13 @@ export const maxDuration = 60;
  * lewat after(). Draf itu hanya tampil di layar Chat -- tidak ada yang terkirim ke
  * tamu tanpa resepsionis menekan Kirim.
  *
- * Menu sapaan (owner 2026-11-05, src/lib/menuSapaan.ts): orang asing yang
- * membuka dengan salam saja ("Halo kak") dibalas menu 1/2/3. Jawaban "1" dicatat
- * di Chat resepsionis (lalu disapa seperti biasa); "2"/"3" dibalas singkat dan
- * tetap milik Mkhsistem/owner. Saat menu dikirim, jawabannya `villa: true` agar
- * Mkhsistem tidak ikut membalas.
+ * Menu wajib (owner 2026-11-05, diperketat 2026-11-08; src/lib/menuSapaan.ts):
+ * orang asing yang membuka dengan salam ("Halo kak"), atau bertanya menginap tanpa
+ * menyebut properti, dibalas menu 1-4 dan HARUS memilih angka. Pertanyaan bebas
+ * sebelum memilih diingatkan sekali. Jawaban "1" (PL) / "2" (EL) membuka Chat
+ * resepsionis properti itu, dan pertanyaan yang sudah ditulis ikut dicatat;
+ * "3"/"4" dibalas singkat dan tetap milik Mkhsistem/owner. Saat menu/pengingat
+ * dikirim, jawabannya `villa: true` agar Mkhsistem tidak ikut membalas.
  *
  * HANYA mencatat -- tidak menjalankan LUNAS/PROMO/dll. Perintah-perintah itu
  * sudah diproses Mkhsistem untuk nomor ini; memprosesnya lagi di sini berarti
@@ -84,37 +97,98 @@ export async function POST(request: Request) {
 
   const supabase = supabaseAdmin();
   let isiDicatat = inbound.text;
-  if (!(await bolehMasukResepsionis(supabase, inbound.sender, inbound.text))) {
-    // Menu sapaan (src/lib/menuSapaan.ts, owner 2026-11-05): salam saja dari
-    // orang asing dijawab menu; jawaban "1" baru dibawa ke resepsionis.
-    const pilihan = inbound.mediaUrl ? null : bacaPilihanMenu(inbound.text);
-    if (pilihan && (await menuSapaanTertunda(supabase, inbound.sender))) {
-      if (pilihan === "properti" || pilihan === "lainnya") {
-        after(async () => {
-          const sent = await kirimDariNomorUtama(inbound.sender, TEKS_PILIHAN_LAIN);
-          if (!sent.success) console.error("[wa/mirror] balasan pilihan menu gagal dikirim", sent.error);
-        });
-        return NextResponse.json({ ok: true, villa: false, skipped: `pilihan menu sapaan: ${pilihan}` });
-      }
-      isiDicatat = pilihan === "menginap_el" ? isiPilihanMenginapEl(inbound.text) : isiPilihanMenginap(inbound.text);
-    } else if (!inbound.mediaUrl && (await bolehDapatMenuSapaan(supabase, inbound.sender, inbound.text, adaIklan(payload)))) {
+  let pertanyaanSebelumnya: string[] = [];
+  let lewatMenu = false;
+
+  // Menu wajib (owner 2026-11-08, src/lib/menuSapaan.ts): orang asing yang
+  // membuka dengan salam, atau bertanya menginap tanpa menyebut properti, harus
+  // memilih angka dulu. Pertanyaan bebas sebelum memilih hanya diingatkan sekali.
+  const menu = inbound.mediaUrl ? null : await statusMenuSapaan(supabase, inbound.sender, inbound.text, adaIklan(payload));
+  if (menu) {
+    const kirimMenu = (isi: string | string[], label: string) =>
       after(async () => {
-        const sent = await kirimDariNomorUtama(inbound.sender, teksMenuSapaan(inbound.senderName));
-        if (!sent.success) console.error("[wa/mirror] menu sapaan gagal dikirim", sent.error);
+        for (const satu of Array.isArray(isi) ? isi : [isi]) {
+          const sent = await kirimDariNomorUtama(inbound.sender, satu);
+          if (!sent.success) {
+            console.error(`[wa/mirror] ${label} gagal dikirim`, sent.error);
+            break;
+          }
+        }
       });
-      // villa: true supaya Mkhsistem tidak ikut membalas (tidak dobel dengan
-      // "pilih proyek" kalau ai_lead_manual_takeover suatu saat dimatikan).
-      // Percakapan resepsionis belum dibuat -- baru setelah tamu memilih 1.
-      return NextResponse.json({ ok: true, villa: true, menu: true, tercatat: false });
-    } else {
-      return NextResponse.json({ ok: true, villa: false, skipped: "bukan tamu atau penanya villa" });
+    // Pertanyaan "bebas / syariah" dijawab kalimat tetap owner (menuSapaan.ts), lalu menu
+    // atau pengingat menyusul supaya tamu tetap memilih. Sudah pernah dijawab = tidak diulang.
+    if (pertanyaanKebebasan(inbound.text)) {
+      const sudahDijawab = menu.tahap === "menunggu" && menu.pertanyaan.some(pertanyaanKebebasan);
+      const pesan: string[] = [];
+      if (!sudahDijawab) pesan.push(JAWABAN_KEBEBASAN);
+      if (menu.tahap === "baru") pesan.push(teksMenuSapaan(inbound.senderName, true));
+      else if (!menu.pengingatSudah) pesan.push(teksPengingatMenu());
+      if (pesan.length) {
+        kirimMenu(pesan, "jawaban kebebasan + menu");
+        return NextResponse.json({ ok: true, villa: true, menu: true, faq: "kebebasan", tercatat: false });
+      }
     }
+    // villa: true supaya Mkhsistem tidak ikut membalas ("pilih proyek"); pesannya
+    // tetap tersimpan di sisi Mkhsistem. Percakapan resepsionis baru dibuat setelah memilih 1/2.
+    if (menu.tahap === "baru") {
+      kirimMenu(teksMenuSapaan(inbound.senderName, !hanyaSapaan(inbound.text)), "menu sapaan");
+      return NextResponse.json({ ok: true, villa: true, menu: true, tercatat: false });
+    }
+    const pilihan = bacaPilihanMenu(inbound.text);
+    if (pilihan === "properti" || pilihan === "lainnya") {
+      kirimMenu(TEKS_PILIHAN_LAIN, "balasan pilihan menu");
+      return NextResponse.json({ ok: true, villa: false, skipped: `pilihan menu sapaan: ${pilihan}` });
+    }
+    if (pilihan) {
+      lewatMenu = true;
+      pertanyaanSebelumnya = menu.pertanyaan;
+      isiDicatat = pilihan === "menginap_el" ? isiPilihanMenginapEl(inbound.text) : isiPilihanMenginap(inbound.text);
+    } else if (hanyaSapaan(inbound.text)) {
+      return NextResponse.json({ ok: true, villa: false, skipped: "salam ulang sebelum memilih menu" });
+    } else if (!menu.pengingatSudah) {
+      kirimMenu(teksPengingatMenu(), "pengingat menu");
+      return NextResponse.json({ ok: true, villa: true, menu: true, pengingat: true, tercatat: false });
+    }
+    // Sudah diingatkan dan tamu tetap menulis bebas: tidak ditahan lagi, ikut penyaringan biasa.
+  }
+
+  if (!lewatMenu && !(await bolehMasukResepsionis(supabase, inbound.sender, inbound.text))) {
+    return NextResponse.json({ ok: true, villa: false, skipped: "bukan tamu atau penanya villa" });
+  }
+
+  // Pertanyaan yang ditulis tamu sebelum memilih tidak boleh hilang: dicatat
+  // lebih dulu supaya resepsionis langsung melihatnya di Chat.
+  let percakapanBaru = false;
+  let idAwal: string | null = null;
+  for (const t of pertanyaanSebelumnya) {
+    const awal = await catatPesanMasukAman(supabase, inbound.sender, t, { namaTampilan: inbound.senderName });
+    if (awal?.baru) percakapanBaru = true;
+    if (awal) idAwal = awal.conversationId;
+  }
+  // Pertanyaan "bebas / syariah" yang sudah dijawab otomatis sebelum tamu memilih menu:
+  // jawabannya dicatat juga supaya resepsionis tahu tamu sudah mendapat kalimat itu.
+  if (idAwal && pertanyaanSebelumnya.some(pertanyaanKebebasan)) {
+    await catatBalasanOtomatisAman(supabase, idAwal, JAWABAN_KEBEBASAN);
   }
 
   const hasil = await catatPesanMasukAman(supabase, inbound.sender, isiDicatat, {
     namaTampilan: inbound.senderName,
     mediaUrl: inbound.mediaUrl,
   });
+  const teksNotif = pertanyaanSebelumnya.length ? pertanyaanSebelumnya[pertanyaanSebelumnya.length - 1] : inbound.text;
+
+  // Tamu percakapan PL yang menanyakan "bebas / syariah": jawaban tetap dikirim langsung
+  // (tanpa menunggu resepsionis) dan dicatat di Chat. Putusan diambil di sini, bukan di
+  // after(), supaya draf AI untuk pesan yang sudah terjawab tidak ikut dibuat.
+  const jawabKebebasan =
+    !!hasil && hasil.properti === "PL" && !lewatMenu && !inbound.mediaUrl && pertanyaanKebebasan(inbound.text) && !(await sudahDijawabKebebasan(supabase, hasil.conversationId));
+  if (jawabKebebasan && hasil) {
+    after(async () => {
+      const sent = await kirimDariNomorUtama(inbound.sender, JAWABAN_KEBEBASAN);
+      if (!sent.success) return console.error("[wa/mirror] jawaban kebebasan gagal dikirim", sent.error);
+      await catatBalasanOtomatisAman(supabase, hasil.conversationId, JAWABAN_KEBEBASAN);
+    });
+  }
 
   // Percakapan Excellent Living (satu nomor WA untuk PL & EL): tanpa push ke
   // manager PL dan tanpa draf AI (AI resepsionis berisi info villa PL).
@@ -125,7 +199,7 @@ export async function POST(request: Request) {
       const { title, body } = isiNotifChatTamu({
         nama: inbound.senderName,
         phone: inbound.sender,
-        text: inbound.text,
+        text: teksNotif,
         adaMedia: Boolean(inbound.mediaUrl),
       });
       await kirimPushKePeranAman(supabase, PERAN_NOTIF_CHAT_TAMU, {
@@ -140,11 +214,12 @@ export async function POST(request: Request) {
     // Terjemahan dulu, baru draf: AI membaca versi Indonesia dari pesan tamu asing.
     after(async () => {
       await terjemahkanPesanMasukAman(supabase, hasil.conversationId, hasil.messageId, inbound.text);
-      if (inbound.text.trim()) await buatDrafAiAman(supabase, hasil.conversationId, hasil.messageId);
+      if (inbound.text.trim() && !jawabKebebasan) await buatDrafAiAman(supabase, hasil.conversationId, hasil.messageId);
     });
   }
-  if (hasil?.baru && !hasil.guestId) {
-    after(() => kirimSapaanPertamaAman(supabase, hasil.conversationId, inbound.sender, inbound.senderName, inbound.text));
+  if ((hasil?.baru || percakapanBaru) && hasil && !hasil.guestId) {
+    // isiDicatat (bukan teks mentah "2"): sapaan membaca "Excellent Living" dari sini.
+    after(() => kirimSapaanPertamaAman(supabase, hasil.conversationId, inbound.sender, inbound.senderName, isiDicatat));
   }
 
   return NextResponse.json({ ok: true, villa: true, tercatat: hasil !== null });
