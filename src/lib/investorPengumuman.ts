@@ -3,7 +3,8 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { todayISO } from "./format";
 import { kirimDariNomorUtama } from "./mkhsistemWa";
-import { PENGUMUMAN, penerimaPengumuman, type InvestorWa } from "./investorPengumumanText";
+import { PENGUMUMAN, penerimaPengumuman, rapikanNama, type InvestorWa } from "./investorPengumumanText";
+import { ambilPenerimaTambahan } from "./investorPenerimaTambahan";
 
 /**
  * Pengumuman WhatsApp sekali kirim ke semua investor aktif (villa_users role
@@ -59,6 +60,14 @@ export async function kirimPengumumanInvestor(
   if (eI) throw new Error(`gagal membaca investor: ${eI.message}`);
   const { penerima, tanpaNomor, dilewati } = penerimaPengumuman((investor ?? []) as InvestorWa[], p.lewati);
   hasil.dilewati_atas_permintaan_owner = dilewati;
+  // Penerima tambahan tanpa akun aktif: teks khusus (tanpa menu dashboard).
+  const tanpaAkses = new Set<string>();
+  for (const t of await ambilPenerimaTambahan(supabase)) {
+    const hp = String(t.hp ?? "").replace(/\D/g, "");
+    if (hp.length < 8 || penerima.some((r) => r.hp === hp)) continue;
+    penerima.push({ hp, nama: rapikanNama(String(t.nama ?? "")) || "Investor Loonars" });
+    tanpaAkses.add(hp);
+  }
   hasil.penerima = penerima.length;
   hasil.nama_penerima = penerima.map((r) => r.nama);
   hasil.tanpa_nomor = tanpaNomor;
@@ -78,7 +87,7 @@ export async function kirimPengumumanInvestor(
       hasil.dilewati_sudah_terkirim++;
       continue;
     }
-    const pesan = p.teks(r.nama);
+    const pesan = tanpaAkses.has(r.hp) ? p.teksTanpaAkses(r.nama) : p.teks(r.nama);
     const kirim = await kirimDariNomorUtama(r.hp, pesan);
     const { error: eLog } = await supabase.from("wa_messages_log").insert({
       phone: r.hp,

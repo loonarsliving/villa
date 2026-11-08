@@ -13,6 +13,21 @@ describe("pengumuman investor 2026-11-08", () => {
     expect(t).toContain("Loonars tidak akan ada tanpa Bapak/Ibu.");
   });
 
+  it("teks untuk penerima tanpa akses dashboard", () => {
+    const t = PENGUMUMAN.teksTanpaAkses("Liza Indira");
+    expect(t).toContain("Yth. Bapak/Ibu *Liza Indira*,");
+    expect(t).toContain("grand opening Loonars Private Living belum terealisasi");
+    expect(t).toContain("diskon 20% untuk semua produk Loonars");
+    expect(t).toContain("setelah Bapak/Ibu memiliki akses ke sistem Loonars");
+    expect(t).not.toContain("living.haluoleo.id");
+    expect(t).not.toContain("menu *Kupon");
+    expect(t).toContain("Loonars tidak akan ada tanpa Bapak/Ibu.");
+  });
+
+  it("teks investor tidak berubah isinya", () => {
+    expect(PENGUMUMAN.teks("X")).toContain("Dashboard Investor: https://living.haluoleo.id");
+  });
+
   it("satu penerima per nomor, nama akun pertama, nomor kosong dihitung", () => {
     const r = penerimaPengumuman([
       { nama: "Ani", hp: "0812-3456-7890" },
