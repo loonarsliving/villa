@@ -35,7 +35,6 @@ create index if not exists villa_investor_kupon_user_idx on public.villa_investo
 
 alter table public.villa_investor_kupon enable row level security;
 revoke all on public.villa_investor_kupon from anon, authenticated;
-drop policy if exists srole_villa_investor_kupon on public.villa_investor_kupon;
 create policy srole_villa_investor_kupon on public.villa_investor_kupon for all to service_role using (true) with check (true);
 
 -- Penanda pada booking + nominal diskon (rupiah) yang diberikan saat itu,
