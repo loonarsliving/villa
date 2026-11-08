@@ -18,8 +18,10 @@ export interface Pengumuman {
 export const PENGUMUMAN: Pengumuman = {
   id: "investor_pengumuman_20261108",
   berlakuSampai: "2026-11-09",
-  // Owner 2026-11-08: "investor A1 dilewati sj" (akun berlabel unit, bukan nama orang).
-  lewati: ["Investor A1"],
+  // Sempat ["Investor A1"] (owner 2026-11-08). Ternyata investor sungguhan
+  // (rekening a.n. MUSAFA); nama akun diganti "Musafa" atas persetujuan owner
+  // dan pengumuman dikirim kepadanya. Tidak ada lagi yang dilewati.
+  lewati: [],
   teks: (nama) =>
     [
       "*Pengumuman untuk Investor Loonars Private Living*",

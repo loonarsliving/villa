@@ -41,7 +41,7 @@ describe("pengumuman investor 2026-11-08", () => {
         { nama: "fatmiwati", hp: "081111111111" },
         { nama: "investor a1", hp: "082222222222" },
       ],
-      PENGUMUMAN.lewati,
+      ["Investor A1"],
     );
     expect(r.penerima).toEqual([{ hp: "081111111111", nama: "Fatmiwati" }]);
     expect(r.dilewati).toBe(2);
