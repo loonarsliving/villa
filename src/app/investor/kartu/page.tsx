@@ -6,10 +6,15 @@ import { InvestorShell } from "../_shell";
 import { api } from "@/lib/api";
 import { Loading } from "@/components/Card";
 import type { JawabanKupon } from "../kupon/types";
+import { lebarCode128B } from "@/lib/barcode128";
 
 /**
  * Kartu Priority Investor Loonars (owner 2026-11-08): ditunjukkan langsung
- * dari layar ke kasir Loonars Coffee / Loonars Beauty untuk diskon 20%.
+ * dari layar ke kasir Loonars Coffee / Loonars Beauty. Sengaja TANPA angka
+ * diskon di kartu (owner 2026-11-08): besaran harga khusus diatur kasir.
+ * Kartu memuat barcode Code 128 berisi nomor anggota (PI-xxxxxx, dari id
+ * akun, tidak berubah) untuk di-scan sistem kasir Coffee nanti; nomornya
+ * sendiri tidak ditulis di kartu (owner). Jangan ubah formatnya tanpa owner.
  *
  * Jam dan kilau pada kartu terus bergerak supaya kasir bisa membedakan kartu
  * asli di dashboard dari tangkapan layar atau foto. Tidak ada pencatatan
@@ -32,6 +37,27 @@ function Jam() {
   );
 }
 
+/** Barcode Code 128 sebagai SVG; latar putih + zona sunyi 10 modul agar mudah dipindai. */
+function Barcode({ nilai }: { nilai: string }) {
+  const lebar = lebarCode128B(nilai);
+  const sunyi = 10;
+  const total = lebar.reduce((a, b) => a + b, 0) + sunyi * 2;
+  let x = sunyi;
+  const batang: { x: number; w: number }[] = [];
+  lebar.forEach((w, i) => {
+    if (i % 2 === 0) batang.push({ x, w });
+    x += w;
+  });
+  return (
+    <svg viewBox={`0 0 ${total} 40`} preserveAspectRatio="none" className="block w-full h-full" role="img" aria-label="Barcode kartu investor" shapeRendering="crispEdges">
+      <rect width={total} height={40} fill="#fff" />
+      {batang.map((b) => (
+        <rect key={b.x} x={b.x} y={0} width={b.w} height={40} fill="#000" />
+      ))}
+    </svg>
+  );
+}
+
 function KartuPriority({ kartu }: { kartu: JawabanKupon["kartu"] }) {
   return (
     <div className="relative mx-auto w-full max-w-[420px] aspect-[1.586/1] rounded-[22px] overflow-hidden text-white shadow-xl shadow-ink/30 select-none">
@@ -48,10 +74,6 @@ function KartuPriority({ kartu }: { kartu: JawabanKupon["kartu"] }) {
             <div className="font-serif text-[22px] sm:text-[24px] tracking-[0.32em] leading-none text-gold-400">LOONARS</div>
             <div className="text-[8.5px] sm:text-[9px] tracking-[0.34em] uppercase text-white/55 mt-1.5">Priority Investor</div>
           </div>
-          <div className="text-right">
-            <div className="font-serif text-[30px] sm:text-[34px] leading-none text-gold-400">{kartu.persen}%</div>
-            <div className="text-[8.5px] tracking-[0.22em] uppercase text-white/55 mt-1">Diskon</div>
-          </div>
         </div>
 
         <div className="mt-auto">
@@ -59,12 +81,15 @@ function KartuPriority({ kartu }: { kartu: JawabanKupon["kartu"] }) {
           <div className="text-[17px] sm:text-[19px] font-semibold tracking-wide mt-0.5 truncate">{kartu.nama ?? "Investor Loonars"}</div>
           <div className="flex items-end justify-between gap-3 mt-2.5">
             <div className="min-w-0">
-              <div className="text-[8px] tracking-[0.2em] uppercase text-white/40">No. Anggota</div>
-              <div className="font-mono text-[12px] tracking-[0.14em] text-white/85">{kartu.no_anggota}</div>
-            </div>
-            <div className="text-right min-w-0">
               <div className="text-[8px] tracking-[0.2em] uppercase text-white/40">Berlaku di</div>
-              <div className="text-[10.5px] text-white/85 leading-tight">{kartu.berlaku_di.join(" · ")}</div>
+              <div className="text-[10.5px] text-white/85 leading-tight">
+                {kartu.berlaku_di.map((b) => (
+                  <div key={b}>{b}</div>
+                ))}
+              </div>
+            </div>
+            <div className="shrink-0 w-[46%] h-[46px] sm:h-[52px] bg-white rounded-md p-1">
+              <Barcode nilai={kartu.no_anggota} />
             </div>
           </div>
           <div className="mt-2.5 pt-2 border-t border-white/10 flex items-center gap-1.5 text-[9.5px] text-white/60">
@@ -104,7 +129,7 @@ export default function KartuPriorityPage() {
           <div className="max-w-[420px] mx-auto text-[11px] text-ink/55 leading-relaxed space-y-2">
             <p>
               <b className="text-ink">Cara pakai:</b> buka halaman ini dan tunjukkan kartu langsung dari layar ke kasir Loonars Coffee atau
-              Loonars Beauty untuk diskon {data.kartu.persen}%.
+              Loonars Beauty.
             </p>
             <p>Jam pada kartu berjalan setiap detik. Kasir hanya menerima kartu yang hidup di layar, bukan foto atau tangkapan layar.</p>
             <p>
