@@ -18,7 +18,7 @@ import { bacaBlokirKamar } from "@/lib/cloudbedsUnitSementara";
 import { buatKodeTipe, jumlahMalam, kamarUntukNamaBerurut, normalNama, pecahNama, PENANDA_BLOK, pilihKamarEl, statusElDariCloudbeds, tarifDikunciLokal, type PemakaianKamar } from "@/lib/elCloudbedsLogic";
 import { supabaseAdminProperti } from "@/lib/supabaseAdmin";
 import { siapkanAkunCloudbeds } from "@/lib/propertiConfig";
-import { ALASAN_ROOM_LEBIH, rencanaTutupRoomLebih, roomLebih, tambahHari, type BlokRoom } from "@/lib/cloudbedsRoomLebih";
+import { ALASAN_ROOM_LEBIH, hariTerbuka, PERPANJANG_BILA_SISA_HARI, rencanaTutupRoomLebih, roomLebih, tambahHari, type BlokRoom } from "@/lib/cloudbedsRoomLebih";
 
 /**
  * Sinkron dua arah Cloudbeds akun Loonars Excellent Living -- versi tabel
@@ -555,9 +555,24 @@ async function bacaBlokRoom(apiKey: string, propertyId: string, dari: string, sa
 async function tutupRoomLebih(apiKey: string, propertyId: string, roomsCb: CloudbedsRoom[], berpeta: Set<string>, hariIni: string) {
   const lebih = roomLebih(roomsCb, berpeta);
   if (!lebih.length) return [];
-  const sampai = tambahHari(hariIni, 731);
-  const blok = await bacaBlokRoom(apiKey, propertyId, hariIni, sampai);
-  const rencana = rencanaTutupRoomLebih(lebih, blok.map((b) => b.blok), hariIni);
+  // getRoomBlocks Cloudbeds menolak rentang > 35 hari: baca per jendela 35 hari,
+  // mulai hari ini, lalu melompat ke hari pertama room lebih terbuka sampai
+  // semuanya tertutup cukup lama atau hari terbukanya terbaca (maks 25 jendela).
+  const cukup = tambahHari(hariIni, PERPANJANG_BILA_SISA_HARI);
+  const semua = new Map<string, BlokRoom>();
+  const baca = async (dari: string) => {
+    const ke = tambahHari(dari, 34);
+    for (const b of await bacaBlokRoom(apiKey, propertyId, dari, ke)) semua.set(b.id || JSON.stringify(b.blok), b.blok);
+    return ke;
+  };
+  let horizon = await baca(hariIni);
+  for (let i = 0; i < 25; i++) {
+    const daftar = [...semua.values()];
+    const belum = lebih.map((r) => hariTerbuka(r.roomID, daftar, hariIni, cukup)).filter((t): t is string => t !== null && t > horizon).sort();
+    if (!belum.length) break;
+    horizon = await baca(belum[0]);
+  }
+  const rencana = rencanaTutupRoomLebih(lebih, [...semua.values()], hariIni);
   const hasil: { room: string; ditutup: string | null; error?: string }[] = lebih
     .filter((r) => !rencana.some((x) => x.roomID === r.roomID))
     .map((r) => ({ room: r.roomName, ditutup: "sudah tertutup" }));
