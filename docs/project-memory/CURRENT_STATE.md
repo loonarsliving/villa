@@ -3,11 +3,6 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
-
-## 2026-11-09 — Harga booking website di Cloudbeds (branch `claude/gross-revenue-discrepancy-xmyer4`, belum di `main`)
-
-Booking loonars.id yang didorong ke Cloudbeds kini disamakan harganya lewat `postAdjustment` (villa-api `samakanHargaCloudbeds`, juga dijalankan sweep `/bridge/push-unsynced-bookings`). Menyentuh harga yang dikirim ke Cloudbeds -> butuh persetujuan owner sebelum merge (CLAUDE.md). Arah tanda `postAdjustment.amount` tidak didokumentasikan; kode mengukurnya per reservasi dan mencatat langkahnya di `cloudbeds_events_log` (`outbound.reservation.price_synced`). Setelah live, cek log pertama untuk memastikan hasil `matched=true`. EL belum ditangani.
-
 ## 2026-11-04 — Keputusan owner EL lanjutan + tutup buku per properti
 - Owner: QRIS EL menyusul; WA tamu memakai nomor yang sama (sistem harus membedakan percakapan EL/PL); notifikasi WA EL sama dengan PL; amenities & BBQ sama; kesiapan kamar EL disesuaikan dengan Cloudbeds EL; database tamu dipisah; laporan investor EL seperti PL tapi tanpa kiriman (belum ada investor aktif); tutup buku per properti; komisi OTA tetap sama (`finance_ota_settlement_config` bersama).
 - Amenities & BBQ per properti (migrasi `20261104000008`, diterapkan; keempat tabel masih kosong): `property_kode` di `amenities`, `amenity_kit_items`, `amenity_usage_log`, `addon_orders`, semuanya di `TABEL_PER_PROPERTI`; rute `/amenities*` dan `GET /addon-orders` diizinkan untuk EL; menu Front Desk EL + Amenities + Pesanan BBQ, Admin EL + Amenities. Pemesanan BBQ publik (loonars.id + QRIS) tetap PL sampai QRIS & website EL tersedia.

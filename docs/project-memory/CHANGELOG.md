@@ -4,12 +4,6 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
-### 2026-11-09 — Harga booking website di Cloudbeds disamakan dengan yang dibayar tamu (BRANCH, menunggu persetujuan owner)
-- Masalah (owner): booking loonars.id tampil di Cloudbeds dengan harga berbeda dari yang benar-benar masuk. Penyebab: `postReservation` tidak membawa harga, jadi Cloudbeds memberi harga normalnya sendiri. `bookings.total_bayar` (angka finance kita) sudah benar dan tidak diubah.
-- villa-api `samakanHargaCloudbeds`: setelah push, baca `getReservation.balanceDetailed.grandTotal`, kirim `postAdjustment type=rate` sebesar selisih ke target `total_bayar - harga_paket` (harga kamar + kode unik). Tanda/efek adjustment tidak didokumentasikan Cloudbeds, jadi diukur: arah terbalik -> `deleteAdjustment` lalu kirim ulang; sisa karena pajak -> satu koreksi; maksimal 3 adjustment. Log `cloudbeds_events_log` event `outbound.reservation.price_synced`.
-- Sweep `/bridge/push-unsynced-bookings` (pg_cron 10 menit) ikut memperbaiki booking website yang sudah di Cloudbeds (check-in >= 2026-10-01): maks 10 per putaran, yang berhasil tidak diulang, yang gagal dicoba lagi paling cepat 24 jam.
-- Hanya `sumber='website'` Private Living. Excellent Living (`src/lib/elCloudbedsSync.ts`) punya masalah yang sama dan belum disentuh.
-
 ### 2026-11-08 — Chat 0822: menu wajib + jawaban tetap "bebas / syariah"
 - Kasus nyata: tamu mengabaikan menu dan menulis "untuk vila loonars itu termasuk bebas atau tidak ya" (ejaan "vila", tanpa kata kunci) -> tidak ada yang membalas dan pertanyaannya tidak sampai ke resepsionis. Pemilihan awal diperketat: kalimat "atau langsung tuliskan pertanyaan" dihapus; orang asing yang membuka dengan salam, atau bertanya menginap TANPA menyebut Private/Excellent Living (`perluMenu`), harus memilih angka 1-4. Pertanyaan bebas sebelum memilih diingatkan sekali (`teksPengingatMenu`); setelah itu ikut penyaringan biasa. Setelah memilih 1/2, pertanyaan yang sudah ditulis ikut dicatat di Chat resepsionis (dulu hilang). Tahap menu (`tentukanTahapMenu`/`statusMenuSapaan`, `src/lib/waChat.ts`) dihitung dari `ai_conversations`, tanpa tabel baru; tidak berlaku untuk iklan, refund, karyawan/kontraktor, lead sales, atau nomor yang sudah punya percakapan/data tamu. `vila` (satu l) kini dikenali.
 - Perbaikan: sapaan pertama untuk pilihan 2 (EL) dulu tertulis "Private Living" karena membaca teks "2", bukan teks yang menyebut Excellent Living.
