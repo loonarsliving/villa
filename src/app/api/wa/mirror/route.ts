@@ -3,6 +3,7 @@ import { after, NextResponse } from "next/server";
 import { buatDrafAiAman } from "@/lib/aiResepsionis";
 import { secretsMatch } from "@/lib/internalSecret";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { aiResepsionisAktifUntuk } from "@/lib/aiResepsionisPengetahuan";
 import {
   bacaPilihanMenu,
   hanyaSapaan,
@@ -191,7 +192,7 @@ export async function POST(request: Request) {
   }
 
   // Percakapan Excellent Living (satu nomor WA untuk PL & EL): tanpa push ke
-  // manager PL dan tanpa draf AI (AI resepsionis berisi info villa PL).
+  // manager PL (Rebecca mengurus PL).
   if (hasil && hasil.properti === "PL") {
     // Notifikasi ke manager (Rebecca) -- push HP + angka di ikon aplikasi
     // (owner 2026-10-23). Lewat after() supaya Mkhsistem tidak menunggu.
@@ -211,6 +212,10 @@ export async function POST(request: Request) {
       });
     });
 
+  }
+  // Draf AI resepsionis untuk properti yang punya buku pengetahuan (PL, dan EL
+  // sejak 2026-11-09 dengan pengetahuan EL sendiri -- aiResepsionisPengetahuan.ts).
+  if (hasil && aiResepsionisAktifUntuk(hasil.properti)) {
     // Terjemahan dulu, baru draf: AI membaca versi Indonesia dari pesan tamu asing.
     after(async () => {
       await terjemahkanPesanMasukAman(supabase, hasil.conversationId, hasil.messageId, inbound.text);
