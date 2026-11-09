@@ -1428,8 +1428,154 @@ async function pushBookingToCloudbeds(booking){
 
     await supabase.from('bookings').update({cloudbeds_reservation_id: body.reservationID}).eq('id', booking.id);
     await logOutbound(true, {cloudbeds_reservation_id: body.reservationID});
+
+    // Booking website: harga di Cloudbeds disamakan dengan yang dibayar
+    // tamu (lihat samakanHargaCloudbeds). Gagal di sini tidak membatalkan
+    // push -- kamarnya sudah terblokir, harga dicoba lagi oleh sweep.
+    // sumber dibaca ulang dari database di dalamnya (objek booking dari
+    // pemanggil tidak selalu lengkap), bukan website = tidak disentuh.
+    await samakanHargaCloudbeds(booking.id, body.reservationID);
   } catch(e) {
     await logOutbound(false, {error: e instanceof Error ? e.message : String(e)});
+  }
+}
+
+/**
+ * HARGA BOOKING WEBSITE DI CLOUDBEDS (owner 2026-11-09: "perbaiki bookingan
+ * web, pakai harga asli yg muncul").
+ *
+ * postReservation tidak membawa harga, jadi Cloudbeds memberi harga sendiri
+ * (harga normal Cloudbeds) untuk setiap booking loonars.id yang didorong ke
+ * sana -- lebih mahal dari yang dibayar tamu (harga website setelah potongan
+ * website/kupon + kode unik). Catatan kita sendiri (bookings.total_bayar)
+ * sudah benar dan tidak disentuh; yang diperbaiki adalah salinan Cloudbeds.
+ *
+ * Cara resmi Cloudbeds menimpa harga reservasi yang sudah ada adalah
+ * postAdjustment type=rate (Reservation FAQ #5). Dokumentasinya TIDAK
+ * menyebut apakah amount positif menurunkan atau menaikkan total, dan
+ * pajak/fee bisa ikut terhitung dari adjustment rate. Karena itu tanda dan
+ * besarnya tidak ditebak:
+ *   1. baca grandTotal (getReservation.balanceDetailed),
+ *   2. kirim adjustment sebesar selisih, baca ulang,
+ *   3. dari perubahan yang terjadi diketahui efek per rupiah adjustment;
+ *      kalau arahnya salah, adjustment itu dihapus (deleteAdjustment) dan
+ *      dikirim ulang dengan tanda yang benar; kalau masih ada sisa (efek
+ *      pajak), dikirim satu koreksi terakhir.
+ * Paling banyak 3 adjustment per booking per percobaan, semuanya tercatat
+ * di cloudbeds_events_log (outbound.reservation.price_synced). Tidak pernah
+ * berulang tanpa batas: hasil akhir yang tidak pas dicatat sebagai gagal.
+ *
+ * Target = total_bayar dikurangi harga_paket: harga kamar + kode unik, yaitu
+ * nominal QRIS untuk kamarnya. Paket dekorasi bukan harga kamar dan tidak
+ * dimasukkan ke rate Cloudbeds.
+ */
+const HARGA_CLOUDBEDS_TOLERANSI = 1; // rupiah, pembulatan desimal Cloudbeds
+
+async function samakanHargaCloudbeds(bookingId, reservationID){
+  const apiKey = cloudbedsApiKey();
+  if(!apiKey || !reservationID) return {ok:false, reason:'no_api_key_or_reservation'};
+  const propertyId = (Deno.env.get('CLOUDBEDS_PROPERTY_ID') ?? '').trim();
+  const langkah = [];
+  const catat = async (ok, extra) => {
+    await supabase.from('cloudbeds_events_log').insert({
+      reservation_id: String(reservationID),
+      event_type: 'outbound.reservation.price_synced',
+      payload: {booking_id: bookingId, langkah, ...extra},
+      matched: ok,
+      error: ok ? null : (extra?.error ?? 'unknown'),
+    });
+    return {ok, ...extra};
+  };
+
+  try {
+    const {data:b} = await supabase.from('bookings')
+      .select('id,sumber,status,total_bayar,harga_paket').eq('id', bookingId).maybeSingle();
+    if(!b) return await catat(false, {error:'booking_not_found'});
+    if(b.sumber !== 'website') return {ok:false, reason:'not_website'};
+    const target = Math.round(Number(b.total_bayar ?? 0) - Number(b.harga_paket ?? 0));
+    if(!(target > 0)) return await catat(false, {error:'target_tidak_valid', target});
+
+    const bacaTotal = async () => {
+      const u = new URL(`${CLOUDBEDS_API_BASE}/getReservation`);
+      u.searchParams.set('reservationID', String(reservationID));
+      if(propertyId) u.searchParams.set('propertyID', propertyId);
+      const res = await fetch(u, {headers:{'x-api-key': apiKey}});
+      const body = await res.json().catch(()=>null);
+      if(!res.ok || body?.success === false) throw new Error(`getReservation: ${body?.message ?? res.status}`);
+      const bd = body?.data?.balanceDetailed;
+      const row = Array.isArray(bd) ? bd[0] : bd;
+      // Angka Cloudbeds kadang datang sebagai string.
+      const g = Number(row?.grandTotal ?? body?.data?.total);
+      if(!Number.isFinite(g)) throw new Error('getReservation: grandTotal tidak ada');
+      return g;
+    };
+    const kirimAdjustment = async (amount) => {
+      const f = new URLSearchParams();
+      if(propertyId) f.set('propertyID', propertyId);
+      f.set('reservationID', String(reservationID));
+      f.set('type', 'rate');
+      f.set('amount', String(Math.round(amount)));
+      f.set('notes', `Harga loonars.id (dibayar tamu via QRIS): Rp ${target.toLocaleString('id-ID')} -- booking ${String(bookingId).slice(0,8)}`);
+      const res = await fetch(`${CLOUDBEDS_API_BASE}/postAdjustment`, {
+        method:'POST', headers:{'x-api-key': apiKey, 'Content-Type':'application/x-www-form-urlencoded'}, body: f.toString(),
+      });
+      const body = await res.json().catch(()=>null);
+      const ok = res.ok && body?.success !== false;
+      const adjustmentID = body?.data?.adjustmentID ?? body?.adjustmentID ?? null;
+      langkah.push({aksi:'postAdjustment', amount: Math.round(amount), ok, adjustmentID, message: body?.message ?? null});
+      if(!ok) throw new Error(`postAdjustment: ${body?.message ?? res.status}`);
+      return adjustmentID;
+    };
+    const hapusAdjustment = async (adjustmentID) => {
+      const f = new URLSearchParams();
+      if(propertyId) f.set('propertyID', propertyId);
+      f.set('reservationID', String(reservationID));
+      f.set('adjustmentID', String(adjustmentID));
+      const res = await fetch(`${CLOUDBEDS_API_BASE}/deleteAdjustment`, {
+        method:'POST', headers:{'x-api-key': apiKey, 'Content-Type':'application/x-www-form-urlencoded'}, body: f.toString(),
+      });
+      const body = await res.json().catch(()=>null);
+      const ok = res.ok && body?.success !== false;
+      langkah.push({aksi:'deleteAdjustment', adjustmentID, ok, message: body?.message ?? null});
+      return ok;
+    };
+
+    const awal = await bacaTotal();
+    langkah.push({aksi:'baca', grandTotal: awal});
+    const selisih = awal - target;
+    if(Math.abs(selisih) <= HARGA_CLOUDBEDS_TOLERANSI) return await catat(true, {target, awal, akhir: awal, sudah_sama: true});
+
+    // Percobaan 1: amount = selisih. Efek per rupiah adjustment diukur.
+    const adj1 = await kirimAdjustment(selisih);
+    let sekarang = await bacaTotal();
+    langkah.push({aksi:'baca', grandTotal: sekarang});
+    const efek = (awal - sekarang) / Math.round(selisih); // +1 = amount positif menurunkan total
+    if(!Number.isFinite(efek) || Math.abs(efek) < 0.5 || Math.abs(efek) > 2){
+      // Tidak berubah atau berubah aneh: jangan tebak lagi, kembalikan.
+      if(adj1) await hapusAdjustment(adj1);
+      return await catat(false, {target, awal, akhir: await bacaTotal(), efek, error:'efek_adjustment_tidak_terduga'});
+    }
+    if(efek < 0){
+      // Arah terbalik: total malah naik. Hapus, lalu kirim dengan tanda benar.
+      if(!adj1 || !await hapusAdjustment(adj1)){
+        return await catat(false, {target, awal, akhir: sekarang, efek, error:'arah_terbalik_dan_gagal_dihapus -- cek folio Cloudbeds manual'});
+      }
+      sekarang = await bacaTotal();
+      langkah.push({aksi:'baca', grandTotal: sekarang});
+      await kirimAdjustment((sekarang - target) / efek);
+      sekarang = await bacaTotal();
+      langkah.push({aksi:'baca', grandTotal: sekarang});
+    }
+    // Sisa karena pajak/fee ikut terhitung: satu koreksi terakhir.
+    if(Math.abs(sekarang - target) > HARGA_CLOUDBEDS_TOLERANSI){
+      await kirimAdjustment((sekarang - target) / efek);
+      sekarang = await bacaTotal();
+      langkah.push({aksi:'baca', grandTotal: sekarang});
+    }
+    const pas = Math.abs(sekarang - target) <= HARGA_CLOUDBEDS_TOLERANSI;
+    return await catat(pas, {target, awal, akhir: sekarang, efek, ...(pas ? {} : {error:'total_akhir_belum_sama'})});
+  } catch(e) {
+    return await catat(false, {error: e instanceof Error ? e.message : String(e)});
   }
 }
 
@@ -5897,7 +6043,36 @@ async function layani(req){
         ok: !!after?.cloudbeds_reservation_id,
       });
     }
-    return json({success:true, candidates:(pending ?? []).length, pushed});
+
+    // Harga booking website di Cloudbeds (lihat samakanHargaCloudbeds):
+    // memperbaiki booking yang didorong sebelum fitur ini ada, dan mencoba
+    // lagi yang gagal. Yang sudah pernah berhasil dilewati; yang gagal
+    // dicoba paling sering sekali per 24 jam. Dibatasi per putaran supaya
+    // sweep 10 menitan tidak menghabiskan kuota API Cloudbeds.
+    const hargaDisamakan = [];
+    const {data:webCb} = await supabase.from('bookings')
+      .select('id,cloudbeds_reservation_id,tgl_checkin')
+      .eq('sumber', 'website')
+      .not('cloudbeds_reservation_id', 'is', null)
+      .in('status', ['terjadwal','checkin','checkout'])
+      .gte('tgl_checkin', '2026-10-01')
+      .order('tgl_checkin', {ascending:false}).limit(300);
+    if(webCb?.length){
+      const resIds = webCb.map(x=>String(x.cloudbeds_reservation_id));
+      const {data:logs} = await supabase.from('cloudbeds_events_log')
+        .select('reservation_id,matched,created_at')
+        .eq('event_type', 'outbound.reservation.price_synced')
+        .in('reservation_id', resIds);
+      const kemarin = Date.now() - 24*60*60*1000;
+      const lewati = new Set((logs ?? [])
+        .filter(l => l.matched || new Date(l.created_at).getTime() > kemarin)
+        .map(l => String(l.reservation_id)));
+      for(const x of webCb.filter(x=>!lewati.has(String(x.cloudbeds_reservation_id))).slice(0, 10)){
+        const r = await samakanHargaCloudbeds(x.id, x.cloudbeds_reservation_id);
+        hargaDisamakan.push({booking_id: x.id, reservation_id: x.cloudbeds_reservation_id, ok: !!r?.ok, error: r?.error ?? null});
+      }
+    }
+    return json({success:true, candidates:(pending ?? []).length, pushed, harga_disamakan: hargaDisamakan});
   }
 
   if(path==='/bridge/confirm-payment' && m==='POST'){
