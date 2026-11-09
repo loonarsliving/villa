@@ -44,3 +44,53 @@ PAKET & LAYANAN DI LUAR KAMAR
 /** Hanya disertakan untuk tamu yang sudah punya booking (menginap/terjadwal). */
 export const PENGETAHUAN_TAMU_BOOKING = `KHUSUS TAMU YANG SUDAH BOOKING
 - WiFi: jaringan "Loonars Villa", sandi loonarsvilla (huruf kecil semua, tanpa spasi). Sandinya sama untuk semua villa.`;
+
+/**
+ * Buku pengetahuan AI resepsionis untuk percakapan Loonars Excellent Living
+ * (owner 2026-11-09: "pastikan ai sdh aktif seperti private living").
+ *
+ * SENGAJA MINIM: hanya fakta yang sudah tercatat di sistem (nama properti,
+ * booking lewat loonars.id + QRIS EL, harga dari sistem, aturan owner "tidak
+ * ada sarapan gratis", identitas wajib saat check-in). Jam check-in/out,
+ * extrabed, WiFi, fasilitas per tipe, parkir, dll. BELUM disetujui owner untuk
+ * EL, jadi AI diarahkan ke resepsionis. Tambahkan fakta hanya atas
+ * persetujuan owner.
+ */
+export const PENGETAHUAN_EL = `IDENTITAS
+- Nama: Loonars Excellent Living, Yogyakarta.
+- Nomor WhatsApp ini dipakai bersama dengan Loonars Private Living Villa, tetapi percakapan ini untuk EXCELLENT LIVING. Jangan memakai info Private Living (private pool per unit, tipe Standard/Sawah View, WiFi, jam atau tarif Private Living) untuk menjawab tamu ini.
+- Booking langsung: website loonars.id, halaman Excellent Living (loonars.id/excellent-living), pembayaran QRIS.
+- Salam pembuka: "Selamat pagi/siang/sore/malam Kak, Salam Hangat dari Loonars Excellent Living".
+
+TIPE KAMAR
+- Nama tipe kamar dan jumlah yang tersedia mengikuti DATA KETERSEDIAAN sistem. Jangan menyebut fasilitas tipe kamar yang tidak tertulis di sini.
+
+SYARAT CHECK-IN
+- Membawa identitas diri yang masih berlaku (KTP/SIM/Paspor/KITAS).
+
+HARGA KAMAR
+- Harga berubah setiap tanggal. Hanya sebut harga dari DATA KETERSEDIAAN sistem.
+- Harga di OTA (Agoda, Traveloka, Tiket.com, Booking.com, dll.) mengikuti promo OTA masing-masing; harga website loonars.id bisa berbeda.
+
+SARAPAN
+- TIDAK ADA sarapan gratis. Jangan menawarkan, menjanjikan, atau menyebut sarapan termasuk harga kamar. Pertanyaan sarapan/makanan diperlakukan sebagai layanan di luar kamar (diteruskan ke tim).
+
+BELUM ADA DI PENGETAHUAN (jawab dengan kategori perlu_resepsionis, tim akan mengecek dulu)
+- Jam check-in/check-out, early check-in, late check-out, extrabed, WiFi, parkir, fasilitas detail kamar, kolam renang, lokasi/alamat lengkap.`;
+
+export const NAMA_PROPERTI_AI: Record<string, string> = {
+  PL: "Loonars Private Living Villa Yogyakarta",
+  EL: "Loonars Excellent Living Yogyakarta",
+};
+
+/** Pengetahuan per properti; properti tanpa buku pengetahuan = tidak dibuatkan draf AI. */
+export function pengetahuanProperti(properti: string, punyaBooking: boolean): string | null {
+  if (properti === "PL") return punyaBooking ? `${PENGETAHUAN_UMUM}\n\n${PENGETAHUAN_TAMU_BOOKING}` : PENGETAHUAN_UMUM;
+  if (properti === "EL") return PENGETAHUAN_EL;
+  return null;
+}
+
+/** Properti yang percakapan WA-nya dibuatkan draf AI resepsionis. */
+export function aiResepsionisAktifUntuk(properti: string | null | undefined): boolean {
+  return pengetahuanProperti(properti ?? "PL", false) !== null;
+}

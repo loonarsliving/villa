@@ -309,6 +309,8 @@ export interface DrafBalasanInput {
     checkout: string;
     tipe: { nama: string; tersedia: number; malam: number; harga_per_malam: number | null; harga_total: number | null }[];
   } | null;
+  /** Nama properti untuk prompt Mkhsistem; tanpa nilai = Private Living. */
+  nama_properti?: string | null;
 }
 
 export interface DrafBalasan {

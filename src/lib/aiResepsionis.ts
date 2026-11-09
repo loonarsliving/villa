@@ -2,7 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { drafBalasanChat, type DrafBalasan, type DrafBalasanInput } from "./aiBridge";
-import { PENGETAHUAN_TAMU_BOOKING, PENGETAHUAN_UMUM } from "./aiResepsionisPengetahuan";
+import { NAMA_PROPERTI_AI, pengetahuanProperti } from "./aiResepsionisPengetahuan";
 
 /**
  * AI resepsionis, TAHAP 1: draf saja (keputusan owner 2026-10-05).
@@ -83,7 +83,51 @@ interface AvailabilityRoomType {
   price_per_night_avg: number | null;
 }
 
-async function cekKetersediaan(checkin: string, checkout: string): Promise<NonNullable<DrafBalasanInput["ketersediaan"]>> {
+type Ketersediaan = NonNullable<DrafBalasanInput["ketersediaan"]>;
+
+interface TipeProperti {
+  nama: string;
+  total: number;
+  tersedia: number;
+  malam: number | null;
+  harga_total: number | null;
+  harga_per_malam: number | null;
+}
+
+/**
+ * Ketersediaan properti selain PL dari rute publik yang sama dengan form
+ * booking loonars.id (/public/p/<KODE>/availability, harga dynamic pricing
+ * properti itu + pengecekan Cloudbeds properti itu). `belumBuka` = belum ada
+ * kamar yang dibuka manager; `tidakTerbaca` = Cloudbeds tidak bisa ditanya.
+ */
+async function cekKetersediaanProperti(
+  properti: string,
+  checkin: string,
+  checkout: string,
+): Promise<{ ketersediaan: Ketersediaan; belumBuka: boolean; tidakTerbaca: boolean }> {
+  const params = new URLSearchParams({ checkin, checkout });
+  const res = await fetch(`${VILLA_API_BASE}/public/p/${properti}/availability?${params}`, { cache: "no-store", signal: AbortSignal.timeout(20_000) });
+  const data = (await res.json().catch(() => null)) as { tipe?: TipeProperti[]; cloudbeds_terbaca?: boolean } | null;
+  if (!res.ok || !Array.isArray(data?.tipe)) throw new Error(`Ketersediaan ${properti} tidak terbaca (HTTP ${res.status})`);
+  const malam = selisihMalam(checkin, checkout);
+  return {
+    belumBuka: data.tipe.every((t) => !Number(t.total)),
+    tidakTerbaca: data.cloudbeds_terbaca === false,
+    ketersediaan: {
+      checkin,
+      checkout,
+      tipe: data.tipe.map((t) => ({
+        nama: t.nama,
+        tersedia: Number(t.tersedia) || 0,
+        malam: Number(t.malam) || malam,
+        harga_per_malam: t.harga_per_malam ?? null,
+        harga_total: t.harga_total ?? null,
+      })),
+    },
+  };
+}
+
+async function cekKetersediaan(checkin: string, checkout: string): Promise<Ketersediaan> {
   const params = new URLSearchParams({ checkin, checkout });
   const res = await fetch(`${VILLA_API_BASE}/public/availability?${params}`, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
   const data = (await res.json().catch(() => null)) as { room_types?: AvailabilityRoomType[] } | null;
@@ -120,6 +164,7 @@ async function sudahDilewati(supabase: SupabaseClient, conversationId: string, s
 }
 
 interface PercakapanRingkas {
+  property_kode: string | null;
   nama_tampilan: string | null;
   status_tamu: string;
   guests: { nama: string } | null;
@@ -141,7 +186,7 @@ async function susunDraf(supabase: SupabaseClient, conversationId: string): Prom
   const [{ data: percakapan, error: pErr }, { data: pesan, error: mErr }] = await Promise.all([
     supabase
       .from("wa_conversations")
-      .select("nama_tampilan,status_tamu,guests(nama),bookings(unit_nomor,status,tgl_checkin,tgl_checkout)")
+      .select("property_kode,nama_tampilan,status_tamu,guests(nama),bookings(unit_nomor,status,tgl_checkin,tgl_checkout)")
       .eq("id", conversationId)
       .maybeSingle(),
     supabase
@@ -154,8 +199,10 @@ async function susunDraf(supabase: SupabaseClient, conversationId: string): Prom
   if (pErr || mErr || !percakapan) throw new Error(pErr?.message ?? mErr?.message ?? "percakapan tidak ditemukan");
 
   const p = percakapan as unknown as PercakapanRingkas;
+  const properti = p.property_kode || "PL";
   const { teks: konteks, punyaBooking } = konteksTamu(p);
-  const pengetahuan = punyaBooking ? `${PENGETAHUAN_UMUM}\n\n${PENGETAHUAN_TAMU_BOOKING}` : PENGETAHUAN_UMUM;
+  const pengetahuan = pengetahuanProperti(properti, punyaBooking);
+  if (!pengetahuan) return null;
   const riwayat = (pesan ?? [])
     .reverse()
     // Resepsionis membaca (dan AI menulis) dalam bahasa Indonesia -- pakai terjemahannya kalau ada.
@@ -171,6 +218,8 @@ async function susunDraf(supabase: SupabaseClient, conversationId: string): Prom
     konteks_tamu: konteks,
     sekarang: waktuWib(sekarang),
     ketersediaan: null,
+    // PL tidak mengirim nama: Mkhsistem memakai prompt PL bawaan yang sama persis.
+    ...(properti !== "PL" ? { nama_properti: NAMA_PROPERTI_AI[properti] ?? null } : {}),
   };
 
   let draf = await drafBalasanChat(dasar);
@@ -182,7 +231,19 @@ async function susunDraf(supabase: SupabaseClient, conversationId: string): Prom
     if (checkin < tanggalWib(sekarang) || malam < 1 || malam > MAKS_MALAM) {
       return { kategori: "perlu_resepsionis", draf: draf.draf, cek_tanggal: null, alasan: `Tanggal yang dibaca AI tidak masuk akal (${checkin} s/d ${checkout}) -- mohon cek manual.` };
     }
-    const ketersediaan = await cekKetersediaan(checkin, checkout);
+    let ketersediaan: Ketersediaan;
+    if (properti === "PL") {
+      ketersediaan = await cekKetersediaan(checkin, checkout);
+    } else {
+      const cek = await cekKetersediaanProperti(properti, checkin, checkout);
+      if (cek.belumBuka) {
+        return { kategori: "perlu_resepsionis", draf: draf.draf, cek_tanggal: null, alasan: "Kamar properti ini belum dibuka manager di sistem -- belum bisa menyebut ketersediaan/harga, mohon jawab manual." };
+      }
+      if (cek.tidakTerbaca) {
+        return { kategori: "perlu_resepsionis", draf: draf.draf, cek_tanggal: null, alasan: "Ketersediaan Cloudbeds tidak terbaca saat ini -- mohon cek manual." };
+      }
+      ketersediaan = cek.ketersediaan;
+    }
     hargaSistem = ketersediaan.tipe.flatMap((t) => [t.harga_per_malam, t.harga_total]).filter((n): n is number => typeof n === "number");
     draf = await drafBalasanChat({ ...dasar, ketersediaan });
     if (draf.kategori === "cek_tanggal") {
