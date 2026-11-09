@@ -18,6 +18,7 @@ import { bacaBlokirKamar } from "@/lib/cloudbedsUnitSementara";
 import { buatKodeTipe, jumlahMalam, kamarUntukNamaBerurut, normalNama, pecahNama, PENANDA_BLOK, pilihKamarEl, statusElDariCloudbeds, tarifDikunciLokal, type PemakaianKamar } from "@/lib/elCloudbedsLogic";
 import { supabaseAdminProperti } from "@/lib/supabaseAdmin";
 import { siapkanAkunCloudbeds } from "@/lib/propertiConfig";
+import { ALASAN_ROOM_LEBIH, rencanaTutupRoomLebih, roomLebih, tambahHari, type BlokRoom } from "@/lib/cloudbedsRoomLebih";
 
 /**
  * Sinkron dua arah Cloudbeds akun Loonars Excellent Living -- versi tabel
@@ -77,6 +78,8 @@ export interface RingkasanKamar {
   tetap_aktif_ada_booking: string[];
   diblokir_hari_ini: string[];
   room_belum_dipetakan: string[];
+  /** Room Cloudbeds yang bukan kamar fisik di sistem dan ditutup otomatis (cloudbedsRoomLebih.ts). */
+  room_lebih?: { room: string; ditutup: string | null; error?: string }[];
   cloudbeds?: (DiagnosaGetRooms & { per_tipe: Record<string, number> }) | null;
 }
 
@@ -183,6 +186,13 @@ export async function syncCloudbedsProperti(kodeProperti: string): Promise<ElSyn
   const tipeLokalDariKamar = new Map(kamar.map((k) => [k.id, k.room_type_id]));
   const kamarDariRoomCb = new Map((peta ?? []).filter((p) => nomorKamar.has(String(p.unit_id))).map((p) => [String(p.cloudbeds_room_id), String(p.unit_id)]));
   const roomCbDariKamar = new Map([...kamarDariRoomCb].map(([cb, u]) => [u, cb]));
+
+  // Room lebih di Cloudbeds (bukan kamar fisik) -> ditutup agar tidak dijual OTA.
+  try {
+    ringkasan.kamar.room_lebih = await tutupRoomLebih(apiKey, propertyId, roomsCb, new Set(kamarDariRoomCb.keys()), hariIni);
+  } catch (e) {
+    errors.push(`tutup room lebih: ${e instanceof Error ? e.message : String(e)}`);
+  }
   const tipeLokalDariTipeCb = new Map<string, string>();
   for (const [cbRoom, unitId] of kamarDariRoomCb) {
     const cb = tipeDariRoomCb.get(cbRoom);
@@ -511,6 +521,65 @@ export async function sinkronKamarEl(
     const { error } = await db.from("units").update(isi).eq("id", k.id);
     if (error) errors.push(`ubah kamar ${k.nomor}: ${error.message}`);
     else hasil.diubah++;
+  }
+  return hasil;
+}
+
+const CB_API = "https://api.cloudbeds.com/api/v1.2";
+
+async function bacaBlokRoom(apiKey: string, propertyId: string, dari: string, sampai: string): Promise<{ id: string; blok: BlokRoom }[]> {
+  const q = new URLSearchParams({ propertyID: propertyId, startDate: dari, endDate: sampai, pageSize: "100" });
+  const res = await fetch(`${CB_API}/getRoomBlocks?${q}`, { headers: { "x-api-key": apiKey }, cache: "no-store", signal: AbortSignal.timeout(20_000) });
+  const body = (await res.json().catch(() => null)) as { success?: boolean; message?: string; data?: unknown } | null;
+  if (!res.ok || body?.success === false) throw new Error(`getRoomBlocks: ${body?.message ?? `HTTP ${res.status}`}`);
+  const wadah = Array.isArray(body?.data) ? body.data : [body?.data];
+  const hasil: { id: string; blok: BlokRoom }[] = [];
+  for (const w of wadah) {
+    for (const k of ((w as { roomBlocks?: unknown[] } | null)?.roomBlocks ?? []) as { roomBlockID?: unknown; startDate?: unknown; endDate?: unknown; rooms?: { roomID?: unknown }[] }[]) {
+      if (typeof k.startDate !== "string") continue;
+      hasil.push({
+        id: String(k.roomBlockID ?? ""),
+        blok: { roomIds: (k.rooms ?? []).map((r) => String(r.roomID ?? "")).filter(Boolean), startDate: k.startDate, endDate: typeof k.endDate === "string" ? k.endDate : null },
+      });
+    }
+  }
+  return hasil;
+}
+
+/**
+ * Tutup room Cloudbeds yang bukan kamar fisik di sistem (owner 2026-11-09:
+ * EL hanya 2 Quadruple, Cloudbeds berisi QUA(1)-(4)). Hanya menulis room
+ * block out_of_service untuk room tanpa peta; kamar berpeta tidak disentuh.
+ * Blokir dianggap berhasil hanya kalau terbaca balik di Cloudbeds.
+ */
+async function tutupRoomLebih(apiKey: string, propertyId: string, roomsCb: CloudbedsRoom[], berpeta: Set<string>, hariIni: string) {
+  const lebih = roomLebih(roomsCb, berpeta);
+  if (!lebih.length) return [];
+  const sampai = tambahHari(hariIni, 731);
+  const blok = await bacaBlokRoom(apiKey, propertyId, hariIni, sampai);
+  const rencana = rencanaTutupRoomLebih(lebih, blok.map((b) => b.blok), hariIni);
+  const hasil: { room: string; ditutup: string | null; error?: string }[] = lebih
+    .filter((r) => !rencana.some((x) => x.roomID === r.roomID))
+    .map((r) => ({ room: r.roomName, ditutup: "sudah tertutup" }));
+  for (const r of rencana) {
+    const form = new URLSearchParams({ propertyID: propertyId, roomBlockType: "out_of_service", roomBlockReason: ALASAN_ROOM_LEBIH, startDate: r.startDate, endDate: r.endDate });
+    form.set("rooms[0][roomID]", r.roomID);
+    form.set("rooms[0][roomTypeID]", r.roomTypeID);
+    const res = await fetch(`${CB_API}/postRoomBlock`, {
+      method: "POST",
+      headers: { "x-api-key": apiKey, "Content-Type": "application/x-www-form-urlencoded" },
+      body: form.toString(),
+      cache: "no-store",
+      signal: AbortSignal.timeout(20_000),
+    });
+    const body = (await res.json().catch(() => null)) as { success?: boolean; message?: string; roomBlockID?: unknown } | null;
+    const id = body?.roomBlockID ? String(body.roomBlockID) : null;
+    const terbaca = id ? (await bacaBlokRoom(apiKey, propertyId, r.startDate, r.startDate)).some((b) => b.id === id && b.blok.roomIds.includes(r.roomID)) : false;
+    hasil.push(
+      terbaca
+        ? { room: r.roomName, ditutup: `${r.startDate} s/d ${r.endDate}` }
+        : { room: r.roomName, ditutup: null, error: body?.message ?? `postRoomBlock HTTP ${res.status}${id ? " (tidak terbaca balik)" : ""}` },
+    );
   }
   return hasil;
 }
