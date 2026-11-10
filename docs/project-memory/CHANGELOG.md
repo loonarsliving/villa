@@ -4,6 +4,12 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-11-10 — Cloudbeds menerapkan postRoomAssign walau menjawab gagal; tamu OTA disamakan ke unit sistem
+- Diagnosa #314: Nisa (6B5D5AF5AG) dan 4 booking website Desember kini SUDAH di RER(10)=A4 di Cloudbeds, Catur & Clara di C1 -- padahal postRoomAssign 17.50 WITA (#310) dijawab "Room could not be assigned". Cloudbeds menerapkannya juga, sehingga A4 di Cloudbeds terisi GANDA: el nasution (10-13 Nov) bersama Nisa (11-14 Nov); Desember Laura Salwa / Muhammad Rifky Abizar bersama Clara/Aliyya/Raihan. Sejak #311 kamar tujuan dicek kosong dulu, jadi ini tidak bertambah.
+- Perbaikan: tamu OTA yang sistem taruh di unit sementara/pengganti kini di-postRoomAssign di Cloudbeds ke unit sistem itu, hanya bila kamar tujuan kosong menurut daftar reservasi Cloudbeds (diperbarui di memori setelah tiap kirim, apa pun jawabannya), maks 10/run, beberapa putaran. Ringkasan sync: `kamar_ota_disamakan`. Harga tetap.
+- el nasution tidak bisa diselesaikan otomatis (tidak ada satu unit kosong 3 malam): perlu pindah kamar di Cloudbeds -- A4 10 Nov lalu C2 11-12 Nov (notifikasi "PERLU PINDAH KAMAR" 18.00 WITA).
+- WA peringatan belum pernah terkirim: semua peringatan hari ini dibuat sebelum #312 live, dan WA hanya dikirim saat notifikasi baru dibuat.
+
 ### 2026-11-10 — Excellent Living: penyelarasan kamar berkala + peringatan tamu tanpa kamar
 - Owner menyetujui ("Ya") penyelarasan berkala EL sebelum EL buka 12 Nov.
 - Booking EL milik sistem (website/front desk) yang kamarnya di Cloudbeds beda dengan kamarnya di sistem kini di-`postRoomAssign` saat sinkron EL (maks 10/run, gagal tidak diulang 1 jam, notifikasi + WA "Kamar Cloudbeds belum sama").
