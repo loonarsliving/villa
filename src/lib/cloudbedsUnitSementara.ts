@@ -93,3 +93,66 @@ export function bacaBlokirKamar(data: unknown[]): BlokirKamar[] {
   }
   return hasil;
 }
+
+function tambahHari(tgl: string, n: number): string {
+  return new Date(Date.parse(`${tgl}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
+}
+
+export type RencanaPindahKamar =
+  | { bisa: true; segmen: { unit: KandidatUnit; dari: string; sampai: string }[] }
+  | { bisa: false; malamPenuh: string[] };
+
+/**
+ * Kalau TIDAK ada satu unit pun yang kosong untuk seluruh menginap, apakah
+ * tamunya tetap bisa ditampung dengan pindah kamar di tengah menginap?
+ *
+ * Owner 10 Nov 2026 (el nasution): Cloudbeds menjual per TIPE kamar, jadi
+ * selama tiap malam masih ada satu kamar kosong, reservasinya sah -- bukan
+ * overbooking. Dulu sync menyebutnya "Overbooking" padahal yang dibutuhkan
+ * hanya pindah kamar. Fungsi ini membedakan keduanya:
+ *  - bisa:true  -> rencana pindah kamar (segmen sesedikit mungkin, serakah:
+ *                  tiap segmen memakai unit yang kosong paling lama),
+ *  - bisa:false -> malam-malam yang memang penuh (overbooking sungguhan).
+ * checkOut eksklusif. Tanpa checkOut (bulanan) tidak direncanakan.
+ */
+export function rencanaPindahKamar(params: {
+  roomTypeId: string;
+  checkIn: string;
+  checkOut: string | null;
+  kandidat: KandidatUnit[];
+  terpakai: Pemakaian[];
+  blokir: BlokirKamar[];
+}): RencanaPindahKamar {
+  const { roomTypeId, checkIn, checkOut, terpakai, blokir } = params;
+  if (!checkOut || checkOut <= checkIn) return { bisa: false, malamPenuh: [] };
+  const units = params.kandidat
+    .filter((k) => cloudbedsRoomTypeIdOf(k.cloudbedsRoomId) === roomTypeId)
+    .sort((a, b) => urutanKamar(a.cloudbedsRoomId) - urutanKamar(b.cloudbedsRoomId));
+  const kosongMalam = (k: KandidatUnit, malam: string) => {
+    const besok = tambahHari(malam, 1);
+    return (
+      !terpakai.some((p) => p.unitId === k.unitId && bertabrakan(malam, besok, p.checkIn, p.checkOut)) &&
+      !blokir.some((b) => b.roomIds.includes(k.cloudbedsRoomId) && bertabrakan(malam, besok, b.startDate, b.endDate))
+    );
+  };
+  const malamPenuh: string[] = [];
+  for (let m = checkIn; m < checkOut; m = tambahHari(m, 1)) {
+    if (!units.some((k) => kosongMalam(k, m))) malamPenuh.push(m);
+  }
+  if (malamPenuh.length > 0) return { bisa: false, malamPenuh };
+
+  const segmen: { unit: KandidatUnit; dari: string; sampai: string }[] = [];
+  let m = checkIn;
+  while (m < checkOut) {
+    let terbaik: { unit: KandidatUnit; sampai: string } | null = null;
+    for (const k of units) {
+      let s = m;
+      while (s < checkOut && kosongMalam(k, s)) s = tambahHari(s, 1);
+      if (s > m && (!terbaik || s > terbaik.sampai)) terbaik = { unit: k, sampai: s };
+    }
+    if (!terbaik) return { bisa: false, malamPenuh: [m] }; // tidak terjadi: tiap malam sudah dicek
+    segmen.push({ unit: terbaik.unit, dari: m, sampai: terbaik.sampai });
+    m = terbaik.sampai;
+  }
+  return { bisa: true, segmen };
+}
