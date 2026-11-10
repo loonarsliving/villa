@@ -1182,6 +1182,43 @@ async function getVercelBridge(){
   return await getSetting('vercel_bridge');
 }
 
+/**
+ * true hanya kalau room Cloudbeds ini TERBUKTI kosong untuk [checkin, checkout)
+ * menurut getReservations (reservasi aktif lain yang di-assign ke room itu).
+ * Gagal membaca = false (jangan mengunci kamar). Dipakai sebelum postRoomAssign:
+ * pada 10 Nov 2026 postRoomAssign yang dijawab "Room could not be assigned"
+ * tetap diterapkan Cloudbeds, sehingga A4 terisi ganda.
+ */
+async function roomCloudbedsKosong(apiKey, roomId, checkin, checkout, kecualiReservationId){
+  try{
+    const propertyId = (Deno.env.get('CLOUDBEDS_PROPERTY_ID') ?? '').trim();
+    for(let halaman = 1; halaman <= 10; halaman++){
+      const url = new URL(`${CLOUDBEDS_API_BASE}/getReservations`);
+      if(propertyId) url.searchParams.set('propertyID', propertyId);
+      url.searchParams.set('checkInTo', addDaysStr(checkout, -1));
+      url.searchParams.set('checkOutFrom', addDaysStr(checkin, 1));
+      url.searchParams.set('includeAllRooms', 'true');
+      url.searchParams.set('pageNumber', String(halaman));
+      url.searchParams.set('pageSize', '100');
+      const res = await fetch(url, {headers:{'x-api-key':apiKey}, signal: AbortSignal.timeout(15000)});
+      const body = await res.json().catch(()=>null);
+      if(!res.ok || body?.success === false || !Array.isArray(body?.data)) return false;
+      for(const r of body.data){
+        if(String(r?.reservationID) === String(kecualiReservationId)) continue;
+        if(!['not_confirmed','confirmed','checked_in'].includes(r?.status)) continue;
+        for(const room of (r.rooms ?? [])){
+          if(String(room?.roomID ?? '') !== String(roomId)) continue;
+          const masuk = String(room?.roomCheckIn ?? r.startDate);
+          const keluar = String(room?.roomCheckOut ?? r.endDate);
+          if(masuk < checkout && checkin < keluar) return false;
+        }
+      }
+      if(body.data.length < 100) break;
+    }
+    return true;
+  }catch{ return false; }
+}
+
 async function pushBookingToCloudbeds(booking){
   // Kunci Cloudbeds di sini milik Private Living. Booking properti lain
   // dikirim lewat sinkron properti itu sendiri (Next.js), bukan dari sini.
@@ -1486,7 +1523,18 @@ async function pushBookingToCloudbeds(booking){
     // Next.js (src/lib/cloudbedsSelarasKamar.ts) mencoba lagi tiap 10 menit.
     try {
       const sub = Array.isArray(body.unassigned) ? body.unassigned[0]?.subReservationID : null;
-      if(sub){
+      const tglKeluar = booking.tgl_checkout ?? addDaysStr(booking.tgl_checkin, 1);
+      if(sub && !(await roomCloudbedsKosong(apiKey, mapping.cloudbeds_room_id, booking.tgl_checkin, tglKeluar, body.reservationID))){
+        // Kamar ini di Cloudbeds sudah dipakai reservasi lain (atau tidak
+        // terbaca): JANGAN dikunci -- sync Next.js menyamakannya nanti.
+        await supabase.from('cloudbeds_events_log').insert({
+          reservation_id: String(body.reservationID),
+          event_type: 'outbound.reservation.room_assigned',
+          payload: {sumber_proses: 'push', booking_id: booking.id, unit_nomor: booking.unit_nomor ?? null, newRoomID: mapping.cloudbeds_room_id, dilewati: 'kamar_tidak_kosong_di_cloudbeds'},
+          matched: false,
+          error: null,
+        });
+      } else if(sub){
         const f = new URLSearchParams();
         const propertyId = (Deno.env.get('CLOUDBEDS_PROPERTY_ID') ?? '').trim();
         if(propertyId) f.set('propertyID', propertyId);

@@ -4,6 +4,12 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-11-10 — Jawaban postRoomAssign Cloudbeds tidak dipercaya lagi
+- Terbukti dua kali hari ini: postRoomAssign yang dijawab "Room could not be assigned" TETAP diterapkan Cloudbeds (17.50 WITA: 7 booking; 21.10 WITA: Laura & Risa pindah ke C2). Owner: "jgan ada kesalahan kecil yg berdampak besar lg".
+- PL sync: setelah kiriman (apa pun jawabannya) booking itu tidak disentuh lagi di run yang sama -- dulu "gagal" langsung diikuti pemindahan sistem ke kamar Cloudbeds LAMA, bisa bolak-balik. Kamar dicatat di memori sebagai mungkin terpakai. Tidak ada peringatan dari jawaban; run berikutnya memverifikasi dari data Cloudbeds. Jalan keluar: satu kiriman per booking per run, dan tidak mengirim lagi bila ada kiriman gagal < 1 jam.
+- EL sync: peringatan hanya bila kiriman < 1 jam lalu dan Cloudbeds masih beda; kamar tujuan wajib kosong di Cloudbeds sebelum dikirim (dulu tidak dicek). Push EL hanya mengunci kamar bila kamarnya kosong di Cloudbeds.
+- villa-api push: sebelum postRoomAssign, `roomCloudbedsKosong` memeriksa getReservations; kamar terpakai / tidak terbaca -> tidak dikunci (sync menyamakan nanti).
+
 ### 2026-11-10 — Cloudbeds menerapkan postRoomAssign walau menjawab gagal; tamu OTA disamakan ke unit sistem
 - Diagnosa #314: Nisa (6B5D5AF5AG) dan 4 booking website Desember kini SUDAH di RER(10)=A4 di Cloudbeds, Catur & Clara di C1 -- padahal postRoomAssign 17.50 WITA (#310) dijawab "Room could not be assigned". Cloudbeds menerapkannya juga, sehingga A4 di Cloudbeds terisi GANDA: el nasution (10-13 Nov) bersama Nisa (11-14 Nov); Desember Laura Salwa / Muhammad Rifky Abizar bersama Clara/Aliyya/Raihan. Sejak #311 kamar tujuan dicek kosong dulu, jadi ini tidak bertambah.
 - Perbaikan: tamu OTA yang sistem taruh di unit sementara/pengganti kini di-postRoomAssign di Cloudbeds ke unit sistem itu, hanya bila kamar tujuan kosong menurut daftar reservasi Cloudbeds (diperbarui di memori setelah tiap kirim, apa pun jawabannya), maks 10/run, beberapa putaran. Ringkasan sync: `kamar_ota_disamakan`. Harga tetap.
