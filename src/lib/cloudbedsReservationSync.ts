@@ -673,39 +673,27 @@ async function selaraskanKamarMilikSistem(ctx: {
   const hasil: HasilSelaras[] = [];
   const propertyId = (process.env.CLOUDBEDS_PROPERTY_ID ?? "").trim();
   const sejamLalu = new Date(Date.now() - 3600_000).toISOString();
-  for (const resv of ctx.reservations) {
-    if (hasil.length >= 10) break; // batas per run
+  let percobaanAssign = 0;
+
+  const rencanaUntuk = (resv: CloudbedsReservation) => {
     const status = ctx.statusSaatIni.get(resv.reservationID);
-    if (status !== "terjadwal" && status !== "checkin") continue;
+    if (status !== "terjadwal" && status !== "checkin") return null;
     const unitId = ctx.unitIdSaatIni.get(resv.reservationID);
     const unit = unitId ? ctx.kandidat.find((k) => k.unitId === unitId) : undefined;
-    if (!unit) continue;
+    if (!unit) return null;
     const rencana = rencanaSelarasKamar({
       reservationID: resv.reservationID,
       rooms: resv.rooms,
       targetRoomID: unit.cloudbedsRoomId,
       targetRoomTypeID: cloudbedsRoomTypeIdOf(unit.cloudbedsRoomId),
     });
-    if (!rencana) continue;
-
-    const { data: baruGagal } = await ctx.supabase
-      .from("cloudbeds_events_log")
-      .select("id")
-      .eq("event_type", "outbound.reservation.room_assigned")
-      .eq("reservation_id", resv.reservationID)
-      .eq("matched", false)
-      .gte("created_at", sejamLalu)
-      .limit(1);
-    if ((baruGagal ?? []).length > 0) continue;
-
-    // Kamar target sudah dipakai reservasi LAIN di Cloudbeds untuk tanggal
-    // ini (el nasution di RER(10) saat Nisa harus di A4): postRoomAssign
-    // pasti ditolak. Kalau booking kita sudah punya kamar lain di Cloudbeds
-    // dan unit itu kosong di sistem, sistem yang mengikuti Cloudbeds --
-    // tipe kamar sama, harga dan pembagian investor (dibagi rata per unit,
-    // PHASE0-BASELINE.md) tidak berubah -- supaya tamu OTA-nya bisa masuk.
+    if (!rencana) return null;
     const masuk = resv.rooms?.[0]?.roomCheckIn ?? resv.startDate;
     const keluar = resv.rooms?.[0]?.roomCheckOut ?? resv.endDate;
+    // Kamar target sudah dipakai reservasi LAIN di Cloudbeds untuk tanggal
+    // ini: postRoomAssign pasti ditolak ("Room could not be assigned" --
+    // 7 dari 7 percobaan pertama, 10 Nov 2026, semuanya karena tamu OTA
+    // sudah Cloudbeds taruh di unit itu).
     const targetDipakai = ctx.semuaReservasi.some(
       (o) =>
         o.reservationID !== resv.reservationID &&
@@ -713,87 +701,131 @@ async function selaraskanKamarMilikSistem(ctx: {
           (x) => String(x.roomID ?? "") === rencana.newRoomID && (x.roomCheckIn ?? o.startDate) < keluar && masuk < (x.roomCheckOut ?? o.endDate),
         ),
     );
-    if (targetDipakai) {
-      const unitCb = rencana.oldRoomID ? ctx.kandidat.find((k) => k.cloudbedsRoomId === rencana.oldRoomID) : undefined;
-      let pindah: string | null = null;
-      if (status === "terjadwal" && unitCb && unitCb.unitId !== unit.unitId) {
-        const { data: milik } = await ctx.supabase.from("bookings").select("id").eq("cloudbeds_reservation_id", resv.reservationID).limit(1).maybeSingle();
-        const { data: bentrok } = await ctx.supabase
-          .from("bookings")
-          .select("id")
-          .eq("unit_id", unitCb.unitId)
-          .in("status", ["terjadwal", "checkin", "menunggu_pembayaran"])
-          .lt("tgl_checkin", keluar)
-          .or(`tgl_checkout.is.null,tgl_checkout.gt.${masuk}`)
-          .neq("id", milik?.id ?? "00000000-0000-0000-0000-000000000000")
-          .limit(1);
-        if (milik?.id && (bentrok ?? []).length === 0) {
-          const { error } = await ctx.supabase.from("bookings").update({ unit_id: unitCb.unitId, unit_nomor: unitCb.unitNomor }).eq("id", milik.id);
-          if (!error) pindah = milik.id;
-          else ctx.errors.push(`${resv.reservationID}: gagal mengikuti kamar Cloudbeds (${error.message})`);
-        }
-      }
-      hasil.push({ reservation_id: resv.reservationID, unit_nomor: pindah ? (unitCb?.unitNomor ?? null) : unit.unitNomor, ok: !!pindah, pesan: pindah ? "mengikuti_kamar_cloudbeds" : "kamar_target_dipakai_reservasi_lain" });
-      await ctx.supabase.from("cloudbeds_events_log").insert({
-        reservation_id: resv.reservationID,
-        event_type: pindah ? "inbound.own_booking.unit_follow_cloudbeds" : "outbound.reservation.room_assigned",
-        payload: { sumber_proses: "sync", dari_unit: unit.unitNomor, ke_unit: pindah ? unitCb?.unitNomor : null, rencana },
-        matched: !!pindah,
-        error: pindah ? null : "kamar_target_dipakai_reservasi_lain",
-      });
-      await ctx.peringatkanSekali(
-        pindah
-          ? {
-              unit_id: unitCb!.unitId,
-              judul: `Booking website dipindah ke Unit ${unitCb!.unitNomor ?? "?"} mengikuti Cloudbeds (${resv.reservationID})`,
-              pesan: `Unit ${unit.unitNomor ?? "?"} di Cloudbeds sudah dipakai reservasi lain untuk ${masuk} s/d ${keluar}, sedangkan Cloudbeds menaruh booking ini di Unit ${unitCb!.unitNomor ?? "?"} yang kosong di sistem. Sistem mengikuti Cloudbeds; harga tidak berubah. Beri tahu tamunya kalau unitnya sudah dijanjikan.`,
-              ref_id: pindah,
-            }
-          : {
-              unit_id: unit.unitId,
-              judul: `Kamar Cloudbeds belum sama (${resv.reservationID}) — harus Unit ${unit.unitNomor ?? "?"}`,
-              pesan: `Booking ini dibuat di sistem untuk Unit ${unit.unitNomor ?? "?"} (${masuk} s/d ${keluar}), tapi di Cloudbeds unit itu sudah dipakai reservasi lain dan kamar booking ini di Cloudbeds ${rencana.oldRoomID ? "tidak kosong di sistem" : "belum di-assign"}. Atur kamarnya di Cloudbeds.`,
-              ref_id: null,
-            },
-      );
-      continue;
-    }
+    return { status, unit, rencana, masuk, keluar, targetDipakai };
+  };
 
-    let ok = false;
-    let pesan: string | null = null;
-    let jawaban: unknown = null;
-    try {
-      const res = await fetch(`${CLOUDBEDS_API_BASE}/postRoomAssign`, {
-        method: "POST",
-        headers: { "x-api-key": ctx.apiKey, "Content-Type": "application/x-www-form-urlencoded" },
-        body: formSelarasKamar(rencana, propertyId).toString(),
-        cache: "no-store",
-        signal: AbortSignal.timeout(20_000),
-      });
-      jawaban = await res.json().catch(() => null);
-      const b = jawaban as { success?: unknown; message?: unknown } | null;
-      ok = res.ok && b?.success !== false && b?.success !== "false";
-      pesan = ok ? null : String(b?.message ?? `HTTP ${res.status}`);
-    } catch (e) {
-      pesan = e instanceof Error ? e.message : String(e);
+  // Sistem mengikuti kamar Cloudbeds: tipe kamar sama, harga tetap, dan
+  // pembagian investor dibagi rata per unit (PHASE0-BASELINE.md), jadi
+  // tidak ada uang yang bergeser. Hanya untuk booking yang belum check-in,
+  // dan hanya kalau unit tujuan kosong di sistem.
+  const ikutiCloudbeds = async (resv: CloudbedsReservation, r: NonNullable<ReturnType<typeof rencanaUntuk>>) => {
+    const unitCb = r.rencana.oldRoomID ? ctx.kandidat.find((k) => k.cloudbedsRoomId === r.rencana.oldRoomID) : undefined;
+    if (r.status !== "terjadwal" || !unitCb || unitCb.unitId === r.unit.unitId) return false;
+    const { data: milik } = await ctx.supabase.from("bookings").select("id").eq("cloudbeds_reservation_id", resv.reservationID).limit(1).maybeSingle();
+    if (!milik?.id) return false;
+    const { data: bentrok } = await ctx.supabase
+      .from("bookings")
+      .select("id")
+      .eq("unit_id", unitCb.unitId)
+      .in("status", ["terjadwal", "checkin", "menunggu_pembayaran"])
+      .lt("tgl_checkin", r.keluar)
+      .or(`tgl_checkout.is.null,tgl_checkout.gt.${r.masuk}`)
+      .neq("id", milik.id)
+      .limit(1);
+    if ((bentrok ?? []).length > 0) return false;
+    const { error } = await ctx.supabase.from("bookings").update({ unit_id: unitCb.unitId, unit_nomor: unitCb.unitNomor }).eq("id", milik.id);
+    if (error) {
+      ctx.errors.push(`${resv.reservationID}: gagal mengikuti kamar Cloudbeds (${error.message})`);
+      return false;
     }
-    hasil.push({ reservation_id: resv.reservationID, unit_nomor: unit.unitNomor, ok, pesan });
+    ctx.unitIdSaatIni.set(resv.reservationID, unitCb.unitId);
+    hasil.push({ reservation_id: resv.reservationID, unit_nomor: unitCb.unitNomor, ok: true, pesan: `mengikuti_kamar_cloudbeds_dari_${r.unit.unitNomor ?? "?"}` });
     await ctx.supabase.from("cloudbeds_events_log").insert({
       reservation_id: resv.reservationID,
-      event_type: "outbound.reservation.room_assigned",
-      payload: { sumber_proses: "sync", unit_id: unit.unitId, unit_nomor: unit.unitNomor, rencana, jawaban },
-      matched: ok,
-      error: pesan,
+      event_type: "inbound.own_booking.unit_follow_cloudbeds",
+      payload: { booking_id: milik.id, dari_unit: r.unit.unitNomor, ke_unit: unitCb.unitNomor, masuk: r.masuk, keluar: r.keluar },
+      matched: true,
+      error: null,
     });
-    if (!ok) {
-      ctx.errors.push(`${resv.reservationID}: gagal menyamakan kamar ke Unit ${unit.unitNomor ?? "?"} (${pesan})`);
-      await ctx.peringatkanSekali({
-        unit_id: unit.unitId,
-        judul: `Kamar Cloudbeds belum sama (${resv.reservationID}) — harus Unit ${unit.unitNomor ?? "?"}`,
-        pesan: `Booking ini dibuat di sistem untuk Unit ${unit.unitNomor ?? "?"}, tapi di Cloudbeds kamarnya ${rencana.oldRoomID ? `kamar lain (${rencana.oldRoomID})` : "belum di-assign"}, dan sistem gagal memindahkannya otomatis: ${pesan}. Selama belum sama, Cloudbeds bisa menjual Unit ${unit.unitNomor ?? "?"} ke OTA. Assign Unit ${unit.unitNomor ?? "?"} di Cloudbeds.`,
-        ref_id: null,
+    await ctx.peringatkanSekali({
+      unit_id: unitCb.unitId,
+      judul: `Booking dipindah ke Unit ${unitCb.unitNomor ?? "?"} mengikuti Cloudbeds (${resv.reservationID})`,
+      pesan: `Booking ini (${r.masuk} s/d ${r.keluar}) tercatat di Unit ${r.unit.unitNomor ?? "?"}, tapi di Cloudbeds tamunya ada di Unit ${unitCb.unitNomor ?? "?"} dan Unit ${r.unit.unitNomor ?? "?"} sudah dipakai reservasi lain. Sistem mengikuti Cloudbeds; harga tidak berubah. Beri tahu tamu kalau unitnya sudah dijanjikan.`,
+      ref_id: milik.id,
+    });
+    return true;
+  };
+
+  // Beberapa putaran, karena perpindahan bisa berantai (10 Nov: Catur C1->C2
+  // dulu, baru Nisa A4->C1, baru el nasution bisa masuk A4).
+  let tertunda: CloudbedsReservation[] = [];
+  let antrean = ctx.reservations;
+  for (let putaran = 0; putaran < 4 && antrean.length > 0; putaran++) {
+    let maju = false;
+    tertunda = [];
+    for (const resv of antrean) {
+      const r = rencanaUntuk(resv);
+      if (!r) continue;
+      if (r.targetDipakai) {
+        if (await ikutiCloudbeds(resv, r)) maju = true;
+        else tertunda.push(resv);
+        continue;
+      }
+      // Target kosong di Cloudbeds: kamarnya disamakan di Cloudbeds.
+      if (percobaanAssign >= 10) continue; // batas per run
+      const { data: baruGagal } = await ctx.supabase
+        .from("cloudbeds_events_log")
+        .select("id")
+        .eq("event_type", "outbound.reservation.room_assigned")
+        .eq("reservation_id", resv.reservationID)
+        .eq("matched", false)
+        .gte("created_at", sejamLalu)
+        .limit(1);
+      if ((baruGagal ?? []).length > 0) continue;
+      percobaanAssign++;
+      let ok = false;
+      let pesan: string | null = null;
+      let jawaban: unknown = null;
+      try {
+        const res = await fetch(`${CLOUDBEDS_API_BASE}/postRoomAssign`, {
+          method: "POST",
+          headers: { "x-api-key": ctx.apiKey, "Content-Type": "application/x-www-form-urlencoded" },
+          body: formSelarasKamar(r.rencana, propertyId).toString(),
+          cache: "no-store",
+          signal: AbortSignal.timeout(20_000),
+        });
+        jawaban = await res.json().catch(() => null);
+        const b = jawaban as { success?: unknown; message?: unknown } | null;
+        ok = res.ok && b?.success !== false && b?.success !== "false";
+        pesan = ok ? null : String(b?.message ?? `HTTP ${res.status}`);
+      } catch (e) {
+        pesan = e instanceof Error ? e.message : String(e);
+      }
+      hasil.push({ reservation_id: resv.reservationID, unit_nomor: r.unit.unitNomor, ok, pesan });
+      await ctx.supabase.from("cloudbeds_events_log").insert({
+        reservation_id: resv.reservationID,
+        event_type: "outbound.reservation.room_assigned",
+        payload: { sumber_proses: "sync", unit_id: r.unit.unitId, unit_nomor: r.unit.unitNomor, rencana: r.rencana, jawaban },
+        matched: ok,
+        error: pesan,
       });
+      if (ok) maju = true;
+      else {
+        ctx.errors.push(`${resv.reservationID}: gagal menyamakan kamar ke Unit ${r.unit.unitNomor ?? "?"} (${pesan})`);
+        await ctx.peringatkanSekali({
+          unit_id: r.unit.unitId,
+          judul: `Kamar Cloudbeds belum sama (${resv.reservationID}) — harus Unit ${r.unit.unitNomor ?? "?"}`,
+          pesan: `Booking ini dibuat di sistem untuk Unit ${r.unit.unitNomor ?? "?"}, tapi di Cloudbeds kamarnya ${r.rencana.oldRoomID ? `lain (${r.rencana.oldRoomID})` : "belum di-assign"}, dan sistem gagal memindahkannya otomatis: ${pesan}. Selama belum sama, Cloudbeds bisa menjual Unit ${r.unit.unitNomor ?? "?"} ke OTA. Assign Unit ${r.unit.unitNomor ?? "?"} di Cloudbeds.`,
+          ref_id: null,
+        });
+      }
     }
+    antrean = tertunda;
+    if (!maju) break;
+  }
+
+  // Masih buntu: unit sistem dipakai reservasi lain di Cloudbeds DAN kamar
+  // Cloudbeds booking ini tidak kosong di sistem (atau belum di-assign).
+  for (const resv of tertunda) {
+    const r = rencanaUntuk(resv);
+    if (!r) continue;
+    hasil.push({ reservation_id: resv.reservationID, unit_nomor: r.unit.unitNomor, ok: false, pesan: "buntu_kamar_dipakai_di_kedua_sistem" });
+    await ctx.peringatkanSekali({
+      unit_id: r.unit.unitId,
+      judul: `Kamar Cloudbeds belum sama (${resv.reservationID}) — harus Unit ${r.unit.unitNomor ?? "?"}`,
+      pesan: `Booking ini (${r.masuk} s/d ${r.keluar}) tercatat di Unit ${r.unit.unitNomor ?? "?"}, tapi di Cloudbeds unit itu dipakai reservasi lain, dan kamar booking ini di Cloudbeds ${r.rencana.oldRoomID ? "tidak kosong di sistem" : "belum di-assign"}. Atur kamarnya di Cloudbeds.`,
+      ref_id: null,
+    });
   }
   return hasil;
 }
