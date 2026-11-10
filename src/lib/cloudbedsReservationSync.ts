@@ -132,6 +132,8 @@ export interface ReservationSyncSummary {
   skipped_own: number;
   /** Booking buatan sistem yang kamarnya dicoba disamakan di Cloudbeds run ini (lihat cloudbedsSelarasKamar.ts). */
   kamar_selaras?: { reservation_id: string; unit_nomor: string | null; ok: boolean; pesan: string | null }[];
+  /** Tamu OTA yang kamar Cloudbeds-nya disamakan dengan unit sistem run ini. */
+  kamar_ota_disamakan?: unknown[];
   /** Diagnosa: kamar Cloudbeds tiap booking milik sistem. */
   kamar_milik_sistem?: unknown[];
   unmapped_room_ids: string[];
@@ -392,6 +394,7 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
       };
     });
 
+  const perluSamakanOta: { resv: CloudbedsReservation; unitId: string; unitNomor: string | null; sub: string | null; kamarSekarang: string | null; checkIn: string; checkOut: string }[] = [];
   let skippedOwn = 0;
   const urutan = [...butuhSementara, ...reservations.filter((r) => !butuhSementara.includes(r))];
   for (const resv of urutan) {
@@ -587,6 +590,12 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
         errors.push(`${resv.reservationID}: ${error.message} (Cloudbeds room ${room?.roomID ?? "-"} -> Unit ${unitDipakai.unitNomor ?? "?"})`);
       } else {
         inserted++;
+        // Tamu OTA yang di sistem ditaruh di unit lain dari kamar Cloudbeds-nya
+        // (unit sementara / pengganti): dicatat untuk disamakan di Cloudbeds
+        // di bawah, supaya kedua sistem menunjuk unit yang sama.
+        if (unitDipakai.unitId !== (room?.roomID ? mapping.unit_id : null) && statusLama !== "checkin" && statusLama !== "checkout") {
+          perluSamakanOta.push({ resv, unitId: unitDipakai.unitId, unitNomor: unitDipakai.unitNomor, sub: kamar.subReservationID ?? null, kamarSekarang: room?.roomID ? String(room.roomID) : null, checkIn, checkOut: checkOut ?? checkIn });
+        }
         // Staf perlu meng-assign kamar yang SAMA di Cloudbeds. Kalau Cloudbeds
         // nanti memberi kamar lain, sync berikutnya memindahkan booking ke
         // kamar itu. Sekali per reservasi per unit (lihat peringatkanSekali).
@@ -601,6 +610,79 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
       }
     } catch (e) {
       errors.push(`${resv.reservationID}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  // Samakan kamar Cloudbeds tamu OTA dengan unit sementara/pengganti yang
+  // sistem pilih. Sampai 10 Nov 2026 ini hanya berupa notifikasi "samakan
+  // kamarnya di Cloudbeds" yang tidak dikerjakan; akibatnya Cloudbeds terus
+  // menganggap unit sistem itu kosong. Hari itu juga ditemukan bahwa
+  // postRoomAssign yang dijawab "Room could not be assigned" TETAP diterapkan
+  // Cloudbeds, sehingga A4 di Cloudbeds terisi ganda -- jadi kamar tujuan
+  // WAJIB kosong menurut daftar reservasi Cloudbeds sebelum dikirim, dan
+  // daftar itu diperbarui di memori setelah tiap pengiriman. adjustPrice
+  // tidak dikirim (harga tetap). Beberapa putaran karena bisa berantai.
+  const kamarOta: { reservation_id: string; unit_nomor: string | null; ok: boolean; pesan: string | null }[] = [];
+  {
+    const sejamLalu = new Date(Date.now() - 3600_000).toISOString();
+    const propertyId = (process.env.CLOUDBEDS_PROPERTY_ID ?? "").trim();
+    let percobaan = 0;
+    let antre = perluSamakanOta;
+    for (let putaran = 0; putaran < 3 && antre.length > 0 && percobaan < 10; putaran++) {
+      const sisa: typeof antre = [];
+      let maju = false;
+      for (const o of antre) {
+        if (percobaan >= 10) { sisa.push(o); continue; }
+        const target = kandidat.find((k) => k.unitId === o.unitId)?.cloudbedsRoomId;
+        if (!target || !o.sub || target === o.kamarSekarang) continue;
+        const terisi = reservations.some(
+          (x) =>
+            x.reservationID !== o.resv.reservationID &&
+            (x.rooms ?? []).some((rr) => String(rr.roomID ?? "") === target && (rr.roomCheckIn ?? x.startDate) < o.checkOut && o.checkIn < (rr.roomCheckOut ?? x.endDate)),
+        );
+        if (terisi) { sisa.push(o); continue; }
+        const { data: baruGagal } = await supabase
+          .from("cloudbeds_events_log")
+          .select("id")
+          .eq("event_type", "outbound.reservation.room_assigned")
+          .eq("reservation_id", o.resv.reservationID)
+          .eq("matched", false)
+          .gte("created_at", sejamLalu)
+          .limit(1);
+        if ((baruGagal ?? []).length > 0) continue;
+        percobaan++;
+        const rencana = { reservationID: o.resv.reservationID, subReservationID: o.sub, newRoomID: target, roomTypeID: cloudbedsRoomTypeIdOf(target), oldRoomID: o.kamarSekarang };
+        let ok = false;
+        let jawaban: unknown = null;
+        try {
+          const res = await fetch(`${CLOUDBEDS_API_BASE}/postRoomAssign`, {
+            method: "POST",
+            headers: { "x-api-key": apiKey, "Content-Type": "application/x-www-form-urlencoded" },
+            body: formSelarasKamar(rencana, propertyId).toString(),
+            cache: "no-store",
+            signal: AbortSignal.timeout(20_000),
+          });
+          jawaban = await res.json().catch(() => null);
+          const b = jawaban as { success?: unknown } | null;
+          ok = res.ok && b?.success !== false && b?.success !== "false";
+        } catch (e) {
+          jawaban = { error: e instanceof Error ? e.message : String(e) };
+        }
+        await supabase.from("cloudbeds_events_log").insert({
+          reservation_id: o.resv.reservationID,
+          event_type: "outbound.reservation.room_assigned",
+          payload: { sumber_proses: "sync_ota_ke_unit_sistem", unit_nomor: o.unitNomor, rencana, jawaban },
+          matched: ok,
+          error: ok ? null : String((jawaban as { message?: unknown } | null)?.message ?? "gagal"),
+        });
+        // Apa pun jawabannya, anggap kamar tujuan kini mungkin terpakai: lebih
+        // baik tidak mengirim reservasi lain ke sana di run ini.
+        for (const rr of o.resv.rooms ?? []) if (rr.subReservationID === o.sub || (o.resv.rooms ?? []).length === 1) rr.roomID = target;
+        kamarOta.push({ reservation_id: o.resv.reservationID, unit_nomor: o.unitNomor, ok, pesan: ok ? null : String((jawaban as { message?: unknown } | null)?.message ?? "gagal") });
+        if (ok) maju = true;
+      }
+      antre = sisa;
+      if (!maju) break;
     }
   }
 
@@ -661,6 +743,7 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
     skipped_own: skippedOwn,
     kamar_selaras: kamarSelaras,
     kamar_milik_sistem: kamarMilikSistem,
+    kamar_ota_disamakan: kamarOta,
     unmapped_room_ids: [...new Set(unmappedRoomIds)].slice(0, 20),
     cancelled_closed: cancelledClosed,
     errors: errors.slice(0, 20),
@@ -678,6 +761,7 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
     skipped_own: skippedOwn,
     kamar_selaras: kamarSelaras,
     kamar_milik_sistem: kamarMilikSistem,
+    kamar_ota_disamakan: kamarOta,
     unmapped_room_ids: [...new Set(unmappedRoomIds)].slice(0, 20),
     cancelled_closed: cancelledClosed,
     errors: errors.slice(0, 20),
