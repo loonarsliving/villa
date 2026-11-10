@@ -1445,6 +1445,21 @@ async function pushBookingToCloudbeds(booking){
 
     if(!body){
       await logOutbound(false, {error: 'postReservation_failed_all_variants', attempts});
+      // "could not accommodate" = menurut Cloudbeds tipe kamar ini sudah
+      // penuh di tanggal itu, padahal tamu sudah punya booking di sistem:
+      // overbooking yang harus diatur manusia. Dulu hanya tercatat di log
+      // (Dwita & Gilang, 30-31 Des: 1.300+ percobaan, tak ada yang tahu).
+      // Satu notifikasi per booking; retry tiap 10 menit tetap jalan.
+      if(attempts.some(a => /could not accommodate/i.test(String(a.message ?? '')))){
+        const judul = `Booking tidak bisa masuk Cloudbeds (penuh) — ${booking.guest_nama ?? 'Tamu'} Unit ${booking.unit_nomor ?? '?'}`;
+        const {data:sudah} = await supabase.from('notifications').select('id').eq('judul', judul).eq('ref_id', booking.id).limit(1);
+        if(!(sudah ?? []).length){
+          await supabase.from('notifications').insert({
+            unit_id: booking.unit_id, target_role: 'all', tipe: 'booking', ref_id: booking.id, judul,
+            pesan: `${booking.guest_nama ?? 'Tamu'} (${booking.tgl_checkin} s/d ${booking.tgl_checkout ?? '?'}) sudah tercatat di sistem, tapi Cloudbeds menolak karena tipe kamar ini penuh di tanggal itu. Kemungkinan overbooking dengan reservasi OTA -- cek Cloudbeds dan atur kamarnya.`,
+          });
+        }
+      }
       return;
     }
     // Recorded on success too: knowing WHICH shape Cloudbeds accepts is
@@ -1454,6 +1469,50 @@ async function pushBookingToCloudbeds(booking){
 
     await supabase.from('bookings').update({cloudbeds_reservation_id: body.reservationID}).eq('id', booking.id);
     await logOutbound(true, {cloudbeds_reservation_id: body.reservationID});
+
+    // Kamarnya langsung dikunci ke unit sistem. postReservation hanya
+    // menerima tipe kamar, jadi tanpa langkah ini reservasinya "unassigned"
+    // di Cloudbeds dan Cloudbeds bebas menjual unit sistem itu ke OTA --
+    // persis yang membuat "el nasution" (10 Nov 2026) ditaruh di A4 milik
+    // booking website lain lalu ditolak sync. postRoomAssign (pms-v1.2,
+    // scope write:room): subReservationID diambil dari `unassigned` di
+    // jawaban postReservation. adjustPrice tidak dikirim (default false =
+    // harga reservasi tetap). Gagal di sini tidak membatalkan push; sync
+    // Next.js (src/lib/cloudbedsSelarasKamar.ts) mencoba lagi tiap 10 menit.
+    try {
+      const sub = Array.isArray(body.unassigned) ? body.unassigned[0]?.subReservationID : null;
+      if(sub){
+        const f = new URLSearchParams();
+        const propertyId = (Deno.env.get('CLOUDBEDS_PROPERTY_ID') ?? '').trim();
+        if(propertyId) f.set('propertyID', propertyId);
+        f.set('reservationID', String(body.reservationID));
+        f.set('subReservationID', String(sub));
+        f.set('newRoomID', String(mapping.cloudbeds_room_id));
+        f.set('roomTypeID', String(roomTypeID));
+        const ra = await fetch(`${CLOUDBEDS_API_BASE}/postRoomAssign`, {
+          method: 'POST',
+          headers: {'x-api-key': apiKey, 'Content-Type': 'application/x-www-form-urlencoded'},
+          body: f.toString(),
+        });
+        const raBody = await ra.json().catch(()=>null);
+        const raOk = ra.ok && raBody?.success !== false && raBody?.success !== 'false';
+        await supabase.from('cloudbeds_events_log').insert({
+          reservation_id: String(body.reservationID),
+          event_type: 'outbound.reservation.room_assigned',
+          payload: {sumber_proses: 'push', booking_id: booking.id, unit_id: booking.unit_id, unit_nomor: booking.unit_nomor ?? null, newRoomID: mapping.cloudbeds_room_id, subReservationID: sub, jawaban: raBody},
+          matched: raOk,
+          error: raOk ? null : (raBody?.message ?? `HTTP ${ra.status}`),
+        });
+      }
+    } catch(e) {
+      await supabase.from('cloudbeds_events_log').insert({
+        reservation_id: String(body.reservationID),
+        event_type: 'outbound.reservation.room_assigned',
+        payload: {sumber_proses: 'push', booking_id: booking.id},
+        matched: false,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
   } catch(e) {
     await logOutbound(false, {error: e instanceof Error ? e.message : String(e)});
   }

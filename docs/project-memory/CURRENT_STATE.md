@@ -3,6 +3,10 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-11-10 — Kamar booking website dikunci di Cloudbeds
+- Booking buatan sistem kini di-assign ke kamar Cloudbeds yang sama dengan unit sistem (`postRoomAssign`, saat push di villa-api + perbaikan berkala di sync Next.js). Lihat CHANGELOG 2026-11-10 dan INTEGRATIONS.md. Scope `write:room` kunci Cloudbeds belum terverifikasi -- cek `cloudbeds_events_log` event `outbound.reservation.room_assigned` setelah deploy.
+- Masih terbuka (manual, staf): el nasution 10-13 Nov tidak punya satu unit kosong 3 malam; Dwita (B1 31 Des) dan Gilang (B3 30 Des) ditolak Cloudbeds karena penuh.
+
 ## 2026-11-09 — AI resepsionis untuk percakapan Excellent Living + cek pemetaan kamar EL
 - Owner: "pastikan pemetaan kamar sdh sama antara cloudbeds dan sistemku, kemudian pastikan ai sdh aktif seperti private living".
 - Pemetaan (dicek 2026-11-09 dari DB + respons sinkron EL 16:42 UTC): 31 kamar sistem terpetakan 1:1 dan berurutan (DOU(1-12)->ST-01..12, QUA(1-2)->ST-13..14, JSP(1-12)->SP-01..12, KIN(1-5)->FP-01..05), tanpa kamar tanpa peta / peta ganda. TETAPI Cloudbeds EL kini punya 33 room: QUA(3) dan QUA(4) muncul sejak 2026-11-09 10:52 UTC dan BELUM dipetakan (sistem hanya 2 kamar Quadruple). Owner 2026-11-09: "Tidak kamar quadruple hanya 2 kamar, 12 kamar lainnya adalah standart" -> pemetaan sistem SUDAH benar; QUA(3)/QUA(4) adalah room lebih di Cloudbeds. API Cloudbeds tidak bisa menghapus room, jadi sinkron EL kini menutupnya: `src/lib/cloudbedsRoomLebih.ts` (+tes) -- room tanpa peta yang tipe Cloudbeds-nya sudah punya kamar berpeta diberi room block out_of_service 730 hari ("Kamar tidak ada di sistem Loonars (room lebih) - jangan dibuka"), dimulai di hari pertama room itu terbuka (tidak menumpuk blokir lama s/d 2027-01-01), diperpanjang otomatis bila sisa < 365 hari, berhasil hanya bila terbaca balik; hasil di ringkasan sinkron `kamar.room_lebih`. Tipe yang belum dikenal sama sekali tidak disentuh. Sebaiknya owner tetap menghapus QUA(3)/QUA(4) di pengaturan Cloudbeds.
