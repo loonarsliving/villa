@@ -4,6 +4,11 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-11-10 — Bukti Menginap untuk menginap gratis (investor / KOL)
+- Kasus nyata: investor (Catur Budi S, C1 11 Nov) menekan "Cetak Invoice" di loonars.id dan mendapat "Bukti pembayaran belum diupload". Penyebab: `/public/bookings/invoice` mensyaratkan `invoice_no` + `bukti_pembayaran_at`, yang hanya diisi saat QRIS terkonfirmasi; menginap gratis (`is_free_stay`) tidak pernah lewat QRIS, jadi 8/8 menginap gratis 45 hari terakhir tidak bisa dicetak. Booking berbayar tidak terdampak (39/39 bisa mencetak).
+- Owner: "buatkan bukti menginap yang bagus agar mereka bangga". `/public/bookings/invoice` kini mengembalikan `jenis: 'bukti_menginap'` untuk `is_free_stay` (`dataBuktiMenginap`: kode voucher, atas nama investor/penerima KOL, unit dasar voucher, tipe kamar, `no_bukti` = `BM-` + 8 karakter booking_id, tidak disimpan). Sengaja tanpa nominal rupiah. `/public/bookings/status` menambah `menginap_gratis`. Tanpa perubahan skema.
+- loonars.id (repo loonars): tombol "Cetak Bukti Menginap (PDF)" + teks "Menginap gratis dikonfirmasi"; PDF bergaya sertifikat (`components/booking/buktiMenginapPdf.ts`: banner foto villa, emas/hijau merek, segel "Priority Investor", "bukan tagihan maupun kuitansi").
+
 ### 2026-11-09 — AI resepsionis (draf) untuk percakapan Excellent Living
 - Draf AI kini juga dibuat untuk chat EL dengan buku pengetahuan EL sendiri (`PENGETAHUAN_EL`, minim, tanpa info villa PL) dan ketersediaan/harga EL dari `/public/p/EL/availability`. Kamar EL belum dibuka / Cloudbeds tidak terbaca -> draf ditahan sebagai perlu_resepsionis. Butuh Mkhsistem (`nama_properti` di chat-reply) agar prompt memakai nama EL. Cloudbeds EL 33 room vs sistem 31: owner memastikan Quadruple hanya 2, jadi QUA(3)/QUA(4) = room lebih; sinkron EL kini menutup room lebih otomatis (`cloudbedsRoomLebih.ts`, room block 730 hari, baca balik).
 

@@ -2305,6 +2305,71 @@ async function periksaVoucherInvestor(kode, tgl_checkin, tgl_checkout){
 }
 
 /**
+ * Data "Bukti Menginap" untuk menginap gratis (voucher investor / kupon KOL),
+ * dipakai /public/bookings/invoice sebagai pengganti invoice. Owner
+ * 2026-11-10: investor yang menginap harus mendapat bukti yang bagus "agar
+ * mereka bangga" -- jadi yang dikirim bukan hanya data kamar, tapi juga atas
+ * nama siapa haknya, dan unit milik investor yang menjadi dasar kodenya.
+ *
+ * Sengaja TIDAK ada nominal rupiah sama sekali: menginap ini bukan transaksi
+ * (tidak masuk pendapatan maupun dividen), dan dokumen ini tidak boleh bisa
+ * dibaca sebagai kuitansi. Nomor dokumen diturunkan dari booking_id, bukan
+ * disimpan -- tidak ada kolom baru, dan nomornya selalu sama tiap dicetak.
+ */
+async function dataBuktiMenginap(booking, guestHp){
+  let kategori = 'investor';
+  let kode = null;
+  let atas_nama = null;
+  let unit_investor = null;
+  if(booking.voucher_id){
+    const {data:v} = await supabase.from('villa_investor_vouchers')
+      .select('kode,user_id,unit_id').eq('id', booking.voucher_id).maybeSingle();
+    kode = v?.kode ?? null;
+    if(v?.user_id){
+      const {data:u} = await supabase.from('villa_users').select('nama').eq('id', v.user_id).maybeSingle();
+      atas_nama = u?.nama ?? null;
+    }
+    if(v?.unit_id){
+      const {data:un} = await supabase.from('units').select('nomor').eq('id', v.unit_id).maybeSingle();
+      unit_investor = un?.nomor ?? null;
+    }
+  } else if(booking.kol_voucher_id){
+    kategori = 'kol';
+    const {data:k} = await supabase.from('villa_kol_vouchers')
+      .select('kode,untuk').eq('id', booking.kol_voucher_id).maybeSingle();
+    kode = k?.kode ?? null;
+    atas_nama = k?.untuk ?? null;
+  }
+  let tipe_nama = null;
+  if(booking.unit_id){
+    const {data:un} = await supabase.from('units').select('room_type_id').eq('id', booking.unit_id).maybeSingle();
+    if(un?.room_type_id){
+      const {data:rt} = await supabase.from('villa_room_types').select('name').eq('id', un.room_type_id).maybeSingle();
+      tipe_nama = rt?.name ?? null;
+    }
+  }
+  return {
+    jenis: 'bukti_menginap',
+    kategori,
+    no_bukti: `BM-${String(booking.id).replace(/-/g,'').slice(0,8).toUpperCase()}`,
+    booking_id: booking.id,
+    unit_nomor: booking.unit_nomor,
+    tipe_nama,
+    guest_nama: booking.guest_nama,
+    guest_hp: guestHp,
+    tgl_checkin: booking.tgl_checkin,
+    tgl_checkout: booking.tgl_checkout,
+    durasi_malam: booking.durasi_malam,
+    checkin_time: booking.checkin_time ? String(booking.checkin_time).slice(0,5) : null,
+    kode_voucher: kode,
+    atas_nama,
+    unit_investor,
+    status: booking.status,
+    diterbitkan: booking.created_at,
+  };
+}
+
+/**
  * Kupon KOL (owner 2026-10-09): menginap gratis untuk barter konten.
  *
  * Bentuknya sengaja sama dengan hasil periksaVoucherInvestor (voucher.id,
@@ -5754,7 +5819,7 @@ async function layani(req){
     if(!hp) return err('Nomor WhatsApp wajib diisi');
 
     const {data:booking} = await supabase.from('bookings')
-      .select('id,guest_id,sumber,status,invoice_no,catatan,created_at,unit_id,unit_nomor,tgl_checkin,tgl_checkout').eq('id',booking_id).maybeSingle();
+      .select('id,guest_id,sumber,status,invoice_no,catatan,created_at,unit_id,unit_nomor,tgl_checkin,tgl_checkout,is_free_stay').eq('id',booking_id).maybeSingle();
     if(!booking) return err('Booking tidak ditemukan', 404);
     if(!SUMBER_BOOKING_WEBSITE.includes(booking.sumber)) return err('Booking ini tidak bisa dicek lewat jalur ini', 403);
 
@@ -5798,6 +5863,9 @@ async function layani(req){
       hold_expires_at: booking.status === 'menunggu_pembayaran' ? holdExpiresAt : null,
       hold_minutes: PENDING_PAYMENT_HOLD_MINUTES,
       invoice_no: booking.invoice_no ?? null,
+      // Halaman tamu memakai ini untuk menulis "Menginap gratis dikonfirmasi"
+      // + tombol "Cetak Bukti Menginap", bukan "Pembayaran dikonfirmasi".
+      menginap_gratis: booking.is_free_stay === true,
     });
   }
 
@@ -6529,7 +6597,7 @@ async function layani(req){
     const hp = (url.searchParams.get('hp') ?? '').trim();
     if(!/^[0-9a-f-]{36}$/i.test(booking_id)) return err('booking_id tidak valid');
     const {data:booking} = await supabase.from('bookings')
-      .select('id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,durasi_malam,tarif,total_bayar,harga_paket,paket_dekorasi,status,invoice_no,bukti_pembayaran_at,created_at')
+      .select('id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,durasi_malam,checkin_time,tarif,total_bayar,harga_paket,paket_dekorasi,status,invoice_no,bukti_pembayaran_at,created_at,is_free_stay,voucher_id,kol_voucher_id')
       .eq('id', booking_id).maybeSingle();
     if(!booking) return err('Booking tidak ditemukan', 404);
     let guestHp = null;
@@ -6538,6 +6606,17 @@ async function layani(req){
       guestHp = g?.hp ?? null;
     }
     if(!hp || !guestHp || guestHp.trim() !== hp) return err('Nomor WhatsApp tidak cocok dengan booking ini', 403);
+    // Menginap gratis (voucher investor / kupon KOL) tidak pernah lewat QRIS,
+    // jadi tidak punya invoice_no maupun bukti_pembayaran_at -- dan memang
+    // tidak boleh dibuatkan INVOICE (tidak ada yang ditagih atau dibayar).
+    // Yang dikirim adalah data "Bukti Menginap" (owner 2026-11-10: "buatkan
+    // bukti menginap yang bagus agar mereka bangga"). Sebelum ini tamunya
+    // mendapat "Bukti pembayaran belum diupload" -- pesan yang salah untuk
+    // tamu yang memang tidak perlu membayar apa pun.
+    if(booking.is_free_stay){
+      if(booking.status === 'batal') return err('Pemesanan ini sudah dibatalkan', 409);
+      return json(await dataBuktiMenginap(booking, guestHp));
+    }
     if(!booking.invoice_no || !booking.bukti_pembayaran_at) return err('Bukti pembayaran belum diupload untuk booking ini', 409);
     return json({
       invoice_no: booking.invoice_no,
