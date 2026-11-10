@@ -291,7 +291,35 @@ export async function syncCloudbedsProperti(kodeProperti: string): Promise<ElSyn
           .eq("matched", false)
           .gte("created_at", sejamLalu)
           .limit(1);
-        if ((baruGagal ?? []).length === 0) {
+        const unitNo = nomorKamar.get(String(ada.unit_id)) ?? "?";
+        // Kamar tujuan WAJIB kosong menurut Cloudbeds. Tanpa cek ini PL sempat
+        // membuat A4 terisi ganda di Cloudbeds (10 Nov 2026).
+        const masukEl = r.rooms?.[0]?.roomCheckIn ?? r.startDate;
+        const keluarEl = r.rooms?.[0]?.roomCheckOut ?? r.endDate;
+        const targetTerisi = aktif.some(
+          (o) =>
+            o.reservationID !== r.reservationID &&
+            (o.rooms ?? []).some((x) => String(x.roomID ?? "") === rencana.newRoomID && (x.roomCheckIn ?? o.startDate) < keluarEl && masukEl < (x.roomCheckOut ?? o.endDate)),
+        );
+        if (targetTerisi) {
+          await peringatkan({
+            unit_id: String(ada.unit_id),
+            judul: `Kamar Cloudbeds belum sama (${kode} ${r.reservationID}) — harus Kamar ${unitNo}`,
+            pesan: `Booking ${kode} ini (${masukEl} s/d ${keluarEl}) dibuat di sistem untuk Kamar ${unitNo}, tapi di Cloudbeds kamar itu sudah dipakai reservasi lain. Atur kamarnya di Cloudbeds supaya sama dengan sistem.`,
+            ref_id: ada.id,
+          });
+        } else if ((baruGagal ?? []).length > 0) {
+          // Sudah dikirim < 1 jam lalu dan Cloudbeds MASIH beda: baru sekarang
+          // dianggap gagal sungguhan. Jawaban postRoomAssign sendiri tidak
+          // dipercaya -- di PL, "Room could not be assigned" terbukti tetap
+          // diterapkan (10 Nov 2026).
+          await peringatkan({
+            unit_id: String(ada.unit_id),
+            judul: `Kamar Cloudbeds belum sama (${kode} ${r.reservationID}) — harus Kamar ${unitNo}`,
+            pesan: `Booking ${kode} ini dibuat di sistem untuk Kamar ${unitNo}, tapi di Cloudbeds kamarnya ${rencana.oldRoomID ? "lain" : "belum di-assign"} dan sistem gagal memindahkannya otomatis. Selama belum sama, Cloudbeds bisa menjual Kamar ${unitNo} ke OTA. Assign Kamar ${unitNo} di Cloudbeds.`,
+            ref_id: ada.id,
+          });
+        } else {
           percobaanSelaras++;
           let ok = false;
           let jawaban: unknown = null;
@@ -309,7 +337,6 @@ export async function syncCloudbedsProperti(kodeProperti: string): Promise<ElSyn
           } catch (e) {
             jawaban = { error: e instanceof Error ? e.message : String(e) };
           }
-          const unitNo = nomorKamar.get(String(ada.unit_id)) ?? "?";
           await catat(db, {
             reservation_id: r.reservationID,
             event_type: "outbound.reservation.room_assigned",
@@ -317,14 +344,6 @@ export async function syncCloudbedsProperti(kodeProperti: string): Promise<ElSyn
             matched: ok,
             error: ok ? null : String((jawaban as { message?: unknown } | null)?.message ?? "gagal"),
           });
-          if (!ok) {
-            await peringatkan({
-              unit_id: String(ada.unit_id),
-              judul: `Kamar Cloudbeds belum sama (${kode} ${r.reservationID}) — harus Kamar ${unitNo}`,
-              pesan: `Booking ${kode} ini dibuat di sistem untuk Kamar ${unitNo}, tapi di Cloudbeds kamarnya ${rencana.oldRoomID ? "lain" : "belum di-assign"} dan sistem gagal memindahkannya otomatis. Selama belum sama, Cloudbeds bisa menjual Kamar ${unitNo} ke OTA. Assign Kamar ${unitNo} di Cloudbeds.`,
-              ref_id: ada.id,
-            });
-          }
         }
       }
       continue;
@@ -487,7 +506,12 @@ export async function syncCloudbedsProperti(kodeProperti: string): Promise<ElSyn
         ? { error: "sumber_langsung_tidak_ditemukan (getSources)" }
         : !tipeCb
           ? { error: "tipe_kamar_belum_terhubung_ke_cloudbeds" }
-          : await kirimSatu(apiKey, propertyId, sourceId, { ...b, tgl_checkout: String(b.tgl_checkout), guest_hp: hp }, tipeCb, roomCbDariKamar.get(String(b.unit_id)));
+          : await kirimSatu(apiKey, propertyId, sourceId, { ...b, tgl_checkout: String(b.tgl_checkout), guest_hp: hp }, tipeCb, roomCbDariKamar.get(String(b.unit_id)), (() => {
+              // Kunci kamar hanya bila kamar itu kosong di Cloudbeds (daftar reservasi aktif di atas).
+              const cb = roomCbDariKamar.get(String(b.unit_id));
+              if (!cb) return false;
+              return !aktif.some((o) => (o.rooms ?? []).some((x) => String(x.roomID ?? "") === cb && (x.roomCheckIn ?? o.startDate) < String(b.tgl_checkout) && b.tgl_checkin < (x.roomCheckOut ?? o.endDate)));
+            })());
       if ("reservationID" in hasil) {
         await db.from("bookings").update({ cloudbeds_reservation_id: hasil.reservationID, updated_at: new Date().toISOString() }).eq("id", b.id).is("cloudbeds_reservation_id", null);
         ringkasan.kirim.berhasil++;
@@ -737,6 +761,8 @@ async function kirimSatu(
   b: BookingKirim,
   tipe: string,
   cbRoomId: string | undefined,
+  /** Kamar cbRoomId kosong di Cloudbeds untuk tanggal ini -- hanya lalu kamarnya dikunci. */
+  kamarKosongDiCb = false,
 ): Promise<{ reservationID: string; variant: string } | { error: string; attempts?: unknown[] }> {
   const { first, last } = pecahNama(b.guest_nama);
   const dewasa = Math.max(1, Math.trunc(Number(b.adults ?? 1)) || 1);
@@ -788,7 +814,7 @@ async function kirimSatu(
       // PL, 10 Nov 2026). postRoomAssign pms-v1.2; adjustPrice tidak dikirim
       // = harga tetap. Best-effort: gagal tidak membatalkan push.
       const sub = Array.isArray(body?.unassigned) ? body.unassigned[0]?.subReservationID : null;
-      if (cbRoomId && sub) {
+      if (cbRoomId && sub && kamarKosongDiCb) {
         try {
           const f = formSelarasKamar(
             { reservationID: String(body.reservationID), subReservationID: String(sub), newRoomID: cbRoomId, roomTypeID: tipe, oldRoomID: null },

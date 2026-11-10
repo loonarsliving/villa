@@ -786,6 +786,13 @@ async function selaraskanKamarMilikSistem(ctx: {
   const propertyId = (process.env.CLOUDBEDS_PROPERTY_ID ?? "").trim();
   const sejamLalu = new Date(Date.now() - 3600_000).toISOString();
   let percobaanAssign = 0;
+  // Catat di memori bahwa kamar Cloudbeds reservasi ini (mungkin) sudah
+  // berpindah, supaya pengecekan "kamar kosong di Cloudbeds" berikutnya di
+  // run ini memperhitungkannya.
+  const tandaiKamar = (resv: CloudbedsReservation, roomId: string) => {
+    const rooms = resv.rooms ?? [];
+    if (rooms.length === 1) rooms[0].roomID = roomId;
+  };
 
   const rencanaUntuk = (resv: CloudbedsReservation) => {
     const status = ctx.statusSaatIni.get(resv.reservationID);
@@ -923,15 +930,17 @@ async function selaraskanKamarMilikSistem(ctx: {
         matched: ok,
         error: pesan,
       });
-      if (ok) {
-        hasil.push({ reservation_id: resv.reservationID, unit_nomor: r.unit.unitNomor, ok, pesan });
-        maju = true;
-        continue;
-      }
-      ditolak.add(resv.reservationID);
-      ctx.errors.push(`${resv.reservationID}: Cloudbeds menolak kamar Unit ${r.unit.unitNomor ?? "?"} (${pesan}); dicoba mengikuti kamar Cloudbeds`);
-      if (await ikutiCloudbeds(resv, r)) maju = true;
-      else tertunda.push(resv);
+      // JAWABAN CLOUDBEDS TIDAK DIPERCAYA (10 Nov 2026): postRoomAssign yang
+      // dijawab "Room could not be assigned" terbukti tetap diterapkan. Jadi
+      // apa pun jawabannya, kamar tujuan dianggap MUNGKIN sudah terpakai di
+      // run ini, booking ini tidak disentuh lagi di run yang sama (dulu
+      // langsung "ikuti Cloudbeds" ke kamar LAMA -> bisa bolak-balik), dan
+      // tidak ada peringatan. Run berikutnya membaca keadaan Cloudbeds yang
+      // sebenarnya: sudah sama -> selesai; masih beda -> jeda 1 jam membuatnya
+      // lewat jalur ikuti-Cloudbeds / jalan keluar / peringatan.
+      tandaiKamar(resv, r.rencana.newRoomID);
+      hasil.push({ reservation_id: resv.reservationID, unit_nomor: r.unit.unitNomor, ok, pesan: ok ? null : `dikirim_${pesan}_menunggu_verifikasi_run_berikutnya` });
+      if (ok) maju = true;
     }
     antrean = tertunda;
     if (!maju) break;
@@ -948,7 +957,17 @@ async function selaraskanKamarMilikSistem(ctx: {
     const r = rencanaUntuk(resv);
     if (!r) continue;
     let selesai = false;
-    if (r.status === "terjadwal" && percobaanAssign < 10) {
+    // Sudah pernah dikirim < 1 jam lalu dan masih beda: jangan kirim lagi ke
+    // kamar lain (tiap kiriman bisa diterapkan Cloudbeds walau dijawab gagal).
+    const { data: kirimanBaru } = await ctx.supabase
+      .from("cloudbeds_events_log")
+      .select("id")
+      .eq("event_type", "outbound.reservation.room_assigned")
+      .eq("reservation_id", resv.reservationID)
+      .eq("matched", false)
+      .gte("created_at", sejamLalu)
+      .limit(1);
+    if (r.status === "terjadwal" && percobaanAssign < 10 && (kirimanBaru ?? []).length === 0) {
       const { data: milik } = await ctx.supabase.from("bookings").select("id").eq("cloudbeds_reservation_id", resv.reservationID).limit(1).maybeSingle();
       const tipe = cloudbedsRoomTypeIdOf(r.unit.cloudbedsRoomId);
       const calon = ctx.kandidat.filter((k) => cloudbedsRoomTypeIdOf(k.cloudbedsRoomId) === tipe && k.unitId !== r.unit.unitId);
@@ -995,7 +1014,15 @@ async function selaraskanKamarMilikSistem(ctx: {
           matched: ok,
           error: ok ? null : String((jawaban as { message?: unknown } | null)?.message ?? "gagal"),
         });
-        if (!ok) continue;
+        // Jawaban tidak dipercaya (lihat di atas): satu kiriman per booking per
+        // run. Gagal -> berhenti; run berikutnya melihat apakah Cloudbeds
+        // ternyata sudah memindahkannya, lalu sistem mengikutinya.
+        tandaiKamar(resv, k.cloudbedsRoomId);
+        if (!ok) {
+          hasil.push({ reservation_id: resv.reservationID, unit_nomor: k.unitNomor, ok: false, pesan: "jalan_keluar_dikirim_menunggu_verifikasi_run_berikutnya" });
+          selesai = true;
+          break;
+        }
         const { error } = await ctx.supabase.from("bookings").update({ unit_id: k.unitId, unit_nomor: k.unitNomor }).eq("id", milik.id);
         if (error) {
           // Cloudbeds sudah pindah; sync berikutnya mengikuti Cloudbeds.
