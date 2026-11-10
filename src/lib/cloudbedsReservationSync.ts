@@ -132,6 +132,8 @@ export interface ReservationSyncSummary {
   skipped_own: number;
   /** Booking buatan sistem yang kamarnya dicoba disamakan di Cloudbeds run ini (lihat cloudbedsSelarasKamar.ts). */
   kamar_selaras?: { reservation_id: string; unit_nomor: string | null; ok: boolean; pesan: string | null }[];
+  /** Diagnosa: kamar Cloudbeds tiap booking milik sistem. */
+  kamar_milik_sistem?: unknown[];
   unmapped_room_ids: string[];
   errors: string[];
   /** Bookings closed out because Cloudbeds now reports the reservation as canceled -- see cancelStaleBookings. */
@@ -375,6 +377,21 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
     errors,
   });
 
+  // Diagnosa (10 Nov 2026): kamar Cloudbeds tiap booking milik sistem vs unit
+  // sistemnya. Tanpa ini, booking yang "hilang" dari kamar_selaras tidak bisa
+  // dijelaskan dari luar -- kunci Cloudbeds tidak tersedia untuk diperiksa.
+  const kamarMilikSistem = reservations
+    .filter((r) => ownReservationIds.has(r.reservationID))
+    .map((r) => {
+      const u = unitIdSaatIni.get(r.reservationID);
+      return {
+        reservation_id: r.reservationID,
+        status: statusSaatIni.get(r.reservationID) ?? null,
+        unit_sistem: kandidat.find((k) => k.unitId === u)?.unitNomor ?? null,
+        rooms_cloudbeds: (r.rooms ?? []).map((x) => ({ roomID: x.roomID ?? null, sub: x.subReservationID ?? null, masuk: x.roomCheckIn ?? null, keluar: x.roomCheckOut ?? null })),
+      };
+    });
+
   let skippedOwn = 0;
   const urutan = [...butuhSementara, ...reservations.filter((r) => !butuhSementara.includes(r))];
   for (const resv of urutan) {
@@ -567,7 +584,7 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
         }
       }
       if (error) {
-        errors.push(`${resv.reservationID}: ${error.message}`);
+        errors.push(`${resv.reservationID}: ${error.message} (Cloudbeds room ${room?.roomID ?? "-"} -> Unit ${unitDipakai.unitNomor ?? "?"})`);
       } else {
         inserted++;
         // Staf perlu meng-assign kamar yang SAMA di Cloudbeds. Kalau Cloudbeds
@@ -643,6 +660,7 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
     unit_sementara: unitSementaraLaporan,
     skipped_own: skippedOwn,
     kamar_selaras: kamarSelaras,
+    kamar_milik_sistem: kamarMilikSistem,
     unmapped_room_ids: [...new Set(unmappedRoomIds)].slice(0, 20),
     cancelled_closed: cancelledClosed,
     errors: errors.slice(0, 20),
@@ -659,6 +677,7 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
     unit_sementara: unitSementaraLaporan,
     skipped_own: skippedOwn,
     kamar_selaras: kamarSelaras,
+    kamar_milik_sistem: kamarMilikSistem,
     unmapped_room_ids: [...new Set(unmappedRoomIds)].slice(0, 20),
     cancelled_closed: cancelledClosed,
     errors: errors.slice(0, 20),
