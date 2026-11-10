@@ -301,10 +301,24 @@ const BBQ_MAKS = 3;
 // (owner 2026-10-13: "BBQ cukup H-1 saja").
 const PAKET_MIN_HARI_SEBELUM_CHECKIN = 2;
 const BBQ_MIN_HARI_SEBELUM_CHECKIN = 1;
+// Floating Breakfast (owner 2026-11-10, poster "Floating Breakfast - Chill &
+// Dine in the Pool"): Rp 350.000 per paket untuk 2 orang (2 nasi goreng
+// spesial, buah potong, 2 jus pilihan, 1 snack). BERBAYAR -- bukan sarapan
+// gratis (aturan owner 2026-10-09 tetap berlaku). Dipesan paling lambat H-1,
+// sama seperti BBQ, supaya dapur sempat menyiapkan.
+const ADDON_FLOATING_BREAKFAST = {nama: 'Floating Breakfast', harga: 350000};
+const FLOATING_BREAKFAST_MAKS = 3;
+const FLOATING_BREAKFAST_MIN_HARI_SEBELUM_CHECKIN = 1;
+// Extra bed (owner 2026-11-10): Rp 150.000 per extra bed per malam, dikali
+// jumlah malam menginap. Tidak ada batas waktu pemesanan.
+const ADDON_EXTRA_BED = {nama: 'Extra Bed', harga_per_malam: 150000};
+const EXTRA_BED_MAKS = 2;
+const namaExtraBed = (qty, malam) => `${ADDON_EXTRA_BED.nama}${qty > 1 ? ` x${qty}` : ''} (${malam} malam)`;
 
 /**
  * bookings.paket_dekorasi menyimpan SEMUA add-on sebagai teks, mis.
- * "Honeymoon Medium + BBQ Family Package x2"; bookings.harga_paket adalah
+ * "Honeymoon Medium + BBQ Family Package x2 + Floating Breakfast +
+ * Extra Bed (3 malam)"; bookings.harga_paket adalah
  * jumlahnya. Fungsi ini memecahnya kembali per item (untuk invoice) memakai
  * katalog di atas. Kalau ada bagian yang tidak dikenali (katalog berubah),
  * dikembalikan satu baris berisi seluruh teks dan harga_paket apa adanya --
@@ -320,6 +334,18 @@ function rincianAddon(paketTeks, hargaPaket){
     if(bbq){
       const qty = Number(bbq[1] ?? 1);
       items.push({nama: qty > 1 ? `${ADDON_BBQ.nama} x${qty}` : ADDON_BBQ.nama, jumlah: ADDON_BBQ.harga * qty});
+      continue;
+    }
+    const fb = bagian.match(/^Floating Breakfast(?: x(\d+))?$/);
+    if(fb){
+      const qty = Number(fb[1] ?? 1);
+      items.push({nama: bagian, jumlah: ADDON_FLOATING_BREAKFAST.harga * qty});
+      continue;
+    }
+    const eb = bagian.match(/^Extra Bed(?: x(\d+))? \((\d+) malam\)$/);
+    if(eb){
+      const qty = Number(eb[1] ?? 1);
+      items.push({nama: bagian, jumlah: ADDON_EXTRA_BED.harga_per_malam * qty * Number(eb[2])});
       continue;
     }
     const dek = Object.values(PAKET_DEKORASI).find(p => p.nama === bagian);
@@ -5374,6 +5400,8 @@ async function layani(req){
     const referral_code = String(b.referral_code??'').trim().toUpperCase() || null;
     const paket_kode = String(b.paket??'').trim().toLowerCase() || null;
     const bbq_qty = Number.isFinite(Number(b.bbq)) ? Math.trunc(Number(b.bbq)) : 0;
+    const fb_qty = Number.isFinite(Number(b.floating_breakfast)) ? Math.trunc(Number(b.floating_breakfast)) : 0;
+    const eb_qty = Number.isFinite(Number(b.extra_bed)) ? Math.trunc(Number(b.extra_bed)) : 0;
 
     // Jumlah tamu. Cloudbeds minta adults[] dan children[] per tipe kamar,
     // dan sebelum ini villa-api mengirim angka tetap 1 dewasa 0 anak untuk
@@ -5403,23 +5431,32 @@ async function layani(req){
     if(!isValidDateStr(tgl_checkout)) return err('Tanggal checkout tidak valid');
     if(new Date(tgl_checkout) <= new Date(tgl_checkin)) return err('Tanggal checkout harus setelah checkin');
 
-    // Add-on (opsional): paket dekorasi dan/atau BBQ. Harga dari katalog di
-    // atas, bukan dari body. Keduanya disimpan gabungan di paket_dekorasi /
-    // harga_paket (lihat rincianAddon).
+    // Add-on (opsional): paket dekorasi, BBQ, floating breakfast, extra bed.
+    // Harga dari katalog di atas, bukan dari body. Semuanya disimpan gabungan
+    // di paket_dekorasi / harga_paket (lihat rincianAddon).
     const paketDek = paket_kode ? PAKET_DEKORASI[paket_kode] ?? null : null;
     if(paket_kode && !paketDek) return err('Paket dekorasi tidak dikenali');
     if(bbq_qty < 0 || bbq_qty > BBQ_MAKS) return err(`Jumlah paket BBQ maksimal ${BBQ_MAKS}`);
+    if(fb_qty < 0 || fb_qty > FLOATING_BREAKFAST_MAKS) return err(`Jumlah paket floating breakfast maksimal ${FLOATING_BREAKFAST_MAKS}`);
+    if(eb_qty < 0 || eb_qty > EXTRA_BED_MAKS) return err(`Jumlah extra bed maksimal ${EXTRA_BED_MAKS}`);
+    // Extra bed ditagih per malam. Sama dengan `nights` di bawah (dihitung
+    // ulang di sini karena add-on divalidasi sebelum unit dicari).
+    const malamAddon = Math.max(1, Math.round((new Date(tgl_checkout).getTime() - new Date(tgl_checkin).getTime())/86400000));
     const namaAddon = [
       ...(paketDek ? [paketDek.nama] : []),
       ...(bbq_qty > 0 ? [bbq_qty > 1 ? `${ADDON_BBQ.nama} x${bbq_qty}` : ADDON_BBQ.nama] : []),
+      ...(fb_qty > 0 ? [fb_qty > 1 ? `${ADDON_FLOATING_BREAKFAST.nama} x${fb_qty}` : ADDON_FLOATING_BREAKFAST.nama] : []),
+      ...(eb_qty > 0 ? [namaExtraBed(eb_qty, malamAddon)] : []),
     ];
     const paket = namaAddon.length
-      ? {nama: namaAddon.join(' + '), harga: (paketDek?.harga ?? 0) + ADDON_BBQ.harga * bbq_qty}
+      ? {nama: namaAddon.join(' + '), harga: (paketDek?.harga ?? 0) + ADDON_BBQ.harga * bbq_qty
+          + ADDON_FLOATING_BREAKFAST.harga * fb_qty + ADDON_EXTRA_BED.harga_per_malam * eb_qty * malamAddon}
       : null;
     if(paket){
       const hariSebelum = Math.round((new Date(tgl_checkin).getTime() - new Date(todayWIB()).getTime())/86400000);
       if(paketDek && hariSebelum < PAKET_MIN_HARI_SEBELUM_CHECKIN) return err('Paket dekorasi harus dipesan paling lambat H-2 sebelum check-in. Untuk check-in lebih cepat, silakan hubungi kami via WhatsApp.', 409);
       if(bbq_qty > 0 && hariSebelum < BBQ_MIN_HARI_SEBELUM_CHECKIN) return err('BBQ harus dipesan paling lambat H-1 sebelum check-in. Untuk hari ini, silakan hubungi kami via WhatsApp.', 409);
+      if(fb_qty > 0 && hariSebelum < FLOATING_BREAKFAST_MIN_HARI_SEBELUM_CHECKIN) return err('Floating breakfast harus dipesan paling lambat H-1 sebelum check-in. Untuk hari ini, silakan hubungi kami via WhatsApp.', 409);
     }
     const hargaPaket = paket ? paket.harga : 0;
 
@@ -5502,7 +5539,7 @@ async function layani(req){
     if(!seluruhnyaGratis && hargaNormal<=0) return err('Tarif unit belum diatur, hubungi kami langsung', 409);
     // Menginap gratis tidak melewati QRIS sama sekali, jadi tidak ada jalan
     // untuk menagih paketnya di sini.
-    if(seluruhnyaGratis && paket) return err('Paket dekorasi / BBQ untuk menginap gratis dipesan lewat WhatsApp, ya. Hapus pilihan add-on untuk melanjutkan.', 409);
+    if(seluruhnyaGratis && paket) return err('Add-on (dekorasi, BBQ, floating breakfast, extra bed) untuk menginap gratis dipesan lewat WhatsApp, ya. Hapus pilihan add-on untuk melanjutkan.', 409);
 
     // Promo, kalau tamu membawa kodenya. Harganya dihitung ulang DI SINI --
     // bukan dipercaya dari yang dikirim browser -- oleh fungsi yang sama
