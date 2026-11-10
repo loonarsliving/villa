@@ -1,4 +1,5 @@
 import "server-only";
+import { formSelarasKamar } from "@/lib/cloudbedsSelarasKamar";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -671,7 +672,32 @@ async function kirimSatu(
     });
     const body = await res.json().catch(() => null);
     attempts.push({ variant: v.nama, http: res.status, success: body?.success ?? null, message: body?.message ?? null });
-    if (res.ok && body?.success !== false && body?.reservationID) return { reservationID: String(body.reservationID), variant: v.nama };
+    if (res.ok && body?.success !== false && body?.reservationID) {
+      // Kamar langsung dikunci ke unit sistem, sama dengan villa-api (PL):
+      // reservasi tipe-kamar-saja dibiarkan "unassigned" oleh Cloudbeds,
+      // lalu Cloudbeds bebas menjual unit sistem itu ke OTA (el nasution,
+      // PL, 10 Nov 2026). postRoomAssign pms-v1.2; adjustPrice tidak dikirim
+      // = harga tetap. Best-effort: gagal tidak membatalkan push.
+      const sub = Array.isArray(body?.unassigned) ? body.unassigned[0]?.subReservationID : null;
+      if (cbRoomId && sub) {
+        try {
+          const f = formSelarasKamar(
+            { reservationID: String(body.reservationID), subReservationID: String(sub), newRoomID: cbRoomId, roomTypeID: tipe, oldRoomID: null },
+            propertyId,
+          );
+          const ra = await fetch(`${CLOUDBEDS_API_BASE}/postRoomAssign`, {
+            method: "POST",
+            headers: { "x-api-key": apiKey, "Content-Type": "application/x-www-form-urlencoded" },
+            body: f.toString(),
+          });
+          const raBody = await ra.json().catch(() => null);
+          attempts.push({ variant: "postRoomAssign", http: ra.status, success: raBody?.success ?? null, message: raBody?.message ?? null });
+        } catch (e) {
+          attempts.push({ variant: "postRoomAssign", error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+      return { reservationID: String(body.reservationID), variant: v.nama };
+    }
   }
   return { error: "postReservation_failed_all_variants", attempts };
 }

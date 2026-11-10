@@ -4,6 +4,12 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-11-10 — "Jangan terulang lagi": peringatan kamar ke WhatsApp, jalan keluar otomatis, EL ikut dikunci
+- Owner: "Jgan pernah biarkan ini terulang lagi". Peringatan el nasution tercatat 03.20 WITA di aplikasi dan tidak ada yang membacanya.
+- Peringatan kamar genting (TIDAK MASUK SISTEM, PERLU PINDAH KAMAR, Kamar Cloudbeds belum sama, Booking dipindah ke Unit ...) kini juga dikirim WhatsApp ke owner (`villa_notify.owner_hp`), manager, dan resepsionis aktif (`src/lib/peringatanKamarWa.ts`, jalur `vercel_bridge` yang sama dengan villa-api, log `wa_messages_log.template_type='cloudbeds_peringatan_kamar'`). Investor (role owner) TIDAK dikirimi. villa-api: "Booking tidak bisa masuk Cloudbeds (penuh)" juga ke WA owner (`cloudbeds_push_penuh`).
+- Perbaikan #311: run 18.00 WITA menunjukkan 6 booking (Nisa, Catur, Clara, Aliyya, Raihan) ditolak Cloudbeds tanpa reservasi penempat yang terlihat, lalu tertahan jeda 1 jam tanpa mencoba jalur lain. Kini setiap penolakan langsung ke "ikuti kamar Cloudbeds", lalu jalan keluar: unit tipe sama yang kosong di Cloudbeds DAN sistem, di-assign di Cloudbeds lalu booking sistem dipindah (booking check-in tidak dipindah).
+- Excellent Living: push booking EL ke Cloudbeds (`elCloudbedsSync.ts` `kirimSatu`) juga hanya membawa tipe kamar; kini langsung `postRoomAssign` ke kamar unitnya. Penyelarasan berkala (seperti PL) BELUM ada untuk EL.
+
 ### 2026-11-10 — Sync: "pindah kamar" dibedakan dari overbooking; booking website mengikuti kamar Cloudbeds
 - Owner: "kalau dia overbooking knpa masih dibuka kamarnya di OTA" -- memang bukan overbooking. Cloudbeds menjual per TIPE kamar; el nasution sah karena tiap malam masih ada satu kamar RER, hanya tidak ada satu unit untuk 3 malam penuh. Owner juga mengonfirmasi satu kamar yang masih ditutup di Cloudbeds kini sudah dibuka (itu sebab 30-31 Des penuh).
 - `rencanaPindahKamar` (`src/lib/cloudbedsUnitSementara.ts`): kalau tidak ada unit pengganti, sync memeriksa tiap malam. Kamar cukup -> notifikasi "PERLU PINDAH KAMAR" dengan saran unit per tanggal (bukan "Overbooking"); benar-benar penuh -> "TIDAK MASUK SISTEM" menyebut malam yang penuh.

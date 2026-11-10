@@ -1454,10 +1454,15 @@ async function pushBookingToCloudbeds(booking){
         const judul = `Booking tidak bisa masuk Cloudbeds (penuh) — ${booking.guest_nama ?? 'Tamu'} Unit ${booking.unit_nomor ?? '?'}`;
         const {data:sudah} = await supabase.from('notifications').select('id').eq('judul', judul).eq('ref_id', booking.id).limit(1);
         if(!(sudah ?? []).length){
+          const pesanPenuh = `${booking.guest_nama ?? 'Tamu'} (${booking.tgl_checkin} s/d ${booking.tgl_checkout ?? '?'}) sudah tercatat di sistem, tapi Cloudbeds menolak karena tipe kamar ini penuh di tanggal itu (reservasi OTA atau kamar yang ditutup di Cloudbeds). Selama belum masuk Cloudbeds, kamar ini masih bisa terjual lagi di OTA -- cek Cloudbeds dan atur kamarnya.`;
           await supabase.from('notifications').insert({
-            unit_id: booking.unit_id, target_role: 'all', tipe: 'booking', ref_id: booking.id, judul,
-            pesan: `${booking.guest_nama ?? 'Tamu'} (${booking.tgl_checkin} s/d ${booking.tgl_checkout ?? '?'}) sudah tercatat di sistem, tapi Cloudbeds menolak karena tipe kamar ini penuh di tanggal itu. Kemungkinan overbooking dengan reservasi OTA -- cek Cloudbeds dan atur kamarnya.`,
+            unit_id: booking.unit_id, target_role: 'all', tipe: 'booking', ref_id: booking.id, judul, pesan: pesanPenuh,
           });
+          // Juga ke WhatsApp owner: notifikasi aplikasi saja terbukti
+          // terlewat (owner 10 Nov 2026: "Jgan pernah biarkan ini terulang lagi").
+          const notifyPenuh = await getSetting('villa_notify');
+          await sendWa(notifyPenuh?.owner_hp ?? null, `⚠️ ${judul}\n\n${pesanPenuh}`,
+            {booking_id: booking.id, unit_id: booking.unit_id, template_type: 'cloudbeds_push_penuh'});
         }
       }
       return;
