@@ -4,6 +4,11 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-11-10 — Sync: "pindah kamar" dibedakan dari overbooking; booking website mengikuti kamar Cloudbeds
+- Owner: "kalau dia overbooking knpa masih dibuka kamarnya di OTA" -- memang bukan overbooking. Cloudbeds menjual per TIPE kamar; el nasution sah karena tiap malam masih ada satu kamar RER, hanya tidak ada satu unit untuk 3 malam penuh. Owner juga mengonfirmasi satu kamar yang masih ditutup di Cloudbeds kini sudah dibuka (itu sebab 30-31 Des penuh).
+- `rencanaPindahKamar` (`src/lib/cloudbedsUnitSementara.ts`): kalau tidak ada unit pengganti, sync memeriksa tiap malam. Kamar cukup -> notifikasi "PERLU PINDAH KAMAR" dengan saran unit per tanggal (bukan "Overbooking"); benar-benar penuh -> "TIDAK MASUK SISTEM" menyebut malam yang penuh.
+- Penyelarasan kamar (PR #310): kalau unit sistem booking website sudah dipakai reservasi LAIN di Cloudbeds, postRoomAssign tidak dicoba; booking website (status terjadwal) dipindah di sistem ke unit yang Cloudbeds berikan bila unit itu kosong di sistem, dengan notifikasi. Tipe kamar sama, harga tetap; pembagian investor dibagi rata per unit (PHASE0-BASELINE.md) sehingga tidak terdampak. Log `inbound.own_booking.unit_follow_cloudbeds`.
+
 ### 2026-11-10 — Kamar booking website dikunci di Cloudbeds (postRoomAssign)
 - Kasus nyata: "el nasution" (Cloudbeds 6BAX7Z6527, 10-13 Nov) tidak masuk sistem. Cloudbeds menaruhnya di RER(10) = A4, padahal di sistem A4 dipegang booking website Nisa Fauziah (11-14 Nov, Cloudbeds 6B5D5AF5AG); tidak ada unit tipe sama yang kosong 3 malam, jadi sync menolak ("TIDAK MASUK SISTEM").
 - Akar masalah: `pushBookingToCloudbeds` hanya mengirim tipe kamar (postReservation menolak roomID), jadi reservasi website di Cloudbeds tanpa kamar / di kamar lain, dan sync melewati reservasi milik sistem tanpa memeriksa kamarnya. Cloudbeds lalu menjual unit sistem itu ke OTA. Pola sama sejak akhir Oktober (Laura Salwa, Muhammad Rifky Abizar, A.devi, Muhammad Fazri di A4).
