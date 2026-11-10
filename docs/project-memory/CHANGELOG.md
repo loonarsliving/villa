@@ -4,6 +4,12 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-11-10 — Excellent Living: penyelarasan kamar berkala + peringatan tamu tanpa kamar
+- Owner menyetujui ("Ya") penyelarasan berkala EL sebelum EL buka 12 Nov.
+- Booking EL milik sistem (website/front desk) yang kamarnya di Cloudbeds beda dengan kamarnya di sistem kini di-`postRoomAssign` saat sinkron EL (maks 10/run, gagal tidak diulang 1 jam, notifikasi + WA "Kamar Cloudbeds belum sama").
+- Reservasi Cloudbeds EL yang tidak mendapat kamar (`sync.tanpa_kamar`) dulu hanya masuk log. Kini notifikasi + WA: "PERLU PINDAH KAMAR" dengan saran kamar per tanggal bila tiap malam masih ada kamar, atau "TIDAK MASUK SISTEM" dengan malam yang penuh.
+- EL memilih kamar kosong setipe untuk tamu OTA (`pilihKamarEl`), jadi tidak ada jalur "ikuti kamar Cloudbeds" seperti PL.
+
 ### 2026-11-10 — "Jangan terulang lagi": peringatan kamar ke WhatsApp, jalan keluar otomatis, EL ikut dikunci
 - Owner: "Jgan pernah biarkan ini terulang lagi". Peringatan el nasution tercatat 03.20 WITA di aplikasi dan tidak ada yang membacanya.
 - Peringatan kamar genting (TIDAK MASUK SISTEM, PERLU PINDAH KAMAR, Kamar Cloudbeds belum sama, Booking dipindah ke Unit ...) kini juga dikirim WhatsApp ke owner (`villa_notify.owner_hp`), manager, dan resepsionis aktif (`src/lib/peringatanKamarWa.ts`, jalur `vercel_bridge` yang sama dengan villa-api, log `wa_messages_log.template_type='cloudbeds_peringatan_kamar'`). Investor (role owner) TIDAK dikirimi. villa-api: "Booking tidak bisa masuk Cloudbeds (penuh)" juga ke WA owner (`cloudbeds_push_penuh`).

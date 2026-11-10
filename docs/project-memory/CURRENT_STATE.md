@@ -5,7 +5,7 @@ _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 ## 2026-11-10 — Kamar booking website dikunci di Cloudbeds
 - Booking buatan sistem kini di-assign ke kamar Cloudbeds yang sama dengan unit sistem (`postRoomAssign`, saat push di villa-api + perbaikan berkala di sync Next.js). Lihat CHANGELOG 2026-11-10 dan INTEGRATIONS.md. Scope `write:room` kunci Cloudbeds belum terverifikasi -- cek `cloudbeds_events_log` event `outbound.reservation.room_assigned` setelah deploy.
-- Peringatan kamar genting kini juga ke WhatsApp owner/manager/resepsionis (`src/lib/peringatanKamarWa.ts`). EL: push dikunci ke kamar, tapi penyelarasan berkala belum ada.
+- Peringatan kamar genting kini juga ke WhatsApp owner/manager/resepsionis (`src/lib/peringatanKamarWa.ts`). EL: push dikunci ke kamar dan disamakan berkala; tamu Cloudbeds EL tanpa kamar kini diperingatkan (aplikasi + WA).
 - Masih terbuka (manual, staf): el nasution 10-13 Nov tidak punya satu unit kosong 3 malam; Dwita (B1 31 Des) dan Gilang (B3 30 Des) ditolak Cloudbeds karena penuh.
 
 ## 2026-11-09 — AI resepsionis untuk percakapan Excellent Living + cek pemetaan kamar EL
