@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { bacaBlokirKamar, pilihUnitSementara, type KandidatUnit } from "./cloudbedsUnitSementara";
+import { bacaBlokirKamar, pilihUnitSementara, rencanaPindahKamar, type KandidatUnit } from "./cloudbedsUnitSementara";
 
 const RT = "270500726767808";
 const unit = (idx: number, nomor: string): KandidatUnit => ({ cloudbedsRoomId: `${RT}-${idx}`, unitId: `u-${nomor}`, unitNomor: nomor });
@@ -94,5 +94,52 @@ describe("bacaBlokirKamar", () => {
       { roomBlocks: [{ endDate: "2026-10-30" }] },
     ]);
     expect(hasil).toEqual([{ roomIds: [`${RT}-4`], startDate: "2026-10-29", endDate: "2026-10-30" }]);
+  });
+});
+
+describe("rencanaPindahKamar", () => {
+  const T = "270500726767808";
+  const u = (i: number, nomor: string) => ({ cloudbedsRoomId: `${T}-${i}`, unitId: `u-${nomor}`, unitNomor: nomor });
+  const A4 = u(9, "A4");
+  const C2 = u(7, "C2");
+  const A1 = u(0, "A1");
+  const kandidat = [A1, C2, A4];
+
+  it("el nasution 10-13 Nov: bukan overbooking, cukup pindah A4 lalu C2", () => {
+    const r = rencanaPindahKamar({
+      roomTypeId: T,
+      checkIn: "2026-11-10",
+      checkOut: "2026-11-13",
+      kandidat,
+      blokir: [],
+      terpakai: [
+        { unitId: "u-A1", checkIn: "2026-11-10", checkOut: "2026-11-13" },
+        { unitId: "u-C2", checkIn: "2026-11-10", checkOut: "2026-11-11" },
+        { unitId: "u-A4", checkIn: "2026-11-11", checkOut: "2026-11-14" },
+      ],
+    });
+    expect(r).toEqual({
+      bisa: true,
+      segmen: [
+        { unit: A4, dari: "2026-11-10", sampai: "2026-11-11" },
+        { unit: C2, dari: "2026-11-11", sampai: "2026-11-13" },
+      ],
+    });
+  });
+
+  it("menyebut malam yang memang penuh (overbooking sungguhan)", () => {
+    const r = rencanaPindahKamar({
+      roomTypeId: T,
+      checkIn: "2026-12-30",
+      checkOut: "2027-01-01",
+      kandidat: [A1, A4],
+      blokir: [{ roomIds: [`${T}-9`], startDate: "2026-12-31", endDate: "2027-01-01" }],
+      terpakai: [{ unitId: "u-A1", checkIn: "2026-12-30", checkOut: "2027-01-01" }],
+    });
+    expect(r).toEqual({ bisa: false, malamPenuh: ["2026-12-31"] });
+  });
+
+  it("tidak merencanakan booking tanpa tanggal keluar", () => {
+    expect(rencanaPindahKamar({ roomTypeId: T, checkIn: "2026-11-10", checkOut: null, kandidat, blokir: [], terpakai: [] })).toEqual({ bisa: false, malamPenuh: [] });
   });
 });

@@ -3,7 +3,7 @@ import { statusSetelahSync, dibuatDiSini } from "./bookingStatusSync";
 import { getCloudbedsReservationTotals, getCloudbedsRoomBlocks } from "@/lib/cloudbedsApi";
 import { mapSourceNameToSumber } from "@/lib/cloudbedsSourceMapping";
 import { cloudbedsRoomTypeIdOf } from "@/lib/cloudbedsRoomTypeMapping";
-import { bacaBlokirKamar, pilihUnitSementara, type BlokirKamar, type KandidatUnit, type Pemakaian } from "@/lib/cloudbedsUnitSementara";
+import { bacaBlokirKamar, pilihUnitSementara, rencanaPindahKamar, type BlokirKamar, type KandidatUnit, type Pemakaian } from "@/lib/cloudbedsUnitSementara";
 import { formSelarasKamar, rencanaSelarasKamar } from "@/lib/cloudbedsSelarasKamar";
 
 /**
@@ -358,6 +358,7 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
     supabase,
     apiKey,
     reservations: reservations.filter((r) => ownReservationIds.has(r.reservationID)),
+    semuaReservasi: reservations,
     unitIdSaatIni,
     statusSaatIni,
     kandidat,
@@ -524,12 +525,36 @@ export async function syncCloudbedsReservations(supabase: SupabaseClient, apiKey
             });
           }
         } else {
-          await peringatkanSekali({
-            unit_id: mapping.unit_id,
-            judul: `TIDAK MASUK SISTEM — reservasi Cloudbeds ${resv.reservationID}`,
-            pesan: `Cloudbeds menaruh ${guestNama} (${checkIn} s/d ${checkOut}) di Unit ${unitNomor ?? "?"}, tapi unit itu sudah dipakai ${penghuni?.guest_nama ?? "booking lain"} dan tidak ada unit kosong lain. Overbooking -- atur kamarnya sekarang.`,
-            ref_id: null,
-          });
+          // Bedakan overbooking sungguhan dari "kamar cukup tapi harus pindah
+          // kamar di tengah menginap" (el nasution, 10 Nov 2026: tiap malam
+          // masih ada satu kamar, jadi Cloudbeds sah menjualnya).
+          const rencana = roomTypeId
+            ? rencanaPindahKamar({
+                roomTypeId,
+                checkIn,
+                checkOut,
+                kandidat,
+                terpakai: lain.map((b) => ({ unitId: String(b.unit_id), checkIn: String(b.tgl_checkin), checkOut: b.tgl_checkout ? String(b.tgl_checkout) : null })),
+                blokir: await muatBlokir(checkIn, checkOut ?? checkIn),
+              })
+            : null;
+          if (rencana?.bisa) {
+            const saran = rencana.segmen.map((g) => `Unit ${g.unit.unitNomor ?? "?"} ${g.dari} s/d ${g.sampai}`).join(", lalu ");
+            await peringatkanSekali({
+              unit_id: mapping.unit_id,
+              judul: `PERLU PINDAH KAMAR — reservasi Cloudbeds ${resv.reservationID} belum masuk sistem`,
+              pesan: `${guestNama} (${checkIn} s/d ${checkOut}) BUKAN overbooking: tiap malam masih ada kamar kosong, tapi tidak ada satu unit yang kosong untuk seluruh menginap. Cloudbeds menaruhnya di Unit ${unitNomor ?? "?"} yang di sistem dipakai ${penghuni?.guest_nama ?? "booking lain"}. Saran: ${saran}. Atur kamarnya di Cloudbeds; sync berikutnya memasukkannya.`,
+              ref_id: null,
+            });
+          } else {
+            const malam = rencana && !rencana.bisa && rencana.malamPenuh.length ? ` Malam penuh: ${rencana.malamPenuh.join(", ")}.` : "";
+            await peringatkanSekali({
+              unit_id: mapping.unit_id,
+              judul: `TIDAK MASUK SISTEM — reservasi Cloudbeds ${resv.reservationID}`,
+              pesan: `Cloudbeds menaruh ${guestNama} (${checkIn} s/d ${checkOut}) di Unit ${unitNomor ?? "?"}, tapi unit itu sudah dipakai ${penghuni?.guest_nama ?? "booking lain"} dan semua unit tipe ini terisi.${malam} Overbooking -- atur kamarnya sekarang.`,
+              ref_id: null,
+            });
+          }
         }
       }
       if (error) {
@@ -637,6 +662,8 @@ async function selaraskanKamarMilikSistem(ctx: {
   supabase: SupabaseClient;
   apiKey: string;
   reservations: CloudbedsReservation[];
+  /** Semua reservasi aktif -- untuk melihat kamar Cloudbeds yang sudah dipakai reservasi lain. */
+  semuaReservasi: CloudbedsReservation[];
   unitIdSaatIni: Map<string, string>;
   statusSaatIni: Map<string, string>;
   kandidat: KandidatUnit[];
@@ -670,6 +697,67 @@ async function selaraskanKamarMilikSistem(ctx: {
       .gte("created_at", sejamLalu)
       .limit(1);
     if ((baruGagal ?? []).length > 0) continue;
+
+    // Kamar target sudah dipakai reservasi LAIN di Cloudbeds untuk tanggal
+    // ini (el nasution di RER(10) saat Nisa harus di A4): postRoomAssign
+    // pasti ditolak. Kalau booking kita sudah punya kamar lain di Cloudbeds
+    // dan unit itu kosong di sistem, sistem yang mengikuti Cloudbeds --
+    // tipe kamar sama, harga dan pembagian investor (dibagi rata per unit,
+    // PHASE0-BASELINE.md) tidak berubah -- supaya tamu OTA-nya bisa masuk.
+    const masuk = resv.rooms?.[0]?.roomCheckIn ?? resv.startDate;
+    const keluar = resv.rooms?.[0]?.roomCheckOut ?? resv.endDate;
+    const targetDipakai = ctx.semuaReservasi.some(
+      (o) =>
+        o.reservationID !== resv.reservationID &&
+        (o.rooms ?? []).some(
+          (x) => String(x.roomID ?? "") === rencana.newRoomID && (x.roomCheckIn ?? o.startDate) < keluar && masuk < (x.roomCheckOut ?? o.endDate),
+        ),
+    );
+    if (targetDipakai) {
+      const unitCb = rencana.oldRoomID ? ctx.kandidat.find((k) => k.cloudbedsRoomId === rencana.oldRoomID) : undefined;
+      let pindah: string | null = null;
+      if (status === "terjadwal" && unitCb && unitCb.unitId !== unit.unitId) {
+        const { data: milik } = await ctx.supabase.from("bookings").select("id").eq("cloudbeds_reservation_id", resv.reservationID).limit(1).maybeSingle();
+        const { data: bentrok } = await ctx.supabase
+          .from("bookings")
+          .select("id")
+          .eq("unit_id", unitCb.unitId)
+          .in("status", ["terjadwal", "checkin", "menunggu_pembayaran"])
+          .lt("tgl_checkin", keluar)
+          .or(`tgl_checkout.is.null,tgl_checkout.gt.${masuk}`)
+          .neq("id", milik?.id ?? "00000000-0000-0000-0000-000000000000")
+          .limit(1);
+        if (milik?.id && (bentrok ?? []).length === 0) {
+          const { error } = await ctx.supabase.from("bookings").update({ unit_id: unitCb.unitId, unit_nomor: unitCb.unitNomor }).eq("id", milik.id);
+          if (!error) pindah = milik.id;
+          else ctx.errors.push(`${resv.reservationID}: gagal mengikuti kamar Cloudbeds (${error.message})`);
+        }
+      }
+      hasil.push({ reservation_id: resv.reservationID, unit_nomor: pindah ? (unitCb?.unitNomor ?? null) : unit.unitNomor, ok: !!pindah, pesan: pindah ? "mengikuti_kamar_cloudbeds" : "kamar_target_dipakai_reservasi_lain" });
+      await ctx.supabase.from("cloudbeds_events_log").insert({
+        reservation_id: resv.reservationID,
+        event_type: pindah ? "inbound.own_booking.unit_follow_cloudbeds" : "outbound.reservation.room_assigned",
+        payload: { sumber_proses: "sync", dari_unit: unit.unitNomor, ke_unit: pindah ? unitCb?.unitNomor : null, rencana },
+        matched: !!pindah,
+        error: pindah ? null : "kamar_target_dipakai_reservasi_lain",
+      });
+      await ctx.peringatkanSekali(
+        pindah
+          ? {
+              unit_id: unitCb!.unitId,
+              judul: `Booking website dipindah ke Unit ${unitCb!.unitNomor ?? "?"} mengikuti Cloudbeds (${resv.reservationID})`,
+              pesan: `Unit ${unit.unitNomor ?? "?"} di Cloudbeds sudah dipakai reservasi lain untuk ${masuk} s/d ${keluar}, sedangkan Cloudbeds menaruh booking ini di Unit ${unitCb!.unitNomor ?? "?"} yang kosong di sistem. Sistem mengikuti Cloudbeds; harga tidak berubah. Beri tahu tamunya kalau unitnya sudah dijanjikan.`,
+              ref_id: pindah,
+            }
+          : {
+              unit_id: unit.unitId,
+              judul: `Kamar Cloudbeds belum sama (${resv.reservationID}) — harus Unit ${unit.unitNomor ?? "?"}`,
+              pesan: `Booking ini dibuat di sistem untuk Unit ${unit.unitNomor ?? "?"} (${masuk} s/d ${keluar}), tapi di Cloudbeds unit itu sudah dipakai reservasi lain dan kamar booking ini di Cloudbeds ${rencana.oldRoomID ? "tidak kosong di sistem" : "belum di-assign"}. Atur kamarnya di Cloudbeds.`,
+              ref_id: null,
+            },
+      );
+      continue;
+    }
 
     let ok = false;
     let pesan: string | null = null;
