@@ -4,6 +4,11 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-11-11 — Investor bisa mencetak Bukti Menginap dari dashboard
+- Kasus: investor Catur Budi memesan menginap gratis di loonars.id (C1, 11-12 Nov), tapi Bukti Menginap hanya bisa diambil dari browser tempat memesan (loonars.id menyimpannya di localStorage); WA konfirmasi menginap gratis hanya ke owner.
+- villa-api: `GET /investor/vouchers` kini memberi `bukti_booking_id` untuk kode terpakai yang menginap gratis; endpoint baru `GET /investor/bukti-menginap?booking_id=` (role owner, hanya booking yang memakai kode milik investor yang login, tidak untuk booking batal / bukan menginap gratis) mengembalikan data yang sama dengan `/public/bookings/invoice` jenis `bukti_menginap`.
+- Dashboard `/investor/menginap-gratis`: tombol "Cetak Bukti Menginap (PDF)". Pembuat PDF disalin dari repo loonars (`src/lib/pdf/buktiMenginapPdf.ts`, foto `public/private-living-hero-poster.jpeg`) -- ubah keduanya bersamaan. Dependensi baru: `jspdf`.
+
 ### 2026-11-11 — Pembatalan booking di sistem ikut membatalkan reservasi Cloudbeds
 - Kejadian: investor Mega (Unit B3 & B4, 11-12 Nov, menginap gratis) reschedule di hari menginap. Owner memutuskan kodenya hangus dan booking dibatalkan supaya unit bisa dijual lagi. Status 'batal' di sistem tidak sampai ke Cloudbeds, jadi kamar tetap tertutup di OTA (gap lama di INTEGRATIONS.md).
 - villa-api `PATCH /bookings` status 'batal' kini memanggil `batalkanReservasiCloudbeds`: `putReservation` status=canceled, hanya untuk reservasi yang terbukti dibuat sistem ini (log `outbound.reservation.created`), hanya PL, tidak untuk booking yang sudah check-in/out, status Cloudbeds dibaca sebelum & sesudah (berhasil hanya kalau `getReservation` membaca 'canceled'). Dicatat sebagai `outbound.reservation.canceled`. Gagal -> notifikasi "Pembatalan BELUM sampai ke Cloudbeds". Kirim 'batal' lagi ke booking yang sudah batal = coba ulang.

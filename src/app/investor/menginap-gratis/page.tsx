@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { InvestorShell } from "../_shell";
 import { api } from "@/lib/api";
 import { Card, CardHeader, Loading } from "@/components/Card";
+import type { BuktiMenginapData } from "@/lib/pdf/buktiMenginapPdf";
 
 /**
  * Dua belas kode menginap gratis milik investor yang sedang login.
@@ -21,6 +22,8 @@ type Voucher = {
   dicoret: boolean;
   dipakai_pada: string | null;
   unit: string | null;
+  /** Ada kalau Bukti Menginap untuk kode ini bisa dicetak. */
+  bukti_booking_id?: string | null;
 };
 
 type Jawaban = {
@@ -42,6 +45,26 @@ function labelBulan(bulan: string): string {
 export default function MenginapGratisPage() {
   const [data, setData] = useState<Jawaban | null>(null);
   const [galat, setGalat] = useState<string | null>(null);
+  const [mencetak, setMencetak] = useState<string | null>(null);
+  const [galatCetak, setGalatCetak] = useState<string | null>(null);
+
+  // Bukti Menginap yang sama dengan di loonars.id, tapi bisa diambil dari
+  // perangkat mana pun selama investor login (owner 2026-11-11).
+  async function cetakBukti(bookingId: string) {
+    if (mencetak) return;
+    setMencetak(bookingId);
+    setGalatCetak(null);
+    try {
+      const data = await api.get<BuktiMenginapData>(`/investor/bukti-menginap?booking_id=${encodeURIComponent(bookingId)}`);
+      const { buildBuktiMenginapPdf } = await import("@/lib/pdf/buktiMenginapPdf");
+      const doc = await buildBuktiMenginapPdf(data);
+      doc.save(`Bukti-Menginap-${data.no_bukti}.pdf`);
+    } catch (e: unknown) {
+      setGalatCetak(e instanceof Error ? e.message : "Gagal membuat Bukti Menginap");
+    } finally {
+      setMencetak(null);
+    }
+  }
 
   useEffect(() => {
     api
@@ -68,6 +91,8 @@ export default function MenginapGratisPage() {
               <span className="text-ink/40">{data.hangus} hangus</span>
             </div>
 
+            {galatCetak && <div className="px-4 sm:px-5 py-2 text-[11px] text-ruby-500 border-b border-ink/[0.05]">{galatCetak}</div>}
+
             {data.vouchers.length === 0 ? (
               <Loading label="Belum ada kode untuk akun ini" />
             ) : (
@@ -86,6 +111,16 @@ export default function MenginapGratisPage() {
                       {v.status === "terpakai" && v.dipakai_pada && ` · dipakai ${v.dipakai_pada}${v.unit ? ` di Unit ${v.unit}` : ""}`}
                       {v.status === "hangus" && " · hangus, bulannya sudah lewat"}
                     </div>
+                    {v.bukti_booking_id && (
+                      <button
+                        type="button"
+                        onClick={() => v.bukti_booking_id && cetakBukti(v.bukti_booking_id)}
+                        disabled={!!mencetak}
+                        className="mt-1.5 text-[10.5px] px-2.5 py-1 rounded border border-gold-500/40 text-gold-500 hover:bg-gold-500/10 disabled:opacity-50"
+                      >
+                        {mencetak === v.bukti_booking_id ? "Menyiapkan…" : "Cetak Bukti Menginap (PDF)"}
+                      </button>
+                    )}
                   </div>
                   <span
                     className={`shrink-0 text-[9.5px] px-2 py-0.5 rounded border ${

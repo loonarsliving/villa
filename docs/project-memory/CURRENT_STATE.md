@@ -3,6 +3,9 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-11-11 — Bukti Menginap di dashboard investor
+- Investor mencetak Bukti Menginap dari `/investor/menginap-gratis` (endpoint `GET /investor/bukti-menginap`). PDF-nya salinan dari loonars.id (`src/lib/pdf/buktiMenginapPdf.ts`) -- dua salinan, ubah bersamaan.
+
 ## 2026-11-11 — Batal di sistem = batal di Cloudbeds (reservasi buatan sistem)
 - `PATCH /bookings` status 'batal' ikut membatalkan reservasi Cloudbeds yang didorong sistem ini (website/investor/KOL/walk-in), dibaca balik dari `getReservation`. Reservasi OTA tetap dibatalkan di OTA/Cloudbeds. Cek `cloudbeds_events_log` event `outbound.reservation.canceled` setelah deploy (scope `write:reservation` kunci sudah dipakai `putReservation` pindah kamar).
 - Kode investor pada booking yang batal tetap terpakai/hangus (keputusan owner 2026-11-11). B3/B4 investor Mega 11 Nov dibatalkan; reservasi Cloudbeds 6BEYUQZ19X & 6BEKCSZYQU dibatalkan manual oleh owner.
