@@ -1572,6 +1572,90 @@ async function pushBookingToCloudbeds(booking){
 }
 
 /**
+ * Batalkan di Cloudbeds reservasi yang DIBUAT oleh sistem ini
+ * (pushBookingToCloudbeds), saat bookingnya dibatalkan staf di sini.
+ *
+ * Kenapa ada (owner 2026-11-11): investor Mega membatalkan dua menginap
+ * gratis (B3, B4) di hari menginapnya. Status 'batal' di sini tidak pernah
+ * sampai ke Cloudbeds -- arah pembatalan selama ini hanya Cloudbeds -> sini
+ * (lihat "Known gap" di INTEGRATIONS.md) -- jadi kamarnya tetap tertutup di
+ * OTA dan tidak bisa dijual lagi sampai seseorang membatalkannya manual.
+ *
+ * Batasan yang disengaja:
+ *  - Hanya reservasi yang terbukti kita dorong sendiri: ada baris
+ *    cloudbeds_events_log 'outbound.reservation.created' yang matched untuk
+ *    booking & reservationID ini. Reservasi OTA (Agoda, Booking.com, ...)
+ *    TIDAK pernah dibatalkan dari sini: pembatalannya urusan OTA/Cloudbeds
+ *    dan punya aturan biaya sendiri.
+ *  - Hanya Private Living (kunci Cloudbeds di sini milik PL, sama seperti
+ *    pushBookingToCloudbeds).
+ *  - Status di Cloudbeds dibaca dulu: yang sudah 'canceled' tidak dikirim
+ *    ulang; yang sudah 'checked_in'/'checked_out' tidak disentuh.
+ *  - Jawaban "success" tidak dipercaya: berhasil hanya kalau getReservation
+ *    sesudahnya benar-benar membaca 'canceled'.
+ *
+ * Tidak pernah melempar; mengembalikan {status, pesan} untuk dilaporkan ke
+ * staf. Gagal di sini tidak membatalkan pembatalan di sistem kita.
+ */
+async function batalkanReservasiCloudbeds(booking){
+  const rid = String(booking?.cloudbeds_reservation_id ?? '').trim();
+  if(!rid) return {status:'tidak_ada_reservasi'};
+  if(propertiSaatIni() !== 'PL') return {status:'dilewati', pesan:'Bukan properti Private Living.'};
+  const apiKey = cloudbedsApiKey();
+  if(!apiKey) return {status:'gagal', pesan:'CLOUDBEDS_API_KEY belum dikonfigurasi'};
+
+  const {data:jejak} = await supabase.from('cloudbeds_events_log')
+    .select('id').eq('event_type','outbound.reservation.created').eq('matched', true)
+    .eq('payload->>booking_id', String(booking.id))
+    .eq('payload->>cloudbeds_reservation_id', rid).limit(1);
+  if(!jejak?.length) return {status:'dilewati', pesan:'Reservasi ini tidak dibuat oleh sistem kita (mis. dari OTA) -- batalkan di Cloudbeds/OTA.'};
+
+  const propertyId = (Deno.env.get('CLOUDBEDS_PROPERTY_ID') ?? '').trim();
+  const bacaStatus = async () => {
+    try{
+      const url = new URL(`${CLOUDBEDS_API_BASE}/getReservation`);
+      if(propertyId) url.searchParams.set('propertyID', propertyId);
+      url.searchParams.set('reservationID', rid);
+      const res = await fetch(url, {headers:{'x-api-key':apiKey}, signal: AbortSignal.timeout(15000)});
+      const body = await res.json().catch(()=>null);
+      if(!res.ok || body?.success !== true) return null;
+      return String(body?.data?.status ?? '') || null;
+    }catch{ return null; }
+  };
+  const catat = async (matched, extra) => {
+    await supabase.from('cloudbeds_events_log').insert({
+      reservation_id: rid,
+      event_type: 'outbound.reservation.canceled',
+      payload: {booking_id: booking.id, unit_nomor: booking.unit_nomor ?? null, ...extra},
+      matched,
+      error: matched ? null : (extra?.error ?? null),
+    });
+  };
+
+  const sebelum = await bacaStatus();
+  if(sebelum === 'canceled'){
+    await catat(true, {status_sebelum: sebelum, catatan:'sudah batal di Cloudbeds'});
+    return {status:'sudah_batal'};
+  }
+  if(sebelum === 'checked_in' || sebelum === 'checked_out'){
+    const pesan = `Status di Cloudbeds '${sebelum}', tidak dibatalkan otomatis.`;
+    await catat(false, {status_sebelum: sebelum, error: pesan});
+    return {status:'dilewati', pesan};
+  }
+
+  const form = new URLSearchParams();
+  form.set('reservationID', rid);
+  form.set('status', 'canceled');
+  const tulis = await cloudbedsTulis('PUT', 'putReservation', form);
+  const sesudah = await bacaStatus();
+  const ok = sesudah === 'canceled';
+  await catat(ok, {status_sebelum: sebelum, status_sesudah: sesudah, response: tulis.body,
+    error: ok ? null : (tulis.pesan ?? `Status Cloudbeds sesudahnya '${sesudah ?? 'tidak terbaca'}'`)});
+  if(ok) return {status:'dibatalkan'};
+  return {status:'gagal', pesan: tulis.pesan ?? `Cloudbeds belum membaca 'canceled' (status: ${sesudah ?? 'tidak terbaca'}).`};
+}
+
+/**
  * Mengirim WhatsApp lewat jembatan Mkhsistem, dan MELAPORKAN hasilnya.
  *
  * Dulu fungsi ini tidak mengembalikan apa pun, sehingga pemanggilnya tidak
@@ -9820,8 +9904,24 @@ async function layani(req){
     const b=await req.json();
     if(!b.id || !b.status) return err('id dan status wajib diisi');
     if(!['terjadwal','checkin','checkout','batal'].includes(b.status)) return err('status tidak valid');
+    const {data:lama} = await supabase.from('bookings').select('status').eq('id',b.id).maybeSingle();
     const {data,error}=await supabase.from('bookings').update({status:b.status}).eq('id',b.id).select().single();
     if(error) return err(error.message);
+    // Pembatalan ikut dikirim ke Cloudbeds supaya kamarnya bisa dijual lagi
+    // di OTA (lihat batalkanReservasiCloudbeds). Juga dijalankan untuk
+    // booking yang SUDAH batal: mengirim 'batal' sekali lagi = coba ulang
+    // pembatalan di Cloudbeds. Booking yang tamunya sudah check-in/out
+    // tidak dikirim.
+    if(b.status === 'batal' && !['checkin','checkout'].includes(lama?.status)){
+      let cloudbeds;
+      try { cloudbeds = await batalkanReservasiCloudbeds(data); }
+      catch(e){ cloudbeds = {status:'gagal', pesan: e?.message ?? String(e)}; }
+      if(cloudbeds.status === 'gagal'){
+        await notif(data.unit_id, 'all', 'booking', `Pembatalan BELUM sampai ke Cloudbeds -- Unit ${data.unit_nomor}`,
+          `${data.guest_nama} (${data.tgl_checkin} s/d ${data.tgl_checkout}) sudah batal di sistem, tapi reservasi Cloudbeds ${data.cloudbeds_reservation_id} gagal dibatalkan: ${cloudbeds.pesan}. Batalkan manual di Cloudbeds supaya kamarnya bisa dijual lagi.`, data.id);
+      }
+      return json({...data, cloudbeds_batal: cloudbeds});
+    }
     return json(data);
   }
 

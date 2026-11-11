@@ -491,7 +491,15 @@ export default function PaymentGatewayPage() {
           setCheckinCardOpen(true);
         }
       } else {
-        await api.patch("/bookings", { id: payment.id, status: "batal" });
+        const hasil = await api.patch<{ cloudbeds_batal?: { status: string; pesan?: string } }>("/bookings", { id: payment.id, status: "batal" });
+        // villa-api ikut membatalkan reservasi Cloudbeds yang dibuat sistem ini,
+        // supaya kamarnya terbuka lagi di OTA. Hasilnya dilaporkan ke kasir.
+        const cb = hasil?.cloudbeds_batal;
+        if (cb?.status === "dibatalkan" || cb?.status === "sudah_batal") {
+          toast("✓", "Booking dibatalkan", "Reservasi di Cloudbeds juga sudah batal — kamar bisa dijual lagi.", "sage");
+        } else if (cb?.status === "gagal" || cb?.status === "dilewati") {
+          toast("⚠", "Batalkan juga di Cloudbeds", cb.pesan ?? "Reservasi Cloudbeds belum ikut batal.", "ruby");
+        }
         setVillaBookings((prev) => prev.map((b) => (b.id === payment.id ? { ...b, status: "batal" } : b)));
         setActivePayment({ ...payment, status: "batal" });
         setCapturedKtpSig(null);

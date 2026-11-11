@@ -4,6 +4,12 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-11-11 — Pembatalan booking di sistem ikut membatalkan reservasi Cloudbeds
+- Kejadian: investor Mega (Unit B3 & B4, 11-12 Nov, menginap gratis) reschedule di hari menginap. Owner memutuskan kodenya hangus dan booking dibatalkan supaya unit bisa dijual lagi. Status 'batal' di sistem tidak sampai ke Cloudbeds, jadi kamar tetap tertutup di OTA (gap lama di INTEGRATIONS.md).
+- villa-api `PATCH /bookings` status 'batal' kini memanggil `batalkanReservasiCloudbeds`: `putReservation` status=canceled, hanya untuk reservasi yang terbukti dibuat sistem ini (log `outbound.reservation.created`), hanya PL, tidak untuk booking yang sudah check-in/out, status Cloudbeds dibaca sebelum & sesudah (berhasil hanya kalau `getReservation` membaca 'canceled'). Dicatat sebagai `outbound.reservation.canceled`. Gagal -> notifikasi "Pembatalan BELUM sampai ke Cloudbeds". Kirim 'batal' lagi ke booking yang sudah batal = coba ulang.
+- Reservasi OTA tidak pernah dibatalkan dari sini. Front Desk (QRIS villa) menampilkan hasilnya.
+- Belum diubah: kode investor tetap terkunci pada booking yang batal (unique index `bookings_voucher_sekali_pakai` tidak menyaring status) -- sesuai keputusan owner "anggap hangus".
+
 ### 2026-11-10 — Jawaban postRoomAssign Cloudbeds tidak dipercaya lagi
 - Terbukti dua kali hari ini: postRoomAssign yang dijawab "Room could not be assigned" TETAP diterapkan Cloudbeds (17.50 WITA: 7 booking; 21.10 WITA: Laura & Risa pindah ke C2). Owner: "jgan ada kesalahan kecil yg berdampak besar lg".
 - PL sync: setelah kiriman (apa pun jawabannya) booking itu tidak disentuh lagi di run yang sama -- dulu "gagal" langsung diikuti pemindahan sistem ke kamar Cloudbeds LAMA, bisa bolak-balik. Kamar dicatat di memori sebagai mungkin terpakai. Tidak ada peringatan dari jawaban; run berikutnya memverifikasi dari data Cloudbeds. Jalan keluar: satu kiriman per booking per run, dan tidak mengirim lagi bila ada kiriman gagal < 1 jam.

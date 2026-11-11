@@ -3,6 +3,10 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-11-11 — Batal di sistem = batal di Cloudbeds (reservasi buatan sistem)
+- `PATCH /bookings` status 'batal' ikut membatalkan reservasi Cloudbeds yang didorong sistem ini (website/investor/KOL/walk-in), dibaca balik dari `getReservation`. Reservasi OTA tetap dibatalkan di OTA/Cloudbeds. Cek `cloudbeds_events_log` event `outbound.reservation.canceled` setelah deploy (scope `write:reservation` kunci sudah dipakai `putReservation` pindah kamar).
+- Kode investor pada booking yang batal tetap terpakai/hangus (keputusan owner 2026-11-11). B3/B4 investor Mega 11 Nov dibatalkan; reservasi Cloudbeds 6BEYUQZ19X & 6BEKCSZYQU dibatalkan manual oleh owner.
+
 ## 2026-11-10 — Kamar booking website dikunci di Cloudbeds
 - Booking buatan sistem kini di-assign ke kamar Cloudbeds yang sama dengan unit sistem (`postRoomAssign`, saat push di villa-api + perbaikan berkala di sync Next.js). Lihat CHANGELOG 2026-11-10 dan INTEGRATIONS.md. Scope `write:room` kunci Cloudbeds belum terverifikasi -- cek `cloudbeds_events_log` event `outbound.reservation.room_assigned` setelah deploy.
 - Peringatan kamar genting kini juga ke WhatsApp owner/manager/resepsionis (`src/lib/peringatanKamarWa.ts`). EL: push dikunci ke kamar dan disamakan berkala; tamu Cloudbeds EL tanpa kamar kini diperingatkan (aplikasi + WA).
