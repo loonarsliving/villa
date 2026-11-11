@@ -12,6 +12,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.47.0",
     "ezuikit-js": "^8.1.2",
+    "jspdf": "^3.0.4",
     "next": "^15.1.0",
     "pdfjs-dist": "^4.10.38",
     "react": "^19.0.0",

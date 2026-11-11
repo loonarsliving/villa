@@ -9661,7 +9661,7 @@ async function layani(req){
     if(!vouchers?.length) return json({vouchers:[], tersedia:0, terpakai:0, hangus:0});
 
     const {data:terpakaiRows} = await supabase.from('bookings')
-      .select('voucher_id,tgl_checkin,unit_nomor,status')
+      .select('id,voucher_id,tgl_checkin,unit_nomor,status,is_free_stay')
       .in('voucher_id', vouchers.map(v=>v.id));
     const pemakaian = new Map();
     for(const r of terpakaiRows ?? []){
@@ -9684,6 +9684,9 @@ async function layani(req){
         dicoret: status !== 'tersedia',
         dipakai_pada: dipakai?.tgl_checkin ?? null,
         unit: dipakai?.unit_nomor ?? null,
+        // Bukti Menginap bisa dicetak dari dashboard (owner 2026-11-11):
+        // sebelumnya hanya dari browser yang dipakai memesan di loonars.id.
+        bukti_booking_id: dipakai?.is_free_stay ? dipakai.id : null,
       };
     });
 
@@ -9691,6 +9694,33 @@ async function layani(req){
       vouchers: hasil, tersedia, terpakai, hangus,
       aturan: 'Satu kode menggratiskan satu malam di bulan yang tertera, dan boleh dipakai di unit mana saja yang kosong. Menginap lebih dari semalam tetap boleh -- malam selanjutnya dibayar seperti biasa. Malam gratisnya tidak berlaku Jumat, Sabtu, Minggu, dan tidak berlaku di periode ramai. Kode yang tidak dipakai sampai bulannya lewat akan hangus.',
     });
+  }
+
+  // Bukti Menginap dari dashboard investor (owner 2026-11-11: investor Catur
+  // Budi memesan di loonars.id, lalu tidak bisa mengambil buktinya karena
+  // loonars.id hanya mengingat booking di browser tempat memesan). Isinya
+  // SAMA dengan /public/bookings/invoice untuk menginap gratis; bedanya
+  // kuncinya sesi login investor, bukan nomor WA tamu. Hanya booking yang
+  // memakai kode milik investor yang login sendiri.
+  if(path==='/investor/bukti-menginap' && m==='GET'){
+    if(!isOwner) return forbidden();
+    const booking_id = url.searchParams.get('booking_id') ?? '';
+    if(!/^[0-9a-f-]{36}$/i.test(booking_id)) return err('booking_id tidak valid');
+    const {data:booking} = await supabase.from('bookings')
+      .select('id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,durasi_malam,checkin_time,status,created_at,is_free_stay,voucher_id,kol_voucher_id')
+      .eq('id', booking_id).maybeSingle();
+    if(!booking?.voucher_id) return err('Booking tidak ditemukan', 404);
+    const {data:v} = await supabase.from('villa_investor_vouchers')
+      .select('user_id').eq('id', booking.voucher_id).maybeSingle();
+    if(!v || String(v.user_id) !== String(session.uid)) return err('Booking tidak ditemukan', 404);
+    if(!booking.is_free_stay) return err('Bukti Menginap hanya untuk menginap gratis', 409);
+    if(booking.status === 'batal') return err('Pemesanan ini sudah dibatalkan', 409);
+    let guestHp = null;
+    if(booking.guest_id){
+      const {data:g} = await supabase.from('guests').select('hp').eq('id', booking.guest_id).maybeSingle();
+      guestHp = g?.hp ?? null;
+    }
+    return json(await dataBuktiMenginap(booking, guestHp ?? ''));
   }
 
   if(path==='/units' && m==='GET'){
