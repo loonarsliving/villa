@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, localApi } from "./api";
 import type { Notification, WaConversationRow } from "./types";
 import { useToast } from "./toast";
+import { bacaDilihat, totalBaruDiPerangkat } from "./chatPerangkat";
 
 export function useNotifPoll(query: string, readField: "is_read_owner" | "is_read_staff" | "is_read_admin") {
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -37,7 +38,8 @@ export function useNotifPoll(query: string, readField: "is_read_owner" | "is_rea
 }
 
 /**
- * Jumlah pesan WhatsApp belum dibaca, untuk lencana di navigasi
+ * Jumlah pesan WhatsApp belum dibalas yang belum dilihat DI PERANGKAT INI
+ * (src/lib/chatPerangkat.ts, 2026-11-12), untuk lencana di navigasi
  * (FrontDeskShell / AdminShell) -- dipoling terpisah dari notifikasi
  * in-app karena sumbernya beda tabel (wa_conversations, bukan
  * notifications). Gagal poll diam-diam saja: lencana nav bukan tempat
@@ -49,18 +51,26 @@ export function useChatUnreadPoll(intervalMs = 30000, aktif = true) {
   useEffect(() => {
     if (!aktif) return;
     let cancelled = false;
+    let terakhir: WaConversationRow[] = [];
     const refresh = () => {
       localApi<WaConversationRow[]>("/api/chat/conversations")
         .then((rows) => {
-          if (!cancelled) setUnreadCount((rows || []).reduce((s, c) => s + c.unread_count, 0));
+          terakhir = rows || [];
+          if (!cancelled) setUnreadCount(totalBaruDiPerangkat(terakhir, bacaDilihat()));
         })
         .catch(() => {});
     };
+    // Percakapan dibuka di halaman Chat -> lencana di perangkat ini langsung turun.
+    const onDilihat = () => {
+      if (!cancelled) setUnreadCount(totalBaruDiPerangkat(terakhir, bacaDilihat()));
+    };
     refresh();
     const id = setInterval(refresh, intervalMs);
+    window.addEventListener("villa-chat-dilihat", onDilihat);
     return () => {
       cancelled = true;
       clearInterval(id);
+      window.removeEventListener("villa-chat-dilihat", onDilihat);
     };
   }, [intervalMs, aktif]);
 

@@ -724,6 +724,9 @@ export interface WaConversationRow {
   bahasa: string | null;
   /** Properti percakapan (PL/EL) -- satu nomor WA dipakai bersama. */
   property_kode: string | null;
+  /** Sesi chat ditutup staf (null = terbuka). Terbuka lagi saat tamu menulis atau staf membalas. */
+  ditutup_at: string | null;
+  ditutup_oleh: string | null;
   guests: { nama: string } | null;
   bookings: { unit_nomor: string; status: string; tgl_checkin: string; tgl_checkout: string | null } | null;
 }

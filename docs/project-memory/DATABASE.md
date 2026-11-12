@@ -210,6 +210,13 @@ service_role saja, tidak ada policy untuk `anon`/`authenticated`.
   ter-update, verifikasi cascade delete membersihkan pesannya) -- data
   ujinya dihapus setelah terbukti, tidak ada sisa di produksi.
 
+- **Tutup sesi chat (2026-11-12, migrasi `20261112000001_chat_tutup_sesi.sql`)**:
+  `wa_conversations.ditutup_at`, `ditutup_oleh` (nullable; null = sesi terbuka).
+  `wa_conversation_increment_unread` diganti dengan isi sama + `ditutup_at/oleh = null`
+  (pesan tamu membuka sesi lagi, atomik). Arti `unread_count` berubah menjadi
+  "pesan masuk belum dibalas" (dinolkan oleh `/reply` dan `/tutup`, bukan saat dibuka).
+  Status penerapan: lihat CURRENT_STATE.md.
+
 ## `villa_referral_codes` / `villa_referral_redemptions` (2026-10-02, kode referral karyawan) — migrasi ditulis, BELUM di-apply
 
 - `villa_referral_codes`: `kode` unik berformat `REF-[A-Z0-9]{2,20}` (tanda hubung = tidak bisa tertukar dengan kode investor 8 karakter), `employee_id` → `employees(id)` Mkhsistem (`on delete set null`), `employee_nama` (salinan), `fee_persen` (default 10), `aktif`, `dibuat_oleh`.

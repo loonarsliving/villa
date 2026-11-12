@@ -10,6 +10,7 @@ import { useToast } from "@/lib/toast";
 import { fmtDateTime, initials } from "@/lib/format";
 import { jamSingkat, kunciHari, labelHari, waktuDaftar } from "@/lib/chatFormat";
 import { Loading } from "@/components/Card";
+import { baruDiPerangkat, bacaDilihat, simpanDilihat, tandaiDilihat, type CatatanDilihat } from "@/lib/chatPerangkat";
 import type { WaConversationMessageRow, WaConversationRow, WaStatusTamu } from "@/lib/types";
 
 /**
@@ -78,7 +79,7 @@ function diterjemahkan(kode: string | null | undefined): boolean {
   return !!kode && kode !== "id";
 }
 
-type Filter = "semua" | "belum" | "menginap" | "prospek" | "selesai";
+type Filter = "semua" | "belum" | "menginap" | "prospek" | "selesai" | "ditutup";
 
 interface PesanTertunda {
   tempId: string;
@@ -125,6 +126,12 @@ function kecilkanGambar(file: File): Promise<string> {
   });
 }
 
+/** Ucapan penutup bawaan saat sesi chat ditutup -- bisa diubah resepsionis sebelum dikirim. */
+function ucapanPenutup(properti: string | null): string {
+  const nama = properti === "EL" ? "Loonars Excellent Living" : "Loonars Private Living";
+  return `Terima kasih sudah menghubungi ${nama} 🙏 Sesi chat ini kami tutup. Jika ada yang ingin ditanyakan lagi, silakan kirim pesan kapan saja.`;
+}
+
 function formatPhoneDisplay(phone: string): string {
   // Nomor disimpan tanpa "+" dalam format internasional (62..., 61..., 1...).
   return phone.startsWith("0") ? phone : `+${phone}`;
@@ -163,6 +170,11 @@ export default function ChatPage() {
   const [pending, setPending] = useState<PesanTertunda[]>([]);
   const [filter, setFilter] = useState<Filter>("semua");
   const [cari, setCari] = useState("");
+  // Percakapan yang sudah dilihat DI PERANGKAT INI (localStorage) -- perangkat lain tidak terpengaruh.
+  const [dilihat, setDilihat] = useState<CatatanDilihat>({});
+  // Panel konfirmasi "Tutup sesi" untuk percakapan yang sedang dibuka.
+  const [menutup, setMenutup] = useState<{ conversationId: string; kirimUcapan: boolean; ucapan: string } | null>(null);
+  const [sedangMenutup, setSedangMenutup] = useState(false);
   const threadRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const activeIdRef = useRef<string | null>(null);
@@ -231,9 +243,6 @@ export default function ChatPage() {
           );
           return sisa.length === prev.length ? prev : sisa;
         });
-        setConversations((prev) =>
-          prev.some((c) => c.id === id && c.unread_count > 0) ? prev.map((c) => (c.id === id ? { ...c, unread_count: 0 } : c)) : prev,
-        );
       })
       .catch((e) => {
         if (!diam) toast("⚠", "Gagal memuat percakapan", e instanceof ApiError ? e.message : "Terjadi kesalahan.", "ruby");
@@ -265,6 +274,19 @@ export default function ChatPage() {
     }, POLL_MS);
     return () => clearInterval(id);
   }, [activeId, loadMessages, loadDrafAi]);
+
+  useEffect(() => setDilihat(bacaDilihat()), []);
+
+  // Percakapan yang sedang dibuka = sudah dilihat di perangkat ini, sampai pesan terbarunya.
+  const lastAtAktif = conversations.find((c) => c.id === activeId)?.last_message_at;
+  useEffect(() => {
+    if (!activeId || !lastAtAktif) return;
+    setDilihat((prev) => {
+      const baru = tandaiDilihat(prev, activeId, lastAtAktif);
+      if (baru !== prev) simpanDilihat(baru);
+      return baru;
+    });
+  }, [activeId, lastAtAktif]);
 
   // Isi percakapan di HP menutupi layar -- halaman di belakangnya jangan ikut tergulir.
   useEffect(() => {
@@ -392,6 +414,49 @@ export default function ChatPage() {
       .catch((e) => toast("⚠", "Gagal memindahkan chat", e instanceof ApiError ? e.message : "Coba lagi.", "ruby"));
   }
 
+  function mulaiTutupSesi(c: WaConversationRow) {
+    setMenutup({ conversationId: c.id, kirimUcapan: true, ucapan: ucapanPenutup(c.property_kode) });
+  }
+
+  async function tutupSesi() {
+    if (!menutup || sedangMenutup) return;
+    const c = conversations.find((x) => x.id === menutup.conversationId);
+    if (!c) return;
+    // Waktu pesan terakhir yang SUDAH dilihat -- pesan tamu sesudahnya membatalkan penutupan.
+    const lastMessageAt = c.last_message_at;
+    const ucapan = menutup.ucapan.trim();
+    setSedangMenutup(true);
+    try {
+      if (menutup.kirimUcapan && ucapan) {
+        // Tunggu balasan yang masih dikirim, supaya ucapan penutup tiba paling akhir.
+        await antreanKirim.current;
+        await localApi(`/api/chat/conversations/${c.id}/reply`, {
+          method: "POST",
+          body: JSON.stringify({ message: ucapan, staffName: user?.nama }),
+        });
+      }
+      const hasil = await localApi<{ ditutup_at: string; ditutup_oleh: string }>(`/api/chat/conversations/${c.id}/tutup`, {
+        method: "POST",
+        body: JSON.stringify({ staffName: user?.nama, lastMessageAt }),
+      });
+      setConversations((prev) =>
+        prev.map((x) => (x.id === c.id ? { ...x, unread_count: 0, ditutup_at: hasil.ditutup_at, ditutup_oleh: hasil.ditutup_oleh } : x)),
+      );
+      setMenutup(null);
+      setDrafAi(null);
+      toast("✓", "Sesi chat ditutup", "Chat pindah ke tab Ditutup. Terbuka lagi otomatis kalau tamu menulis lagi.", "sage");
+      if (activeIdRef.current === c.id) loadMessages(c.id, true);
+      loadConversations();
+      tutupPercakapan();
+    } catch (e) {
+      toast("⚠", "Sesi belum ditutup", e instanceof ApiError ? e.message : "Coba lagi.", "ruby");
+      if (activeIdRef.current === c.id) loadMessages(c.id, true);
+      loadConversations();
+    } finally {
+      setSedangMenutup(false);
+    }
+  }
+
   function kirimUlang(p: PesanTertunda) {
     setPending((prev) => prev.map((x) => (x.tempId === p.tempId ? { ...x, status: "mengirim" } : x)));
     kirim({ ...p, status: "mengirim" });
@@ -407,23 +472,28 @@ export default function ChatPage() {
     );
   }
 
+  // Sesi yang ditutup keluar dari semua tab kecuali "Ditutup" (pencarian tetap menemukannya).
+  const terbuka = conversations.filter((c) => !c.ditutup_at);
   const jumlah: Record<Filter, number> = {
-    semua: conversations.length,
-    belum: conversations.filter((c) => c.unread_count > 0).length,
-    menginap: conversations.filter((c) => c.status_tamu === "menginap").length,
-    prospek: conversations.filter((c) => c.status_tamu === "prospek").length,
-    selesai: conversations.filter((c) => c.status_tamu === "selesai").length,
+    semua: terbuka.length,
+    belum: terbuka.filter((c) => c.unread_count > 0).length,
+    menginap: terbuka.filter((c) => c.status_tamu === "menginap").length,
+    prospek: terbuka.filter((c) => c.status_tamu === "prospek").length,
+    selesai: terbuka.filter((c) => c.status_tamu === "selesai").length,
+    ditutup: 0,
   };
   const filterList: { key: Filter; label: string }[] = [
-    { key: "semua", label: "Semua" },
-    { key: "belum", label: "Belum dibaca" },
+    { key: "semua", label: "Aktif" },
+    { key: "belum", label: "Belum dibalas" },
     { key: "menginap", label: "Menginap" },
     { key: "prospek", label: "Prospek" },
     { key: "selesai", label: "Selesai" },
+    { key: "ditutup", label: "Ditutup" },
   ];
   const kataCari = cari.trim().toLowerCase();
   const angkaCari = kataCari.replace(/\D/g, "");
   const tampil = conversations.filter((c) => {
+    if (filter === "ditutup" ? !c.ditutup_at : c.ditutup_at && !kataCari) return false;
     if (filter === "belum" && c.unread_count === 0) return false;
     if ((filter === "menginap" || filter === "prospek" || filter === "selesai") && c.status_tamu !== filter) return false;
     if (!kataCari) return true;
@@ -459,7 +529,7 @@ export default function ChatPage() {
                   {jumlah[f.key] > 0 && (
                     <span
                       className={`ml-1.5 inline-flex min-w-[20px] h-5 px-1.5 items-center justify-center rounded-full text-[11px] ${
-                        f.key === "belum" ? "bg-ruby-500 text-white" : filter === f.key ? "bg-white/20" : "bg-ink/[0.06]"
+                        f.key === "belum" && terbuka.some((c) => baruDiPerangkat(c, dilihat)) ? "bg-ruby-500 text-white" : filter === f.key ? "bg-white/20" : "bg-ink/[0.06]"
                       }`}
                     >
                       {jumlah[f.key]}
@@ -475,12 +545,18 @@ export default function ChatPage() {
               <Loading />
             ) : tampil.length === 0 ? (
               <div className="px-6 py-12 text-center text-sm text-ink/40">
-                {conversations.length === 0 ? "Belum ada pesan masuk." : "Tidak ada percakapan yang cocok."}
+                {conversations.length === 0
+                  ? "Belum ada pesan masuk."
+                  : filter === "ditutup"
+                    ? "Belum ada sesi yang ditutup."
+                    : "Tidak ada percakapan yang cocok."}
               </div>
             ) : (
               tampil.map((c) => {
                 const nama = namaPercakapan(c);
                 const aktif = activeId === c.id;
+                // Merah = pesan belum dibalas yang belum dilihat di perangkat ini.
+                const baru = baruDiPerangkat(c, dilihat);
                 return (
                   <button
                     key={c.id}
@@ -499,19 +575,29 @@ export default function ChatPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-baseline gap-2">
-                        <div className={`flex-1 truncate text-[15px] md:text-sm ${c.unread_count > 0 ? "font-semibold text-ink" : "font-medium text-ink/85"}`}>
+                        <div className={`flex-1 truncate text-[15px] md:text-sm ${baru ? "font-semibold text-ink" : "font-medium text-ink/85"}`}>
                           {nama}
                         </div>
-                        <div className={`shrink-0 text-[11px] ${c.unread_count > 0 ? "text-ruby-500 font-semibold" : "text-ink/40"}`}>
+                        <div className={`shrink-0 text-[11px] ${baru ? "text-ruby-500 font-semibold" : "text-ink/40"}`}>
                           {waktuDaftar(c.last_message_at)}
                         </div>
                       </div>
                       <div className="flex items-center gap-2 mt-1">
-                        <div className={`flex-1 truncate text-[13px] ${c.unread_count > 0 ? "text-ink/75" : "text-ink/45"}`}>
+                        <div className={`flex-1 truncate text-[13px] ${baru ? "text-ink/75" : "text-ink/45"}`}>
                           {c.last_message_preview || "—"}
                         </div>
-                        {c.unread_count > 0 ? (
+                        {c.ditutup_at ? (
+                          <span className="shrink-0 px-2 py-0.5 rounded-full text-[11px] font-medium bg-ink/[0.06] text-ink/50">Ditutup</span>
+                        ) : baru ? (
                           <span className="shrink-0 min-w-[22px] h-[22px] px-1.5 rounded-full bg-ruby-500 text-white text-[11px] font-semibold flex items-center justify-center">
+                            {c.unread_count}
+                          </span>
+                        ) : c.unread_count > 0 ? (
+                          // Sudah dilihat di perangkat ini, tapi belum ada yang membalas.
+                          <span
+                            title="Sudah dilihat di perangkat ini, belum dibalas"
+                            className="shrink-0 min-w-[22px] h-[22px] px-1.5 rounded-full border border-ruby-500/40 text-ruby-500 text-[11px] font-semibold flex items-center justify-center"
+                          >
                             {c.unread_count}
                           </span>
                         ) : (
@@ -573,7 +659,67 @@ export default function ChatPage() {
                 <span className={`hidden sm:inline-block shrink-0 mr-2 lg:mr-0 px-2.5 py-1 rounded-full text-xs font-medium ${statusChip[active.status_tamu]}`}>
                   {statusLabel[active.status_tamu]}
                 </span>
+                {!active.ditutup_at && (
+                  <button
+                    type="button"
+                    onClick={() => mulaiTutupSesi(active)}
+                    className="shrink-0 mr-1 lg:mr-0 h-9 px-3 rounded-full border border-ink/15 text-[13px] font-medium text-ink/70 hover:border-ink/30 active:bg-ink/[0.05]"
+                  >
+                    Tutup sesi
+                  </button>
+                )}
               </header>
+
+              {active.ditutup_at && (
+                <div className="shrink-0 px-4 lg:px-5 py-2 bg-ink/[0.04] border-b border-ink/[0.06] text-xs text-ink/60">
+                  Sesi ditutup{active.ditutup_oleh ? ` oleh ${active.ditutup_oleh}` : ""} · {fmtDateTime(active.ditutup_at)}. Terbuka lagi
+                  otomatis kalau tamu menulis lagi atau Anda membalas.
+                </div>
+              )}
+
+              {menutup?.conversationId === active.id && (
+                <div className="shrink-0 px-4 lg:px-5 py-3 bg-base-900 border-b border-ink/[0.06] space-y-2">
+                  <div className="text-sm font-semibold text-ink">Tutup sesi chat ini?</div>
+                  <div className="text-xs text-ink/55">
+                    Chat pindah ke tab Ditutup dan tanda belum-dibalas hilang di semua perangkat.
+                  </div>
+                  <label className="flex items-center gap-2 text-[13px] text-ink/80">
+                    <input
+                      type="checkbox"
+                      checked={menutup.kirimUcapan}
+                      onChange={(e) => setMenutup({ ...menutup, kirimUcapan: e.target.checked })}
+                    />
+                    Kirim ucapan penutup ke tamu
+                    {diterjemahkan(active.bahasa) && <span className="text-ink/40">(diterjemahkan otomatis)</span>}
+                  </label>
+                  {menutup.kirimUcapan && (
+                    <textarea
+                      value={menutup.ucapan}
+                      onChange={(e) => setMenutup({ ...menutup, ucapan: e.target.value })}
+                      rows={3}
+                      className="w-full px-3 py-2 rounded-xl border border-ink/10 bg-base-800/60 text-base md:text-sm text-ink outline-none focus:border-gold-500"
+                    />
+                  )}
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setMenutup(null)}
+                      disabled={sedangMenutup}
+                      className="h-9 px-3.5 rounded-full text-[13px] font-medium text-ink/70 border border-ink/10"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="button"
+                      onClick={tutupSesi}
+                      disabled={sedangMenutup || (menutup.kirimUcapan && !menutup.ucapan.trim())}
+                      className="h-9 px-3.5 rounded-full text-[13px] font-semibold bg-ink text-white disabled:opacity-40"
+                    >
+                      {sedangMenutup ? "Menutup…" : "Tutup sesi"}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="shrink-0 flex items-center gap-2 px-4 lg:px-5 py-1.5 bg-base-900 border-b border-ink/[0.06] text-xs text-ink/55">
                 <span aria-hidden>🌐</span>
