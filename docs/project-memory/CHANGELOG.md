@@ -4,7 +4,7 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
-### 2026-11-12 — Lapisan gerak UI (animasi) — DI BRANCH `claude/ui-animation-repo-villa-property-wcsa7p`, BELUM di `main`
+### 2026-11-12 — Lapisan gerak UI (animasi) — LIVE (PR #320, owner: "bawa ke production")
 - Permintaan owner: tampilan operasional dibuat lebih menarik & enak dipakai, termasuk Chat. Hanya tampilan -- tidak ada perubahan logika, API, harga, maupun database.
 - Dependensi baru: `motion` (dimuat versi ringan lewat `src/components/MotionProvider.tsx`; komponen memakai `m.*`, bukan `motion.*`). Dipakai untuk Modal, laci menu HP, dan toast (animasi masuk/keluar).
 - `src/app/globals.css`: kelas gerak (`anim-fade`, `anim-fade-up`, `anim-pop`, `anim-bubble-l/r`, `stagger`, `skeleton`, `typing-dots`, `sheen`), efek tekan tombol global (properti `scale`), dan `prefers-reduced-motion`.
