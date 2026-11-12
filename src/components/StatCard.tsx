@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { AnimatedValue } from "./AnimatedValue";
 
 const accentMap = {
   neutral: { tint: "bg-base-800", icon: "bg-ink/[0.06] text-ink/50" },
@@ -35,17 +36,19 @@ export function StatCard({
   return (
     <div
       onClick={onClick}
-      className={`relative ${a.tint} rounded-2xl p-4 overflow-hidden ${
-        onClick ? "cursor-pointer hover:brightness-95 transition active:scale-[0.98]" : ""
+      className={`group sheen anim-fade-up relative ${a.tint} rounded-2xl p-4 overflow-hidden transition duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-ink/[0.07] ${
+        onClick ? "cursor-pointer active:scale-[0.98]" : ""
       }`}
     >
       <div className="flex items-center justify-between gap-2 mb-3">
         <div className="text-[10px] font-semibold tracking-[0.06em] text-ink/45">{label}</div>
-        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs shrink-0 ${a.icon}`}>
+        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs shrink-0 transition-transform duration-300 group-hover:scale-110 group-hover:rotate-6 ${a.icon}`}>
           {icon ?? defaultIcon[accent]}
         </div>
       </div>
-      <div className="font-serif text-xl sm:text-2xl font-medium leading-none text-ink">{value}</div>
+      <div className="font-serif text-xl sm:text-2xl font-medium leading-none text-ink">
+        <AnimatedValue value={value} />
+      </div>
       {sub && <div className="text-[10px] text-ink/40 mt-2">{sub}</div>}
     </div>
   );

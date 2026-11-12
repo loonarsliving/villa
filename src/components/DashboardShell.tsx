@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { AnimatePresence, m } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth";
@@ -16,6 +17,90 @@ export interface NavItem {
 export interface NavSection {
   title: string;
   items: NavItem[];
+}
+
+// Posisi penanda menu aktif & gulir sidebar dari halaman sebelumnya. Shell
+// dipasang ulang tiap pindah halaman, jadi nilainya disimpan di luar komponen
+// supaya penanda bisa "meluncur" dari menu lama ke menu baru dan sidebar tidak
+// melompat kembali ke atas.
+let penandaSebelumnya: number | null = null;
+let gulirSidebar = 0;
+
+const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+
+function NavList({ sections, pathname, onNavigate }: { sections: NavSection[]; pathname: string; onNavigate: () => void }) {
+  const navRef = useRef<HTMLElement | null>(null);
+  const penandaRef = useRef<HTMLSpanElement | null>(null);
+  const kunci = sections.map((s) => s.items.map((i) => i.href).join(",")).join("|");
+
+  useIsoLayoutEffect(() => {
+    const nav = navRef.current;
+    const penanda = penandaRef.current;
+    if (!nav || !penanda) return;
+    nav.scrollTop = gulirSidebar;
+    const aktif = nav.querySelector<HTMLElement>('[data-aktif="true"]');
+    if (!aktif) {
+      penanda.style.opacity = "0";
+      return;
+    }
+    const top = aktif.offsetTop;
+    penanda.style.opacity = "1";
+    penanda.style.top = `${top}px`;
+    penanda.style.height = `${aktif.offsetHeight}px`;
+    const kurangiGerak = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (penandaSebelumnya !== null && penandaSebelumnya !== top && !kurangiGerak && penanda.animate) {
+      penanda.animate([{ transform: `translateY(${penandaSebelumnya - top}px)` }, { transform: "translateY(0)" }], {
+        duration: 380,
+        easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+      });
+    }
+    penandaSebelumnya = top;
+  }, [pathname, kunci]);
+
+  return (
+    <nav
+      ref={navRef}
+      onScroll={(e) => {
+        gulirSidebar = e.currentTarget.scrollTop;
+      }}
+      className="flex-1 overflow-y-auto px-2.5 py-4"
+    >
+      <div className="relative">
+        <span
+          ref={penandaRef}
+          aria-hidden
+          className="pointer-events-none absolute left-0 right-0 rounded-lg bg-gold-500/10 border-l-2 border-gold-500 opacity-0"
+        />
+        {sections.map((sec) => (
+          <div key={sec.title}>
+            <div className="text-[8.5px] font-semibold text-ink/30 tracking-[0.18em] uppercase px-2 py-3.5">{sec.title}</div>
+            {sec.items.map((item) => {
+              const active = pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  data-aktif={active}
+                  onClick={onNavigate}
+                  className={`group relative flex items-center gap-2.5 px-2.5 py-2.5 rounded-lg text-[13px] mb-0.5 ${
+                    active ? "text-gold-600 font-medium" : "text-ink/50 hover:bg-ink/[0.05] hover:text-ink/80"
+                  }`}
+                >
+                  <span className="w-4 text-center text-sm shrink-0 transition-transform duration-300 group-hover:scale-125">{item.icon}</span>
+                  <span className="truncate transition-transform duration-300 group-hover:translate-x-0.5">{item.label}</span>
+                  {!!item.badge && (
+                    <span className="anim-pop anim-ping ml-auto bg-ruby-500 text-white text-[8.5px] font-bold px-1.5 py-0.5 rounded-full">
+                      {item.badge}
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </nav>
+  );
 }
 
 export function DashboardShell({
@@ -46,7 +131,11 @@ export function DashboardShell({
 
   if (!ready) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-ink/30 text-xs tracking-wide">
+      <div className="anim-fade min-h-screen flex flex-col items-center justify-center gap-4 text-ink/30 text-xs tracking-wide">
+        <div className="font-serif text-2xl font-light text-ink/70">
+          Loonars <em className="italic text-gold-500">Living</em>
+        </div>
+        <div className="skeleton h-1 w-40" />
         Memuat sesi...
       </div>
     );
@@ -65,36 +154,7 @@ export function DashboardShell({
           <em className="italic text-gold-500">{brandSub}</em>
         </div>
       </div>
-      <nav className="flex-1 overflow-y-auto px-2.5 py-4">
-        {sections.map((sec) => (
-          <div key={sec.title}>
-            <div className="text-[8.5px] font-semibold text-ink/30 tracking-[0.18em] uppercase px-2 my-3.5">{sec.title}</div>
-            {sec.items.map((item) => {
-              const active = pathname === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={() => setDrawerOpen(false)}
-                  className={`flex items-center gap-2.5 px-2.5 py-2.5 rounded text-[13px] mb-0.5 transition-colors ${
-                    active
-                      ? "bg-gold-500/10 text-gold-500 border-l-2 border-gold-500 pl-2"
-                      : "text-ink/50 hover:bg-ink/[0.06] hover:text-ink/80"
-                  }`}
-                >
-                  <span className="w-4 text-center text-sm shrink-0">{item.icon}</span>
-                  <span className="truncate">{item.label}</span>
-                  {!!item.badge && (
-                    <span className="ml-auto bg-ruby-500 text-ink text-[8.5px] font-bold px-1.5 py-0.5 rounded-full">
-                      {item.badge}
-                    </span>
-                  )}
-                </Link>
-              );
-            })}
-          </div>
-        ))}
-      </nav>
+      <NavList sections={sections} pathname={pathname} onNavigate={() => setDrawerOpen(false)} />
       <div className="p-3.5 border-t border-ink/[0.08] flex items-center gap-2.5">
         <div className="w-7 h-7 bg-gold-500/10 border border-gold-500/25 rounded-full flex items-center justify-center text-[10px] font-semibold text-gold-500 shrink-0">
           {initials(user?.nama)}
@@ -105,7 +165,7 @@ export function DashboardShell({
         </div>
         <button
           onClick={logout}
-          className="ml-auto text-[10px] text-ink/30 hover:text-ink/60 px-2 py-1 border border-ink/10 rounded shrink-0"
+          className="ml-auto text-[10px] text-ink/40 hover:text-ruby-500 hover:border-ruby-500/40 hover:bg-ruby-500/5 px-2 py-1 border border-ink/10 rounded-md shrink-0"
         >
           Keluar
         </button>
@@ -121,17 +181,32 @@ export function DashboardShell({
       </aside>
 
       {/* Mobile drawer */}
-      {drawerOpen && (
-        <div className="md:hidden fixed inset-0 z-50 flex">
-          <div className="absolute inset-0 bg-black/70" onClick={() => setDrawerOpen(false)} />
-          <aside className="relative w-[260px] max-w-[80vw] h-full bg-base-900 border-r border-ink/[0.08] flex flex-col">
-            {navContent}
-          </aside>
-        </div>
-      )}
+      <AnimatePresence>
+        {drawerOpen && (
+          <div key="drawer" className="md:hidden fixed inset-0 z-50 flex">
+            <m.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="absolute inset-0 bg-ink/50 backdrop-blur-[2px]"
+              onClick={() => setDrawerOpen(false)}
+            />
+            <m.aside
+              initial={{ x: "-100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "-100%" }}
+              transition={{ type: "spring", stiffness: 380, damping: 36 }}
+              className="relative w-[260px] max-w-[80vw] h-full bg-base-900 border-r border-ink/[0.08] flex flex-col shadow-2xl shadow-ink/20"
+            >
+              {navContent}
+            </m.aside>
+          </div>
+        )}
+      </AnimatePresence>
 
       <div className="flex-1 min-w-0 flex flex-col md:ml-[220px]">
-        <header className="h-14 bg-base-900 border-b border-ink/[0.08] flex items-center justify-between px-4 sm:px-7 sticky top-0 z-30">
+        <header className="h-14 bg-base-900/85 backdrop-blur-md border-b border-ink/[0.08] flex items-center justify-between px-4 sm:px-7 sticky top-0 z-30">
           <div className="flex items-center gap-3 min-w-0">
             <button
               onClick={() => setDrawerOpen(true)}
@@ -140,33 +215,34 @@ export function DashboardShell({
             >
               ☰
             </button>
-            <div className="min-w-0">
+            <div key={pathname} className="anim-fade-up min-w-0">
               <div className="font-serif text-lg sm:text-xl font-light text-ink truncate">{pageTitle}</div>
               {pageSub && <div className="text-[10px] text-ink/30 truncate hidden sm:block">{pageSub}</div>}
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">{topBarExtra}</div>
         </header>
-        <main className="p-4 sm:p-6 lg:p-7 flex-1 pb-24 md:pb-7">{children}</main>
+        {/* Hanya opacity: transform di sini akan merusak posisi elemen `fixed` di dalam halaman. */}
+        <main className="anim-fade p-4 sm:p-6 lg:p-7 flex-1 pb-24 md:pb-7">{children}</main>
       </div>
 
       {/* Mobile bottom nav */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-base-900 border-t border-ink/[0.08] px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 flex items-stretch justify-between shadow-[0_-4px_20px_rgba(20,22,27,0.06)]">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-base-900/90 backdrop-blur-md border-t border-ink/[0.08] px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 flex items-stretch justify-between shadow-[0_-4px_20px_rgba(20,22,27,0.06)]">
         {bottomItems.map((item) => {
           const active = pathname === item.href;
           return (
             <Link
               key={item.href}
               href={item.href}
-              className={`relative flex-1 min-w-0 flex flex-col items-center justify-center gap-1 py-1.5 rounded-xl text-[9.5px] font-medium transition-colors ${
+              className={`relative flex-1 min-w-0 flex flex-col items-center justify-center gap-1 py-1.5 rounded-xl text-[9.5px] font-medium ${
                 active ? "text-gold-600" : "text-ink/40"
               }`}
             >
-              <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm ${active ? "bg-gold-500/15" : ""}`}>
+              <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm ${active ? "anim-pop bg-gold-500/15 shadow-sm shadow-gold-500/20" : ""}`}>
                 {item.icon}
               </span>
               <span className="block w-full truncate text-center px-0.5">{item.label}</span>
-              {!!item.badge && <span className="absolute top-0.5 right-3 w-1.5 h-1.5 rounded-full bg-ruby-500" />}
+              {!!item.badge && <span className="anim-ping absolute top-0.5 right-3 w-1.5 h-1.5 rounded-full bg-ruby-500" />}
             </Link>
           );
         })}

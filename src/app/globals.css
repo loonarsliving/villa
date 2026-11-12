@@ -63,3 +63,219 @@ body {
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+/* ══ Lapisan gerak (2026-11-12) ═══════════════════════════════════════════
+   Aturan penting: JANGAN memberi transform/filter permanen pada pembungkus
+   halaman atau Card -- itu membuat elemen `position: fixed` di dalamnya
+   (Modal, panel chat layar penuh) salah posisi. Karena itu animasi masuk di
+   bawah memakai fill-mode `backwards` (transform hilang begitu selesai) dan
+   efek tekan memakai properti `scale`, bukan `transform`. */
+:root {
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@layer base {
+  button,
+  a,
+  [role="button"] {
+    transition:
+      background-color 0.18s ease,
+      border-color 0.18s ease,
+      color 0.18s ease,
+      box-shadow 0.2s ease,
+      opacity 0.18s ease,
+      transform 0.22s var(--ease-out),
+      scale 0.14s var(--ease-out);
+  }
+  button:not(:disabled):active,
+  [role="button"]:active {
+    scale: 0.96;
+  }
+  input,
+  select,
+  textarea {
+    transition:
+      border-color 0.18s ease,
+      box-shadow 0.2s ease,
+      background-color 0.18s ease;
+  }
+  tbody tr {
+    transition: background-color 0.15s ease;
+  }
+  :focus-visible {
+    outline: 2px solid rgba(196, 160, 92, 0.55);
+    outline-offset: 2px;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+}
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.94);
+  }
+}
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+@keyframes dot-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+@keyframes float-soft {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+@keyframes sheen {
+  from {
+    transform: translateX(-120%) skewX(-18deg);
+  }
+  to {
+    transform: translateX(320%) skewX(-18deg);
+  }
+}
+@keyframes ring-ping {
+  0% {
+    box-shadow: 0 0 0 0 rgba(192, 57, 43, 0.45);
+  }
+  100% {
+    box-shadow: 0 0 0 7px rgba(192, 57, 43, 0);
+  }
+}
+@keyframes bar-grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+.anim-fade {
+  animation: fade-in 0.35s ease backwards;
+}
+.anim-fade-up {
+  animation: fade-up 0.45s var(--ease-out) backwards;
+}
+.anim-pop {
+  animation: pop-in 0.3s var(--ease-spring) backwards;
+}
+.anim-float {
+  animation: float-soft 3.2s ease-in-out infinite;
+}
+.anim-bubble-l,
+.anim-bubble-r {
+  animation: bubble-in 0.28s var(--ease-out) backwards;
+}
+.anim-bubble-l {
+  transform-origin: bottom left;
+}
+.anim-bubble-r {
+  transform-origin: bottom right;
+}
+.anim-ping {
+  animation: ring-ping 1.6s ease-out infinite;
+}
+
+/* Anak-anak langsung muncul bergantian (grid kartu, daftar). */
+.stagger > * {
+  animation: fade-up 0.45s var(--ease-out) backwards;
+}
+.stagger > *:nth-child(2) { animation-delay: 0.04s; }
+.stagger > *:nth-child(3) { animation-delay: 0.08s; }
+.stagger > *:nth-child(4) { animation-delay: 0.12s; }
+.stagger > *:nth-child(5) { animation-delay: 0.16s; }
+.stagger > *:nth-child(6) { animation-delay: 0.2s; }
+.stagger > *:nth-child(7) { animation-delay: 0.24s; }
+.stagger > *:nth-child(8) { animation-delay: 0.28s; }
+.stagger > *:nth-child(n + 9) { animation-delay: 0.32s; }
+
+/* Kerangka pemuatan berkilau -- pengganti tulisan "Memuat..." */
+.skeleton {
+  border-radius: 8px;
+  background: linear-gradient(90deg, rgba(20, 22, 27, 0.06) 25%, rgba(20, 22, 27, 0.12) 37%, rgba(20, 22, 27, 0.06) 63%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+.typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.typing-dots > i {
+  width: 5px;
+  height: 5px;
+  border-radius: 9999px;
+  background: currentColor;
+  animation: dot-bounce 1.2s ease-in-out infinite;
+}
+.typing-dots > i:nth-child(2) { animation-delay: 0.15s; }
+.typing-dots > i:nth-child(3) { animation-delay: 0.3s; }
+
+/* Kilau yang menyapu sekali saat hover (tombol utama, kartu statistik). */
+.sheen {
+  position: relative;
+  overflow: hidden;
+}
+.sheen::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 35%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+  transform: translateX(-120%) skewX(-18deg);
+  pointer-events: none;
+}
+.sheen:hover::after {
+  animation: sheen 0.8s ease;
+}
+
+/* Pengguna yang meminta gerak dikurangi (pengaturan HP/komputer) tidak diberi animasi. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Kartu di dalam grid muncul bergantian tanpa perlu kelas tambahan. */
+.grid > .anim-fade-up:nth-child(2) { animation-delay: 0.05s; }
+.grid > .anim-fade-up:nth-child(3) { animation-delay: 0.1s; }
+.grid > .anim-fade-up:nth-child(4) { animation-delay: 0.15s; }
+.grid > .anim-fade-up:nth-child(5) { animation-delay: 0.2s; }
+.grid > .anim-fade-up:nth-child(6) { animation-delay: 0.25s; }
+.grid > .anim-fade-up:nth-child(n + 7) { animation-delay: 0.3s; }
