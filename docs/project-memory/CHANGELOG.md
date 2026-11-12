@@ -4,6 +4,13 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-11-12 — Lapisan gerak UI (animasi) — DI BRANCH `claude/ui-animation-repo-villa-property-wcsa7p`, BELUM di `main`
+- Permintaan owner: tampilan operasional dibuat lebih menarik & enak dipakai, termasuk Chat. Hanya tampilan -- tidak ada perubahan logika, API, harga, maupun database.
+- Dependensi baru: `motion` (dimuat versi ringan lewat `src/components/MotionProvider.tsx`; komponen memakai `m.*`, bukan `motion.*`). Dipakai untuk Modal, laci menu HP, dan toast (animasi masuk/keluar).
+- `src/app/globals.css`: kelas gerak (`anim-fade`, `anim-fade-up`, `anim-pop`, `anim-bubble-l/r`, `stagger`, `skeleton`, `typing-dots`, `sheen`), efek tekan tombol global (properti `scale`), dan `prefers-reduced-motion`.
+- Komponen bersama: `Card` (muncul halus), `StatCard` (angka berhitung lewat `AnimatedValue`), `Loading` (kerangka berkilau; label yang bukan "Memuat…" diperlakukan sebagai keadaan kosong), `Empty`, `Modal` (portal ke `<body>`, Esc menutup), `Btn`, toast, `DashboardShell` (penanda menu aktif meluncur, gulir sidebar diingat, header kaca), `AppHome`, halaman login.
+- Chat (`/front-desk/chat`): gelembung pesan muncul halus, titik "sedang mengirim", panel percakapan meluncur masuk, kartu Draf AI, tombol kirim.
+
 ### 2026-11-12 — Chat: belum-dibalas per perangkat + tutup sesi chat
 - Membuka chat di satu perangkat tidak lagi menghilangkan tanda belum-dibalas di perangkat lain; status dilihat disimpan per perangkat (`src/lib/chatPerangkat.ts`). `unread_count` dinolkan saat membalas / menutup sesi.
 - Fitur "Tutup sesi" + tab "Ditutup", ucapan penutup opsional ke tamu, rute `POST /api/chat/conversations/[id]/tutup`, migrasi `20261112000001_chat_tutup_sesi`.

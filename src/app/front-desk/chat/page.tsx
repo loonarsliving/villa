@@ -176,6 +176,7 @@ export default function ChatPage() {
   const [menutup, setMenutup] = useState<{ conversationId: string; kirimUcapan: boolean; ucapan: string } | null>(null);
   const [sedangMenutup, setSedangMenutup] = useState(false);
   const threadRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const activeIdRef = useRef<string | null>(null);
   // Pengiriman dirantai satu per satu: urutan ke tamu tetap sama dengan urutan diketik.
@@ -296,6 +297,22 @@ export default function ChatPage() {
     return () => {
       document.body.style.overflow = semula;
     };
+  }, [activeId]);
+
+  // Panel percakapan meluncur masuk saat dibuka/berganti (di HP dari kanan,
+  // seperti WhatsApp). Web Animations API: tidak meninggalkan transform setelah
+  // selesai, jadi tata letak `fixed` panel di HP tidak terganggu.
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!activeId || !el?.animate) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    const sempit = window.matchMedia("(max-width: 1023px)").matches;
+    el.animate(
+      sempit
+        ? [{ transform: "translateX(32px)", opacity: 0 }, { transform: "translateX(0)", opacity: 1 }]
+        : [{ opacity: 0.35 }, { opacity: 1 }],
+      { duration: 260, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
+    );
   }, [activeId]);
 
   // Gulir hanya kotak percakapan (bukan seluruh halaman), dan hanya saat ada pesan baru.
@@ -513,7 +530,7 @@ export default function ChatPage() {
               value={cari}
               onChange={(e) => setCari(e.target.value)}
               placeholder="Cari nama atau nomor…"
-              className="w-full h-11 px-4 rounded-xl border border-ink/10 bg-base-900 md:bg-base-800/60 text-base md:text-sm text-ink placeholder:text-ink/35 outline-none focus:border-gold-500 transition-colors"
+              className="w-full h-11 px-4 rounded-xl border border-ink/10 bg-base-900 md:bg-base-800/60 text-base md:text-sm text-ink placeholder:text-ink/35 outline-none focus:border-gold-500 focus:shadow-[0_0_0_4px_rgba(196,160,92,0.14)]"
             />
             <div className="-mx-4 px-4 md:mx-0 md:px-0 flex gap-2 overflow-x-auto no-scrollbar">
               {filterList.map((f) => (
@@ -552,7 +569,7 @@ export default function ChatPage() {
                     : "Tidak ada percakapan yang cocok."}
               </div>
             ) : (
-              tampil.map((c) => {
+              tampil.map((c, urutan) => {
                 const nama = namaPercakapan(c);
                 const aktif = activeId === c.id;
                 // Merah = pesan belum dibalas yang belum dilihat di perangkat ini.
@@ -562,12 +579,13 @@ export default function ChatPage() {
                     key={c.id}
                     type="button"
                     onClick={() => bukaPercakapan(c.id)}
-                    className={`w-full text-left flex items-center gap-3 px-4 py-3.5 border-b border-ink/[0.05] last:border-0 transition-colors active:bg-ink/[0.05] ${
+                    style={{ animationDelay: `${Math.min(urutan, 10) * 30}ms` }}
+                    className={`group anim-fade-up w-full text-left flex items-center gap-3 px-4 py-3.5 border-b border-ink/[0.05] last:border-0 transition-colors active:bg-ink/[0.05] ${
                       aktif ? "bg-gold-500/[0.08]" : "hover:bg-ink/[0.03]"
                     }`}
                   >
                     <div
-                      className={`w-11 h-11 rounded-full flex items-center justify-center text-base font-semibold shrink-0 ${
+                      className={`w-11 h-11 rounded-full flex items-center justify-center text-base font-semibold shrink-0 transition-transform duration-300 group-hover:scale-110 ${
                         c.status_tamu === "menginap" ? "bg-sage-500/15 text-sage-600" : "bg-gold-500/15 text-gold-600"
                       }`}
                     >
@@ -589,7 +607,7 @@ export default function ChatPage() {
                         {c.ditutup_at ? (
                           <span className="shrink-0 px-2 py-0.5 rounded-full text-[11px] font-medium bg-ink/[0.06] text-ink/50">Ditutup</span>
                         ) : baru ? (
-                          <span className="shrink-0 min-w-[22px] h-[22px] px-1.5 rounded-full bg-ruby-500 text-white text-[11px] font-semibold flex items-center justify-center">
+                          <span className="anim-pop anim-ping shrink-0 min-w-[22px] h-[22px] px-1.5 rounded-full bg-ruby-500 text-white text-[11px] font-semibold flex items-center justify-center">
                             {c.unread_count}
                           </span>
                         ) : c.unread_count > 0 ? (
@@ -620,13 +638,14 @@ export default function ChatPage() {
 
         {/* ── Isi percakapan: layar penuh di HP, panel kanan dari tablet ke atas ── */}
         <section
+          ref={panelRef}
           className={`${
             active ? "fixed inset-0 z-50 flex md:static md:z-auto md:flex-1" : "hidden lg:flex"
           } flex-col min-h-0 bg-canvas md:bg-base-800/40`}
         >
           {!active ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-center px-8 text-ink/40">
-              <div className="text-4xl mb-3">💬</div>
+            <div className="anim-fade-up flex-1 flex flex-col items-center justify-center text-center px-8 text-ink/40">
+              <div className="anim-float w-20 h-20 mb-4 rounded-full bg-gold-500/10 flex items-center justify-center text-4xl shadow-inner">💬</div>
               <div className="text-sm">Pilih percakapan untuk mulai membalas.</div>
               <div className="text-xs mt-1">Semua jam dalam WIB.</div>
             </div>
@@ -770,7 +789,7 @@ export default function ChatPage() {
                       return (
                         <Fragment key={m.id}>
                           {hariBaru && (
-                            <div className="flex justify-center py-2">
+                            <div className="anim-fade flex justify-center py-2">
                               <span className="px-3 py-1 rounded-full bg-base-900 border border-ink/[0.06] text-[11px] font-medium text-ink/50 shadow-sm">
                                 {labelHari(m.created_at)}
                               </span>
@@ -778,8 +797,8 @@ export default function ChatPage() {
                           )}
                           <div className={`flex ${keluar ? "justify-end" : "justify-start"}`}>
                             <div
-                              className={`max-w-[85%] md:max-w-[70%] rounded-2xl px-3.5 py-2 text-[15px] md:text-[14px] leading-snug whitespace-pre-wrap break-words shadow-sm ${
-                                keluar ? "bg-gold-500/20 text-ink rounded-br-md" : "bg-base-900 text-ink rounded-bl-md"
+                              className={`max-w-[85%] md:max-w-[70%] rounded-2xl px-3.5 py-2 text-[15px] md:text-[14px] leading-snug whitespace-pre-wrap break-words shadow-sm transition-shadow hover:shadow-md ${
+                                keluar ? "anim-bubble-r bg-gold-500/20 text-ink rounded-br-md" : "anim-bubble-l bg-base-900 text-ink rounded-bl-md"
                               }`}
                             >
                               {m.media_url && gambarStaf(m.media_url) ? (
@@ -819,7 +838,7 @@ export default function ChatPage() {
                     {pendingAktif.map((p) => (
                       <div key={p.tempId} className="flex justify-end">
                         <div
-                          className={`max-w-[85%] md:max-w-[70%] rounded-2xl rounded-br-md px-3.5 py-2 text-[15px] md:text-[14px] leading-snug whitespace-pre-wrap break-words shadow-sm bg-gold-500/20 text-ink ${
+                          className={`anim-bubble-r max-w-[85%] md:max-w-[70%] rounded-2xl rounded-br-md px-3.5 py-2 text-[15px] md:text-[14px] leading-snug whitespace-pre-wrap break-words shadow-sm bg-gold-500/20 text-ink ${
                             p.status === "gagal" ? "ring-2 ring-ruby-500/60" : ""
                           }`}
                         >
@@ -841,7 +860,14 @@ export default function ChatPage() {
                                 </button>
                               </>
                             ) : (
-                              <span className="text-ink/45">
+                              <span className="inline-flex items-center gap-1.5 text-ink/45">
+                                {p.status === "mengirim" && (
+                                  <span className="typing-dots text-gold-600" aria-hidden>
+                                    <i />
+                                    <i />
+                                    <i />
+                                  </span>
+                                )}
                                 {p.status === "terkirim" ? "Terkirim" : diterjemahkan(active.bahasa) ? `Menerjemahkan ke ${namaBahasa(active.bahasa)} & mengirim…` : "Mengirim…"}
                               </span>
                             )}
@@ -854,7 +880,7 @@ export default function ChatPage() {
               </div>
 
               {drafAi && drafAi.dibuat !== drafDiabaikan && (
-                <div className="shrink-0 mx-3 lg:mx-5 mt-2 rounded-2xl border border-ink/10 bg-base-800/60 px-3.5 py-2.5">
+                <div key={drafAi.dibuat} className="anim-fade-up shrink-0 mx-3 lg:mx-5 mt-2 rounded-2xl border border-gold-500/30 bg-gradient-to-br from-gold-500/[0.08] to-base-800/60 px-3.5 py-2.5 shadow-sm">
                   <div className="flex items-center gap-2 text-[11px] font-semibold">
                     <span className={`px-2 py-0.5 rounded-full ${(kategoriAi[drafAi.kategori] ?? kategoriAi.perlu_resepsionis).kelas}`}>
                       {(kategoriAi[drafAi.kategori] ?? kategoriAi.perlu_resepsionis).label}
@@ -871,7 +897,7 @@ export default function ChatPage() {
                         setDrafDiabaikan(drafAi.dibuat);
                         inputRef.current?.focus();
                       }}
-                      className="px-3 py-1.5 rounded-full bg-gold-500 text-white text-[12px] font-semibold"
+                      className="sheen px-3 py-1.5 rounded-full bg-gold-500 text-white text-[12px] font-semibold shadow-sm shadow-gold-500/30 hover:bg-gold-600"
                     >
                       Pakai draf
                     </button>
@@ -887,7 +913,7 @@ export default function ChatPage() {
               )}
 
               {gambarDipilih?.conversationId === active.id && (
-                <div className="shrink-0 flex items-center gap-3 px-3 lg:px-5 pt-2 bg-base-900 border-t border-ink/[0.06]">
+                <div className="anim-fade-up shrink-0 flex items-center gap-3 px-3 lg:px-5 pt-2 bg-base-900 border-t border-ink/[0.06]">
                   {/* eslint-disable-next-line @next/next/no-img-element -- pratinjau lokal (data URL) */}
                   <img src={gambarDipilih.dataUrl} alt="Gambar yang akan dikirim" className="h-16 w-16 rounded-xl object-cover border border-ink/10" />
                   <div className="flex-1 text-[12px] text-ink/55">
@@ -937,14 +963,14 @@ export default function ChatPage() {
                   }}
                   placeholder={diterjemahkan(active.bahasa) ? `Bahasa Indonesia → ${namaBahasa(active.bahasa)}` : "Tulis balasan…"}
                   aria-label="Tulis balasan"
-                  className="flex-1 resize-none min-h-[44px] max-h-[132px] py-2.5 px-4 rounded-3xl border border-ink/10 bg-base-800/60 text-base md:text-sm leading-6 text-ink placeholder:text-ink/35 outline-none focus:border-gold-500 transition-colors"
+                  className="flex-1 resize-none min-h-[44px] max-h-[132px] py-2.5 px-4 rounded-3xl border border-ink/10 bg-base-800/60 text-base md:text-sm leading-6 text-ink placeholder:text-ink/35 outline-none focus:border-gold-500 focus:bg-base-900 focus:shadow-[0_0_0_4px_rgba(196,160,92,0.14)]"
                 />
                 <button
                   type="button"
                   onClick={kirimBalasan}
                   disabled={!draft.trim() && gambarDipilih?.conversationId !== active.id}
                   aria-label="Kirim"
-                  className="shrink-0 w-11 h-11 rounded-full bg-gold-500 text-white text-lg flex items-center justify-center shadow-sm disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-transform"
+                  className="shrink-0 w-11 h-11 rounded-full bg-gradient-to-br from-gold-400 to-gold-600 text-white text-lg flex items-center justify-center shadow-md shadow-gold-500/40 enabled:hover:-translate-y-0.5 enabled:hover:shadow-lg enabled:hover:shadow-gold-500/50 disabled:opacity-40 disabled:shadow-none disabled:cursor-not-allowed"
                 >
                   ➤
                 </button>

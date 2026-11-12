@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import { ToastProvider } from "@/lib/toast";
+import { MotionProvider } from "@/components/MotionProvider";
 
 // Font disimpan di repo (src/app/fonts) agar build tidak bergantung pada Google
 // Fonts -- next/font/google sesekali gagal di CI GitHub (2026-11-01).
@@ -36,7 +37,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="id">
       <body className={`${inter.variable} ${cormorant.variable} ${mono.variable} font-sans antialiased bg-canvas text-ink`}>
-        <ToastProvider>{children}</ToastProvider>
+        <MotionProvider>
+          <ToastProvider>{children}</ToastProvider>
+        </MotionProvider>
       </body>
     </html>
   );

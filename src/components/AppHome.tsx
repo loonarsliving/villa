@@ -7,6 +7,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { initials } from "@/lib/format";
+import { AnimatedValue } from "./AnimatedValue";
 
 /**
  * Halaman depan bergaya aplikasi, mengikuti aplikasi Cloudbeds yang dipakai
@@ -92,11 +93,11 @@ function RingOkupansi({ persen, memuat }: { persen: number; memuat: boolean }) {
           strokeLinecap="round"
           strokeDasharray={keliling}
           strokeDashoffset={keliling - (keliling * terisi) / 100}
-          className="transition-[stroke-dashoffset] duration-500"
+          className="transition-[stroke-dashoffset] duration-1000 ease-out"
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center text-white">
-        <div className="text-[26px] font-light leading-none tabular-nums">{memuat ? "—" : `${terisi}%`}</div>
+        <div className="text-[26px] font-light leading-none tabular-nums">{memuat ? "—" : <AnimatedValue value={`${terisi}%`} />}</div>
         <div className="text-[10px] tracking-wide opacity-80 mt-1">Okupansi</div>
       </div>
     </div>
@@ -195,7 +196,7 @@ export function AppHome({
         </div>
       </header>
 
-      <main className="grow px-4 pt-4 pb-28">
+      <main className="stagger grow px-4 pt-4 pb-28">
         {/* Penggeser tanggal */}
         <div className="flex items-center justify-center gap-2 mb-4">
           <button
@@ -259,7 +260,7 @@ export function AppHome({
       </main>
 
       {/* Tab bar. Ditempel di bawah layar, aman terhadap area gestur iPhone. */}
-      <nav className="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 pb-[env(safe-area-inset-bottom)]">
+      <nav className="fixed bottom-0 inset-x-0 bg-white/90 backdrop-blur-md border-t border-slate-200 pb-[env(safe-area-inset-bottom)]">
         <div className="flex items-stretch justify-around max-w-md mx-auto">
           {tabs.map((tab) => {
             const aktif = pathname === tab.href;
@@ -271,7 +272,7 @@ export function AppHome({
                   aktif ? "text-blue-600" : "text-slate-400"
                 }`}
               >
-                <span className="text-[19px] leading-none" aria-hidden>
+                <span className={`text-[19px] leading-none transition-transform duration-300 ${aktif ? "anim-pop -translate-y-0.5 scale-110" : ""}`} aria-hidden>
                   {tab.icon}
                 </span>
                 {tab.label}
@@ -298,10 +299,10 @@ function BarisAngka({
 }) {
   return (
     <div className={`flex items-center gap-4 px-4 py-3.5 ${akhir ? "" : "border-b border-slate-100"}`}>
-      <div className="text-[20px] font-semibold text-slate-900 tabular-nums w-8">{memuat ? "—" : (nilai ?? 0)}</div>
+      <div className="text-[20px] font-semibold text-slate-900 tabular-nums w-8">{memuat ? "—" : <AnimatedValue value={String(nilai ?? 0)} durasi={500} />}</div>
       <div className="grow text-[14px] text-slate-700">{label}</div>
       {!memuat && (nilai ?? 0) === 0 && (
-        <span className="w-6 h-6 rounded-full border-2 border-emerald-500 text-emerald-600 flex items-center justify-center text-[11px]">
+        <span className="anim-pop w-6 h-6 rounded-full border-2 border-emerald-500 text-emerald-600 flex items-center justify-center text-[11px]">
           ✓
         </span>
       )}

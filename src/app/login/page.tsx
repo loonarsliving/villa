@@ -8,7 +8,7 @@ import type { SessionUser } from "@/lib/types";
 
 type Step = "login" | "newpass" | "profile";
 
-const shellCls = "relative z-10 w-full max-w-[400px] p-8 sm:p-11 border border-ink/10 rounded-lg bg-ink/[0.02] backdrop-blur-xl";
+const shellCls = "anim-fade-up stagger relative z-10 w-full max-w-[400px] p-8 sm:p-11 border border-ink/10 rounded-2xl bg-base-900/60 backdrop-blur-xl shadow-xl shadow-ink/[0.06]";
 const labelCls = "block text-[10px] font-medium text-ink/40 tracking-[0.15em] uppercase mb-2";
 const inputCls =
   "w-full py-3 border-0 border-b border-ink/15 bg-transparent text-sm text-ink outline-none focus:border-gold-500 transition-colors mb-6 placeholder:text-ink/20";
@@ -109,6 +109,9 @@ export default function LoginPage() {
         className="absolute inset-0 pointer-events-none"
         style={{ background: "radial-gradient(ellipse 60% 60% at 70% 40%, rgba(196,160,92,.08) 0%, transparent 70%)" }}
       />
+      {/* Cahaya latar yang mengambang pelan -- hiasan saja. */}
+      <div aria-hidden className="anim-float absolute -top-24 -left-20 w-80 h-80 rounded-full bg-gold-400/20 blur-3xl pointer-events-none" style={{ animationDuration: "9s" }} />
+      <div aria-hidden className="anim-float absolute -bottom-28 -right-16 w-96 h-96 rounded-full bg-azure-400/10 blur-3xl pointer-events-none" style={{ animationDuration: "12s", animationDelay: "-4s" }} />
 
       {step === "login" && (
         <div className={shellCls}>

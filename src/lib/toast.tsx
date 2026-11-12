@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
+import { AnimatePresence, m } from "motion/react";
 
 type ToastKind = "gold" | "sage" | "azure" | "ruby";
 
@@ -34,24 +35,38 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={push}>
       {children}
       <div className="fixed top-4 right-4 z-[300] flex flex-col gap-2 w-[min(90vw,320px)]">
-        {items.map((t) => (
-          <div
-            key={t.id}
-            className={`bg-base-800 border border-base-700 border-l-2 ${kindBorder[t.kind]} rounded-md p-3.5 shadow-2xl flex gap-3 animate-in slide-in-from-right`}
-          >
-            <div className="text-base shrink-0 mt-0.5">{t.icon}</div>
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold text-ink">{t.title}</div>
-              <div className="text-xs text-ink/50 mt-0.5 leading-relaxed">{t.msg}</div>
-            </div>
-            <button
-              onClick={() => setItems((prev) => prev.filter((x) => x.id !== t.id))}
-              className="text-ink/30 hover:text-ink/60 text-xs shrink-0"
+        <AnimatePresence initial={false}>
+          {items.map((t) => (
+            <m.div
+              key={t.id}
+              role="status"
+              initial={{ opacity: 0, x: 40, scale: 0.95 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: 40, scale: 0.95 }}
+              transition={{ type: "spring", stiffness: 420, damping: 30 }}
+              className={`relative overflow-hidden bg-base-900 border border-ink/10 border-l-[3px] ${kindBorder[t.kind]} rounded-xl p-3.5 shadow-xl shadow-ink/10 flex gap-3`}
             >
-              ✕
-            </button>
-          </div>
-        ))}
+              <div className="anim-pop text-base shrink-0 mt-0.5">{t.icon}</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold text-ink">{t.title}</div>
+                <div className="text-xs text-ink/50 mt-0.5 leading-relaxed">{t.msg}</div>
+              </div>
+              <button
+                onClick={() => setItems((prev) => prev.filter((x) => x.id !== t.id))}
+                aria-label="Tutup pemberitahuan"
+                className="text-ink/30 hover:text-ink/60 text-xs shrink-0"
+              >
+                ✕
+              </button>
+              {/* Garis waktu: habis tepat saat toast hilang (5 detik). */}
+              <span
+                aria-hidden
+                className="absolute left-0 bottom-0 h-[2px] w-full origin-left bg-ink/15"
+                style={{ animation: "bar-grow 5s linear reverse forwards" }}
+              />
+            </m.div>
+          ))}
+        </AnimatePresence>
       </div>
     </ToastContext.Provider>
   );
