@@ -11,10 +11,11 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 /**
  * Riwayat satu percakapan, tertua dulu (urutan baca alami).
  *
- * Efek samping yang disengaja: membuka percakapan ini SEKALIGUS
- * menandainya terbaca (unread_count -> 0) -- pola inbox yang wajar
- * (staf membukanya artinya sudah dilihat), dan menghindari perlu
- * endpoint PATCH terpisah cuma untuk itu.
+ * Membuka percakapan TIDAK lagi menolkan unread_count (2026-11-12): angka itu
+ * kini "pesan tamu belum dibalas", dinolkan hanya saat staf membalas atau
+ * menutup sesi -- supaya perangkat lain tetap melihat chat yang belum
+ * dibalas. Status "sudah dilihat" disimpan per perangkat
+ * (src/lib/chatPerangkat.ts).
  */
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const token = request.headers.get("x-villa-token") ?? "";
@@ -42,8 +43,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     .order("created_at", { ascending: true })
     .limit(500);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  await supabase.from("wa_conversations").update({ unread_count: 0 }).eq("id", id);
 
   return NextResponse.json(data ?? []);
 }

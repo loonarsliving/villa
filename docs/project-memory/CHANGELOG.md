@@ -4,6 +4,10 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-11-12 — Chat: belum-dibalas per perangkat + tutup sesi chat
+- Membuka chat di satu perangkat tidak lagi menghilangkan tanda belum-dibalas di perangkat lain; status dilihat disimpan per perangkat (`src/lib/chatPerangkat.ts`). `unread_count` dinolkan saat membalas / menutup sesi.
+- Fitur "Tutup sesi" + tab "Ditutup", ucapan penutup opsional ke tamu, rute `POST /api/chat/conversations/[id]/tutup`, migrasi `20261112000001_chat_tutup_sesi`.
+
 ### 2026-11-11 — Investor bisa mencetak Bukti Menginap dari dashboard
 - Kasus: investor Catur Budi memesan menginap gratis di loonars.id (C1, 11-12 Nov), tapi Bukti Menginap hanya bisa diambil dari browser tempat memesan (loonars.id menyimpannya di localStorage); WA konfirmasi menginap gratis hanya ke owner.
 - villa-api: `GET /investor/vouchers` kini memberi `bukti_booking_id` untuk kode terpakai yang menginap gratis; endpoint baru `GET /investor/bukti-menginap?booking_id=` (role owner, hanya booking yang memakai kode milik investor yang login, tidak untuk booking batal / bukan menginap gratis) mengembalikan data yang sama dengan `/public/bookings/invoice` jenis `bukti_menginap`.

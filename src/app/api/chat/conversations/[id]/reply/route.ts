@@ -104,6 +104,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     console.error("[chat/reply] pesan terkirim tapi gagal dicatat", e instanceof Error ? e.message : String(e));
   }
 
+  // Pesan tamu sudah dibalas: angka belum-dibalas nol di semua perangkat, dan
+  // membalas chat yang sesinya ditutup membukanya lagi.
+  const { error: resetError } = await supabase
+    .from("wa_conversations")
+    .update({ unread_count: 0, ditutup_at: null, ditutup_oleh: null })
+    .eq("id", percakapan.id);
+  if (resetError) console.error("[chat/reply] gagal menolkan belum-dibalas", resetError.message);
+
   // Pesan tamu sudah dijawab staf -- draf AI untuk pesan itu tidak berlaku lagi.
   await hapusDrafAiAman(supabase, percakapan.id);
 

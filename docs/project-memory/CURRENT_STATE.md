@@ -3,6 +3,12 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-11-12 — Chat: belum-dibalas per perangkat + tutup sesi chat
+- Owner: "jika 1 device sdh membuka chat, device lain tidak melihat ada chat yg belum di balas, baiknya pisahkan per device" + "fitur tutup sesi chat ... jdi tidak ada sesi yg menggantung".
+- `wa_conversations.unread_count` kini = pesan tamu BELUM DIBALAS: tidak lagi dinolkan saat percakapan dibuka (`/messages`), hanya saat staf membalas (`/reply`) atau menutup sesi (`/tutup`). Status "sudah dilihat" per perangkat di localStorage (`src/lib/chatPerangkat.ts`, +tes): lencana merah hilang di perangkat yang sudah membuka, muncul lagi kalau ada pesan lebih baru; perangkat lain tetap merah. Sudah dilihat tapi belum dibalas = lencana bergaris. Lencana menu Chat + bunyi/toast manager (`useChatUnreadPoll`) ikut per perangkat; angka di ikon push (server) = total belum dibalas.
+- Tutup sesi: tombol "Tutup sesi" di header chat, opsional kirim ucapan penutup (bisa diubah, diterjemahkan seperti balasan biasa), lalu `POST /api/chat/conversations/[id]/tutup` (ditolak 409 kalau ada pesan masuk sesudah yang dilihat staf). Sesi ditutup keluar dari tab Aktif ke tab "Ditutup"; terbuka lagi otomatis saat tamu menulis (RPC) atau staf membalas.
+- Migrasi `20261112000001_chat_tutup_sesi` (kolom `ditutup_at`/`ditutup_oleh` + RPC increment membuka sesi; owner-approved "Ya bawa ke production") DITERAPKAN 2026-11-12 lewat `execute_sql` sebelum merge (isi = file, md5 `f0e5c833af3d409cd4af9089de0b890e`), dicatat di `schema_migrations`. Diverifikasi: 2 kolom ada, RPC tetap SECURITY DEFINER + berisi pembukaan sesi. Lihat DATABASE.md.
+
 ## 2026-11-11 — Bukti Menginap di dashboard investor
 - Investor mencetak Bukti Menginap dari `/investor/menginap-gratis` (endpoint `GET /investor/bukti-menginap`). PDF-nya salinan dari loonars.id (`src/lib/pdf/buktiMenginapPdf.ts`) -- dua salinan, ubah bersamaan.
 
