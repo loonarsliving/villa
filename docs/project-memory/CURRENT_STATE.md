@@ -3,8 +3,8 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
-## 2026-11-12 — Lapisan gerak UI (animasi) — di branch, BELUM di `main`
-- Branch `claude/ui-animation-repo-villa-property-wcsa7p`. Murni tampilan; logika, API, harga, database tidak disentuh. Dependensi baru `motion`.
+## 2026-11-12 — Lapisan gerak UI (animasi) — LIVE (PR #320, owner: "bawa ke production")
+- Di-merge ke `main` 2026-11-12 (PR #320); deploy produksi Vercel READY. Murni tampilan; logika, API, harga, database tidak disentuh. Dependensi baru `motion`.
 - ATURAN untuk pekerjaan UI berikutnya: jangan memberi `transform`/`filter`/`backdrop-filter` PERMANEN pada pembungkus halaman (`<main>` di `DashboardShell`) atau `Card` -- elemen `position: fixed` di dalamnya (panel chat layar penuh di HP, overlay) akan salah posisi/terpotong. Animasi masuk memakai fill-mode `backwards`; efek tekan memakai properti `scale`. `Modal` sudah dirender lewat portal ke `<body>`.
 - `Loading` dengan label yang tidak diawali "Memuat/Menghitung/Mengambil/Menyusun/Memproses" tampil sebagai keadaan kosong (banyak halaman lama memakai `<Loading label="Belum ada ...">`).
 - Diverifikasi: typecheck, vitest (432 lulus), `next build`, dan uji browser dengan data tiruan (Chat PC/HP, Front Desk, modal Check-In, laci menu, login). BELUM diuji dengan akun & data asli.
