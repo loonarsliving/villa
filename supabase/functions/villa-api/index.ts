@@ -1039,21 +1039,34 @@ async function kirimAjakPesanDirect(bookingId){
  * wa_messages_log. Tidak menjanjikan apa pun di luar yang dibayar (tanpa
  * sarapan gratis -- aturan owner 2026-10-09).
  */
-function teksTerimaKasihLunas({nama, bahasa, checkin, checkout, unit, addon, total, invoice}){
+function teksTerimaKasihLunas({nama, bahasa, checkin, checkout, unit, addon, total, invoice, linkInvoice}){
   const rentang = `${tanggalSingkat(checkin, bahasa, false)} – ${tanggalSingkat(checkout, bahasa, true)}`;
   const rp = `Rp ${Math.round(Number(total ?? 0)).toLocaleString('id-ID')}`;
   if(bahasa === 'en'){
     return `Hi ${nama || 'there'} 👋\n\n`+
       `Congratulations, your payment has been received! Thank you for booking ${namaProperti()} Yogyakarta 🎉\n\n`+
       `Stay: ${rentang}${unit ? `\n${propertiSaatIni()==='PL' ? 'Villa' : 'Room'}: ${unit}` : ''}${addon ? `\nAdd-on: ${addon}` : ''}\nTotal paid: ${rp}${invoice ? `\nInvoice: ${invoice}` : ''}\n\n`+
-      `Check-in from 14.00, check-out by 12.00. Your invoice can be downloaded on the loonars.id booking page. `+
+      `Check-in from 14.00, check-out by 12.00.${linkInvoice ? `\n\nDownload your invoice: ${linkInvoice}\n(enter this WhatsApp number)` : ' Your invoice can be downloaded on the loonars.id booking page.'}\n\n`+
       `If you have any questions, just reply to this message. See you soon at Loonars! 🌿`;
   }
   return `Halo Kak${nama ? ` ${nama}` : ''} 👋\n\n`+
     `Selamat, pembayaran Kakak sudah kami terima! Terima kasih sudah memesan di ${namaProperti()} Yogyakarta 🎉\n\n`+
     `Menginap: ${rentang}${unit ? `\n${propertiSaatIni()==='PL' ? 'Villa' : 'Kamar'}: ${unit}` : ''}${addon ? `\nAdd-on: ${addon}` : ''}\nTotal dibayar: ${rp}${invoice ? `\nNo. invoice: ${invoice}` : ''}\n\n`+
-    `Check-in mulai pukul 14.00, check-out paling lambat 12.00. Invoice bisa diunduh di halaman pemesanan loonars.id. `+
+    `Check-in mulai pukul 14.00, check-out paling lambat 12.00.${linkInvoice ? `\n\nUnduh invoice: ${linkInvoice}\n(masukkan nomor WhatsApp ini)` : ' Invoice bisa diunduh di halaman pemesanan loonars.id.'}\n\n`+
     `Kalau ada pertanyaan, silakan balas pesan ini ya. Sampai jumpa di Loonars! 🌿`;
+}
+
+/**
+ * Link unduh invoice di loonars.id (owner 2026-11-13: tamu yang sudah lunas
+ * tidak bisa mengunduh bukti pemesanan). Halaman /invoice meminta nomor WA
+ * tamu lalu memanggil /public/bookings/invoice (PL) atau
+ * /public/p/<kode>/bookings/invoice -- kunci booking_id + nomor WA yang sama.
+ * Dulu tamu hanya disuruh ke "halaman pemesanan", yang menyimpan booking di
+ * browser tempat memesan saja.
+ */
+function linkInvoiceTamu(bookingId){
+  const p = propertiSaatIni();
+  return `https://www.loonars.id/invoice?b=${bookingId}${p === 'PL' ? '' : `&p=${p}`}`;
 }
 
 async function kirimTerimaKasihLunas(bookingId){
@@ -1071,6 +1084,7 @@ async function kirimTerimaKasihLunas(bookingId){
     const teks = teksTerimaKasihLunas({
       nama: bk.guest_nama, bahasa, checkin: bk.tgl_checkin, checkout: bk.tgl_checkout,
       unit: bk.unit_nomor, addon: bk.paket_dekorasi, total: tagihanTamu(bk), invoice: bk.invoice_no,
+      linkInvoice: linkInvoiceTamu(bk.id),
     });
     return (await sendWa(g.hp, teks, {booking_id: bk.id, unit_id: bk.unit_id, template_type: templateProperti('booking_paid_thanks')})) ? 'terkirim' : 'gagal';
   } catch(e){

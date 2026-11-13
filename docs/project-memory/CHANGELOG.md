@@ -10,6 +10,10 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 - Data (setelah deploy): `villa_users.is_active=true` untuk Liza; Musafa diterbitkan 12 kode menginap gratis A1 sendiri lewat `villa_terbitkan_voucher_investor` (Okt 2026–Sep 2027, sama dengan Liza) -- pilihan owner "Musafa dibuatkan 12 juga", jatah malam gratis A1 jadi 24/tahun.
 - Halaman `/admin/bukti-transfer` (Next.js) membaca semua akun owner aktif, jadi Liza otomatis mendapat bukti transfer versi Loonars dengan angka per unit yang sama -- disengaja.
 
+### 2026-11-13 — WA "pembayaran berhasil" membawa link unduh invoice
+- Kasus: tamu yang sudah lunas dan menerima WA tidak bisa mengunduh bukti pemesanan. Tombol invoice di loonars.id hanya muncul di browser tempat memesan (booking disimpan di localStorage), sedangkan WA hanya menyuruh ke "halaman pemesanan loonars.id".
+- villa-api `teksTerimaKasihLunas` kini menyertakan `linkInvoiceTamu(booking_id)` → `https://www.loonars.id/invoice?b=<id>` (`&p=<kode>` untuk properti selain PL). Halaman `/invoice` (repo loonars, PR #44) meminta nomor WA lalu memakai endpoint invoice yang sudah ada; tidak ada endpoint baru.
+
 ### 2026-11-12 — Lapisan gerak UI (animasi) — LIVE (PR #320, owner: "bawa ke production")
 - Permintaan owner: tampilan operasional dibuat lebih menarik & enak dipakai, termasuk Chat. Hanya tampilan -- tidak ada perubahan logika, API, harga, maupun database.
 - Dependensi baru: `motion` (dimuat versi ringan lewat `src/components/MotionProvider.tsx`; komponen memakai `m.*`, bukan `motion.*`). Dipakai untuk Modal, laci menu HP, dan toast (animasi masuk/keluar).
