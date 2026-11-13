@@ -1039,21 +1039,237 @@ async function kirimAjakPesanDirect(bookingId){
  * wa_messages_log. Tidak menjanjikan apa pun di luar yang dibayar (tanpa
  * sarapan gratis -- aturan owner 2026-10-09).
  */
-function teksTerimaKasihLunas({nama, bahasa, checkin, checkout, unit, addon, total, invoice}){
+function teksTerimaKasihLunas({nama, bahasa, checkin, checkout, unit, addon, total, invoice, linkInvoice}){
   const rentang = `${tanggalSingkat(checkin, bahasa, false)} – ${tanggalSingkat(checkout, bahasa, true)}`;
   const rp = `Rp ${Math.round(Number(total ?? 0)).toLocaleString('id-ID')}`;
   if(bahasa === 'en'){
     return `Hi ${nama || 'there'} 👋\n\n`+
       `Congratulations, your payment has been received! Thank you for booking ${namaProperti()} Yogyakarta 🎉\n\n`+
       `Stay: ${rentang}${unit ? `\n${propertiSaatIni()==='PL' ? 'Villa' : 'Room'}: ${unit}` : ''}${addon ? `\nAdd-on: ${addon}` : ''}\nTotal paid: ${rp}${invoice ? `\nInvoice: ${invoice}` : ''}\n\n`+
-      `Check-in from 14.00, check-out by 12.00. Your invoice can be downloaded on the loonars.id booking page. `+
+      `Check-in from 14.00, check-out by 12.00.${linkInvoice ? `\n\nDownload your invoice: ${linkInvoice}\n(enter this WhatsApp number)` : ' Your invoice can be downloaded on the loonars.id booking page.'}\n\n`+
       `If you have any questions, just reply to this message. See you soon at Loonars! 🌿`;
   }
   return `Halo Kak${nama ? ` ${nama}` : ''} 👋\n\n`+
     `Selamat, pembayaran Kakak sudah kami terima! Terima kasih sudah memesan di ${namaProperti()} Yogyakarta 🎉\n\n`+
     `Menginap: ${rentang}${unit ? `\n${propertiSaatIni()==='PL' ? 'Villa' : 'Kamar'}: ${unit}` : ''}${addon ? `\nAdd-on: ${addon}` : ''}\nTotal dibayar: ${rp}${invoice ? `\nNo. invoice: ${invoice}` : ''}\n\n`+
-    `Check-in mulai pukul 14.00, check-out paling lambat 12.00. Invoice bisa diunduh di halaman pemesanan loonars.id. `+
+    `Check-in mulai pukul 14.00, check-out paling lambat 12.00.${linkInvoice ? `\n\nUnduh invoice: ${linkInvoice}\n(masukkan nomor WhatsApp ini)` : ' Invoice bisa diunduh di halaman pemesanan loonars.id.'}\n\n`+
     `Kalau ada pertanyaan, silakan balas pesan ini ya. Sampai jumpa di Loonars! 🌿`;
+}
+
+/**
+ * Data invoice yang dikirim ke tamu. Dipakai BERSAMA oleh
+ * /public/bookings/invoice (PL), /public/p/<kode>/bookings/invoice (EL), dan
+ * PDF invoice yang dilampirkan di WA "pembayaran berhasil" -- supaya invoice
+ * yang diunduh dan yang dikirim lewat WA tidak pernah berbeda isinya.
+ */
+function dataInvoicePl(booking, guestHp){
+  return {
+      invoice_no: booking.invoice_no,
+      booking_id: booking.id,
+      unit_nomor: booking.unit_nomor,
+      guest_nama: booking.guest_nama,
+      guest_hp: guestHp,
+      tgl_checkin: booking.tgl_checkin,
+      tgl_checkout: booking.tgl_checkout,
+      durasi_malam: booking.durasi_malam,
+      // Invoice memisahkan kamar dan paket (permintaan owner 2026-10-13):
+      // tarif = harga kamar seluruh menginap, kode_unik = selisih total_bayar
+      // dan tarif, harga_paket = paket dekorasi, total_bayar = semua yang
+      // dibayar tamu.
+      tarif: Number(booking.tarif),
+      kode_unik: Math.max(0, Number(booking.total_bayar ?? booking.tarif) - Number(booking.tarif)),
+      paket_dekorasi: booking.paket_dekorasi ?? null,
+      harga_paket: Number(booking.harga_paket ?? 0),
+      addons: rincianAddon(booking.paket_dekorasi, booking.harga_paket),
+      total_bayar: tagihanTamu(booking),
+      paid_at: booking.bukti_pembayaran_at,
+      created_at: booking.created_at,
+    };
+}
+
+async function dataInvoiceEl(booking, guestHp){
+  const {data:u} = await supabase.from('units').select('room_type_id').eq('id', booking.unit_id).maybeSingle();
+  const {data:rt} = u?.room_type_id ? await supabase.from('villa_room_types').select('name').eq('id', u.room_type_id).maybeSingle() : {data:null};
+  return {
+    properti: namaProperti(), invoice_no: booking.invoice_no, booking_id: booking.id,
+    unit_nomor: booking.unit_nomor, tipe_nama: rt?.name ?? null,
+    guest_nama: booking.guest_nama, guest_hp: guestHp,
+    tgl_checkin: booking.tgl_checkin, tgl_checkout: booking.tgl_checkout, durasi_malam: booking.durasi_malam,
+    tarif: Number(booking.tarif),
+    kode_unik: Math.max(0, Number(booking.total_bayar ?? booking.tarif) - Number(booking.tarif)),
+    total_bayar: tagihanTamu(booking),
+    paid_at: booking.bukti_pembayaran_at, created_at: booking.created_at,
+  };
+}
+
+/**
+ * PDF invoice untuk dilampirkan di WA. SALINAN dari buildInvoicePdf di repo
+ * loonars (components/booking/invoicePdf.ts) -- ubah keduanya bersamaan.
+ * jsPDF dimuat hanya saat dibutuhkan, supaya tidak menambah waktu mulai
+ * semua permintaan villa-api lainnya.
+ */
+async function buatPdfInvoice(data){
+  const { jsPDF } = await import('npm:jspdf@3.0.4');
+  const rpPdf = (n) => 'Rp ' + Math.round(Number(n ?? 0)).toLocaleString('id-ID');
+  const tglPdf = (iso) => new Date(iso + (iso.length === 10 ? 'T00:00:00' : '')).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const marginX = 20;
+  const rightX = pageWidth - marginX;
+  let y = 20;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(18);
+  doc.text((data.properti ?? 'Loonars Private Living').toUpperCase(), marginX, y);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(110);
+  y += 6;
+  doc.text('WhatsApp: +62 822-2888-5223 · loonars.id', marginX, y);
+  doc.setTextColor(0);
+  doc.setDrawColor(200);
+  y += 5;
+  doc.line(marginX, y, rightX, y);
+
+  y += 10;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.text('INVOICE', marginX, y);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+  doc.text(`No. Invoice: ${data.invoice_no}`, rightX, y - 4, { align: 'right' });
+  doc.text(`No. Reservasi: ${String(data.booking_id).slice(0, 8).toUpperCase()}`, rightX, y + 1, { align: 'right' });
+  doc.text(`Tanggal: ${tglPdf(String(data.paid_at).slice(0, 10))}`, rightX, y + 6, { align: 'right' });
+
+  y += 16;
+  doc.setFont('helvetica', 'bold');
+  doc.text('Ditagihkan kepada:', marginX, y);
+  doc.setFont('helvetica', 'normal');
+  y += 5;
+  doc.text(String(data.guest_nama ?? ''), marginX, y);
+  y += 5;
+  doc.text(String(data.guest_hp ?? ''), marginX, y);
+
+  y += 10;
+  doc.setFont('helvetica', 'bold');
+  doc.text('Detail Menginap', marginX, y);
+  doc.setFont('helvetica', 'normal');
+  y += 6;
+  const details = [
+    [data.properti ? 'Kamar' : 'Unit', data.tipe_nama ? `${data.unit_nomor} (${data.tipe_nama})` : String(data.unit_nomor ?? '')],
+    ['Check-in', tglPdf(data.tgl_checkin)],
+    ['Check-out', tglPdf(data.tgl_checkout)],
+    ['Durasi', `${data.durasi_malam} malam`],
+  ];
+  for (const [label, value] of details) {
+    doc.text(label, marginX, y);
+    doc.text(value, marginX + 35, y);
+    y += 5.5;
+  }
+
+  y += 6;
+  doc.setDrawColor(60);
+  doc.setFillColor(245, 245, 245);
+  doc.rect(marginX, y, pageWidth - marginX * 2, 8, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.text('Deskripsi', marginX + 2, y + 5.5);
+  doc.text('Jumlah', rightX - 2, y + 5.5, { align: 'right' });
+  y += 8;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+  const hargaPaket = data.harga_paket ?? 0;
+  const kodeUnik = data.kode_unik ?? Math.max(0, data.total_bayar - hargaPaket - data.tarif);
+  const baris = [[`${data.properti ? 'Sewa Kamar' : 'Sewa Villa'} ${data.unit_nomor} (${data.durasi_malam} malam)`, data.tarif]];
+  if (data.addons?.length) for (const a of data.addons) baris.push([a.nama, a.jumlah]);
+  else if (data.paket_dekorasi && hargaPaket > 0) baris.push([`Paket Dekorasi ${data.paket_dekorasi}`, hargaPaket]);
+  if (kodeUnik > 0) baris.push(['Kode unik pembayaran', kodeUnik]);
+  for (const [label, jumlah] of baris) {
+    y += 7;
+    doc.text(label, marginX + 2, y);
+    doc.text(rpPdf(jumlah), rightX - 2, y, { align: 'right' });
+  }
+
+  y += 8;
+  doc.line(marginX, y, rightX, y);
+  y += 8;
+  const totalsX = marginX + 90;
+  doc.text('Total', totalsX, y);
+  doc.text(rpPdf(data.total_bayar), rightX - 2, y, { align: 'right' });
+  y += 6;
+  doc.text('Pembayaran Diterima (QRIS)', totalsX, y);
+  doc.text(rpPdf(data.total_bayar), rightX - 2, y, { align: 'right' });
+  y += 6;
+  doc.setFont('helvetica', 'bold');
+  doc.text('Sisa Tagihan', totalsX, y);
+  doc.text(rpPdf(0), rightX - 2, y, { align: 'right' });
+
+  y += 14;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.text('Konfirmasi Pembayaran', marginX, y);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  y += 5.5;
+  doc.text(`Pembayaran dikonfirmasi lunas via QRIS. Bukti transfer diterima pada ${tglPdf(String(data.paid_at).slice(0, 10))}.`, marginX, y, { maxWidth: pageWidth - marginX * 2 });
+
+  y += 16;
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(9.5);
+  doc.setTextColor(90);
+  doc.text(`Terima kasih telah memilih ${data.properti ?? 'Loonars Private Living'}. Sampai jumpa!`, marginX, y);
+  doc.setTextColor(0);
+  return new Uint8Array(doc.output('arraybuffer'));
+}
+
+/**
+ * Mengirim PDF invoice sebagai pesan WA kedua, setelah teks "pembayaran
+ * berhasil" (owner 2026-11-13: "kirim invoicenya juga"). Pola wa-outbox
+ * MK Connect (migrasi 0306): Whacenter hanya andal mengunduh URL publik
+ * Storage biasa, jadi PDF ditaruh di bucket publik `wa-outbox` dengan nama
+ * acak, dan dihapus otomatis setelah sehari oleh retensi MK Connect. Link
+ * /invoice di pesan teks tetap jadi jalan permanen.
+ *
+ * Tidak pernah melempar error: kegagalan di sini tidak boleh mengganggu
+ * konfirmasi pembayaran maupun pesan teks yang sudah terkirim.
+ */
+async function kirimPdfInvoiceLunas(bookingId, hp){
+  try {
+    const template = templateProperti('booking_paid_invoice_pdf');
+    const {data:sudah} = await supabase.from('wa_messages_log').select('id')
+      .eq('booking_id', bookingId).eq('template_type', template).eq('status','sent').limit(1);
+    if(sudah?.length) return 'sudah';
+    const {data:bk} = await supabase.from('bookings')
+      .select('id,unit_id,unit_nomor,guest_id,guest_nama,tgl_checkin,tgl_checkout,durasi_malam,tarif,total_bayar,harga_paket,paket_dekorasi,status,invoice_no,bukti_pembayaran_at,created_at,is_free_stay')
+      .eq('id', bookingId).maybeSingle();
+    // Menginap gratis tidak punya invoice (yang ada Bukti Menginap, lewat link /invoice).
+    if(!bk || bk.is_free_stay || !bk.invoice_no || !bk.bukti_pembayaran_at) return 'tanpa_invoice';
+    const data = propertiSaatIni() === 'PL' ? dataInvoicePl(bk, hp) : await dataInvoiceEl(bk, hp);
+    const bytes = await buatPdfInvoice(data);
+    const namaFile = String(bk.invoice_no).replace(/[^A-Za-z0-9._-]/g, '_') || 'invoice';
+    const path = `${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}/${namaFile}.pdf`;
+    const {error:upErr} = await supabase.storage.from('wa-outbox').upload(path, bytes, {contentType:'application/pdf', upsert:false});
+    if(upErr){ console.error('[invoice-pdf-wa] upload gagal', upErr.message); return 'gagal_upload'; }
+    const url = supabase.storage.from('wa-outbox').getPublicUrl(path).data.publicUrl;
+    const caption = bahasaDariNomorHp(hp) === 'en' ? `Invoice ${bk.invoice_no}` : `Invoice ${bk.invoice_no} 📄`;
+    return (await sendWa(hp, caption, {booking_id: bk.id, unit_id: bk.unit_id, template_type: template, file: url})) ? 'terkirim' : 'gagal';
+  } catch(e){
+    console.error('[invoice-pdf-wa]', e?.message ?? e);
+    return 'gagal';
+  }
+}
+
+/**
+ * Link unduh invoice di loonars.id (owner 2026-11-13: tamu yang sudah lunas
+ * tidak bisa mengunduh bukti pemesanan). Halaman /invoice meminta nomor WA
+ * tamu lalu memanggil /public/bookings/invoice (PL) atau
+ * /public/p/<kode>/bookings/invoice -- kunci booking_id + nomor WA yang sama.
+ * Dulu tamu hanya disuruh ke "halaman pemesanan", yang menyimpan booking di
+ * browser tempat memesan saja.
+ */
+function linkInvoiceTamu(bookingId){
+  const p = propertiSaatIni();
+  return `https://www.loonars.id/invoice?b=${bookingId}${p === 'PL' ? '' : `&p=${p}`}`;
 }
 
 async function kirimTerimaKasihLunas(bookingId){
@@ -1071,8 +1287,12 @@ async function kirimTerimaKasihLunas(bookingId){
     const teks = teksTerimaKasihLunas({
       nama: bk.guest_nama, bahasa, checkin: bk.tgl_checkin, checkout: bk.tgl_checkout,
       unit: bk.unit_nomor, addon: bk.paket_dekorasi, total: tagihanTamu(bk), invoice: bk.invoice_no,
+      linkInvoice: linkInvoiceTamu(bk.id),
     });
-    return (await sendWa(g.hp, teks, {booking_id: bk.id, unit_id: bk.unit_id, template_type: templateProperti('booking_paid_thanks')})) ? 'terkirim' : 'gagal';
+    const terkirim = await sendWa(g.hp, teks, {booking_id: bk.id, unit_id: bk.unit_id, template_type: templateProperti('booking_paid_thanks')});
+    // PDF invoice menyusul sebagai pesan kedua; gagalnya tidak mengubah hasil di atas.
+    if(terkirim) await kirimPdfInvoiceLunas(bk.id, g.hp);
+    return terkirim ? 'terkirim' : 'gagal';
   } catch(e){
     // Ucapan terima kasih tidak boleh menggagalkan konfirmasi pembayaran.
     console.error('[terima-kasih-lunas]', e?.message ?? e);
@@ -5555,18 +5775,7 @@ async function layani(req){
           'id,unit_nomor,guest_id,sumber,guest_nama,tgl_checkin,tgl_checkout,durasi_malam,tarif,total_bayar,harga_paket,paket_dekorasi,status,invoice_no,bukti_pembayaran_at,created_at,unit_id');
         if(gagal) return gagal;
         if(!booking.invoice_no || !booking.bukti_pembayaran_at) return err('Pembayaran belum terkonfirmasi untuk booking ini', 409);
-        const {data:u} = await supabase.from('units').select('room_type_id').eq('id', booking.unit_id).maybeSingle();
-        const {data:rt} = u?.room_type_id ? await supabase.from('villa_room_types').select('name').eq('id', u.room_type_id).maybeSingle() : {data:null};
-        return json({
-          properti: namaProperti(), invoice_no: booking.invoice_no, booking_id: booking.id,
-          unit_nomor: booking.unit_nomor, tipe_nama: rt?.name ?? null,
-          guest_nama: booking.guest_nama, guest_hp: guestHp,
-          tgl_checkin: booking.tgl_checkin, tgl_checkout: booking.tgl_checkout, durasi_malam: booking.durasi_malam,
-          tarif: Number(booking.tarif),
-          kode_unik: Math.max(0, Number(booking.total_bayar ?? booking.tarif) - Number(booking.tarif)),
-          total_bayar: tagihanTamu(booking),
-          paid_at: booking.bukti_pembayaran_at, created_at: booking.created_at,
-        });
+        return json(await dataInvoiceEl(booking, guestHp));
       }
 
       return err('Rute tidak ditemukan', 404);
@@ -6853,29 +7062,9 @@ async function layani(req){
       return json(await dataBuktiMenginap(booking, guestHp));
     }
     if(!booking.invoice_no || !booking.bukti_pembayaran_at) return err('Bukti pembayaran belum diupload untuk booking ini', 409);
-    return json({
-      invoice_no: booking.invoice_no,
-      booking_id: booking.id,
-      unit_nomor: booking.unit_nomor,
-      guest_nama: booking.guest_nama,
-      guest_hp: guestHp,
-      tgl_checkin: booking.tgl_checkin,
-      tgl_checkout: booking.tgl_checkout,
-      durasi_malam: booking.durasi_malam,
-      // Invoice memisahkan kamar dan paket (permintaan owner 2026-10-13):
-      // tarif = harga kamar seluruh menginap, kode_unik = selisih total_bayar
-      // dan tarif, harga_paket = paket dekorasi, total_bayar = semua yang
-      // dibayar tamu.
-      tarif: Number(booking.tarif),
-      kode_unik: Math.max(0, Number(booking.total_bayar ?? booking.tarif) - Number(booking.tarif)),
-      paket_dekorasi: booking.paket_dekorasi ?? null,
-      harga_paket: Number(booking.harga_paket ?? 0),
-      addons: rincianAddon(booking.paket_dekorasi, booking.harga_paket),
-      total_bayar: tagihanTamu(booking),
-      paid_at: booking.bukti_pembayaran_at,
-      created_at: booking.created_at,
-    });
+    return json(dataInvoicePl(booking, guestHp));
   }
+  
 
   if(path==='/me/password' && m==='POST'){
     const session = await requireAuth(req);
