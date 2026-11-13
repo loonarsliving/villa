@@ -4131,6 +4131,24 @@ async function unitIdsForSession(session){
   return session.unit_id ? [session.unit_id] : [];
 }
 
+/**
+ * Akun investor yang bagiannya DIBAYAR DARI BAGIAN LOONARS, bukan dari
+ * kolam 70% investor (owner 2026-11-13). Kasus: unit A1 dipegang dua
+ * pihak -- Musafa (pemilik tercatat, rekening BNI) dan Liza Indira. Owner:
+ * "apa yang Musafa lihat Liza juga bisa lihat, yang berubah hanya nama...
+ * mereka tetap tahu 13 investor, di belakang layar realisasinya kita
+ * membayar Liza menggunakan bagian dari Loonars".
+ *
+ * Jadi akun ini login dan melihat dashboard persis seperti investor biasa
+ * (1 dari 13, bagian yang sama), tetapi di daftar transfer dividen admin ia
+ * dipisah ke `dibayar_loonars` supaya tidak terbaca sebagai investor ke-14.
+ * Pembagi bagi hasil tidak tersentuh: pembaginya jumlah unit (countActiveInvestors),
+ * bukan jumlah akun aktif.
+ */
+const AKUN_DIBAYAR_LOONARS = new Set([
+  'b73b8b0b-f642-4005-b1b9-6ee508305306', // Liza Indira, A1
+]);
+
 async function computeDividendList(periode){
   const report = await computeReport(undefined, periode);
   const {data:investors, error} = await supabase.from('villa_users')
@@ -4154,7 +4172,7 @@ async function computeDividendList(periode){
     .lte('mulai', `${periode}-01`).gte('selesai', `${periode}-01`);
   const tetap = new Map((terms ?? []).map(t => [String(t.user_id), Number(t.pemasukan_tetap)]));
 
-  const list = (investors ?? []).map(inv => {
+  const semua = (investors ?? []).map(inv => {
     const nTetap = tetap.get(String(inv.id));
     const unit = jumlahUnit.get(String(inv.id)) ?? 1;
     return {
@@ -4165,7 +4183,23 @@ async function computeDividendList(periode){
       rekening_lengkap: !!(inv.bank_nama && inv.no_rekening),
     };
   });
-  return { periode, per_investor_amount: report.per_investor_amount, investor_count: report.investor_count, investors: list };
+  const list = semua.filter(inv => !AKUN_DIBAYAR_LOONARS.has(String(inv.id)));
+  const dibayar_loonars = semua.filter(inv => AKUN_DIBAYAR_LOONARS.has(String(inv.id)));
+  return { periode, per_investor_amount: report.per_investor_amount, investor_count: report.investor_count, investors: list, dibayar_loonars };
+}
+
+// Bagian "dibayar dari bagian Loonars" untuk pesan WA daftar transfer admin.
+// Kosong bila tidak ada akun seperti itu, jadi pesan lama tidak berubah.
+function barisDibayarLoonars(list){
+  const rows = list.dibayar_loonars ?? [];
+  if(!rows.length) return '';
+  const lines = rows.map(inv => {
+    const rek = inv.rekening_lengkap
+      ? `${inv.bank_nama} ${inv.no_rekening} a.n ${inv.nama_pemilik_rekening || inv.nama}`
+      : 'REKENING BELUM DIISI';
+    return `• Unit ${inv.unit_nomor} — ${inv.nama}: Rp ${Math.round(inv.jumlah).toLocaleString('id-ID')} → ${rek}`;
+  }).join('\n');
+  return `\n\n*Dibayar dari bagian Loonars* (bukan dari bagian investor):\n${lines}`;
 }
 
 
@@ -6336,9 +6370,14 @@ async function layani(req){
     // pramesti cahyani, skema A4+A5), yang unit_nomor-nya bukan kode unit
     // biasa jadi tidak bisa dikenali lewat pencocokan unit_code standar.
     const targetUnitNomor = unitCode === 'TETAP' ? 'Pemasukan Tetap' : unitCode;
-    const {data:investor} = await supabase.from('villa_users')
+    // Satu unit bisa punya lebih dari satu akun aktif (A1: Musafa + Liza,
+    // owner 2026-11-13). Bukti transfer dari kolam investor milik pemilik
+    // tercatat, jadi akun yang dibayar dari bagian Loonars dilewati, dan
+    // urutannya dibuat pasti (akun tertua dulu), bukan acak.
+    const {data:kandidat} = await supabase.from('villa_users')
       .select('id,nama,hp').eq('role','owner').eq('unit_nomor',targetUnitNomor).eq('is_active',true)
-      .not('hp','is',null).limit(1).maybeSingle();
+      .not('hp','is',null).order('created_at');
+    const investor = (kandidat ?? []).find(u => !AKUN_DIBAYAR_LOONARS.has(String(u.id))) ?? null;
     if(!investor?.hp) return json({success:false, reason:'investor_tidak_ditemukan', unit_code:unitCode});
 
     const periode = monthWIB();
@@ -7301,7 +7340,7 @@ async function layani(req){
       const tanda = inv.pemasukan_tetap ? ' (pemasukan tetap)' : inv.unit_dimiliki > 1 ? ` (${inv.unit_dimiliki} unit)` : '';
       return `• Unit ${inv.unit_nomor} — ${inv.nama}: Rp ${Math.round(inv.jumlah).toLocaleString('id-ID')}${tanda} → ${rek}`;
     }).join('\n');
-    const message = `*Daftar Transfer Dividen — Periode ${periode}*\n\nBagian per investor: Rp ${Math.round(list.per_investor_amount).toLocaleString('id-ID')} (${list.investor_count} investor aktif)\n\n${lines || '(belum ada investor aktif)'}\n\nMohon proses transfer dividen bulan ini ke masing-masing rekening di atas.`;
+    const message = `*Daftar Transfer Dividen — Periode ${periode}*\n\nBagian per investor: Rp ${Math.round(list.per_investor_amount).toLocaleString('id-ID')} (${list.investor_count} investor aktif)\n\n${lines || '(belum ada investor aktif)'}${barisDibayarLoonars(list)}\n\nMohon proses transfer dividen bulan ini ke masing-masing rekening di atas.`;
 
     const {data:admins} = await supabase.from('villa_users').select('hp').eq('role','admin').eq('is_active',true);
     let sent=0;
@@ -7333,7 +7372,7 @@ async function layani(req){
       const tanda = inv.pemasukan_tetap ? ' (pemasukan tetap)' : inv.unit_dimiliki > 1 ? ` (${inv.unit_dimiliki} unit)` : '';
       return `• Unit ${inv.unit_nomor} — ${inv.nama}: Rp ${Math.round(inv.jumlah).toLocaleString('id-ID')}${tanda} → ${rek}`;
     }).join('\n');
-    const message = `*Pengingat: 1 Jam Lagi Batas Transfer Dividen — Periode ${periode}*\n\nTransfer harus selesai jam 20:00 WIB malam ini.\n\nBagian per investor: Rp ${Math.round(list.per_investor_amount).toLocaleString('id-ID')} (${list.investor_count} investor aktif)\n\n${lines || '(belum ada investor aktif)'}\n\nMohon segera diproses.`;
+    const message = `*Pengingat: 1 Jam Lagi Batas Transfer Dividen — Periode ${periode}*\n\nTransfer harus selesai jam 20:00 WIB malam ini.\n\nBagian per investor: Rp ${Math.round(list.per_investor_amount).toLocaleString('id-ID')} (${list.investor_count} investor aktif)\n\n${lines || '(belum ada investor aktif)'}${barisDibayarLoonars(list)}\n\nMohon segera diproses.`;
 
     const {data:admins2} = await supabase.from('villa_users').select('hp').eq('role','admin').eq('is_active',true);
     let sent2=0;

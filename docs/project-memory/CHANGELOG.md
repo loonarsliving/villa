@@ -4,6 +4,12 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ## main branch history (oldest → newest)
 
+### 2026-11-13 — Unit A1 dua akun: Liza Indira dibayar dari bagian Loonars (owner-approved)
+- Unit A1 dipegang dua pihak: Musafa (pemilik tercatat, rekening BNI, `villa_investor_units`) dan Liza Indira (akun `a1@haluoleo.id`, sebelumnya nonaktif). Keputusan owner: Liza melihat dashboard persis seperti Musafa (1 dari 13 investor, bagian sama), hanya nama yang beda; di belakang layar Liza dibayar dari bagian Loonars. Rumus bagi hasil tetap /13 unit (`countActiveInvestors` = jumlah unit, tidak tersentuh).
+- villa-api: konstanta `AKUN_DIBAYAR_LOONARS` (id akun Liza). `computeDividendList` memisahkan akun ini ke `dibayar_loonars`, sehingga `investors` tetap 13; WA daftar transfer & pengingat 1 jam menampilkannya sebagai bagian terpisah "Dibayar dari bagian Loonars". `/bridge/dividend-proof-forward` kini melewati akun itu dan memilih akun aktif tertua (sebelumnya `limit(1)` tanpa urutan -- dengan dua akun aktif A1 bukti bisa salah alamat).
+- Data (setelah deploy): `villa_users.is_active=true` untuk Liza; Musafa diterbitkan 12 kode menginap gratis A1 sendiri lewat `villa_terbitkan_voucher_investor` (Okt 2026–Sep 2027, sama dengan Liza) -- pilihan owner "Musafa dibuatkan 12 juga", jatah malam gratis A1 jadi 24/tahun.
+- Halaman `/admin/bukti-transfer` (Next.js) membaca semua akun owner aktif, jadi Liza otomatis mendapat bukti transfer versi Loonars dengan angka per unit yang sama -- disengaja.
+
 ### 2026-11-12 — Lapisan gerak UI (animasi) — LIVE (PR #320, owner: "bawa ke production")
 - Permintaan owner: tampilan operasional dibuat lebih menarik & enak dipakai, termasuk Chat. Hanya tampilan -- tidak ada perubahan logika, API, harga, maupun database.
 - Dependensi baru: `motion` (dimuat versi ringan lewat `src/components/MotionProvider.tsx`; komponen memakai `m.*`, bukan `motion.*`). Dipakai untuk Modal, laci menu HP, dan toast (animasi masuk/keluar).
