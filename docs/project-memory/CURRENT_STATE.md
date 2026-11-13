@@ -6,6 +6,7 @@ _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 ## 2026-11-13 — Amenities: stok dipotong otomatis per kamar per malam
 - Owner: "setiap kamar permalam 1 amenities"; beli 200 (100 PL, 100 EL). villa-api `POST /cron/amenities-malam` (pg_cron `villa-amenities-malam` 16.30 UTC = 23.30 WIB, migrasi `20261113000001`) memotong Kit Standar untuk setiap unit dengan booking `status='checkin'` yang menginap malam itu, per properti (PL + `PROPERTI_SIAP`). Idempoten per unit per malam lewat `amenity_usage_log.created_by = 'Otomatis · malam YYYY-MM-DD'` (tanpa kolom baru). Body `{tgl}` opsional untuk menyusulkan malam terlewat. Stok <= minimum -> notifikasi `info` ke `all`.
 - `PATCH /housekeeping/done` untuk tugas `jenis='amenities'` (booking OTA) TIDAK lagi memotong stok (hanya pengingat), agar tidak terhitung dua kali.
+- LIVE 2026-11-13 (PR #324; villa-api live identik dengan main; cron `villa-amenities-malam` aktif). Data diisi: item 'Amenities' stok 100 PL + 100 EL, minimum 15, Kit Standar 1/kamar di kedua properti. Dijalankan manual malam 13 Nov: PL 13 kamar -> stok 87; jalankan ulang -> 0 dipotong (idempoten terbukti). EL 0 kamar terisi.
 - Baru: `GET /amenities/ringkasan` (kamar terisi malam ini, sudah dipotong berapa) + kartu "Pemakaian Malam Ini" (perkiraan cukup berapa malam) di Admin & Front Desk Amenities.
 
 ## 2026-11-13 — Unit A1: dua akun aktif, Liza dibayar dari bagian Loonars
