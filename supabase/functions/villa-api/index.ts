@@ -93,6 +93,7 @@ const RUTE_PROPERTI_LAIN = new Set([
   // Amenities & pesanan BBQ per properti (migrasi 20261104000008).
   'GET /amenities', 'POST /amenities', 'PATCH /amenities', 'DELETE /amenities',
   'GET /amenities/kit', 'POST /amenities/kit', 'DELETE /amenities/kit', 'GET /amenities/usage-log', 'GET /amenities/ringkasan',
+  'GET /manager/amenities', 'POST /manager/amenities/restock',
   'GET /addon-orders',
   // Kesiapan kamar per properti. Selain PL penutupan kamar hanya di sistem
   // (Cloudbeds EL baru punya 1 kamar per tipe -- menutupnya = menutup satu
@@ -1450,6 +1451,29 @@ async function potongAmenitiesMalam(tgl){
     }
   }
   return {kamar_terisi: terisi.kamar.length, dipotong: baru.length, sudah: sudahUnit.size, item: rinci};
+}
+
+/**
+ * Tambah stok amenities (restock) dan catat di amenity_usage_log sebagai
+ * baris qty NEGATIF bertanda 'Restock · <nama>' (riwayat menampilkannya
+ * sebagai +qty). Dipakai Admin (PATCH /amenities) dan Manager
+ * (POST /manager/amenities/restock, owner 2026-11-13). Properti dari konteks.
+ */
+async function tambahStokAmenities(id, qty, oleh){
+  const jumlah = Number(qty);
+  if(!Number.isInteger(jumlah) || jumlah <= 0) return {error:'Jumlah restock harus bilangan bulat lebih dari 0', status:400};
+  if(jumlah > 10000) return {error:'Jumlah restock terlalu besar (maks 10.000 sekali input)', status:400};
+  const {data:cur} = await supabase.from('amenities').select('id,nama,stock').eq('id', id).maybeSingle();
+  if(!cur) return {error:'Item amenities tidak ditemukan', status:404};
+  const {data, error} = await supabase.from('amenities')
+    .update({stock:(cur.stock ?? 0) + jumlah, updated_at:new Date().toISOString()})
+    .eq('id', id).select().single();
+  if(error) return {error:error.message, status:500};
+  await supabase.from('amenity_usage_log').insert({
+    housekeeping_id:null, unit_id:null, unit_nomor:null,
+    amenity_id:id, amenity_nama:cur.nama, qty:-jumlah, created_by:`Restock · ${oleh}`,
+  });
+  return {data};
 }
 
 async function notif(unit_id, role, tipe, judul, pesan, ref_id){
@@ -8373,6 +8397,35 @@ async function layani(req){
     return json(data);
   }
 
+  // Amenities untuk Manager (owner 2026-11-13: "restock bela atau beca bisa
+  // menambah stocknya mereka sbgai manager"). Manager melihat stok, Kit
+  // Standar, pemakaian malam ini, riwayat; dan boleh MENAMBAH stok
+  // (restock). Ubah katalog/kit/hapus tetap hanya Admin. Properti = akun.
+  if(path==='/manager/amenities' && m==='GET'){
+    if(!isManager) return forbidden();
+    const tgl = todayWIB();
+    const [{data:items, error:iErr}, {data:kit}, {data:log}, terisi, {data:sudah}] = await Promise.all([
+      supabase.from('amenities').select('*').order('nama'),
+      supabase.from('amenity_kit_items').select('*, amenities(nama,satuan,stock)').order('created_at'),
+      supabase.from('amenity_usage_log').select('*').order('created_at',{ascending:false}).limit(50),
+      kamarTerisiMalam(tgl),
+      supabase.from('amenity_usage_log').select('unit_id').eq('created_by', penandaAmenitiesMalam(tgl)),
+    ]);
+    if(iErr) return err(iErr.message);
+    return json({
+      items: items ?? [], kit: kit ?? [], log: log ?? [],
+      ringkasan: terisi.error ? null : {tgl, kamar_terisi: terisi.kamar.length, sudah_dipotong: new Set((sudah ?? []).map(r=>r.unit_id)).size},
+    });
+  }
+  if(path==='/manager/amenities/restock' && m==='POST'){
+    if(!isManager) return forbidden();
+    const b = await req.json();
+    if(!b?.id) return err('id wajib diisi');
+    const r = await tambahStokAmenities(b.id, b.qty, await namaPengguna(session));
+    if(r.error) return err(r.error, r.status);
+    return json(r.data);
+  }
+
   if(path==='/manager/kamar' && m==='GET'){
     if(!isManager) return forbidden();
     const hariIni = todayWIB();
@@ -9546,10 +9599,10 @@ async function layani(req){
     if(b.nama!==undefined) patch.nama = b.nama;
     if(b.satuan!==undefined) patch.satuan = b.satuan;
     if(b.stock_minimum!==undefined) patch.stock_minimum = Number(b.stock_minimum);
-    if(b.restock_qty){
-      if(Number(b.restock_qty) <= 0) return err('restock_qty harus lebih dari 0');
-      const {data:current} = await supabase.from('amenities').select('stock').eq('id',b.id).single();
-      patch.stock = (current?.stock ?? 0) + Number(b.restock_qty);
+    if(b.restock_qty!==undefined && b.restock_qty!==null && b.restock_qty!==''){
+      const r = await tambahStokAmenities(b.id, b.restock_qty, await namaPengguna(session));
+      if(r.error) return err(r.error, r.status);
+      if(Object.keys(patch).length === 1) return json(r.data);
     }
     const {data,error} = await supabase.from('amenities').update(patch).eq('id',b.id).select().single();
     if(error) return err(error.message);

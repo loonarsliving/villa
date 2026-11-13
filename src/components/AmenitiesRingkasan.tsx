@@ -21,6 +21,11 @@ export function hitungPerkiraan(items: AmenityItem[], kit: AmenityKitItem[], kam
   });
 }
 
+/** Riwayat: pemakaian (qty positif) tampil "-n", restock (qty negatif) tampil "+n". */
+export function tampilQty(qty: number) {
+  return qty < 0 ? `+${-qty}` : `-${qty}`;
+}
+
 export function RingkasanMalam({
   ringkasan,
   items,

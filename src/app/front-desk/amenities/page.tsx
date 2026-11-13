@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { fmtDate, fmtDateTime } from "@/lib/format";
 import { Card, CardHeader, Loading, Badge } from "@/components/Card";
 import type { AmenityItem, AmenityKitItem, AmenityRingkasan, AmenityUsageLog } from "@/lib/types";
-import { RingkasanMalam } from "@/components/AmenitiesRingkasan";
+import { RingkasanMalam, tampilQty } from "@/components/AmenitiesRingkasan";
 
 export default function FrontDeskAmenitiesPage() {
   const [items, setItems] = useState<AmenityItem[]>([]);
@@ -75,10 +75,10 @@ export default function FrontDeskAmenitiesPage() {
               <div className="flex-1 min-w-0">
                 <div className="text-xs text-ink/80">{l.amenity_nama || "—"}</div>
                 <div className="text-[10px] text-ink/30 mt-0.5">
-                  Unit {l.unit_nomor || "—"} · {fmtDateTime(l.created_at)}
+                  {l.unit_nomor ? `Unit ${l.unit_nomor}` : l.created_by || "Stok masuk"} · {fmtDateTime(l.created_at)}
                 </div>
               </div>
-              <div className="text-xs text-ruby-400 shrink-0">-{l.qty}</div>
+              <div className={`text-xs shrink-0 ${l.qty < 0 ? "text-sage-500" : "text-ruby-400"}`}>{tampilQty(l.qty)}</div>
             </div>
           ))
         )}

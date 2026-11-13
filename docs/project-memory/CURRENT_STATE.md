@@ -3,6 +3,11 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-11-13 — Amenities: Manager boleh restock
+- Owner: "restock bela atau beca bisa menambah stocknya mereka sbgai manager". Halaman baru `/manager/amenities` (menu Manager PL & EL): stok, pemakaian malam ini, riwayat, tombol Restock. villa-api `GET /manager/amenities`, `POST /manager/amenities/restock` (isManager; properti = akun; juga di `RUTE_PROPERTI_LAIN`). Manager hanya bisa MENAMBAH stok; katalog/kit/hapus tetap Admin.
+- Restock (Admin maupun Manager, helper `tambahStokAmenities`) kini tercatat di `amenity_usage_log` sebagai qty NEGATIF, `created_by='Restock · <nama>'`; riwayat menampilkannya "+n". Jumlah wajib bilangan bulat 1–10.000.
+- Akun manager saat ini: "Rebeca" (PL) dan "Manager" (EL; tidak ada akun bernama Bela -- diasumsikan Bela memakai akun EL ini).
+
 ## 2026-11-13 — Amenities: stok dipotong otomatis per kamar per malam
 - Owner: "setiap kamar permalam 1 amenities"; beli 200 (100 PL, 100 EL). villa-api `POST /cron/amenities-malam` (pg_cron `villa-amenities-malam` 16.30 UTC = 23.30 WIB, migrasi `20261113000001`) memotong Kit Standar untuk setiap unit dengan booking `status='checkin'` yang menginap malam itu, per properti (PL + `PROPERTI_SIAP`). Idempoten per unit per malam lewat `amenity_usage_log.created_by = 'Otomatis · malam YYYY-MM-DD'` (tanpa kolom baru). Body `{tgl}` opsional untuk menyusulkan malam terlewat. Stok <= minimum -> notifikasi `info` ke `all`.
 - `PATCH /housekeeping/done` untuk tugas `jenis='amenities'` (booking OTA) TIDAK lagi memotong stok (hanya pengingat), agar tidak terhitung dua kali.

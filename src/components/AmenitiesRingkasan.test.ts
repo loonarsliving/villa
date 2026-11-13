@@ -15,3 +15,11 @@ describe("hitungPerkiraan", () => {
     expect(hitungPerkiraan(items, kit, 0)[0].cukupMalam).toBeNull();
   });
 });
+
+import { tampilQty } from "./AmenitiesRingkasan";
+describe("tampilQty", () => {
+  it("pemakaian tampil minus, restock tampil plus", () => {
+    expect(tampilQty(1)).toBe("-1");
+    expect(tampilQty(-100)).toBe("+100");
+  });
+});
