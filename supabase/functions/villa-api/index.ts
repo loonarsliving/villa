@@ -7386,6 +7386,50 @@ async function layani(req){
     return json({diusulkan:true, kode_konfirmasi:kodeKonfirmasi, okupansi_persen:okupansi, jumlah_penerima:penerima.length});
   }
 
+  // Kirim ulang invoice ke tamu yang sudah lunas SEBELUM WA "pembayaran
+  // berhasil" membawa link /invoice dan PDF-nya (owner 2026-11-13: "ya
+  // setuju" kirim ulang otomatis). Daftar booking eksplisit lewat ?ids=
+  // (dipicu sekali lewat villa_cron_post), maks 20 per panggilan.
+  // Hanya booking website yang lunas, bukan menginap gratis, belum batal.
+  // Sekali per booking (template booking_invoice_resend di wa_messages_log).
+  if(path==='/cron/kirim-ulang-invoice' && m==='POST'){
+    const cron = await getSetting('cron');
+    const provided = req.headers.get('x-cron-secret') ?? '';
+    if(!cron.secret) return err('Cron belum dikonfigurasi (integration_settings.cron.secret)',503);
+    if(!await secretsMatch(provided, cron.secret)) return err('Unauthorized',401);
+    const ids = String(url.searchParams.get('ids') ?? '').split(',').map(x=>x.trim()).filter(x=>/^[0-9a-f-]{36}$/i.test(x)).slice(0, 20);
+    if(!ids.length) return err('ids wajib diisi');
+    const hasil = [];
+    for(const id of ids){
+      try {
+        const {data:bk} = await supabase.from('bookings')
+          .select('id,unit_id,guest_id,guest_nama,sumber,status,tgl_checkin,tgl_checkout,invoice_no,bukti_pembayaran_at,is_free_stay')
+          .eq('id', id).maybeSingle();
+        if(!bk){ hasil.push({id, hasil:'tidak_ada'}); continue; }
+        if(!SUMBER_BOOKING_WEBSITE.includes(bk.sumber) || bk.is_free_stay || bk.status === 'batal' || !bk.invoice_no || !bk.bukti_pembayaran_at){
+          hasil.push({id, hasil:'dilewati'}); continue;
+        }
+        const {data:sudah} = await supabase.from('wa_messages_log').select('id')
+          .eq('booking_id', bk.id).eq('template_type', templateProperti('booking_invoice_resend')).eq('status','sent').limit(1);
+        if(sudah?.length){ hasil.push({id, hasil:'sudah'}); continue; }
+        const {data:g} = bk.guest_id ? await supabase.from('guests').select('hp').eq('id', bk.guest_id).maybeSingle() : {data:null};
+        if(!g?.hp){ hasil.push({id, hasil:'tanpa_hp'}); continue; }
+        const bahasa = bahasaDariNomorHp(g.hp);
+        const rentang = `${tanggalSingkat(bk.tgl_checkin, bahasa, false)} – ${tanggalSingkat(bk.tgl_checkout, bahasa, true)}`;
+        const link = linkInvoiceTamu(bk.id);
+        const teks = bahasa === 'en'
+          ? `Hi ${bk.guest_nama || 'there'} 👋\n\nHere is the invoice for your stay at ${namaProperti()} (${rentang}, invoice ${bk.invoice_no}).\n\nDownload it anytime: ${link}\n(enter this WhatsApp number)\n\nSorry this link was missing from our earlier message. See you soon at Loonars! 🌿`
+          : `Halo Kak${bk.guest_nama ? ` ${bk.guest_nama}` : ''} 👋\n\nBerikut invoice pemesanan Kakak di ${namaProperti()} (${rentang}, no. invoice ${bk.invoice_no}).\n\nUnduh kapan saja: ${link}\n(masukkan nomor WhatsApp ini)\n\nMohon maaf, link ini belum ada di pesan kami sebelumnya. Sampai jumpa di Loonars! 🌿`;
+        const terkirim = await sendWa(g.hp, teks, {booking_id: bk.id, unit_id: bk.unit_id, template_type: templateProperti('booking_invoice_resend')});
+        const pdf = terkirim ? await kirimPdfInvoiceLunas(bk.id, g.hp) : 'tidak_dicoba';
+        hasil.push({id, hasil: terkirim ? 'terkirim' : 'gagal', pdf});
+      } catch(e){
+        hasil.push({id, hasil:'error', pesan:String(e?.message ?? e).slice(0, 200)});
+      }
+    }
+    return json({success:true, hasil});
+  }
+
   if(path==='/cron/expire-pending-bookings' && m==='POST'){
     const cron = await getSetting('cron');
     const provided = req.headers.get('x-cron-secret') ?? '';
