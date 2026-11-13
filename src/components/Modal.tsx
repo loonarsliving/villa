@@ -117,7 +117,7 @@ export function Btn({
       aria-disabled={disabled}
       className={`px-4 py-2 rounded-lg text-[11.5px] font-semibold tracking-wide ${
         variant === "primary"
-          ? "sheen bg-gold-500 text-base-950 shadow-sm shadow-gold-500/30 hover:bg-gold-400 hover:shadow-md hover:shadow-gold-500/40"
+          ? "sheen bg-gold-500 text-white shadow-sm shadow-gold-500/30 hover:bg-gold-400 hover:shadow-md hover:shadow-gold-500/40"
           : "bg-base-800 text-ink/50 border border-ink/10 hover:bg-base-700 hover:text-ink/70"
       } ${disabled ? "opacity-50 cursor-not-allowed pointer-events-none" : ""}`}
     >

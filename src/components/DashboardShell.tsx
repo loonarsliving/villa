@@ -63,17 +63,17 @@ function NavList({ sections, pathname, onNavigate }: { sections: NavSection[]; p
       onScroll={(e) => {
         gulirSidebar = e.currentTarget.scrollTop;
       }}
-      className="flex-1 overflow-y-auto px-2.5 py-4"
+      className="relative flex-1 overflow-y-auto px-2.5 py-4"
     >
       <div className="relative">
         <span
           ref={penandaRef}
           aria-hidden
-          className="pointer-events-none absolute left-0 right-0 rounded-lg bg-gold-500/10 border-l-2 border-gold-500 opacity-0"
+          className="pointer-events-none absolute left-0 right-0 rounded-xl bg-cream/[0.1] border-l-2 border-gold-400 shadow-[inset_0_0_0_1px_rgba(246,241,232,0.06)] opacity-0"
         />
         {sections.map((sec) => (
           <div key={sec.title}>
-            <div className="text-[8.5px] font-semibold text-ink/30 tracking-[0.18em] uppercase px-2 py-3.5">{sec.title}</div>
+            <div className="text-[8.5px] font-semibold text-[#d6b98f]/70 tracking-[0.22em] uppercase px-2 py-3.5">{sec.title}</div>
             {sec.items.map((item) => {
               const active = pathname === item.href;
               return (
@@ -82,8 +82,8 @@ function NavList({ sections, pathname, onNavigate }: { sections: NavSection[]; p
                   href={item.href}
                   data-aktif={active}
                   onClick={onNavigate}
-                  className={`group relative flex items-center gap-2.5 px-2.5 py-2.5 rounded-lg text-[13px] mb-0.5 ${
-                    active ? "text-gold-600 font-medium" : "text-ink/50 hover:bg-ink/[0.05] hover:text-ink/80"
+                  className={`group relative flex items-center gap-2.5 px-2.5 py-2.5 rounded-xl text-[13px] mb-0.5 ${
+                    active ? "text-white font-medium" : "text-cream/65 hover:bg-cream/[0.06] hover:text-cream"
                   }`}
                 >
                   <span className="w-4 text-center text-sm shrink-0 transition-transform duration-300 group-hover:scale-125">{item.icon}</span>
@@ -146,26 +146,26 @@ export function DashboardShell({
 
   const navContent = (
     <>
-      <div className="px-5 py-5 border-b border-ink/[0.08]">
-        <div className="text-[10px] font-medium text-gold-500 tracking-[0.25em] uppercase">{property}</div>
-        <div className="font-serif text-lg font-light text-ink leading-tight mt-1">
+      <div className="relative px-5 py-5 border-b border-cream/[0.08]">
+        <div className="text-[10px] font-medium text-[#d6b98f] tracking-[0.25em] uppercase">{property}</div>
+        <div className="font-serif text-lg font-light text-cream leading-tight mt-1">
           {brandTitle}
           <br />
-          <em className="italic text-gold-500">{brandSub}</em>
+          <em className="italic text-[#e7c9a5]">{brandSub}</em>
         </div>
       </div>
       <NavList sections={sections} pathname={pathname} onNavigate={() => setDrawerOpen(false)} />
-      <div className="p-3.5 border-t border-ink/[0.08] flex items-center gap-2.5">
-        <div className="w-7 h-7 bg-gold-500/10 border border-gold-500/25 rounded-full flex items-center justify-center text-[10px] font-semibold text-gold-500 shrink-0">
+      <div className="relative p-3.5 border-t border-cream/[0.08] flex items-center gap-2.5">
+        <div className="w-7 h-7 bg-cream/10 border border-cream/25 rounded-full flex items-center justify-center text-[10px] font-semibold text-[#e7c9a5] shrink-0">
           {initials(user?.nama)}
         </div>
         <div className="min-w-0">
-          <div className="text-[11.5px] font-medium text-ink truncate">{user?.nama || "—"}</div>
-          <div className="text-[9.5px] text-ink/30">{roleLabel}</div>
+          <div className="text-[11.5px] font-medium text-cream truncate">{user?.nama || "—"}</div>
+          <div className="text-[9.5px] text-cream/45">{roleLabel}</div>
         </div>
         <button
           onClick={logout}
-          className="ml-auto text-[10px] text-ink/40 hover:text-ruby-500 hover:border-ruby-500/40 hover:bg-ruby-500/5 px-2 py-1 border border-ink/10 rounded-md shrink-0"
+          className="ml-auto text-[10px] text-cream/55 hover:text-white hover:border-ruby-400/60 hover:bg-ruby-500/20 px-2 py-1 border border-cream/15 rounded-md shrink-0"
         >
           Keluar
         </button>
@@ -176,7 +176,9 @@ export function DashboardShell({
   return (
     <div className="min-h-screen flex">
       {/* Desktop / tablet sidebar */}
-      <aside className="hidden md:flex md:w-[220px] md:min-w-[220px] h-screen bg-base-900 border-r border-ink/[0.08] fixed top-0 left-0 flex-col z-40">
+      <aside className="hidden md:flex md:w-[220px] md:min-w-[220px] h-screen bg-forest text-cream fixed top-0 left-0 flex-col z-40 overflow-hidden">
+        <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-48 opacity-70" style={{ background: "radial-gradient(20rem 11rem at 15% 0%, rgba(180,105,63,0.25), transparent 70%)" }} />
+        <div aria-hidden className="pointer-events-none absolute -bottom-24 -left-24 h-64 w-64 rounded-full border border-cream/5 shadow-[0_0_0_36px_rgba(246,241,232,0.02),0_0_0_72px_rgba(246,241,232,0.015)]" />
         {navContent}
       </aside>
 
@@ -189,7 +191,7 @@ export function DashboardShell({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="absolute inset-0 bg-ink/50 backdrop-blur-[2px]"
+              className="absolute inset-0 bg-forest/50 backdrop-blur-[3px]"
               onClick={() => setDrawerOpen(false)}
             />
             <m.aside
@@ -197,7 +199,7 @@ export function DashboardShell({
               animate={{ x: 0 }}
               exit={{ x: "-100%" }}
               transition={{ type: "spring", stiffness: 380, damping: 36 }}
-              className="relative w-[260px] max-w-[80vw] h-full bg-base-900 border-r border-ink/[0.08] flex flex-col shadow-2xl shadow-ink/20"
+              className="relative w-[260px] max-w-[80vw] h-full bg-forest text-cream flex flex-col shadow-2xl shadow-ink/30"
             >
               {navContent}
             </m.aside>
@@ -206,7 +208,7 @@ export function DashboardShell({
       </AnimatePresence>
 
       <div className="flex-1 min-w-0 flex flex-col md:ml-[220px]">
-        <header className="h-14 bg-base-900/85 backdrop-blur-md border-b border-ink/[0.08] flex items-center justify-between px-4 sm:px-7 sticky top-0 z-30">
+        <header className="h-14 bg-canvas/85 backdrop-blur-xl border-b border-ink/[0.07] shadow-[0_10px_30px_-24px_rgba(43,38,32,0.4)] flex items-center justify-between px-4 sm:px-7 sticky top-0 z-30">
           <div className="flex items-center gap-3 min-w-0">
             <button
               onClick={() => setDrawerOpen(true)}
@@ -216,7 +218,7 @@ export function DashboardShell({
               ☰
             </button>
             <div key={pathname} className="anim-fade-up min-w-0">
-              <div className="font-serif text-lg sm:text-xl font-light text-ink truncate">{pageTitle}</div>
+              <div className="font-serif text-xl sm:text-2xl font-normal text-ink truncate">{pageTitle}</div>
               {pageSub && <div className="text-[10px] text-ink/30 truncate hidden sm:block">{pageSub}</div>}
             </div>
           </div>

@@ -13,8 +13,8 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "Portal Investor & Operasional — Loonars Private Living",
     start_url: "/",
     display: "standalone",
-    background_color: "#f5f6f9",
-    theme_color: "#456147",
+    background_color: "#f6f1e8",
+    theme_color: "#1f2d22",
     icons: [
       { src: "/icon/192", sizes: "192x192", type: "image/png" },
       { src: "/icon/512", sizes: "512x512", type: "image/png" },

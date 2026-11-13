@@ -642,7 +642,7 @@ export default function PaymentGatewayPage() {
                       key={k}
                       onClick={() => resetForm(k)}
                       className={`flex-1 py-2.5 rounded-lg text-[11.5px] font-semibold transition ${
-                        form.kategori === k ? "bg-gold-500 text-base-950" : "bg-base-800 text-ink/50 border border-ink/10"
+                        form.kategori === k ? "bg-gold-500 text-white" : "bg-base-800 text-ink/50 border border-ink/10"
                       }`}
                     >
                       <span className="mr-1">{kategoriIcon[k]}</span>
@@ -757,7 +757,7 @@ export default function PaymentGatewayPage() {
               <button
                 onClick={createPayment}
                 disabled={submitting || (form.kategori === "villa" && !stayRange.ok)}
-                className="w-full mt-1 bg-gold-500 text-base-950 rounded-lg py-3 text-[12.5px] font-semibold tracking-wide hover:opacity-90 active:scale-[0.99] transition disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full mt-1 bg-gold-500 text-white rounded-lg py-3 text-[12.5px] font-semibold tracking-wide hover:opacity-90 active:scale-[0.99] transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {submitting ? "Memproses…" : form.kategori === "villa" ? "Lanjut: Foto KTP & Tanda Tangan →" : "Buat Tagihan & Tampilkan QRIS"}
               </button>

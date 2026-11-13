@@ -13,8 +13,8 @@
 }
 
 body {
-  background: #f5f6f9;
-  color: #14161b;
+  background: #f6f1e8;
+  color: #2b2620;
 }
 
 @keyframes pulse-dot {
@@ -52,7 +52,7 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(20, 22, 27, 0.15);
+  background: rgba(43, 38, 32, 0.18);
   border-radius: 4px;
 }
 
@@ -104,7 +104,7 @@ body {
     transition: background-color 0.15s ease;
   }
   :focus-visible {
-    outline: 2px solid rgba(196, 160, 92, 0.55);
+    outline: 2px solid rgba(180, 105, 63, 0.55);
     outline-offset: 2px;
   }
 }
@@ -222,7 +222,7 @@ body {
 /* Kerangka pemuatan berkilau -- pengganti tulisan "Memuat..." */
 .skeleton {
   border-radius: 8px;
-  background: linear-gradient(90deg, rgba(20, 22, 27, 0.06) 25%, rgba(20, 22, 27, 0.12) 37%, rgba(20, 22, 27, 0.06) 63%);
+  background: linear-gradient(90deg, rgba(43, 38, 32, 0.06) 25%, rgba(43, 38, 32, 0.12) 37%, rgba(43, 38, 32, 0.06) 63%);
   background-size: 200% 100%;
   animation: shimmer 1.4s linear infinite;
 }
@@ -279,3 +279,9 @@ body {
 .grid > .anim-fade-up:nth-child(5) { animation-delay: 0.2s; }
 .grid > .anim-fade-up:nth-child(6) { animation-delay: 0.25s; }
 .grid > .anim-fade-up:nth-child(n + 7) { animation-delay: 0.3s; }
+
+/* Cormorant (font-serif) memakai angka gaya lama -- "4" dan "9" tampil
+   sekecil huruf kecil di kartu statistik. Angka tegak supaya terbaca. */
+.font-serif {
+  font-variant-numeric: lining-nums;
+}

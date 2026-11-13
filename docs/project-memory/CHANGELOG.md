@@ -20,6 +20,11 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 - Data (setelah deploy): `villa_users.is_active=true` untuk Liza; Musafa diterbitkan 12 kode menginap gratis A1 sendiri lewat `villa_terbitkan_voucher_investor` (Okt 2026–Sep 2027, sama dengan Liza) -- pilihan owner "Musafa dibuatkan 12 juga", jatah malam gratis A1 jadi 24/tahun.
 - Halaman `/admin/bukti-transfer` (Next.js) membaca semua akun owner aktif, jadi Liza otomatis mendapat bukti transfer versi Loonars dengan angka per unit yang sama -- disengaja.
 
+### 2026-11-13 — Dashboard villa dirombak ke palet loonars.id
+- Palet di `tailwind.config.ts` (nama kelas tetap, nilainya diganti): `gold` → terakota (aksen/aksi utama, tombol kini teks putih), `sage` → hijau daun, `ruby` → merah hangat, `azure` → biru-abu redup, `base`/`canvas`/`ink` → kertas krem & tinta cokelat; `slate`/`blue` bawaan Tailwind diganti versi hangat (dipakai beranda investor/admin `AppHome`). Token baru `forest`, `cream`.
+- `DashboardShell`: sidebar & laci HP hijau hutan (teks krem, penanda aktif terakota), header krem berlapis kaca. Header `AppHome` hijau hutan + cahaya terakota. `globals.css`/`manifest.ts` mengikuti palet; angka `font-serif` dipaksa lining.
+- Hanya tampilan; tidak ada perubahan logika, API, harga, atau database.
+
 ### 2026-11-13 — WA "pembayaran berhasil" membawa link unduh invoice
 - Kasus: tamu yang sudah lunas dan menerima WA tidak bisa mengunduh bukti pemesanan. Tombol invoice di loonars.id hanya muncul di browser tempat memesan (booking disimpan di localStorage), sedangkan WA hanya menyuruh ke "halaman pemesanan loonars.id".
 - PDF invoice kini juga DIKIRIM sebagai pesan WA kedua (`kirimPdfInvoiceLunas`): dibuat di villa-api dengan `npm:jspdf@3.0.4` (dimuat dinamis, `buatPdfInvoice` = salinan `components/booking/invoicePdf.ts` repo loonars — ubah keduanya bersamaan), diunggah ke bucket publik `wa-outbox` (pola MK Connect 0306, nama acak, dihapus otomatis setelah sehari), lalu `sendWa(..., {file})`. Template `booking_paid_invoice_pdf` (EL: `el_…`), dedupe lewat `wa_messages_log`. Menginap gratis dilewati. Gagalnya tidak mengubah konfirmasi pembayaran maupun pesan teks.
