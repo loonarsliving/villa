@@ -313,7 +313,7 @@ export default function FrontDeskPage() {
                   {units.map((u) => (
                     <div key={u.id} className={`border rounded px-2.5 py-2 min-w-[52px] text-center ${statusColor[u.status]}`}>
                       <div className="font-serif text-base font-light text-ink">{u.nomor}</div>
-                      <div className="text-[8.5px] text-ink/30 mt-0.5">{statusLabel[u.status]}</div>
+                      <div className="text-[8.5px] text-ink/50 mt-0.5">{statusLabel[u.status]}</div>
                     </div>
                   ))}
                 </div>
@@ -333,7 +333,7 @@ export default function FrontDeskPage() {
                     <div className="text-[11.5px] text-ink/50 leading-relaxed">
                       <b className="text-ink">{n.judul}</b> — {n.pesan}
                     </div>
-                    <div className="text-[9.5px] text-ink/30 mt-0.5">{fmtDate(n.created_at)}</div>
+                    <div className="text-[9.5px] text-ink/50 mt-0.5">{fmtDate(n.created_at)}</div>
                   </div>
                 </div>
               ))
@@ -345,20 +345,20 @@ export default function FrontDeskPage() {
           <Card>
             <CardHeader title="Aksi Cepat" />
             <div className="p-4 grid grid-cols-2 gap-2">
-              <button onClick={openCheckin} className="flex flex-col items-center justify-center py-4 rounded bg-gold-500 text-white">
-                <span className="text-lg">🛎️</span>
+              <button onClick={openCheckin} className="group sheen flex flex-col items-center justify-center py-4 rounded-xl bg-gold-500 text-white shadow-md shadow-gold-500/30 transition duration-300 hover:-translate-y-1 hover:shadow-lg hover:shadow-gold-500/40">
+                <span className="text-lg transition-transform duration-300 group-hover:scale-125 group-hover:-rotate-6">🛎️</span>
                 <span className="text-[10.5px] font-semibold mt-1">Check-In</span>
               </button>
-              <button onClick={openCheckout} className="flex flex-col items-center justify-center py-4 rounded bg-base-800 border border-ink/10 text-ink/50">
-                <span className="text-lg">👋</span>
+              <button onClick={openCheckout} className="group flex flex-col items-center justify-center py-4 rounded-xl bg-base-800 border border-ink/10 text-ink/60 transition duration-300 hover:-translate-y-1 hover:border-gold-500/40 hover:bg-base-700/60 hover:text-ink hover:shadow-md hover:shadow-ink/10">
+                <span className="text-lg transition-transform duration-300 group-hover:scale-125 group-hover:-rotate-6">👋</span>
                 <span className="text-[10.5px] font-medium mt-1">Check-Out</span>
               </button>
-              <a href="/front-desk/housekeeping" className="flex flex-col items-center justify-center py-4 rounded bg-base-800 border border-ink/10 text-ink/50">
-                <span className="text-lg">🧹</span>
+              <a href="/front-desk/housekeeping" className="group flex flex-col items-center justify-center py-4 rounded-xl bg-base-800 border border-ink/10 text-ink/60 transition duration-300 hover:-translate-y-1 hover:border-gold-500/40 hover:bg-base-700/60 hover:text-ink hover:shadow-md hover:shadow-ink/10">
+                <span className="text-lg transition-transform duration-300 group-hover:scale-125 group-hover:-rotate-6">🧹</span>
                 <span className="text-[10.5px] font-medium mt-1">Housekeeping</span>
               </a>
-              <a href="/front-desk/booking" className="flex flex-col items-center justify-center py-4 rounded bg-base-800 border border-ink/10 text-ink/50">
-                <span className="text-lg">📅</span>
+              <a href="/front-desk/booking" className="group flex flex-col items-center justify-center py-4 rounded-xl bg-base-800 border border-ink/10 text-ink/60 transition duration-300 hover:-translate-y-1 hover:border-gold-500/40 hover:bg-base-700/60 hover:text-ink hover:shadow-md hover:shadow-ink/10">
+                <span className="text-lg transition-transform duration-300 group-hover:scale-125 group-hover:-rotate-6">📅</span>
                 <span className="text-[10.5px] font-medium mt-1">Booking</span>
               </a>
             </div>
@@ -373,9 +373,9 @@ export default function FrontDeskPage() {
                   <div className={`w-1.5 h-1.5 rounded-full shrink-0 mt-1 ${a.dot}`} />
                   <div className="flex-1">
                     <div className="text-[11.5px] font-medium text-ink/80">{a.title}</div>
-                    <div className="text-[10px] text-ink/30">{a.sub}</div>
+                    <div className="text-[10px] text-ink/50">{a.sub}</div>
                   </div>
-                  <div className="font-mono text-[9.5px] text-ink/30 pt-0.5 shrink-0">{a.time}</div>
+                  <div className="font-mono text-[9.5px] text-ink/50 pt-0.5 shrink-0">{a.time}</div>
                 </div>
               ))
             )}
@@ -428,7 +428,7 @@ export default function FrontDeskPage() {
                   onChange={(e) => setCiSearch(e.target.value)}
                   placeholder="Cari nama tamu / unit / no. HP…"
                 />
-                <div className="text-[9.5px] text-ink/30 mt-1">
+                <div className="text-[9.5px] text-ink/50 mt-1">
                   {tibaHariIni > 0
                     ? `${tibaHariIni} tamu dijadwalkan tiba hari ini atau sebelumnya — ada di urutan atas.`
                     : "Belum ada tamu yang dijadwalkan tiba hari ini."}
@@ -436,9 +436,9 @@ export default function FrontDeskPage() {
               </div>
             )}
             {scheduledBookings.length === 0 ? (
-              <div className="text-[11px] text-ink/30 text-center py-6">Tidak ada booking terjadwal. Pakai tab &quot;Tamu Baru&quot; untuk tamu yang belum ada bookingnya.</div>
+              <div className="text-[11px] text-ink/50 text-center py-6">Tidak ada booking terjadwal. Pakai tab &quot;Tamu Baru&quot; untuk tamu yang belum ada bookingnya.</div>
             ) : sortedScheduled.length === 0 ? (
-              <div className="text-[11px] text-ink/30 text-center py-6">Tidak ada booking yang cocok dengan pencarian &quot;{ciSearch}&quot;.</div>
+              <div className="text-[11px] text-ink/50 text-center py-6">Tidak ada booking yang cocok dengan pencarian &quot;{ciSearch}&quot;.</div>
             ) : (
               <div className="max-h-[280px] overflow-y-auto -mx-1 space-y-1.5">
                 {sortedScheduled.map((bk) => {
@@ -460,7 +460,7 @@ export default function FrontDeskPage() {
                             </span>
                           )}
                         </div>
-                        <div className="text-[9.5px] text-ink/30 mt-0.5">
+                        <div className="text-[9.5px] text-ink/50 mt-0.5">
                           Unit {bk.unit_nomor} · {fmtDate(bk.tgl_checkin)} · {bk.sumber === "cloudbeds" ? "☁ Cloudbeds" : bk.sumber}
                         </div>
                         {bk.paket_dekorasi && (

@@ -169,21 +169,21 @@ export function SurvivalControlCenter({ from, to }: { from: string; to: string }
         <CardHeader title="Bulan Ini" subtitle={`${s.this_month.month} — sisa ${s.this_month.days_remaining} hari`} />
         <div className="p-4 sm:p-5 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
           <div>
-            <div className="text-[9.5px] text-ink/30 uppercase tracking-wide">Sudah Terjual</div>
+            <div className="text-[9.5px] text-ink/50 uppercase tracking-wide">Sudah Terjual</div>
             <div className="font-serif text-lg text-ink">{s.this_month.room_nights_so_far} malam</div>
           </div>
           <div>
-            <div className="text-[9.5px] text-ink/30 uppercase tracking-wide">Target Sebulan</div>
+            <div className="text-[9.5px] text-ink/50 uppercase tracking-wide">Target Sebulan</div>
             <div className="font-serif text-lg text-ink">{s.this_month.room_nights_required != null ? `${Math.ceil(s.this_month.room_nights_required)} malam` : "—"}</div>
           </div>
           <div>
-            <div className="text-[9.5px] text-ink/30 uppercase tracking-wide">Masih Kurang</div>
+            <div className="text-[9.5px] text-ink/50 uppercase tracking-wide">Masih Kurang</div>
             <div className={`font-serif text-lg ${s.this_month.room_nights_still_needed === 0 ? "text-sage-600" : "text-ruby-500"}`}>
               {s.this_month.room_nights_still_needed != null ? `${Math.ceil(s.this_month.room_nights_still_needed)} malam` : "—"}
             </div>
           </div>
           <div>
-            <div className="text-[9.5px] text-ink/30 uppercase tracking-wide">Perlu / Malam (Sisa Hari)</div>
+            <div className="text-[9.5px] text-ink/50 uppercase tracking-wide">Perlu / Malam (Sisa Hari)</div>
             <div className="font-serif text-lg text-ink">
               {s.this_month.avg_rooms_per_night_needed_for_rest_of_month != null
                 ? `${s.this_month.avg_rooms_per_night_needed_for_rest_of_month.toFixed(1)} kamar`
@@ -229,15 +229,15 @@ export function SurvivalControlCenter({ from, to }: { from: string; to: string }
             <CardHeader title="Seberapa jauh dari cakupan jaminan?" subtitle="Periode berjalan" />
             <div className="p-4 sm:p-5 grid grid-cols-3 gap-2 text-center">
               <div>
-                <div className="text-[9.5px] text-ink/30 uppercase tracking-wide">Entitlement</div>
+                <div className="text-[9.5px] text-ink/50 uppercase tracking-wide">Entitlement</div>
                 <div className="font-serif text-base text-ink">{fmtCurrency(data.investor_entitlement_mtd)}</div>
               </div>
               <div>
-                <div className="text-[9.5px] text-ink/30 uppercase tracking-wide">Jaminan</div>
+                <div className="text-[9.5px] text-ink/50 uppercase tracking-wide">Jaminan</div>
                 <div className="font-serif text-base text-ink">{fmtCurrency(data.investor_guarantee)}</div>
               </div>
               <div>
-                <div className="text-[9.5px] text-ink/30 uppercase tracking-wide">Gap</div>
+                <div className="text-[9.5px] text-ink/50 uppercase tracking-wide">Gap</div>
                 <div className={`font-serif text-base ${gapToGuarantee <= 0 ? "text-sage-600" : "text-ruby-500"}`}>
                   {gapToGuarantee <= 0 ? "Tercapai" : fmtCurrency(gapToGuarantee)}
                 </div>

@@ -130,7 +130,7 @@ export default function ElCloudbedsPage() {
           <div className="divide-y divide-ink/[0.05]">
             {mappings.map((mp) => (
               <div key={mp.id} className="px-4 sm:px-5 py-2.5 flex items-center justify-between gap-3 text-[12px]">
-                <span className="text-ink/70">{mp.cloudbeds_room_name ?? mp.cloudbeds_room_id} <span className="text-ink/30">({mp.cloudbeds_room_id})</span></span>
+                <span className="text-ink/70">{mp.cloudbeds_room_name ?? mp.cloudbeds_room_id} <span className="text-ink/50">({mp.cloudbeds_room_id})</span></span>
                 <span className="flex items-center gap-3">
                   <span className="font-semibold text-ink">→ {mp.el_rooms?.nomor ?? "?"}</span>
                   <Btn onClick={() => hapus(mp.id)}>Hapus</Btn>

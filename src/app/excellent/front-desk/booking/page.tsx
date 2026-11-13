@@ -292,7 +292,7 @@ export default function ElBookingPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-[12px]">
               <thead>
-                <tr className="text-left text-[9.5px] uppercase tracking-wider text-ink/30">
+                <tr className="text-left text-[9.5px] uppercase tracking-wider text-ink/50">
                   <th className="px-3.5 py-2.5">Kamar</th>
                   <th className="px-3.5 py-2.5">Tamu</th>
                   <th className="px-3.5 py-2.5">Tanggal</th>
@@ -308,11 +308,11 @@ export default function ElBookingPage() {
                     <td className="px-3.5 py-2.5 font-semibold text-ink">{b.room_nomor ?? "—"}</td>
                     <td className="px-3.5 py-2.5 text-ink/70">
                       {b.guest_nama}
-                      {b.guest_hp && <div className="text-[10.5px] text-ink/35">{b.guest_hp}</div>}
+                      {b.guest_hp && <div className="text-[10.5px] text-ink/55">{b.guest_hp}</div>}
                     </td>
                     <td className="px-3.5 py-2.5 text-ink/60 whitespace-nowrap">
                       {b.tgl_checkin} → {b.tgl_checkout}
-                      <div className="text-[10.5px] text-ink/35">{b.durasi_malam ?? "-"} malam · {b.adults} dewasa{b.children ? `, ${b.children} anak` : ""}</div>
+                      <div className="text-[10.5px] text-ink/55">{b.durasi_malam ?? "-"} malam · {b.adults} dewasa{b.children ? `, ${b.children} anak` : ""}</div>
                     </td>
                     <td className="px-3.5 py-2.5 text-ink/60">{b.sumber}</td>
                     <td className="px-3.5 py-2.5 text-right text-ink/70 whitespace-nowrap">{fmtCurrencyFull(b.total_bayar)}</td>

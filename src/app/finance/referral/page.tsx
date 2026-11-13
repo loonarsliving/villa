@@ -195,7 +195,7 @@ export default function ReferralFeesPage() {
                         </td>
                         <td className="px-3 py-2.5">
                           {p.status_fee !== "sah" ? (
-                            <span className="text-ink/30">—</span>
+                            <span className="text-ink/50">—</span>
                           ) : p.fee_dibayar_at ? (
                             <span className="text-sage-400">
                               Dicairkan {fmtDate(p.fee_dibayar_at)}{" "}

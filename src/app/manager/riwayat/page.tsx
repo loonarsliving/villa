@@ -49,7 +49,7 @@ export default function RiwayatCekPage() {
                   <div className="text-[12.5px] text-ink">
                     Unit {r.unit_nomor ?? "—"} · <span className={aksi.cls}>{aksi.teks}</span>
                   </div>
-                  <div className="text-[10.5px] text-ink/30 shrink-0">{fmtDateTime(r.created_at)}</div>
+                  <div className="text-[10.5px] text-ink/50 shrink-0">{fmtDateTime(r.created_at)}</div>
                 </div>
                 <div className="text-[11px] text-ink/40 mt-1">
                   {r.dicek_oleh_nama ?? "—"}
@@ -57,7 +57,7 @@ export default function RiwayatCekPage() {
                   {bermasalah.length > 0 && ` · bermasalah: ${bermasalah.join(", ")}`}
                 </div>
                 {r.catatan && <div className="text-[11px] text-ink/60 mt-1">{r.catatan}</div>}
-                {r.cloudbeds_pesan && <div className="text-[10.5px] text-ink/30 mt-1">{r.cloudbeds_pesan}</div>}
+                {r.cloudbeds_pesan && <div className="text-[10.5px] text-ink/50 mt-1">{r.cloudbeds_pesan}</div>}
               </div>
             );
           })

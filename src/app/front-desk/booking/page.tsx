@@ -195,7 +195,7 @@ export default function BookingCalendarPage() {
         ) : (
           <div className="overflow-x-auto">
             <div className="flex sticky top-0 z-20 bg-base-900">
-              <div className="w-[84px] shrink-0 px-2 py-2 text-[9px] text-ink/30 sticky left-0 bg-base-900 z-30">Unit</div>
+              <div className="w-[84px] shrink-0 px-2 py-2 text-[9px] text-ink/50 sticky left-0 bg-base-900 z-30">Unit</div>
               <div className="flex-1 flex">
                 {days.map((d) => (
                   <div

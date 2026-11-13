@@ -54,7 +54,7 @@ export default function FrontDeskAmenitiesPage() {
               <div key={it.id} className="flex items-center gap-3 px-4 sm:px-5 py-2.5 border-b border-ink/[0.05] last:border-0">
                 <div className="flex-1 min-w-0">
                   <div className="text-xs text-ink/80">{it.nama}</div>
-                  <div className="text-[10px] text-ink/30 mt-0.5">Minimum {it.stock_minimum} {it.satuan}</div>
+                  <div className="text-[10px] text-ink/50 mt-0.5">Minimum {it.stock_minimum} {it.satuan}</div>
                 </div>
                 <div className={`text-xs font-semibold shrink-0 ${low ? "text-ruby-400" : "text-ink/80"}`}>
                   {it.stock} {it.satuan}
@@ -74,7 +74,7 @@ export default function FrontDeskAmenitiesPage() {
             <div key={l.id} className="flex items-center gap-3 px-4 sm:px-5 py-2.5 border-b border-ink/[0.05] last:border-0">
               <div className="flex-1 min-w-0">
                 <div className="text-xs text-ink/80">{l.amenity_nama || "—"}</div>
-                <div className="text-[10px] text-ink/30 mt-0.5">
+                <div className="text-[10px] text-ink/50 mt-0.5">
                   {l.unit_nomor ? `Unit ${l.unit_nomor}` : l.created_by || "Stok masuk"} · {fmtDateTime(l.created_at)}
                 </div>
               </div>

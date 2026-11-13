@@ -86,7 +86,7 @@ export function PeriodeBar({ p, children }: { p: Periode; children?: ReactNode }
           setPreset("custom");
         }}
       />
-      <span className="text-ink/30 text-[11px] self-center">s/d</span>
+      <span className="text-ink/50 text-[11px] self-center">s/d</span>
       <input
         type="date"
         className="text-[11px] px-2 py-1.5 rounded-full border border-ink/15 bg-transparent"

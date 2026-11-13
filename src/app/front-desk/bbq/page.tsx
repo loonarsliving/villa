@@ -129,7 +129,7 @@ export default function FrontDeskBbqPage() {
                     </div>
                     <div className="text-[11px] text-ink/50 mt-0.5">Menginap: {o.info_menginap || "—"}</div>
                     {o.catatan && <div className="text-[11px] text-ink/50">Catatan: {o.catatan}</div>}
-                    <div className="text-[9.5px] text-ink/30 mt-1">
+                    <div className="text-[9.5px] text-ink/50 mt-1">
                       Kode {o.kode} · dipesan {fmtDateTime(o.created_at)}
                       {o.paid_at ? ` · lunas ${fmtDateTime(o.paid_at)}` : ""}
                       {o.invoice_no ? ` · ${o.invoice_no}` : ""}

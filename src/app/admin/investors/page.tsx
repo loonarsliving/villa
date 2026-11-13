@@ -49,7 +49,7 @@ export default function AdminInvestorsPage() {
               <thead>
                 <tr className="bg-base-800">
                   {["Nama", "Unit", "No. HP", "Rekening Dividen", "Lunas", "Terdaftar"].map((h) => (
-                    <th key={h} className="text-left px-3.5 py-2 text-[8.5px] font-semibold tracking-wide uppercase text-ink/30 border-b border-ink/[0.08]">
+                    <th key={h} className="text-left px-3.5 py-2 text-[8.5px] font-semibold tracking-wide uppercase text-ink/50 border-b border-ink/[0.08]">
                       {h}
                     </th>
                   ))}
@@ -78,7 +78,7 @@ export default function AdminInvestorsPage() {
                         title="Tandai jika investor ini sudah melunasi pembayaran unit"
                       />
                     </td>
-                    <td className="px-3.5 py-2.5 border-b border-ink/[0.05] text-ink/30 text-[10px]">
+                    <td className="px-3.5 py-2.5 border-b border-ink/[0.05] text-ink/50 text-[10px]">
                       {fmtDate(r.created_at, { day: "2-digit", month: "short", year: "numeric" })}
                     </td>
                   </tr>

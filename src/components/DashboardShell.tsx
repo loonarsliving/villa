@@ -131,7 +131,7 @@ export function DashboardShell({
 
   if (!ready) {
     return (
-      <div className="anim-fade min-h-screen flex flex-col items-center justify-center gap-4 text-ink/30 text-xs tracking-wide">
+      <div className="anim-fade min-h-screen flex flex-col items-center justify-center gap-4 text-ink/50 text-xs tracking-wide">
         <div className="font-serif text-2xl font-light text-ink/70">
           Loonars <em className="italic text-gold-500">Living</em>
         </div>
@@ -147,7 +147,7 @@ export function DashboardShell({
   const navContent = (
     <>
       <div className="relative px-5 py-5 border-b border-cream/[0.08]">
-        <div className="text-[10px] font-medium text-[#d6b98f] tracking-[0.25em] uppercase">{property}</div>
+        <div className="text-[9px] font-medium text-[#d6b98f] tracking-[0.18em] uppercase whitespace-nowrap truncate">{property}</div>
         <div className="font-serif text-lg font-light text-cream leading-tight mt-1">
           {brandTitle}
           <br />
@@ -219,7 +219,7 @@ export function DashboardShell({
             </button>
             <div key={pathname} className="anim-fade-up min-w-0">
               <div className="font-serif text-xl sm:text-2xl font-normal text-ink truncate">{pageTitle}</div>
-              {pageSub && <div className="text-[10px] text-ink/30 truncate hidden sm:block">{pageSub}</div>}
+              {pageSub && <div className="text-[10px] text-ink/50 truncate hidden sm:block">{pageSub}</div>}
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">{topBarExtra}</div>

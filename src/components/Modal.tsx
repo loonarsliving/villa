@@ -82,7 +82,7 @@ export function Modal({
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="mb-5">
-      <label className="block text-[9.5px] font-semibold text-ink/30 tracking-[0.12em] uppercase mb-1.5">{label}</label>
+      <label className="block text-[9.5px] font-semibold text-ink/50 tracking-[0.12em] uppercase mb-1.5">{label}</label>
       {children}
     </div>
   );

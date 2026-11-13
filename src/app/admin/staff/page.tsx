@@ -74,7 +74,7 @@ export default function AdminStaffPage() {
             <div key={s.id} className="flex items-center gap-3 px-4 sm:px-5 py-3 border-b border-ink/[0.05] last:border-0">
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-medium text-ink/80">{s.nama}</div>
-                <div className="text-[10px] text-ink/30 mt-0.5">{roleLabel[s.role]} · {s.hp || "tanpa HP"}</div>
+                <div className="text-[10px] text-ink/50 mt-0.5">{roleLabel[s.role]} · {s.hp || "tanpa HP"}</div>
               </div>
               <Badge tone={s.is_active ? "ok" : "danger"}>{s.is_active ? "Aktif" : "Nonaktif"}</Badge>
               <button onClick={() => toggleActive(s)} className="text-[10.5px] font-semibold text-gold-500 shrink-0">

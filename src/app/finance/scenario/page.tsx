@@ -76,7 +76,7 @@ export default function ScenarioPage() {
         <CardHeader title="What If" subtitle="Ubah ADR dan kamar terjual/malam untuk melihat dampaknya" />
         <div className="p-4 sm:p-5 space-y-4">
           <div>
-            <div className="text-[9.5px] font-semibold text-ink/30 tracking-[0.12em] uppercase mb-1.5">Net ADR</div>
+            <div className="text-[9.5px] font-semibold text-ink/50 tracking-[0.12em] uppercase mb-1.5">Net ADR</div>
             <div className="flex flex-wrap gap-2">
               {ADR_PRESETS.map((v) => (
                 <button
@@ -103,7 +103,7 @@ export default function ScenarioPage() {
           </div>
 
           <div>
-            <div className="text-[9.5px] font-semibold text-ink/30 tracking-[0.12em] uppercase mb-1.5">Occupancy (mengatur kamar/malam otomatis)</div>
+            <div className="text-[9.5px] font-semibold text-ink/50 tracking-[0.12em] uppercase mb-1.5">Occupancy (mengatur kamar/malam otomatis)</div>
             <div className="flex flex-wrap gap-2">
               {OCCUPANCY_PRESETS.map((p) => (
                 <button
@@ -118,7 +118,7 @@ export default function ScenarioPage() {
           </div>
 
           <div>
-            <div className="text-[9.5px] font-semibold text-ink/30 tracking-[0.12em] uppercase mb-1.5">
+            <div className="text-[9.5px] font-semibold text-ink/50 tracking-[0.12em] uppercase mb-1.5">
               Average Rooms Sold / Night {occupancyFromRooms !== null && `(≈ ${occupancyFromRooms.toFixed(1)}% occupancy)`}
             </div>
             <input

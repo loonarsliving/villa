@@ -43,7 +43,7 @@ export default function OpexPage() {
             <>
               <div className="grid grid-cols-3 gap-3">
                 <div className="bg-base-800 border border-ink/[0.08] rounded p-4">
-                  <div className="text-[9px] text-ink/30 uppercase tracking-wide">Pendapatan Villa</div>
+                  <div className="text-[9px] text-ink/50 uppercase tracking-wide">Pendapatan Villa</div>
                   <div className="font-serif text-xl font-light text-ink mt-1">{fmtCurrency(pendapatanInvestor(report))}</div>
                 </div>
                 <div className="bg-gold-500/10 border border-gold-500/25 rounded p-4">

@@ -530,7 +530,7 @@ export default function ChatPage() {
               value={cari}
               onChange={(e) => setCari(e.target.value)}
               placeholder="Cari nama atau nomor…"
-              className="w-full h-11 px-4 rounded-xl border border-ink/10 bg-base-900 md:bg-base-800/60 text-base md:text-sm text-ink placeholder:text-ink/35 outline-none focus:border-gold-500 focus:shadow-[0_0_0_4px_rgba(180,105,63,0.14)]"
+              className="w-full h-11 px-4 rounded-xl border border-ink/10 bg-base-900 md:bg-base-800/60 text-base md:text-sm text-ink placeholder:text-ink/55 outline-none focus:border-gold-500 focus:shadow-[0_0_0_4px_rgba(180,105,63,0.14)]"
             />
             <div className="-mx-4 px-4 md:mx-0 md:px-0 flex gap-2 overflow-x-auto no-scrollbar">
               {filterList.map((f) => (
@@ -963,7 +963,7 @@ export default function ChatPage() {
                   }}
                   placeholder={diterjemahkan(active.bahasa) ? `Bahasa Indonesia → ${namaBahasa(active.bahasa)}` : "Tulis balasan…"}
                   aria-label="Tulis balasan"
-                  className="flex-1 resize-none min-h-[44px] max-h-[132px] py-2.5 px-4 rounded-3xl border border-ink/10 bg-base-800/60 text-base md:text-sm leading-6 text-ink placeholder:text-ink/35 outline-none focus:border-gold-500 focus:bg-base-900 focus:shadow-[0_0_0_4px_rgba(180,105,63,0.14)]"
+                  className="flex-1 resize-none min-h-[44px] max-h-[132px] py-2.5 px-4 rounded-3xl border border-ink/10 bg-base-800/60 text-base md:text-sm leading-6 text-ink placeholder:text-ink/55 outline-none focus:border-gold-500 focus:bg-base-900 focus:shadow-[0_0_0_4px_rgba(180,105,63,0.14)]"
                 />
                 <button
                   type="button"

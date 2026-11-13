@@ -63,7 +63,7 @@ export default function LaporanPage() {
             <div className="w-8 h-8 bg-gold-500/10 border border-gold-500/25 rounded flex items-center justify-center text-sm shrink-0">📄</div>
             <div className="flex-1 min-w-0">
               <div className="text-xs font-medium text-ink/80">Laporan {m.label}</div>
-              <div className="text-[10px] text-ink/30 mt-0.5">{i === 0 ? "Sedang berjalan — angka sementara" : "Diterbitkan tgl 5"}</div>
+              <div className="text-[10px] text-ink/50 mt-0.5">{i === 0 ? "Sedang berjalan — angka sementara" : "Diterbitkan tgl 5"}</div>
             </div>
             <button
               type="button"

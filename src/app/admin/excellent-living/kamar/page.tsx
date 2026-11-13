@@ -95,7 +95,7 @@ export default function ElKamarAdminPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-[12px]">
               <thead>
-                <tr className="text-left text-[9.5px] uppercase tracking-wider text-ink/30">
+                <tr className="text-left text-[9.5px] uppercase tracking-wider text-ink/50">
                   <th className="px-3.5 py-2.5">Nomor</th>
                   <th className="px-3.5 py-2.5">Tipe</th>
                   <th className="px-3.5 py-2.5">Status</th>

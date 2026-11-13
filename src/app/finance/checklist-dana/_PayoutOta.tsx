@@ -153,7 +153,7 @@ export function PayoutOtaCard({
           <div className="overflow-x-auto">
             <table className="w-full text-[11.5px]">
               <thead>
-                <tr className="text-ink/35 text-[9.5px] uppercase tracking-wide">
+                <tr className="text-ink/55 text-[9.5px] uppercase tracking-wide">
                   <th className="text-left px-4 py-2">Nomor</th>
                   <th className="text-left px-4 py-2">Tamu</th>
                   <th className="text-left px-4 py-2">Menginap</th>
@@ -169,7 +169,7 @@ export function PayoutOtaCard({
                     <td className="px-4 py-2 whitespace-nowrap">{h.baris.nomor}</td>
                     <td className="px-4 py-2">
                       {h.baris.tamu || "—"}
-                      {h.item && h.item.guest_nama !== h.baris.tamu && <div className="text-ink/35 text-[10px]">di sistem: {h.item.guest_nama}</div>}
+                      {h.item && h.item.guest_nama !== h.baris.tamu && <div className="text-ink/55 text-[10px]">di sistem: {h.item.guest_nama}</div>}
                     </td>
                     <td className="px-4 py-2 whitespace-nowrap">{h.baris.checkin ? `${fmtDate(h.baris.checkin)} – ${fmtDate(h.baris.checkout)}` : "—"}</td>
                     <td className="px-4 py-2 text-right font-medium whitespace-nowrap">{fmtCurrencyFull(h.baris.net)}</td>
@@ -196,7 +196,7 @@ export function PayoutOtaCard({
               {bisaDicatat.length ? `Tandai ${bisaDicatat.length} booking sudah masuk (${fmtCurrencyFull(totalCatat)})` : "Tidak ada baris yang bisa dicatat"}
             </Btn>
           </div>
-          <div className="px-4 pb-3 text-[10.5px] text-ink/35">
+          <div className="px-4 pb-3 text-[10.5px] text-ink/55">
             Hanya baris berstatus Cocok yang dicatat. Baris lain dicek manual di tabel centang di bawah. Pastikan transfer sudah masuk di rekening sebelum menekan tombol. Nomor booking OTA disimpan supaya pencocokan berikutnya lewat nomor.
           </div>
         </>

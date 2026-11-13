@@ -20,6 +20,12 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 - Data (setelah deploy): `villa_users.is_active=true` untuk Liza; Musafa diterbitkan 12 kode menginap gratis A1 sendiri lewat `villa_terbitkan_voucher_investor` (Okt 2026–Sep 2027, sama dengan Liza) -- pilihan owner "Musafa dibuatkan 12 juga", jatah malam gratis A1 jadi 24/tahun.
 - Halaman `/admin/bukti-transfer` (Next.js) membaca semua akun owner aktif, jadi Liza otomatis mendapat bukti transfer versi Loonars dengan angka per unit yang sama -- disengaja.
 
+### 2026-11-14 — Dashboard villa: perbaikan keterbacaan + judul kartu serif + animasi hover
+- Teks pucat dinaikkan kontrasnya di semua halaman (`text-ink/30` → `/50`, `/35` → `/55`, `/25` → `/45`); di latar krem yang lama ±2:1.
+- `CardHeader`: judul huruf serif (sebelumnya huruf kecil KAPITAL) + garis terakota yang memanjang saat kartu di-hover (`group/card`, tanpa transform pada kartu).
+- Angka huruf serif tegak: `.font-serif .tabular-nums` = `lining-nums tabular-nums` (kelas `tabular-nums` menimpa aturan lining sebelumnya).
+- Sidebar: nama properti satu baris. `AppHome` berlatar krem. Aksi Cepat Front Desk: terangkat + ikon memantul saat hover.
+
 ### 2026-11-13 — Dashboard villa dirombak ke palet loonars.id
 - Palet di `tailwind.config.ts` (nama kelas tetap, nilainya diganti): `gold` → terakota (aksen/aksi utama, tombol kini teks putih), `sage` → hijau daun, `ruby` → merah hangat, `azure` → biru-abu redup, `base`/`canvas`/`ink` → kertas krem & tinta cokelat; `slate`/`blue` bawaan Tailwind diganti versi hangat (dipakai beranda investor/admin `AppHome`). Token baru `forest`, `cream`.
 - `DashboardShell`: sidebar & laci HP hijau hutan (teks krem, penanda aktif terakota), header krem berlapis kaca. Header `AppHome` hijau hutan + cahaya terakota. `globals.css`/`manifest.ts` mengikuti palet; angka `font-serif` dipaksa lining.

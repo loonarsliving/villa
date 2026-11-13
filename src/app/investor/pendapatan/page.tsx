@@ -72,7 +72,7 @@ export default function PendapatanPage() {
             <div key={i} className={`flex items-center px-4 sm:px-5 py-2.5 border-b border-ink/[0.05] last:border-0 text-xs ${b.tebal && !b.emas ? "bg-gold-500/10" : ""}`}>
               <div className="flex-1">
                 <div className={`${b.tebal ? "text-ink/80 font-medium" : "text-ink/50"} ${b.emas ? "text-gold-500" : ""}`}>{b.label}</div>
-                {b.keterangan && <div className="text-[10px] text-ink/35 mt-0.5">{b.keterangan}</div>}
+                {b.keterangan && <div className="text-[10px] text-ink/55 mt-0.5">{b.keterangan}</div>}
               </div>
               <div className="w-16 sm:w-20 mx-3 h-1 bg-ink/[0.08] rounded-full shrink-0 hidden sm:block">
                 <div

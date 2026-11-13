@@ -43,7 +43,7 @@ export default function PilihPropertiPage() {
   }
 
   if (!ready) {
-    return <div className="min-h-screen flex items-center justify-center text-ink/30 text-xs">Memuat sesi...</div>;
+    return <div className="min-h-screen flex items-center justify-center text-ink/50 text-xs">Memuat sesi...</div>;
   }
 
   return (

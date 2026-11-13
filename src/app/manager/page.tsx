@@ -275,7 +275,7 @@ function ModalCek({
       <Field label={mt ? "Perpanjang tutup sampai (malam terakhir)" : "Kalau maintenance: tutup dari – sampai (malam terakhir)"}>
         <div className="flex items-center gap-2">
           <input type="date" className={inputCls} value={mulai} min={hariIni} disabled={!!mt} onChange={(e) => setMulai(e.target.value)} />
-          <span className="text-ink/30 text-xs">s/d</span>
+          <span className="text-ink/50 text-xs">s/d</span>
           <input
             type="date"
             className={inputCls}
@@ -285,7 +285,7 @@ function ModalCek({
             onChange={(e) => setSampai(e.target.value)}
           />
         </div>
-        <div className="text-[10.5px] text-ink/30 mt-1.5">
+        <div className="text-[10.5px] text-ink/50 mt-1.5">
           Paling lama {maksMalam} malam sekali tutup. Kalau sudah beres lebih cepat, tekan Kamar Siap.
         </div>
       </Field>
@@ -301,7 +301,7 @@ function ModalCek({
       )}
 
       {!semuaBaik && (
-        <div className="text-[10.5px] text-ink/30 mt-3">Kamar Siap baru bisa ditekan kalau ke-10 poin sudah dicentang baik.</div>
+        <div className="text-[10.5px] text-ink/50 mt-3">Kamar Siap baru bisa ditekan kalau ke-10 poin sudah dicentang baik.</div>
       )}
     </Modal>
   );

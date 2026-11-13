@@ -711,7 +711,7 @@ export default function PaymentGatewayPage() {
                           : "Pilih unit dulu"}
                       </span>
                       {selectedUnit && (
-                        <span className="text-[9px] text-ink/30 text-right leading-snug">
+                        <span className="text-[9px] text-ink/50 text-right leading-snug">
                           {tarifServer != null
                             ? `Harga sistem saat ini — sama dengan loonars.id — Unit ${selectedUnit.nomor}`
                             : form.tipe === "harian"
@@ -777,7 +777,7 @@ export default function PaymentGatewayPage() {
                     <div className="w-8 h-8 rounded-full bg-gold-500/10 flex items-center justify-center text-sm shrink-0">🏡</div>
                     <div className="flex-1 min-w-0">
                       <div className="text-xs font-medium text-ink/80 truncate">{b.guest_nama}</div>
-                      <div className="text-[10px] text-ink/30 mt-0.5 truncate">
+                      <div className="text-[10px] text-ink/50 mt-0.5 truncate">
                         Unit {b.unit_nomor} · {fmtDate(b.tgl_checkin)}
                       </div>
                     </div>
@@ -823,7 +823,7 @@ export default function PaymentGatewayPage() {
                     <div className="w-8 h-8 rounded-full bg-gold-500/10 flex items-center justify-center text-sm shrink-0">{kategoriIcon[r.kategori]}</div>
                     <div className="flex-1 min-w-0">
                       <div className="text-xs font-medium text-ink/80 truncate">{r.guest_nama}</div>
-                      <div className="text-[10px] text-ink/30 mt-0.5 truncate">
+                      <div className="text-[10px] text-ink/50 mt-0.5 truncate">
                         {r.deskripsi} · {fmtDateTime(r.created_at)}
                       </div>
                     </div>
@@ -905,14 +905,14 @@ export default function PaymentGatewayPage() {
                   </li>
                   <li>Cocokkan notifikasi masuk / mutasi rekening villa sebelum menekan Tandai Lunas.</li>
                 </ol>
-                <div className="mt-2 text-[9.5px] text-ink/35">
+                <div className="mt-2 text-[9.5px] text-ink/55">
                   Tidak ada konfirmasi otomatis. Status lunas ditentukan oleh klik Anda, jadi pastikan uangnya benar-benar
                   masuk lebih dulu.
                 </div>
               </div>
             )}
 
-            <div className="text-[10px] text-ink/30 mt-3">
+            <div className="text-[10px] text-ink/50 mt-3">
               {activePayment.guest_nama} {activePayment.guest_hp ? `· ${activePayment.guest_hp}` : ""}
             </div>
             <div className="text-[10px] text-ink/20 mt-1">{fmtDateTime(activePayment.created_at)}</div>

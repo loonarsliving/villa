@@ -72,7 +72,7 @@ export default function KuponInvestorPage() {
               <div key={k.kode} className="flex flex-wrap items-center gap-2 px-4 sm:px-5 py-3 border-b border-ink/[0.05] last:border-0">
                 <div className="grow min-w-[9rem]">
                   <div className="font-mono tracking-[0.12em] text-[14px] text-ink select-all">{k.kode}</div>
-                  <div className="text-[9.5px] text-ink/30 mt-0.5">Diskon {k.persen}% · sekali pakai</div>
+                  <div className="text-[9.5px] text-ink/50 mt-0.5">Diskon {k.persen}% · sekali pakai</div>
                 </div>
                 <button
                   type="button"
@@ -110,15 +110,15 @@ export default function KuponInvestorPage() {
             data.riwayat.map((r) => (
               <div key={r.kode} className="flex items-center gap-3 px-4 sm:px-5 py-3 border-b border-ink/[0.05] last:border-0">
                 <div className="grow min-w-0">
-                  <div className={`font-mono tracking-[0.12em] text-[13px] ${r.status === "batal" ? "line-through text-ink/30" : "text-ink/70"}`}>{r.kode}</div>
-                  <div className="text-[9.5px] text-ink/35 mt-0.5">
+                  <div className={`font-mono tracking-[0.12em] text-[13px] ${r.status === "batal" ? "line-through text-ink/50" : "text-ink/70"}`}>{r.kode}</div>
+                  <div className="text-[9.5px] text-ink/55 mt-0.5">
                     {r.properti} · {tgl(r.tgl_checkin)} – {tgl(r.tgl_checkout)}
                     {r.diskon > 0 && ` · tamu hemat ${fmtCurrencyFull(r.diskon)}`}
                   </div>
                 </div>
                 <span
                   className={`shrink-0 text-[9.5px] px-2 py-0.5 rounded border ${
-                    r.status === "lunas" ? "text-sage-500 border-sage-500/30" : r.status === "batal" ? "text-ink/30 border-ink/10" : "text-gold-500 border-gold-500/30"
+                    r.status === "lunas" ? "text-sage-500 border-sage-500/30" : r.status === "batal" ? "text-ink/50 border-ink/10" : "text-gold-500 border-gold-500/30"
                   }`}
                 >
                   {LABEL_STATUS[r.status]}

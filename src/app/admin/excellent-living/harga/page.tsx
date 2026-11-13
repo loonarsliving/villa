@@ -155,7 +155,7 @@ export default function ElHargaPage() {
             <table className="text-[11.5px] min-w-full">
               <thead>
                 <tr className="text-ink/50">
-                  <th className="sticky left-0 bg-white px-3 py-2 text-left">Tipe</th>
+                  <th className="sticky left-0 bg-base-900 px-3 py-2 text-left">Tipe</th>
                   {tanggal.map((d) => {
                     const t = new Date(`${d}T00:00:00Z`);
                     return (
@@ -169,7 +169,7 @@ export default function ElHargaPage() {
               <tbody className="divide-y divide-ink/[0.05]">
                 {data.map((t) => (
                   <tr key={t.room_type_id}>
-                    <td className="sticky left-0 bg-white px-3 py-2 font-semibold text-ink whitespace-nowrap">
+                    <td className="sticky left-0 bg-base-900 px-3 py-2 font-semibold text-ink whitespace-nowrap">
                       {t.nama}
                       {!t.cloudbeds_room_type_id && <div className="text-[10px] font-normal text-gold-600">belum terhubung ke Cloudbeds</div>}
                     </td>
@@ -177,7 +177,7 @@ export default function ElHargaPage() {
                       const rek = rekomendasiDari(t.room_type_id, m.date);
                       return (
                         <td key={m.date} className="px-2 py-2 text-right whitespace-nowrap text-ink/70" title={rek?.alasan}>
-                          {m.rate === null ? <span className="text-ink/25">—</span> : fmtCurrencyFull(m.rate).replace("Rp", "").trim()}
+                          {m.rate === null ? <span className="text-ink/45">—</span> : fmtCurrencyFull(m.rate).replace("Rp", "").trim()}
                           {rek && <div className="text-[10px] text-gold-600">AI {fmtCurrencyFull(rek.rate).replace("Rp", "").trim()}</div>}
                         </td>
                       );

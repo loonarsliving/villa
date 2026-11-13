@@ -101,12 +101,12 @@ export default function MenginapGratisPage() {
                   <div className="grow min-w-0">
                     <div
                       className={`font-mono tracking-[0.12em] text-[13px] ${
-                        v.dicoret ? "line-through text-ink/30" : "text-ink"
+                        v.dicoret ? "line-through text-ink/50" : "text-ink"
                       }`}
                     >
                       {v.kode}
                     </div>
-                    <div className="text-[9.5px] text-ink/30 mt-0.5">
+                    <div className="text-[9.5px] text-ink/50 mt-0.5">
                       {labelBulan(v.bulan)}
                       {v.status === "terpakai" && v.dipakai_pada && ` · dipakai ${v.dipakai_pada}${v.unit ? ` di Unit ${v.unit}` : ""}`}
                       {v.status === "hangus" && " · hangus, bulannya sudah lewat"}
@@ -126,7 +126,7 @@ export default function MenginapGratisPage() {
                     className={`shrink-0 text-[9.5px] px-2 py-0.5 rounded border ${
                       v.status === "tersedia"
                         ? "text-gold-500 border-gold-500/30"
-                        : "text-ink/30 border-ink/10"
+                        : "text-ink/50 border-ink/10"
                     }`}
                   >
                     {v.status === "tersedia" ? "Tersedia" : v.status === "terpakai" ? "Terpakai" : "Hangus"}
