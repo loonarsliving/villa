@@ -164,7 +164,7 @@ export function AppHome({
           className="absolute inset-0"
           style={{
             backgroundImage:
-              "radial-gradient(120% 90% at 85% 15%, #1e3a5f 0%, transparent 60%), linear-gradient(160deg, #0f172a 0%, #1e293b 55%, #334155 100%)",
+              "radial-gradient(120% 90% at 85% 15%, rgba(180,105,63,0.55) 0%, transparent 60%), linear-gradient(160deg, #1f2d22 0%, #2d4433 55%, #3e5a44 100%)",
           }}
         />
         <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 via-transparent to-slate-900/30" />

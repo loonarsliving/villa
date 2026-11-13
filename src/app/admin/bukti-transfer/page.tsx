@@ -149,7 +149,7 @@ export default function BuktiTransferPage() {
             <button
               onClick={() => void kirim()}
               disabled={mengirim || !terpilih.length}
-              className="w-full bg-gold-500 text-base-950 rounded-lg py-3 text-[12.5px] font-semibold tracking-wide hover:opacity-90 active:scale-[0.99] transition disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full bg-gold-500 text-white rounded-lg py-3 text-[12.5px] font-semibold tracking-wide hover:opacity-90 active:scale-[0.99] transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {mengirim ? "Mengirim…" : `Sudah transfer — kirim bukti ke ${terpilih.length} investor (${fmtCurrencyFull(total)})`}
             </button>

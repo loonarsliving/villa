@@ -13,7 +13,7 @@ const labelCls = "block text-[10px] font-medium text-ink/40 tracking-[0.15em] up
 const inputCls =
   "w-full py-3 border-0 border-b border-ink/15 bg-transparent text-sm text-ink outline-none focus:border-gold-500 transition-colors mb-6 placeholder:text-ink/20";
 const btnCls =
-  "w-full py-3.5 bg-gold-500 hover:opacity-90 disabled:opacity-60 text-base-950 rounded font-semibold text-[11.5px] tracking-[0.08em] uppercase transition-opacity";
+  "w-full py-3.5 bg-gold-500 hover:opacity-90 disabled:opacity-60 text-white rounded font-semibold text-[11.5px] tracking-[0.08em] uppercase transition-opacity";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -107,7 +107,7 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center relative overflow-hidden px-4">
       <div
         className="absolute inset-0 pointer-events-none"
-        style={{ background: "radial-gradient(ellipse 60% 60% at 70% 40%, rgba(196,160,92,.08) 0%, transparent 70%)" }}
+        style={{ background: "radial-gradient(ellipse 60% 60% at 70% 40%, rgba(180,105,63,.09) 0%, transparent 70%)" }}
       />
       {/* Cahaya latar yang mengambang pelan -- hiasan saja. */}
       <div aria-hidden className="anim-float absolute -top-24 -left-20 w-80 h-80 rounded-full bg-gold-400/20 blur-3xl pointer-events-none" style={{ animationDuration: "9s" }} />

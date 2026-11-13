@@ -273,7 +273,7 @@ export default function FrontDeskPage() {
       pageSub={fmtFullDate()}
       topBarExtra={
         <>
-          <button onClick={openCheckin} className="text-[11px] bg-gold-500 text-base-950 font-semibold rounded px-3.5 py-2 whitespace-nowrap">
+          <button onClick={openCheckin} className="text-[11px] bg-gold-500 text-white font-semibold rounded px-3.5 py-2 whitespace-nowrap">
             + Check-In
           </button>
           <button onClick={openCheckout} className="hidden sm:block text-[11px] text-ink/80 bg-base-800 border border-ink/10 rounded px-3.5 py-2 whitespace-nowrap">
@@ -345,7 +345,7 @@ export default function FrontDeskPage() {
           <Card>
             <CardHeader title="Aksi Cepat" />
             <div className="p-4 grid grid-cols-2 gap-2">
-              <button onClick={openCheckin} className="flex flex-col items-center justify-center py-4 rounded bg-gold-500 text-base-950">
+              <button onClick={openCheckin} className="flex flex-col items-center justify-center py-4 rounded bg-gold-500 text-white">
                 <span className="text-lg">🛎️</span>
                 <span className="text-[10.5px] font-semibold mt-1">Check-In</span>
               </button>
@@ -400,7 +400,7 @@ export default function FrontDeskPage() {
           <button
             onClick={() => setCiTab("existing")}
             className={`flex-1 py-2 rounded-lg text-[11.5px] font-semibold transition ${
-              ciTab === "existing" ? "bg-gold-500 text-base-950" : "bg-base-800 text-ink/50 border border-ink/10"
+              ciTab === "existing" ? "bg-gold-500 text-white" : "bg-base-800 text-ink/50 border border-ink/10"
             }`}
           >
             Booking Terjadwal
@@ -408,7 +408,7 @@ export default function FrontDeskPage() {
           <button
             onClick={() => setCiTab("new")}
             className={`flex-1 py-2 rounded-lg text-[11.5px] font-semibold transition ${
-              ciTab === "new" ? "bg-gold-500 text-base-950" : "bg-base-800 text-ink/50 border border-ink/10"
+              ciTab === "new" ? "bg-gold-500 text-white" : "bg-base-800 text-ink/50 border border-ink/10"
             }`}
           >
             Tamu Baru

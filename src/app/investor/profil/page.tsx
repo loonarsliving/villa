@@ -99,7 +99,7 @@ export default function InvestorProfilPage() {
               <button
                 type="submit"
                 disabled={saving}
-                className="py-3 px-5 bg-gold-500 hover:opacity-90 disabled:opacity-60 text-base-950 rounded font-semibold text-[11.5px] tracking-[0.08em] uppercase transition-opacity"
+                className="py-3 px-5 bg-gold-500 hover:opacity-90 disabled:opacity-60 text-white rounded font-semibold text-[11.5px] tracking-[0.08em] uppercase transition-opacity"
               >
                 {saving ? "Menyimpan..." : "Simpan"}
               </button>
