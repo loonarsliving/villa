@@ -3,6 +3,9 @@
 _Snapshot as of this audit: 2026-08-21, `main`@`ab473b3`._
 
 
+## 2026-11-13 — Unit A1: dua akun aktif, Liza dibayar dari bagian Loonars
+- A1 punya dua akun owner aktif: Musafa (pemilik tercatat) dan Liza Indira. Liza ada di `AKUN_DIBAYAR_LOONARS` (villa-api): tampil normal di dashboard & bukti transfer, tetapi di daftar transfer dividen dipisah sebagai "Dibayar dari bagian Loonars", tidak menambah pembagi (tetap 13 unit). Kedua akun memegang 12 kode menginap gratis A1 masing-masing. Detail di CHANGELOG 2026-11-13.
+
 ## 2026-11-12 — Lapisan gerak UI (animasi) — LIVE (PR #320, owner: "bawa ke production")
 - Di-merge ke `main` 2026-11-12 (PR #320); deploy produksi Vercel READY. Murni tampilan; logika, API, harga, database tidak disentuh. Dependensi baru `motion`.
 - ATURAN untuk pekerjaan UI berikutnya: jangan memberi `transform`/`filter`/`backdrop-filter` PERMANEN pada pembungkus halaman (`<main>` di `DashboardShell`) atau `Card` -- elemen `position: fixed` di dalamnya (panel chat layar penuh di HP, overlay) akan salah posisi/terpotong. Animasi masuk memakai fill-mode `backwards`; efek tekan memakai properti `scale`. `Modal` sudah dirender lewat portal ke `<body>`.
