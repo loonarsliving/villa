@@ -12,6 +12,8 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 
 ### 2026-11-13 — WA "pembayaran berhasil" membawa link unduh invoice
 - Kasus: tamu yang sudah lunas dan menerima WA tidak bisa mengunduh bukti pemesanan. Tombol invoice di loonars.id hanya muncul di browser tempat memesan (booking disimpan di localStorage), sedangkan WA hanya menyuruh ke "halaman pemesanan loonars.id".
+- PDF invoice kini juga DIKIRIM sebagai pesan WA kedua (`kirimPdfInvoiceLunas`): dibuat di villa-api dengan `npm:jspdf@3.0.4` (dimuat dinamis, `buatPdfInvoice` = salinan `components/booking/invoicePdf.ts` repo loonars — ubah keduanya bersamaan), diunggah ke bucket publik `wa-outbox` (pola MK Connect 0306, nama acak, dihapus otomatis setelah sehari), lalu `sendWa(..., {file})`. Template `booking_paid_invoice_pdf` (EL: `el_…`), dedupe lewat `wa_messages_log`. Menginap gratis dilewati. Gagalnya tidak mengubah konfirmasi pembayaran maupun pesan teks.
+- Data invoice dipindah ke `dataInvoicePl` / `dataInvoiceEl`, dipakai bersama endpoint invoice dan PDF WA (isi respons endpoint tidak berubah).
 - villa-api `teksTerimaKasihLunas` kini menyertakan `linkInvoiceTamu(booking_id)` → `https://www.loonars.id/invoice?b=<id>` (`&p=<kode>` untuk properti selain PL). Halaman `/invoice` (repo loonars, PR #44) meminta nomor WA lalu memakai endpoint invoice yang sudah ada; tidak ada endpoint baru.
 
 ### 2026-11-12 — Lapisan gerak UI (animasi) — LIVE (PR #320, owner: "bawa ke production")
