@@ -7,13 +7,15 @@ import { useToast } from "@/lib/toast";
 import { fmtDate, fmtDateTime } from "@/lib/format";
 import { Card, CardHeader, CardBody, Loading, Badge } from "@/components/Card";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
-import type { AmenityItem, AmenityKitItem, AmenityUsageLog } from "@/lib/types";
+import type { AmenityItem, AmenityKitItem, AmenityRingkasan, AmenityUsageLog } from "@/lib/types";
+import { RingkasanMalam } from "@/components/AmenitiesRingkasan";
 
 export default function AdminAmenitiesPage() {
   const toast = useToast();
   const [items, setItems] = useState<AmenityItem[]>([]);
   const [kit, setKit] = useState<AmenityKitItem[]>([]);
   const [log, setLog] = useState<AmenityUsageLog[]>([]);
+  const [ringkasan, setRingkasan] = useState<AmenityRingkasan | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [itemOpen, setItemOpen] = useState(false);
@@ -27,11 +29,13 @@ export default function AdminAmenitiesPage() {
 
   async function load() {
     setLoading(true);
-    const [i, k, l] = await Promise.all([
+    const [i, k, l, r] = await Promise.all([
       api.get<AmenityItem[]>("/amenities"),
       api.get<AmenityKitItem[]>("/amenities/kit"),
       api.get<AmenityUsageLog[]>("/amenities/usage-log"),
+      api.get<AmenityRingkasan>("/amenities/ringkasan").catch(() => null),
     ]);
+    setRingkasan(r || null);
     setItems(i || []);
     setKit(k || []);
     setLog(l || []);
@@ -112,10 +116,12 @@ export default function AdminAmenitiesPage() {
   return (
     <AdminShell pageTitle="Amenities" pageSub="Katalog stock, kit standar kamar, dan riwayat pemakaian">
       <div className="bg-gold-500/10 border-l-2 border-gold-500 rounded-r p-3.5 text-[11px] text-ink/50 leading-relaxed mb-3.5">
-        Saat housekeeping menandai tugas <b>&quot;lengkapi amenities&quot;</b> selesai (dibuat otomatis tiap ada booking OTA baru), stock item di
-        bawah ini otomatis berkurang sesuai <b>Kit Standar</b> — tanpa perlu input manual. Reception hanya bisa lihat halaman ini, tidak bisa ubah
-        stock; ubah stock/kit hanya lewat halaman admin ini.
+        Stock berkurang <b>otomatis setiap malam (23.30 WIB)</b>: setiap kamar yang sedang ditempati tamu (sudah check-in) dipotong sesuai{" "}
+        <b>Kit Standar</b> di bawah (mis. 1 amenities per kamar per malam) — tanpa input manual. Tambah stock lewat tombol <b>Restock</b>.
+        Reception hanya bisa melihat halaman ini.
       </div>
+
+      <RingkasanMalam ringkasan={ringkasan} items={items} kit={kit} />
 
       <Card className="mb-3.5">
         <CardHeader
@@ -172,7 +178,7 @@ export default function AdminAmenitiesPage() {
       <Card className="mb-3.5">
         <CardHeader
           title="Kit Standar per Kamar"
-          subtitle="Jumlah tiap item yang otomatis dikurangi saat 1 tugas amenities selesai"
+          subtitle="Jumlah tiap item yang otomatis dikurangi per kamar terisi per malam"
           action={
             <button
               onClick={() => setKitOpen(true)}

@@ -5,17 +5,27 @@ import { FrontDeskShell } from "../_shell";
 import { api } from "@/lib/api";
 import { fmtDate, fmtDateTime } from "@/lib/format";
 import { Card, CardHeader, Loading, Badge } from "@/components/Card";
-import type { AmenityItem, AmenityUsageLog } from "@/lib/types";
+import type { AmenityItem, AmenityKitItem, AmenityRingkasan, AmenityUsageLog } from "@/lib/types";
+import { RingkasanMalam } from "@/components/AmenitiesRingkasan";
 
 export default function FrontDeskAmenitiesPage() {
   const [items, setItems] = useState<AmenityItem[]>([]);
   const [log, setLog] = useState<AmenityUsageLog[]>([]);
+  const [kit, setKit] = useState<AmenityKitItem[]>([]);
+  const [ringkasan, setRingkasan] = useState<AmenityRingkasan | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([api.get<AmenityItem[]>("/amenities"), api.get<AmenityUsageLog[]>("/amenities/usage-log")]).then(([i, l]) => {
+    Promise.all([
+      api.get<AmenityItem[]>("/amenities"),
+      api.get<AmenityUsageLog[]>("/amenities/usage-log"),
+      api.get<AmenityKitItem[]>("/amenities/kit").catch(() => []),
+      api.get<AmenityRingkasan>("/amenities/ringkasan").catch(() => null),
+    ]).then(([i, l, k, r]) => {
       setItems(i || []);
       setLog(l || []);
+      setKit(k || []);
+      setRingkasan(r || null);
       setLoading(false);
     });
   }, []);
@@ -25,9 +35,11 @@ export default function FrontDeskAmenitiesPage() {
   return (
     <FrontDeskShell pageTitle="Amenities" pageSub="Stock item kamar (lihat saja)">
       <div className="bg-gold-500/10 border-l-2 border-gold-500 rounded-r p-3.5 text-[11px] text-ink/50 leading-relaxed mb-3.5">
-        Stock berkurang otomatis saat tugas <b>&quot;lengkapi amenities&quot;</b> di Housekeeping ditandai selesai. Untuk tambah stock (restock)
+        Stock berkurang <b>otomatis setiap malam (23.30 WIB)</b> untuk setiap kamar yang sedang ditempati tamu. Untuk tambah stock (restock)
         atau ubah kit standar, hubungi Admin.
       </div>
+
+      <RingkasanMalam ringkasan={ringkasan} items={items} kit={kit} />
 
       <Card className="mb-3.5">
         <CardHeader title="Stock Saat Ini" action={lowStockCount > 0 ? <Badge tone="danger">{lowStockCount} stock rendah</Badge> : undefined} />
