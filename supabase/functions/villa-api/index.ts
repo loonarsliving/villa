@@ -92,7 +92,7 @@ const RUTE_PROPERTI_LAIN = new Set([
   'GET /guests/directory', 'GET /guests/directory/summary', 'PATCH /guests/marketing',
   // Amenities & pesanan BBQ per properti (migrasi 20261104000008).
   'GET /amenities', 'POST /amenities', 'PATCH /amenities', 'DELETE /amenities',
-  'GET /amenities/kit', 'POST /amenities/kit', 'DELETE /amenities/kit', 'GET /amenities/usage-log',
+  'GET /amenities/kit', 'POST /amenities/kit', 'DELETE /amenities/kit', 'GET /amenities/usage-log', 'GET /amenities/ringkasan',
   'GET /addon-orders',
   // Kesiapan kamar per properti. Selain PL penutupan kamar hanya di sistem
   // (Cloudbeds EL baru punya 1 kamar per tipe -- menutupnya = menutup satu
@@ -1392,6 +1392,64 @@ function prevMonthWIB(d = new Date()){
 function invoiceNoFor(booking){
   const ymd = todayWIB(new Date(booking.created_at)).replace(/-/g,'');
   return `INV-${propertiSaatIni()==='PL' ? 'LV' : propertiSaatIni()}-${ymd}-${String(booking.id).slice(0,8).toUpperCase()}`;
+}
+
+// Penanda baris amenity_usage_log dari pemotongan per malam. Tanggal malam
+// ada di dalamnya, jadi pemotongan idempoten per unit per malam tanpa kolom
+// baru (dan tetap terbaca di Riwayat Pemakaian).
+function penandaAmenitiesMalam(tgl){ return `Otomatis · malam ${tgl}`; }
+
+/** Booking yang menginap pada malam `tgl` (status checkin), satu per unit. */
+async function kamarTerisiMalam(tgl){
+  const {data, error} = await supabase.from('bookings')
+    .select('id,unit_id,unit_nomor')
+    .eq('status','checkin').lte('tgl_checkin', tgl)
+    .or(`tgl_checkout.gt.${tgl},tgl_checkout.is.null`);
+  if(error) return {error: error.message};
+  const perUnit = new Map();
+  for(const bk of data ?? []) if(bk.unit_id && !perUnit.has(bk.unit_id)) perUnit.set(bk.unit_id, bk);
+  return {kamar: [...perUnit.values()]};
+}
+
+/**
+ * Potong stok amenities untuk setiap kamar terisi malam `tgl`, sesuai Kit
+ * Standar (properti dari konteks). Unit yang sudah punya log malam itu
+ * dilewati. Stok tidak di bawah 0. Admin diberi notifikasi bila stok
+ * mencapai batas minimum.
+ */
+async function potongAmenitiesMalam(tgl){
+  const {data:kit, error:kitErr} = await supabase.from('amenity_kit_items').select('amenity_id,qty,amenities(nama,satuan)');
+  if(kitErr) return {error: kitErr.message};
+  if(!(kit ?? []).length) return {tanpa_kit: true, dipotong: 0};
+  const terisi = await kamarTerisiMalam(tgl);
+  if(terisi.error) return {error: terisi.error};
+  const penanda = penandaAmenitiesMalam(tgl);
+  const {data:sudah, error:logErr} = await supabase.from('amenity_usage_log').select('unit_id').eq('created_by', penanda);
+  if(logErr) return {error: logErr.message};
+  const sudahUnit = new Set((sudah ?? []).map(r => r.unit_id));
+  const baru = terisi.kamar.filter(k => !sudahUnit.has(k.unit_id));
+  if(!baru.length) return {kamar_terisi: terisi.kamar.length, dipotong: 0, sudah: sudahUnit.size};
+
+  const rinci = [];
+  for(const item of kit){
+    const total = Number(item.qty) * baru.length;
+    const {data:cur} = await supabase.from('amenities').select('stock,stock_minimum').eq('id', item.amenity_id).maybeSingle();
+    if(!cur) continue;
+    const sisa = Math.max(0, (cur.stock ?? 0) - total);
+    const {error:upErr} = await supabase.from('amenities').update({stock: sisa, updated_at: new Date().toISOString()}).eq('id', item.amenity_id);
+    if(upErr) return {error: upErr.message};
+    const {error:insErr} = await supabase.from('amenity_usage_log').insert(baru.map(k => ({
+      housekeeping_id: null, unit_id: k.unit_id, unit_nomor: k.unit_nomor,
+      amenity_id: item.amenity_id, amenity_nama: item.amenities?.nama ?? null, qty: Number(item.qty), created_by: penanda,
+    })));
+    if(insErr) return {error: insErr.message};
+    rinci.push({nama: item.amenities?.nama ?? null, dipakai: total, sisa});
+    if(sisa <= (cur.stock_minimum ?? 0)){
+      await notif(null, 'all', 'info', `Stok amenities menipis: ${item.amenities?.nama ?? ''}`,
+        `Sisa ${sisa} ${item.amenities?.satuan ?? 'pcs'} setelah pemakaian malam ${tgl} (${baru.length} kamar). Segera restock di menu Amenities.`, null);
+    }
+  }
+  return {kamar_terisi: terisi.kamar.length, dipotong: baru.length, sudah: sudahUnit.size, item: rinci};
 }
 
 async function notif(unit_id, role, tipe, judul, pesan, ref_id){
@@ -7450,6 +7508,33 @@ async function layani(req){
     return json({success:true, ...pl, lain});
   }
 
+  // Pemotongan stok amenities per malam (owner 2026-11-13: "setiap kamar
+  // permalam 1 amenities"). pg_cron 'villa-amenities-malam' 16.30 UTC =
+  // 23.30 WIB. Setiap unit dengan booking status 'checkin' yang menginap
+  // malam itu dipotong sesuai Kit Standar (mis. 1 amenities / kamar).
+  // Idempoten per unit per malam (lihat potongAmenitiesMalam). Body opsional
+  // {tgl:'YYYY-MM-DD'} untuk menyusulkan malam yang terlewat.
+  if(path==='/cron/amenities-malam' && m==='POST'){
+    const cron = await getSetting('cron');
+    const provided = req.headers.get('x-cron-secret') ?? '';
+    if(!cron.secret) return err('Cron belum dikonfigurasi (integration_settings.cron.secret)',503);
+    if(!await secretsMatch(provided, cron.secret)) return err('Unauthorized',401);
+    let b = {};
+    try { b = await req.json(); } catch { b = {}; }
+    const tgl = b?.tgl ?? todayWIB();
+    if(!isValidDateStr(tgl)) return err('tgl tidak valid');
+    if(tgl > todayWIB()) return err('tgl tidak boleh di masa depan');
+    const pl = await potongAmenitiesMalam(tgl);
+    const lain = {};
+    for(const kode of PROPERTI_SIAP){
+      if(kode === 'PL') continue;
+      try { lain[kode] = await konteksProperti.run({ properti: kode }, () => potongAmenitiesMalam(tgl)); }
+      catch(e){ lain[kode] = {error: e?.message ?? String(e)}; }
+    }
+    if(pl.error) return err(pl.error);
+    return json({success:true, tgl, ...pl, lain});
+  }
+
   if(path==='/cron/cleaning-calls' && m==='POST'){
     const cron = await getSetting('cron');
     const provided = req.headers.get('x-cron-secret') ?? '';
@@ -9461,6 +9546,16 @@ async function layani(req){
     return json({success:true});
   }
 
+  // Ringkasan untuk halaman Amenities: kamar terisi malam ini (= pemakaian
+  // per malam menurut Kit Standar) dan apakah malam ini sudah dipotong.
+  if(path==='/amenities/ringkasan' && m==='GET'){
+    if(!isStaff) return forbidden();
+    const tgl = todayWIB();
+    const terisi = await kamarTerisiMalam(tgl);
+    if(terisi.error) return err(terisi.error);
+    const {data:sudah} = await supabase.from('amenity_usage_log').select('unit_id').eq('created_by', penandaAmenitiesMalam(tgl));
+    return json({tgl, kamar_terisi: terisi.kamar.length, sudah_dipotong: new Set((sudah ?? []).map(r=>r.unit_id)).size});
+  }
   if(path==='/amenities/usage-log' && m==='GET'){
     if(!isStaff) return forbidden();
     const {data,error} = await supabase.from('amenity_usage_log').select('*').order('created_at',{ascending:false}).limit(50);
@@ -10305,17 +10400,13 @@ async function layani(req){
     const {data:task} = await supabase.from('housekeeping').select('jenis,unit_id,unit_nomor').eq('id',task_id).maybeSingle();
     await supabase.from('housekeeping').update({status:'done',done_at:new Date().toISOString(),done_by}).eq('id',task_id);
 
+    // Tugas 'amenities' (dari booking OTA) kini hanya pengingat menyiapkan
+    // kamar. Stok TIDAK dipotong di sini lagi: sejak 2026-11-13 (owner:
+    // "setiap kamar permalam 1 amenities") stok dipotong otomatis per kamar
+    // terisi per malam oleh /cron/amenities-malam -- memotong di sini juga
+    // akan menghitung dua kali.
     if(task?.jenis==='amenities'){
-      const {data:kit} = await supabase.from('amenity_kit_items').select('amenity_id,qty,amenities(nama,stock)');
-      for(const item of kit ?? []){
-        const currentStock = item.amenities?.stock ?? 0;
-        const newStock = Math.max(0, currentStock - item.qty);
-        await supabase.from('amenities').update({stock:newStock, updated_at:new Date().toISOString()}).eq('id',item.amenity_id);
-        await supabase.from('amenity_usage_log').insert({
-          housekeeping_id:task_id, unit_id:task.unit_id, unit_nomor:task.unit_nomor,
-          amenity_id:item.amenity_id, amenity_nama:item.amenities?.nama ?? null, qty:item.qty, created_by:done_by ?? null,
-        });
-      }
+      // tidak mengubah status unit
     } else if(unit_id) {
       await supabase.from('units').update({status:'available'}).eq('id',unit_id);
     }

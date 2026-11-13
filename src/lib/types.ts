@@ -153,6 +153,12 @@ export interface CctvDisciplinaryReport {
   cctv_cameras?: { nama: string; zona: string | null } | null;
 }
 
+export interface AmenityRingkasan {
+  tgl: string;
+  kamar_terisi: number;
+  sudah_dipotong: number;
+}
+
 export interface AmenityUsageLog {
   id: string;
   unit_id: string | null;
