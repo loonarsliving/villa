@@ -88,7 +88,7 @@ export function DokumenCheckin({ bookingId, onClose }: { bookingId: string | nul
         </Btn>
       }
     >
-      {loading && <div className="text-[11px] text-ink/30 text-center py-8">Memuat…</div>}
+      {loading && <div className="text-[11px] text-ink/50 text-center py-8">Memuat…</div>}
       {error && (
         <div className="text-[11px] text-ruby-400 border border-ruby-500/30 bg-ruby-500/5 rounded px-3 py-2.5 leading-relaxed">
           {error}
@@ -120,7 +120,7 @@ export function DokumenCheckin({ bookingId, onClose }: { bookingId: string | nul
                   )}
                 </>
               ) : (
-                <span className="text-ink/30">No. HP tidak tercatat</span>
+                <span className="text-ink/50">No. HP tidak tercatat</span>
               )}
             </div>
             <div className="text-[10.5px] text-ink/40 mt-0.5">
@@ -134,7 +134,7 @@ export function DokumenCheckin({ bookingId, onClose }: { bookingId: string | nul
               {b.sumber === "cloudbeds" && <Badge tone="pending">☁ Cloudbeds</Badge>}
             </div>
             {b.checkin_at && (
-              <div className="text-[9.5px] text-ink/30 mt-2">
+              <div className="text-[9.5px] text-ink/50 mt-2">
                 Check-in {fmtDateTime(b.checkin_at)}
                 {b.checkin_by ? ` · oleh ${b.checkin_by}` : ""}
               </div>
@@ -142,7 +142,7 @@ export function DokumenCheckin({ bookingId, onClose }: { bookingId: string | nul
           </div>
 
           <div className="mb-5">
-            <label className="block text-[9.5px] font-semibold text-ink/30 tracking-[0.12em] uppercase mb-1.5">
+            <label className="block text-[9.5px] font-semibold text-ink/50 tracking-[0.12em] uppercase mb-1.5">
               Foto KTP / Paspor
             </label>
             {data?.ktpUrl ? (
@@ -155,13 +155,13 @@ export function DokumenCheckin({ bookingId, onClose }: { bookingId: string | nul
                     className="w-full rounded-lg border border-ink/10 bg-white object-contain max-h-[260px]"
                   />
                 </a>
-                <div className="text-[9px] text-ink/30 mt-1.5 leading-relaxed">
+                <div className="text-[9px] text-ink/50 mt-1.5 leading-relaxed">
                   Ketuk gambar untuk ukuran penuh. Tautannya berumur pendek dan mati sendiri — data pribadi tamu,
                   jangan disebar atau disimpan di luar sistem.
                 </div>
               </>
             ) : (
-              <div className="rounded-lg border border-dashed border-ink/15 px-3 py-5 text-[10.5px] text-ink/35 text-center leading-relaxed">
+              <div className="rounded-lg border border-dashed border-ink/15 px-3 py-5 text-[10.5px] text-ink/55 text-center leading-relaxed">
                 {data?.ktpError
                   ? `Foto KTP tersimpan tapi gagal dibuka: ${data.ktpError}`
                   : sudahCheckin
@@ -172,7 +172,7 @@ export function DokumenCheckin({ bookingId, onClose }: { bookingId: string | nul
           </div>
 
           <div>
-            <label className="block text-[9.5px] font-semibold text-ink/30 tracking-[0.12em] uppercase mb-1.5">
+            <label className="block text-[9.5px] font-semibold text-ink/50 tracking-[0.12em] uppercase mb-1.5">
               Tanda Tangan Tamu (persetujuan tata tertib)
             </label>
             {data?.signatureDataUrl ? (
@@ -186,13 +186,13 @@ export function DokumenCheckin({ bookingId, onClose }: { bookingId: string | nul
                   alt={`Tanda tangan ${b.guest_nama}`}
                   className="w-full rounded-lg border border-ink/10 bg-white"
                 />
-                <div className="text-[9px] text-ink/30 mt-1.5 leading-relaxed">
+                <div className="text-[9px] text-ink/50 mt-1.5 leading-relaxed">
                   Ditandatangani saat check-in sebagai persetujuan atas tata tertib — termasuk denda merokok di dalam
                   villa dan tanggung jawab atas kerusakan.
                 </div>
               </>
             ) : (
-              <div className="rounded-lg border border-dashed border-ink/15 px-3 py-5 text-[10.5px] text-ink/35 text-center leading-relaxed">
+              <div className="rounded-lg border border-dashed border-ink/15 px-3 py-5 text-[10.5px] text-ink/55 text-center leading-relaxed">
                 {sudahCheckin
                   ? "Tidak ada tanda tangan pada booking ini — kemungkinan di-check-in sebelum kartu check-in digital dipakai."
                   : "Belum ada — tanda tangan diambil saat proses check-in."}

@@ -54,7 +54,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               <button
                 onClick={() => setItems((prev) => prev.filter((x) => x.id !== t.id))}
                 aria-label="Tutup pemberitahuan"
-                className="text-ink/30 hover:text-ink/60 text-xs shrink-0"
+                className="text-ink/50 hover:text-ink/60 text-xs shrink-0"
               >
                 ✕
               </button>

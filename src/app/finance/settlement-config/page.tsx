@@ -126,7 +126,7 @@ export default function SettlementConfigPage() {
                       </td>
                       <td className="px-3 py-2.5">
                         {r.commission_pct != null ? `${r.commission_pct}%` : <span className="text-ruby-400">Belum diisi</span>}
-                        {r.commission_source && <div className="text-ink/35 text-[10px] max-w-[220px]">{r.commission_source}</div>}
+                        {r.commission_source && <div className="text-ink/55 text-[10px] max-w-[220px]">{r.commission_source}</div>}
                       </td>
                       <td className="px-3 py-2.5">{r.destination_account_label ?? "—"}</td>
                       <td className="px-3 py-2.5">{r.effective_date ?? "—"}</td>

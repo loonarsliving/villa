@@ -149,7 +149,7 @@ export function MutasiBankCard({
             <div className="overflow-x-auto">
               <table className="w-full text-[11.5px]">
                 <thead>
-                  <tr className="text-ink/35 text-[9.5px] uppercase tracking-wide">
+                  <tr className="text-ink/55 text-[9.5px] uppercase tracking-wide">
                     <th className="text-left px-4 py-2">Tanggal</th>
                     <th className="text-left px-4 py-2">Keterangan</th>
                     <th className="text-right px-4 py-2">Nominal</th>
@@ -168,14 +168,14 @@ export function MutasiBankCard({
                         {h.group ? (
                           <>
                             {h.group.sumber} · {fmtDate(h.group.tanggal, { weekday: "short", day: "2-digit", month: "short" })}
-                            <div className="text-ink/35 text-[10px]">
+                            <div className="text-ink/55 text-[10px]">
                               {h.status === "sudah_tercatat"
                                 ? `${h.group.count} booking, sudah dicentang semua`
                                 : `${h.group.count_belum} booking belum masuk · ${fmtCurrencyFull(h.group.belum)}`}
                             </div>
                           </>
                         ) : (
-                          <span className="text-ink/35 text-[10.5px]">
+                          <span className="text-ink/55 text-[10.5px]">
                             {h.sumber ? `Tidak ada pencairan ${h.sumber} yang mirip di ${bulanLabel}` : "Bukan transfer OTA yang dikenali"}
                           </span>
                         )}
@@ -199,7 +199,7 @@ export function MutasiBankCard({
               </table>
             </div>
           )}
-          <div className="px-4 py-3 text-[10.5px] text-ink/35 border-t border-ink/[0.05]">
+          <div className="px-4 py-3 text-[10.5px] text-ink/55 border-t border-ink/[0.05]">
             Pakai = memilih semua booking pencairan itu dan mengisi nilai, tanggal, dan keterangan mutasi di kartu di bawah. Nilai mutasi dibagi ke
             booking sebanding angka seharusnya, dan selisihnya tercatat. Pencairan dicari di bulan {bulanLabel}; kalau transfer jatuh di bulan lain,
             ganti bulan di atas. File mutasi tidak disimpan.

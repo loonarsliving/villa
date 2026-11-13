@@ -79,9 +79,9 @@ export default function OccupancyForecastPage() {
                     {d.forecast_occupancy_pct !== null ? (
                       <div className="text-lg font-serif font-medium text-ink">{d.forecast_occupancy_pct}%</div>
                     ) : (
-                      <div className="text-[10.5px] text-ink/35 italic">belum cukup data</div>
+                      <div className="text-[10.5px] text-ink/55 italic">belum cukup data</div>
                     )}
-                    <div className="text-[9.5px] text-ink/30 mt-1">{d.sample_count} sampel</div>
+                    <div className="text-[9.5px] text-ink/50 mt-1">{d.sample_count} sampel</div>
                   </div>
                 ))}
               </div>

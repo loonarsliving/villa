@@ -123,12 +123,12 @@ export default function ManagerCctvPage() {
         }
       >
         <div ref={wadahRef} className="w-full">
-          {memuat && <div className="text-center py-10 text-[11px] text-ink/30">Menghubungkan ke kamera…</div>}
+          {memuat && <div className="text-center py-10 text-[11px] text-ink/50">Menghubungkan ke kamera…</div>}
           {galatNonton && (
             <div className="text-center py-10 text-[11px] text-ruby-400 leading-relaxed px-4">
               Gagal live-view: {galatNonton}
               <br />
-              <span className="text-ink/30">Coba lagi sebentar. Kalau tetap gagal, hubungi admin.</span>
+              <span className="text-ink/50">Coba lagi sebentar. Kalau tetap gagal, hubungi admin.</span>
             </div>
           )}
           <div id="manager-cctv-player" className={memuat || galatNonton ? "hidden" : ""} />

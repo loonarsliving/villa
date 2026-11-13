@@ -69,7 +69,7 @@ export function HandoverHarian({ refreshKey = 0 }: { refreshKey?: number }) {
       </div>
       {error && <div className="text-[11px] text-ruby-500 mb-2">{error}</div>}
       {!data ? (
-        <div className="text-[11px] text-ink/30 py-3">Memuat jadwal tamu…</div>
+        <div className="text-[11px] text-ink/50 py-3">Memuat jadwal tamu…</div>
       ) : (
         <div className="grid sm:grid-cols-3 gap-3">
           <Kolom judul="Menginap (lanjut)" warna="bg-gold-500" items={data.inHouse} kosong="Tidak ada tamu yang lanjut menginap" />
@@ -87,10 +87,10 @@ function Kolom({ judul, warna, items, kosong }: { judul: string; warna: string; 
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-ink/[0.06]">
         <span className={`w-1.5 h-1.5 rounded-full ${warna}`} />
         <span className="text-[10.5px] font-semibold uppercase tracking-wide text-ink/60">{judul}</span>
-        <span className="text-[10px] text-ink/35 ml-auto">{items.length}</span>
+        <span className="text-[10px] text-ink/55 ml-auto">{items.length}</span>
       </div>
       {items.length === 0 ? (
-        <div className="text-[10.5px] text-ink/30 px-3 py-3">{kosong}</div>
+        <div className="text-[10.5px] text-ink/50 px-3 py-3">{kosong}</div>
       ) : (
         items.map((b) => {
           const selesai = b.keadaan === "Sudah check-out" || b.keadaan === "Sudah check-in" || b.keadaan === "Menginap";

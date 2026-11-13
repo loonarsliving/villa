@@ -18,7 +18,7 @@ const numColor: Record<string, string> = {
   available: "text-sage-400",
   occupied: "text-gold-500",
   checkout: "text-gold-500",
-  dirty: "text-ink/30",
+  dirty: "text-ink/50",
   maintenance: "text-ruby-400",
 };
 const statusLabel: Record<string, string> = {
@@ -57,7 +57,7 @@ export default function SiteplanPage() {
               <div key={blok} className="bg-base-800 border border-ink/[0.08] rounded-md overflow-hidden">
                 <div className="px-4 py-2.5 bg-gold-500/10 border-b border-ink/[0.08] flex items-center justify-between">
                   <div className="font-serif text-base font-light text-gold-500 tracking-wide">Blok {blok}</div>
-                  <div className="text-[9.5px] text-ink/30">{counts[blok]} unit · {terisi} terisi</div>
+                  <div className="text-[9.5px] text-ink/50">{counts[blok]} unit · {terisi} terisi</div>
                 </div>
                 <div className="flex gap-2 flex-wrap p-4">
                   {blokUnits.map((u) => (
@@ -67,8 +67,8 @@ export default function SiteplanPage() {
                       className={`bg-base-900 border rounded p-3.5 min-w-[88px] text-center hover:border-gold-500 transition-colors ${statusColor[u.status]}`}
                     >
                       <div className={`font-serif text-xl font-light ${numColor[u.status]}`}>{u.nomor}</div>
-                      <div className="text-[9px] text-ink/30 mt-1">{statusLabel[u.status]}</div>
-                      {u.owner_nama && <div className="text-[8.5px] text-ink/30 mt-1 truncate max-w-[80px]">{u.owner_nama}</div>}
+                      <div className="text-[9px] text-ink/50 mt-1">{statusLabel[u.status]}</div>
+                      {u.owner_nama && <div className="text-[8.5px] text-ink/50 mt-1 truncate max-w-[80px]">{u.owner_nama}</div>}
                     </button>
                   ))}
                 </div>

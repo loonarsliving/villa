@@ -75,7 +75,7 @@ function Isi({ label, nilai, onChange, sub }: { label: string; nilai: string; on
         value={nilai ? angka(nilai).toLocaleString("id-ID") : ""}
         onChange={(e) => onChange(e.target.value)}
       />
-      {sub && <div className="text-[10px] text-ink/35 mt-1">{sub}</div>}
+      {sub && <div className="text-[10px] text-ink/55 mt-1">{sub}</div>}
     </label>
   );
 }
@@ -230,7 +230,7 @@ export function RencanaKas() {
             <tbody>
               {r.akanCairPerBaris.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-4 py-5 text-center text-ink/30">
+                  <td colSpan={4} className="px-4 py-5 text-center text-ink/50">
                     Tidak ada pencairan terjadwal sampai akhir bulan.
                   </td>
                 </tr>

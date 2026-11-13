@@ -152,7 +152,7 @@ export default function PricingRecommendationsPage() {
               <div className="p-4 sm:p-5">
                 <div className="flex items-center gap-3 mb-3">
                   <div className="text-[13px] text-ink/40 line-through">{fmtCurrency(r.current_rate)}</div>
-                  <div className="text-ink/30">→</div>
+                  <div className="text-ink/50">→</div>
                   <div className="text-lg font-serif font-medium text-ink">{fmtCurrency(r.recommended_rate)}</div>
                   <Badge tone={r.delta_pct > 0 ? "ok" : "danger"}>
                     {r.delta_pct > 0 ? "+" : ""}

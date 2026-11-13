@@ -285,3 +285,9 @@ body {
 .font-serif {
   font-variant-numeric: lining-nums;
 }
+/* `tabular-nums` (mis. angka berhitung di StatCard) menimpa aturan di atas --
+   gabungkan keduanya untuk angka di dalam huruf serif. */
+.font-serif .tabular-nums,
+.font-serif.tabular-nums {
+  font-variant-numeric: lining-nums tabular-nums;
+}

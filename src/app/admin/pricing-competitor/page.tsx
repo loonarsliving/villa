@@ -226,7 +226,7 @@ export default function PricingCompetitorPage() {
                     <div key={r.id} className="flex items-center justify-between gap-3 text-[12px] border-b border-ink/[0.05] pb-2 last:border-0">
                       <div className="min-w-0">
                         <div className="font-medium text-ink truncate">
-                          {r.competitor_name} <span className="text-ink/30 font-normal">· {r.competitor_type}</span>
+                          {r.competitor_name} <span className="text-ink/50 font-normal">· {r.competitor_type}</span>
                         </div>
                         <div className="text-ink/40 text-[10.5px] truncate">
                           {r.location_label} · {r.villa_room_types?.name ?? "semua tipe"} · diamati {fmtDate(r.observed_at)}

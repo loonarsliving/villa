@@ -13,7 +13,7 @@ function Baris({ label, sub, nilai, tebal }: { label: string; sub?: string; nila
     <div className={`flex items-start justify-between gap-3 px-4 sm:px-5 py-2.5 border-b border-ink/[0.05] last:border-0 text-xs ${tebal ? "bg-gold-500/10 font-medium" : ""}`}>
       <div>
         <div className={tebal ? "text-ink/80" : "text-ink/60"}>{label}</div>
-        {sub && <div className="text-[10.5px] text-ink/35 mt-0.5">{sub}</div>}
+        {sub && <div className="text-[10.5px] text-ink/55 mt-0.5">{sub}</div>}
       </div>
       <div className="font-mono text-[11.5px] text-ink/70 shrink-0 text-right">{nilai}</div>
     </div>
@@ -31,11 +31,11 @@ export function RincianBiayaInvestor({ report }: { report: Report }) {
     <>
       <Card className="mt-3.5">
         <CardHeader title="Rincian COGS" subtitle="Biaya untuk setiap kamar yang terisi semalam" />
-        <div className="px-4 sm:px-5 pt-3 pb-1 text-[10px] text-ink/35 uppercase tracking-wide">Biaya langsung per malam</div>
+        <div className="px-4 sm:px-5 pt-3 pb-1 text-[10px] text-ink/55 uppercase tracking-wide">Biaya langsung per malam</div>
         {c.biaya_langsung.map((k) => (
           <Baris key={k.label} label={k.label} nilai={fmtCurrencyFull(k.nominal)} />
         ))}
-        <div className="px-4 sm:px-5 pt-3 pb-1 text-[10px] text-ink/35 uppercase tracking-wide">Biaya tetap pendukung per bulan</div>
+        <div className="px-4 sm:px-5 pt-3 pb-1 text-[10px] text-ink/55 uppercase tracking-wide">Biaya tetap pendukung per bulan</div>
         {c.biaya_tetap_bulanan.map((k) => (
           <Baris key={k.label} label={k.label} nilai={`${fmtCurrencyFull(k.nominal)}/bln`} />
         ))}

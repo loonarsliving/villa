@@ -151,7 +151,7 @@ export function AppHome({
   const hariIni = tanggal === hariIniJakarta();
 
   return (
-    <div className="min-h-screen bg-white text-slate-900 flex flex-col">
+    <div className="min-h-screen bg-canvas text-slate-900 flex flex-col">
       {/* Kepala berfoto. Tinggi tetap supaya ring dan tanggal tidak bergeser
           saat angkanya berubah dari "—" ke angka sungguhan. */}
       <header className="relative h-[210px] shrink-0 overflow-hidden bg-slate-900">

@@ -293,7 +293,7 @@ export default function ChecklistDanaPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-[11.5px]">
                 <thead>
-                  <tr className="text-ink/35 text-[9.5px] uppercase tracking-wide">
+                  <tr className="text-ink/55 text-[9.5px] uppercase tracking-wide">
                     <th className="text-left px-4 py-2">Channel</th>
                     <th className="text-right px-4 py-2">Seharusnya</th>
                     <th className="text-right px-4 py-2">Sudah masuk</th>
@@ -306,10 +306,10 @@ export default function ChecklistDanaPage() {
                       <td className="px-4 py-2">{c.sumber}</td>
                       <td className="px-4 py-2 text-right">{fmtCurrencyFull(c.seharusnya)}</td>
                       <td className="px-4 py-2 text-right text-sage-400">
-                        {fmtCurrencyFull(c.diterima)} <span className="text-ink/30">({c.count_masuk})</span>
+                        {fmtCurrencyFull(c.diterima)} <span className="text-ink/50">({c.count_masuk})</span>
                       </td>
                       <td className="px-4 py-2 text-right">
-                        {fmtCurrencyFull(c.belum)} <span className="text-ink/30">({c.count_belum})</span>
+                        {fmtCurrencyFull(c.belum)} <span className="text-ink/50">({c.count_belum})</span>
                       </td>
                     </tr>
                   ))}
@@ -329,7 +329,7 @@ export default function ChecklistDanaPage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-[11.5px]">
                   <thead>
-                    <tr className="text-ink/35 text-[9.5px] uppercase tracking-wide">
+                    <tr className="text-ink/55 text-[9.5px] uppercase tracking-wide">
                       <th className="text-left px-4 py-2">Tanggal cair</th>
                       <th className="text-left px-4 py-2">Channel</th>
                       <th className="text-right px-4 py-2">Booking</th>
@@ -346,17 +346,17 @@ export default function ChecklistDanaPage() {
                         <tr key={g.key} className="border-t border-ink/[0.05] text-ink/70 align-top">
                           <td className={`px-4 py-2 whitespace-nowrap ${lewat ? "text-ruby-400" : ""}`}>
                             {fmtDate(g.tanggal, { weekday: "short", day: "2-digit", month: "short" })}
-                            {g.berjalan && <div className="text-ink/30 text-[10px]">masih berjalan</div>}
+                            {g.berjalan && <div className="text-ink/50 text-[10px]">masih berjalan</div>}
                             {lewat && <div className="text-[10px]">sudah lewat</div>}
                           </td>
                           <td className="px-4 py-2">{g.sumber}</td>
                           <td className="px-4 py-2 text-right">{g.count}</td>
                           <td className="px-4 py-2 text-right font-medium whitespace-nowrap">{fmtCurrencyFull(g.seharusnya)}</td>
                           <td className="px-4 py-2 text-right text-sage-400 whitespace-nowrap">
-                            {fmtCurrencyFull(g.diterima)} <span className="text-ink/30">({g.count_masuk})</span>
+                            {fmtCurrencyFull(g.diterima)} <span className="text-ink/50">({g.count_masuk})</span>
                           </td>
                           <td className="px-4 py-2 text-right whitespace-nowrap">
-                            {fmtCurrencyFull(g.belum)} <span className="text-ink/30">({g.count_belum})</span>
+                            {fmtCurrencyFull(g.belum)} <span className="text-ink/50">({g.count_belum})</span>
                           </td>
                           <td className="px-4 py-2 text-right whitespace-nowrap">
                             {g.count_belum > 0 ? (
@@ -374,7 +374,7 @@ export default function ChecklistDanaPage() {
                 </table>
               </div>
             )}
-            <div className="px-4 py-3 text-[10.5px] text-ink/35 border-t border-ink/[0.05]">
+            <div className="px-4 py-3 text-[10.5px] text-ink/55 border-t border-ink/[0.05]">
               &quot;Total seharusnya&quot; memakai komisi rata-rata di Konfigurasi Settlement OTA, jadi bisa berbeda sedikit dari nilai transfer.
               Bandingkan juga jumlah booking dengan laporan payout OTA: kalau jumlahnya kurang, ada reservasi yang tidak masuk ke sistem.
               &quot;Masih berjalan&quot; = tanggal cair belum lewat, booking yang check-in-nya belum tiba belum terhitung.
@@ -428,7 +428,7 @@ export default function ChecklistDanaPage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-[11.5px]">
                   <thead>
-                    <tr className="text-ink/35 text-[9.5px] uppercase tracking-wide">
+                    <tr className="text-ink/55 text-[9.5px] uppercase tracking-wide">
                       <th className="px-3 py-2 w-8">
                         {belumDiList.length > 0 && <input type="checkbox" checked={semuaDipilih} onChange={toggleAll} aria-label="Pilih semua" />}
                       </th>
@@ -457,16 +457,16 @@ export default function ChecklistDanaPage() {
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap">
                             {fmtDate(i.tgl_checkout)}
-                            <div className="text-ink/30 text-[10px]">{i.malam} malam</div>
+                            <div className="text-ink/50 text-[10px]">{i.malam} malam</div>
                           </td>
                           <td className="px-3 py-2">
                             {i.guest_nama}
-                            <div className="text-ink/30 text-[10px]">Unit {i.unit_nomor ?? "-"}</div>
+                            <div className="text-ink/50 text-[10px]">Unit {i.unit_nomor ?? "-"}</div>
                           </td>
                           <td className="px-3 py-2">{i.sumber ?? "-"}</td>
                           <td className="px-3 py-2 text-right whitespace-nowrap">
                             {fmtCurrencyFull(i.seharusnya)}
-                            {i.kotor !== i.seharusnya && <div className="text-ink/30 text-[10px]">kotor {fmtCurrencyFull(i.kotor)}</div>}
+                            {i.kotor !== i.seharusnya && <div className="text-ink/50 text-[10px]">kotor {fmtCurrencyFull(i.kotor)}</div>}
                           </td>
                           <td className={`px-3 py-2 whitespace-nowrap ${lewat ? "text-ruby-400" : ""}`}>
                             {i.expected_settlement_date ? fmtDate(i.expected_settlement_date) : "Belum diatur"}
@@ -504,7 +504,7 @@ export default function ChecklistDanaPage() {
                 </table>
               </div>
             )}
-            <div className="px-4 py-3 text-[10.5px] text-ink/35 border-t border-ink/[0.05] space-y-1">
+            <div className="px-4 py-3 text-[10.5px] text-ink/55 border-t border-ink/[0.05] space-y-1">
               <div>
                 &quot;Seharusnya&quot; = angka bersih yang diterima villa (untuk OTA: Deposit Amount Cloudbeds dikurangi komisi OTA di Konfigurasi Settlement OTA; untuk langsung:
                 total bayar). Booking yang tanggal check-in-nya belum tiba tidak ada di daftar ini.

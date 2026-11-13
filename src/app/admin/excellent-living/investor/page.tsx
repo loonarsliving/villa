@@ -84,7 +84,7 @@ export default function ElInvestorAdminPage() {
                       <div className="text-[13px] font-semibold text-ink">{inv.nama}{!inv.is_active && " (nonaktif)"}</div>
                       <div className="text-[11px] text-ink/40">{inv.email}{inv.hp ? ` · ${inv.hp}` : ""}</div>
                       <div className="flex flex-wrap gap-2 mt-2">
-                        {milik.length === 0 && <span className="text-[11px] text-ink/30">Belum ada unit</span>}
+                        {milik.length === 0 && <span className="text-[11px] text-ink/50">Belum ada unit</span>}
                         {milik.map((l) => {
                           const u = unitById.get(l.loonars_unit_id);
                           return (
@@ -107,7 +107,7 @@ export default function ElInvestorAdminPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-[12px]">
                 <thead>
-                  <tr className="text-left text-[9.5px] uppercase tracking-wider text-ink/30">
+                  <tr className="text-left text-[9.5px] uppercase tracking-wider text-ink/50">
                     <th className="px-3.5 py-2.5">Unit</th>
                     <th className="px-3.5 py-2.5">Tipe</th>
                     <th className="px-3.5 py-2.5">Status</th>

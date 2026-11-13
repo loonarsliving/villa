@@ -337,7 +337,7 @@ export function CheckinCard({
       )}
 
       <div className="mb-5">
-        <label className="block text-[9.5px] font-semibold text-ink/30 tracking-[0.12em] uppercase mb-1.5">Nomor WhatsApp Tamu</label>
+        <label className="block text-[9.5px] font-semibold text-ink/50 tracking-[0.12em] uppercase mb-1.5">Nomor WhatsApp Tamu</label>
         <input
           type="tel"
           inputMode="tel"
@@ -353,7 +353,7 @@ export function CheckinCard({
       </div>
 
       <div className="mb-5">
-        <label className="block text-[9.5px] font-semibold text-ink/30 tracking-[0.12em] uppercase mb-1.5">Foto KTP / Paspor</label>
+        <label className="block text-[9.5px] font-semibold text-ink/50 tracking-[0.12em] uppercase mb-1.5">Foto KTP / Paspor</label>
         {ktpPreview ? (
           <div className="flex items-center gap-3">
             <img src={ktpPreview} alt="KTP" className="w-24 h-16 object-cover rounded border border-ink/10" />
@@ -390,7 +390,7 @@ export function CheckinCard({
       </div>
 
       <div className="mb-5">
-        <label className="block text-[9.5px] font-semibold text-ink/30 tracking-[0.12em] uppercase mb-1.5">Tata Tertib & Larangan</label>
+        <label className="block text-[9.5px] font-semibold text-ink/50 tracking-[0.12em] uppercase mb-1.5">Tata Tertib & Larangan</label>
         <div className="max-h-40 overflow-y-auto rounded-lg border border-ink/15 bg-base-800/40 p-3 text-[10.5px] leading-relaxed text-ink/60 whitespace-pre-line">
           {houseRules}
         </div>
@@ -408,7 +408,7 @@ export function CheckinCard({
       </div>
 
       <div className="mb-1">
-        <label className="block text-[9.5px] font-semibold text-ink/30 tracking-[0.12em] uppercase mb-1.5">Tanda Tangan Tamu</label>
+        <label className="block text-[9.5px] font-semibold text-ink/50 tracking-[0.12em] uppercase mb-1.5">Tanda Tangan Tamu</label>
         <canvas
           ref={canvasRef}
           className="w-full h-[140px] rounded-lg border border-ink/15 bg-white touch-none"

@@ -178,7 +178,7 @@ export default function PromoPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-[12px]">
                 <thead>
-                  <tr className="text-ink/30 text-[9.5px] uppercase tracking-[0.12em]">
+                  <tr className="text-ink/50 text-[9.5px] uppercase tracking-[0.12em]">
                     <th className="text-left py-2">Kode</th>
                     <th className="text-left py-2">Nama</th>
                     <th className="text-left py-2">Harga</th>
@@ -201,7 +201,7 @@ export default function PromoPage() {
                       <td className="py-2.5 text-ink/50">{rentang(p.menginap_dari, p.menginap_sampai)}</td>
                       <td className="py-2.5 text-right text-ink">
                         {p.terpakai}
-                        {p.kuota != null && <span className="text-ink/30"> / {p.kuota}</span>}
+                        {p.kuota != null && <span className="text-ink/50"> / {p.kuota}</span>}
                       </td>
                       <td className="py-2.5">{p.aktif ? <Badge tone="ok">Aktif</Badge> : <Badge tone="pending">Nonaktif</Badge>}</td>
                       <td className="py-2.5 text-right whitespace-nowrap">

@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
     <div
-      className={`anim-fade-up bg-base-900 border border-ink/[0.06] rounded-2xl shadow-sm shadow-ink/[0.04] overflow-hidden transition-shadow duration-300 hover:shadow-md hover:shadow-ink/[0.07] ${className}`}
+      className={`group/card anim-fade-up bg-base-900 border border-ink/[0.06] rounded-2xl shadow-sm shadow-ink/[0.04] overflow-hidden transition-shadow duration-300 hover:shadow-md hover:shadow-ink/[0.07] ${className}`}
     >
       {children}
     </div>
@@ -22,8 +22,11 @@ export function CardHeader({
   return (
     <div className="px-4 sm:px-5 py-3.5 border-b border-ink/[0.05] flex items-center justify-between gap-3">
       <div className="min-w-0">
-        <div className="text-[11px] font-semibold text-ink/80 tracking-wide uppercase truncate">{title}</div>
-        {subtitle && <div className="text-[10px] text-ink/30 mt-0.5">{subtitle}</div>}
+        {/* Judul kartu berhuruf serif ala loonars.id (sebelumnya huruf kecil KAPITAL). */}
+        <div className="font-serif text-[1.2rem] leading-tight text-ink truncate">{title}</div>
+        {/* Garis terakota yang tumbuh saat kartu disentuh/diarahkan kursor (tanpa transform pada kartu). */}
+        <span aria-hidden className="mt-1.5 block h-px w-6 origin-left bg-gold-500/60 transition-[width,background-color] duration-500 ease-out group-hover/card:w-14 group-hover/card:bg-gold-500" />
+        {subtitle && <div className="text-[11px] text-ink/55 mt-0.5">{subtitle}</div>}
       </div>
       {action}
     </div>
@@ -60,8 +63,8 @@ export function Loading({ label = "Memuat..." }: { label?: string }) {
 
 export function Empty({ label }: { label: string }) {
   return (
-    <div className="anim-fade-up flex flex-col items-center gap-2 py-8 text-ink/35 text-xs tracking-wide">
-      <span className="anim-float w-10 h-10 rounded-full bg-ink/[0.04] flex items-center justify-center text-base text-ink/30" aria-hidden>
+    <div className="anim-fade-up flex flex-col items-center gap-2 py-8 text-ink/55 text-xs tracking-wide">
+      <span className="anim-float w-10 h-10 rounded-full bg-ink/[0.04] flex items-center justify-center text-base text-ink/50" aria-hidden>
         ◌
       </span>
       {label}

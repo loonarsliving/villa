@@ -112,7 +112,7 @@ export default function PricingCalendarPage() {
                             {day.recommendation_status === "executed" ? "disetujui" : "menunggu review"}
                           </Badge>
                         )}
-                        <div className="text-[10px] text-ink/35 mt-1.5">
+                        <div className="text-[10px] text-ink/55 mt-1.5">
                           {day.has_snapshot ? `Okupansi: ${day.occupancy_pct ?? 0}%` : "Okupansi: belum ada data"}
                         </div>
                       </div>

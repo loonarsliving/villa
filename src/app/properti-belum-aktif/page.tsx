@@ -4,7 +4,7 @@ import { AuthProvider, useAuth } from "@/lib/auth";
 
 function Isi() {
   const { user, ready, logout } = useAuth();
-  if (!ready) return <div className="min-h-screen flex items-center justify-center text-ink/30 text-xs">Memuat sesi...</div>;
+  if (!ready) return <div className="min-h-screen flex items-center justify-center text-ink/50 text-xs">Memuat sesi...</div>;
   return (
     <div className="min-h-screen bg-canvas flex items-center justify-center px-4">
       <div className="max-w-md text-center">

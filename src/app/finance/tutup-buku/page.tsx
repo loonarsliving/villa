@@ -232,7 +232,7 @@ export default function TutupBukuPage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-[11.5px]">
                   <thead>
-                    <tr className="text-ink/35 text-[9.5px] uppercase tracking-wide">
+                    <tr className="text-ink/55 text-[9.5px] uppercase tracking-wide">
                       <th className="text-left px-4 py-2">Channel</th>
                       <th className="text-right px-4 py-2">Piutang saat tutup</th>
                       <th className="text-right px-4 py-2">Cair setelah tutup</th>
@@ -244,13 +244,13 @@ export default function TutupBukuPage() {
                       <tr key={g.sumber} className="border-t border-ink/[0.05] text-ink/70">
                         <td className="px-4 py-2">{g.sumber}</td>
                         <td className="px-4 py-2 text-right whitespace-nowrap">
-                          {fmtCurrencyFull(g.saat_tutup)} <span className="text-ink/30">({g.count_saat_tutup})</span>
+                          {fmtCurrencyFull(g.saat_tutup)} <span className="text-ink/50">({g.count_saat_tutup})</span>
                         </td>
                         <td className="px-4 py-2 text-right whitespace-nowrap text-azure-500">
-                          {fmtCurrencyFull(g.cair)} <span className="text-ink/30">({g.count_cair})</span>
+                          {fmtCurrencyFull(g.cair)} <span className="text-ink/50">({g.count_cair})</span>
                         </td>
                         <td className="px-4 py-2 text-right whitespace-nowrap font-medium">
-                          {fmtCurrencyFull(g.sisa)} <span className="text-ink/30">({g.count_sisa})</span>
+                          {fmtCurrencyFull(g.sisa)} <span className="text-ink/50">({g.count_sisa})</span>
                         </td>
                       </tr>
                     ))}
@@ -271,7 +271,7 @@ export default function TutupBukuPage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-[11.5px]">
                   <thead>
-                    <tr className="text-ink/35 text-[9.5px] uppercase tracking-wide">
+                    <tr className="text-ink/55 text-[9.5px] uppercase tracking-wide">
                       <th className="text-left px-4 py-2">Channel</th>
                       <th className="text-right px-4 py-2">Belum cair</th>
                       {URUTAN_UMUR.map((u) => (
@@ -288,17 +288,17 @@ export default function TutupBukuPage() {
                         <Fragment key={g.sumber}>
                           <tr className="border-t border-ink/[0.05] text-ink/70 cursor-pointer hover:bg-ink/[0.02]" onClick={() => toggleOta(g.sumber)}>
                             <td className="px-4 py-2 whitespace-nowrap">
-                              <span className="text-ink/30 mr-1">{buka ? "▾" : "▸"}</span>
+                              <span className="text-ink/50 mr-1">{buka ? "▾" : "▸"}</span>
                               {g.sumber}
                             </td>
                             <td className="px-4 py-2 text-right whitespace-nowrap font-medium">
-                              {fmtCurrencyFull(g.total)} <span className="text-ink/30">({g.count})</span>
+                              {fmtCurrencyFull(g.total)} <span className="text-ink/50">({g.count})</span>
                             </td>
                             {URUTAN_UMUR.map((u) => (
                               <td key={u} className={`px-3 py-2 text-right whitespace-nowrap ${g.per_umur[u].count ? WARNA_UMUR[u] : "text-ink/20"}`}>
                                 {g.per_umur[u].count ? (
                                   <>
-                                    {fmtCurrencyFull(g.per_umur[u].total)} <span className="text-ink/30">({g.per_umur[u].count})</span>
+                                    {fmtCurrencyFull(g.per_umur[u].total)} <span className="text-ink/50">({g.per_umur[u].count})</span>
                                   </>
                                 ) : (
                                   "-"
@@ -320,7 +320,7 @@ export default function TutupBukuPage() {
                 </table>
               </div>
             )}
-            <div className="px-4 py-3 text-[10.5px] text-ink/35 border-t border-ink/[0.05] space-y-1">
+            <div className="px-4 py-3 text-[10.5px] text-ink/55 border-t border-ink/[0.05] space-y-1">
               <div>
                 Cara memakai: mulai dari kolom &quot;Lewat &gt; 30 hari&quot; dan &quot;Lewat 8-30 hari&quot;. Cari No. reservasi Cloudbeds di laporan payout OTA
                 (extranet Booking.com / Agoda / Traveloka). Kalau ada di payout dan dananya sudah di mutasi bank, centang di{" "}
@@ -345,7 +345,7 @@ export default function TutupBukuPage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-[11.5px]">
                   <thead>
-                    <tr className="text-ink/35 text-[9.5px] uppercase tracking-wide">
+                    <tr className="text-ink/55 text-[9.5px] uppercase tracking-wide">
                       <th className="text-left px-4 py-2">Tamu / Unit</th>
                       <th className="text-left px-4 py-2">Channel</th>
                       <th className="text-left px-4 py-2">Check-in</th>
@@ -359,7 +359,7 @@ export default function TutupBukuPage() {
                       <tr key={i.booking_id} className="border-t border-ink/[0.05] text-ink/70">
                         <td className="px-4 py-2">
                           {i.guest_nama} <Badge tone="ok">cair setelah tutup buku</Badge>
-                          <div className="text-ink/30 text-[10px]">Unit {i.unit_nomor ?? "-"}</div>
+                          <div className="text-ink/50 text-[10px]">Unit {i.unit_nomor ?? "-"}</div>
                         </td>
                         <td className="px-4 py-2">{i.sumber ?? "-"}</td>
                         <td className="px-4 py-2 whitespace-nowrap">{fmtDate(i.tgl_checkin)}</td>
@@ -409,7 +409,7 @@ function DaftarBooking({ baris }: { baris: BarisPiutang<FinanceChecklistItem>[] 
   return (
     <table className="w-full text-[11px]">
       <thead>
-        <tr className="text-ink/35 text-[9px] uppercase tracking-wide">
+        <tr className="text-ink/55 text-[9px] uppercase tracking-wide">
           <th className="text-left px-2 py-1.5">No. reservasi</th>
           <th className="text-left px-2 py-1.5">Tamu / Unit</th>
           <th className="text-left px-2 py-1.5">Check-in / out</th>
@@ -424,7 +424,7 @@ function DaftarBooking({ baris }: { baris: BarisPiutang<FinanceChecklistItem>[] 
             <td className="px-2 py-1.5 font-mono text-[10.5px]">{i.cloudbeds_reservation_id ?? "-"}</td>
             <td className="px-2 py-1.5">
               {i.guest_nama}
-              <span className="text-ink/30"> · Unit {i.unit_nomor ?? "-"}</span>
+              <span className="text-ink/50"> · Unit {i.unit_nomor ?? "-"}</span>
             </td>
             <td className="px-2 py-1.5 whitespace-nowrap">
               {fmtDate(i.tgl_checkin)} – {fmtDate(i.tgl_checkout)}
@@ -451,7 +451,7 @@ function RiwayatTutupBuku({ daftar, aktif, onPilih }: { daftar: TutupBukuDaftar 
         <div className="overflow-x-auto">
           <table className="w-full text-[11.5px]">
             <thead>
-              <tr className="text-ink/35 text-[9.5px] uppercase tracking-wide">
+              <tr className="text-ink/55 text-[9.5px] uppercase tracking-wide">
                 <th className="text-left px-4 py-2">Bulan</th>
                 <th className="text-left px-4 py-2">Status</th>
                 <th className="text-right px-4 py-2">Seharusnya</th>
@@ -474,7 +474,7 @@ function RiwayatTutupBuku({ daftar, aktif, onPilih }: { daftar: TutupBukuDaftar 
                   <td className="px-4 py-2 text-right whitespace-nowrap">{fmtCurrencyFull(r.total_seharusnya)}</td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">{fmtCurrencyFull(r.total_diterima)}</td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">
-                    {fmtCurrencyFull(r.total_piutang)} <span className="text-ink/30">({r.jumlah_booking_piutang})</span>
+                    {fmtCurrencyFull(r.total_piutang)} <span className="text-ink/50">({r.jumlah_booking_piutang})</span>
                   </td>
                   <td className="px-4 py-2 whitespace-nowrap text-ink/50">
                     {fmtDateTime(r.ditutup_at)} · {r.ditutup_oleh_nama ?? "-"}

@@ -29,7 +29,7 @@ export default function FrontDeskNotifPage() {
                 <div className="text-[11.5px] text-ink/50 leading-relaxed">
                   <b className="text-ink">{n.judul}</b> — {n.pesan}
                 </div>
-                <div className="text-[9.5px] text-ink/30 mt-0.5">{fmtDate(n.created_at, { day: "2-digit", month: "short", year: "numeric" })}</div>
+                <div className="text-[9.5px] text-ink/50 mt-0.5">{fmtDate(n.created_at, { day: "2-digit", month: "short", year: "numeric" })}</div>
               </div>
             </div>
           ))

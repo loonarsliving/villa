@@ -166,7 +166,7 @@ export default function GuestDatabasePage() {
             <div className="overflow-x-auto">
               <table className="w-full text-[12px]">
                 <thead>
-                  <tr className="text-ink/30 text-[9.5px] uppercase tracking-[0.12em]">
+                  <tr className="text-ink/50 text-[9.5px] uppercase tracking-[0.12em]">
                     <th className="text-left py-2">Nama</th>
                     <th className="text-left py-2">Kontak</th>
                     <th className="text-left py-2">Asal</th>
@@ -182,7 +182,7 @@ export default function GuestDatabasePage() {
                     <tr key={r.guest_id} className="border-t border-ink/5">
                       <td className="py-2.5 text-ink">{r.nama ?? "-"}</td>
                       <td className="py-2.5 text-ink/60">
-                        <div>{r.hp ?? <span className="text-ink/25">tanpa nomor</span>}</div>
+                        <div>{r.hp ?? <span className="text-ink/45">tanpa nomor</span>}</div>
                         <div className="text-[11px] text-ink/40">{r.email ?? "tanpa email"}</div>
                       </td>
                       <td className="py-2.5 text-ink/50">{SUMBER_LABEL[r.sumber_pertama ?? ""] ?? r.sumber_pertama ?? "-"}</td>
@@ -238,7 +238,7 @@ export default function GuestDatabasePage() {
         <Field label="Catatan internal">
           <input className={inputCls} value={form.catatan} onChange={(e) => setForm({ ...form, catatan: e.target.value })} placeholder="mis. tamu rombongan kantor" />
         </Field>
-        <p className="text-[11px] text-ink/35 leading-relaxed">
+        <p className="text-[11px] text-ink/55 leading-relaxed">
           Nama, nomor, dan email tidak diubah dari sini — semuanya ikut data pemesanan, supaya tidak ada dua versi nomor
           yang sama.
         </p>
@@ -251,9 +251,9 @@ function Kartu({ label, nilai, sub }: { label: string; nilai?: number; sub?: str
   return (
     <Card>
       <CardBody>
-        <div className="text-[9.5px] uppercase tracking-[0.12em] text-ink/30 mb-1.5">{label}</div>
+        <div className="text-[9.5px] uppercase tracking-[0.12em] text-ink/50 mb-1.5">{label}</div>
         <div className="text-2xl font-light text-ink">{nilai ?? "—"}</div>
-        {sub && <div className="text-[10.5px] text-ink/30 mt-1">{sub}</div>}
+        {sub && <div className="text-[10.5px] text-ink/50 mt-1">{sub}</div>}
       </CardBody>
     </Card>
   );

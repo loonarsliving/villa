@@ -117,7 +117,7 @@ export default function PropertyConfigPage() {
                     <tr key={r.property_code} className="border-b border-ink/5">
                       <td className="px-4 py-2.5 font-medium text-ink/80">
                         {r.property_name}
-                        <div className="text-ink/30 font-normal">{r.property_code}</div>
+                        <div className="text-ink/50 font-normal">{r.property_code}</div>
                       </td>
                       <td className="px-3 py-2.5">{r.total_rooms}</td>
                       <td className="px-3 py-2.5">

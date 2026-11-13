@@ -288,7 +288,7 @@ export default function AdminCctvPage() {
             <div key={cam.id} className="flex flex-wrap items-center gap-3 px-4 sm:px-5 py-3 border-b border-ink/[0.05] last:border-0">
               <div className="flex-1 min-w-0">
                 <div className="text-[12.5px] text-ink/80 font-medium truncate">{cam.nama}</div>
-                <div className="text-[10px] text-ink/30 mt-0.5">
+                <div className="text-[10px] text-ink/50 mt-0.5">
                   {cam.deskripsi || "tanpa deskripsi"} · serial {cam.ezviz_serial} · channel {cam.ezviz_channel_no}
                   {cam.zona ? ` · checkpoint tiap ${cam.checkpoint_interval_minutes} menit` : ""}
                 </div>
@@ -334,7 +334,7 @@ export default function AdminCctvPage() {
                 <div className="text-[12.5px] text-ink/80 font-medium truncate">
                   {r.cctv_cameras?.nama || cameraName(r.camera_id)} · {r.period_start.slice(0, 7)}
                 </div>
-                <div className="text-[10px] text-ink/30 mt-0.5">
+                <div className="text-[10px] text-ink/50 mt-0.5">
                   Hadir {r.total_present}/{r.total_checkpoints} checkpoint · Tidak terdeteksi {r.total_absent}x
                   {r.reviewed_at ? ` · ditinjau ${formatDateTime(r.reviewed_at)}` : ""}
                 </div>
@@ -366,7 +366,7 @@ export default function AdminCctvPage() {
                 <div className="text-[11.5px] text-ink/70 truncate">
                   {cameraName(l.camera_id)} · {formatDateTime(l.captured_at)}
                 </div>
-                {l.ai_summary && <div className="text-[10px] text-ink/30 mt-0.5 truncate">{l.ai_summary}</div>}
+                {l.ai_summary && <div className="text-[10px] text-ink/50 mt-0.5 truncate">{l.ai_summary}</div>}
                 {l.error_detail && <div className="text-[10px] text-ruby-400 mt-0.5 truncate">{l.error_detail}</div>}
               </div>
               <Badge tone={l.status !== "ok" ? "danger" : l.person_detected ? "ok" : "pending"}>
@@ -425,7 +425,7 @@ export default function AdminCctvPage() {
               value={form.checkpoint_interval_minutes}
               onChange={(e) => setForm({ ...form, checkpoint_interval_minutes: e.target.value })}
             />
-            <div className="text-[10px] text-ink/30 mt-1">Catatan: cron berjalan tiap 2 jam — angka ini untuk referensi, bukan penjadwalan per-kamera.</div>
+            <div className="text-[10px] text-ink/50 mt-1">Catatan: cron berjalan tiap 2 jam — angka ini untuk referensi, bukan penjadwalan per-kamera.</div>
           </Field>
         )}
       </Modal>
@@ -441,12 +441,12 @@ export default function AdminCctvPage() {
           </Btn>
         }
       >
-        {watchLoading && <div className="text-center py-10 text-[11px] text-ink/30">Menghubungkan ke kamera…</div>}
+        {watchLoading && <div className="text-center py-10 text-[11px] text-ink/50">Menghubungkan ke kamera…</div>}
         {watchError && (
           <div className="text-center py-10 text-[11px] text-ruby-400 leading-relaxed px-4">
             Gagal live-view: {watchError}
             <br />
-            <span className="text-ink/30">Cek serial/channel/verification code, dan pastikan EZVIZ_APP_KEY/EZVIZ_APP_SECRET sudah diset di Vercel.</span>
+            <span className="text-ink/50">Cek serial/channel/verification code, dan pastikan EZVIZ_APP_KEY/EZVIZ_APP_SECRET sudah diset di Vercel.</span>
           </div>
         )}
         <div id="cctv-player-container" className={watchLoading || watchError ? "hidden" : ""} />

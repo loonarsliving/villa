@@ -156,7 +156,7 @@ export default function AdminUsersPage() {
               <thead>
                 <tr className="bg-base-800">
                   {["Nama", "Email", "Properti", "Role", "Unit", "Status", "Password", "Aksi"].map((h) => (
-                    <th key={h} className="text-left px-3.5 py-2 text-[8.5px] font-semibold tracking-wide uppercase text-ink/30 border-b border-ink/[0.08]">
+                    <th key={h} className="text-left px-3.5 py-2 text-[8.5px] font-semibold tracking-wide uppercase text-ink/50 border-b border-ink/[0.08]">
                       {h}
                     </th>
                   ))}
@@ -258,7 +258,7 @@ export default function AdminUsersPage() {
           />
           <span className="text-[10.5px] text-ink/70">Minta pengguna mengganti password ini saat login berikutnya</span>
         </label>
-        <div className="text-[10.5px] text-ink/30 leading-relaxed mt-2">
+        <div className="text-[10.5px] text-ink/50 leading-relaxed mt-2">
           {resetWajibGanti
             ? "Password di atas sekali pakai — pengguna memilih passwordnya sendiri saat login, jadi jangan disimpan."
             : "Password di atas menetap dan bisa disimpan. Matikan centang ini hanya untuk akun bersama (mis. resepsionis) yang passwordnya dipegang manajemen."}

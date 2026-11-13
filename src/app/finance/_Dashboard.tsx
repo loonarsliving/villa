@@ -263,7 +263,7 @@ export function FinanceDashboard({ view }: { view: "pendapatan" | "transaksi" })
                   <tbody>
                     {channels.channels.length === 0 && (
                       <tr>
-                        <td colSpan={9} className="px-4 py-6 text-center text-ink/30">
+                        <td colSpan={9} className="px-4 py-6 text-center text-ink/50">
                           Tidak ada data pada periode ini.
                         </td>
                       </tr>
@@ -272,7 +272,7 @@ export function FinanceDashboard({ view }: { view: "pendapatan" | "transaksi" })
                       <tr key={c.sumber} className="border-b border-ink/5">
                         <td className="px-4 py-2.5">
                           <div className="font-medium text-ink/80">{c.sumber}</div>
-                          <div className="text-ink/30">
+                          <div className="text-ink/50">
                             {c.normalized_channel} · {c.booking_count} booking
                           </div>
                         </td>
@@ -332,7 +332,7 @@ export function FinanceDashboard({ view }: { view: "pendapatan" | "transaksi" })
                   <tbody>
                     {channels.by_date.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="px-4 py-6 text-center text-ink/30">
+                        <td colSpan={6} className="px-4 py-6 text-center text-ink/50">
                           Tidak ada data pada periode ini.
                         </td>
                       </tr>
@@ -352,7 +352,7 @@ export function FinanceDashboard({ view }: { view: "pendapatan" | "transaksi" })
                             <tr className="border-b border-ink/5 text-ink/70">
                               <td className="pl-8 pr-3 py-1.5">
                                 {c.sumber}
-                                <span className="text-ink/30"> · komisi {c.commission_pct}%</span>
+                                <span className="text-ink/50"> · komisi {c.commission_pct}%</span>
                               </td>
                               <td className="px-3 py-1.5">{c.booking_count}</td>
                               <td className="px-3 py-1.5">{c.malam}</td>
@@ -441,7 +441,7 @@ export function FinanceDashboard({ view }: { view: "pendapatan" | "transaksi" })
                 <tbody>
                   {(!bookings || bookings.items.length === 0) && (
                     <tr>
-                      <td colSpan={7} className="px-4 py-6 text-center text-ink/30">
+                      <td colSpan={7} className="px-4 py-6 text-center text-ink/50">
                         Tidak ada booking pada filter ini.
                       </td>
                     </tr>
@@ -459,14 +459,14 @@ export function FinanceDashboard({ view }: { view: "pendapatan" | "transaksi" })
                       <td className="px-3 py-2.5">
                         {fmtCurrencyFull(b.revenue)}
                         {b.pemasukan_diakui === false && b.status !== "batal" && (
-                          <div className="text-ink/30 text-[9.5px] mt-0.5">tanggal check-in belum tiba · belum dihitung</div>
+                          <div className="text-ink/50 text-[9.5px] mt-0.5">tanggal check-in belum tiba · belum dihitung</div>
                         )}
                       </td>
                       <td className="px-3 py-2.5">
                         <Badge tone={b.payment_status === "PAID" ? "ok" : b.payment_status === "CANCELLED" ? "pending" : "danger"}>
                           {b.payment_status}
                         </Badge>
-                        <div className="text-ink/30 text-[9.5px] mt-0.5">
+                        <div className="text-ink/50 text-[9.5px] mt-0.5">
                           {b.payment_status_source === "cloudbeds_balance" ? "dari Cloudbeds" : "perkiraan"}
                         </div>
                       </td>
@@ -495,7 +495,7 @@ export function FinanceDashboard({ view }: { view: "pendapatan" | "transaksi" })
                   <div key={a.id} className="px-4 sm:px-5 py-3 text-[11px]">
                     <div className="flex justify-between gap-2">
                       <span className="font-medium text-ink/80">{a.action}</span>
-                      <span className="text-ink/30">{fmtDateTime(a.created_at)}</span>
+                      <span className="text-ink/50">{fmtDateTime(a.created_at)}</span>
                     </div>
                     <div className="text-ink/40 mt-0.5">
                       {a.user_nama ?? "—"} {a.reason ? `— ${a.reason}` : ""}
@@ -598,7 +598,7 @@ function BookingDetailModal({
       {detail && (
         <div className="space-y-5 text-[12px]">
           <section>
-            <div className="text-[10px] font-semibold text-ink/30 tracking-wide uppercase mb-1.5">Reservasi</div>
+            <div className="text-[10px] font-semibold text-ink/50 tracking-wide uppercase mb-1.5">Reservasi</div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-ink/70">
               <div>Booking ID: {detail.reservation.id.slice(0, 8)}</div>
               <div>Sumber: {detail.reservation.sumber} ({detail.reservation.normalized_channel})</div>
@@ -612,15 +612,15 @@ function BookingDetailModal({
           </section>
 
           <section>
-            <div className="text-[10px] font-semibold text-ink/30 tracking-wide uppercase mb-1.5">Revenue</div>
+            <div className="text-[10px] font-semibold text-ink/50 tracking-wide uppercase mb-1.5">Revenue</div>
             <div className="text-ink/70">
               Net: {fmtCurrencyFull(detail.revenue.net)}
-              <div className="text-ink/30 text-[10.5px] mt-1">{detail.revenue.note}</div>
+              <div className="text-ink/50 text-[10.5px] mt-1">{detail.revenue.note}</div>
             </div>
           </section>
 
           <section>
-            <div className="text-[10px] font-semibold text-ink/30 tracking-wide uppercase mb-1.5">Payment</div>
+            <div className="text-[10px] font-semibold text-ink/50 tracking-wide uppercase mb-1.5">Payment</div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-ink/70">
               <div>Status: {detail.payment.paid ? "Lunas" : "Belum lunas"}</div>
               <div>Outstanding: {fmtCurrencyFull(detail.payment.outstanding)}</div>
@@ -634,7 +634,7 @@ function BookingDetailModal({
           </section>
 
           <section>
-            <div className="text-[10px] font-semibold text-ink/30 tracking-wide uppercase mb-1.5">Settlement</div>
+            <div className="text-[10px] font-semibold text-ink/50 tracking-wide uppercase mb-1.5">Settlement</div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-ink/70">
               <div>Collection Method: {detail.settlement.collection_method}</div>
               <div>Status: {detail.settlement.settlement_status ?? "—"}</div>
@@ -648,7 +648,7 @@ function BookingDetailModal({
           </section>
 
           <section>
-            <div className="text-[10px] font-semibold text-ink/30 tracking-wide uppercase mb-1.5">Bank</div>
+            <div className="text-[10px] font-semibold text-ink/50 tracking-wide uppercase mb-1.5">Bank</div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-ink/70">
               <div>Diterima: {detail.bank.amount_received != null ? fmtCurrencyFull(detail.bank.amount_received) : "—"}</div>
               <div>Tanggal: {detail.bank.received_date ? fmtDate(detail.bank.received_date) : "—"}</div>
@@ -667,7 +667,7 @@ function BookingDetailModal({
 
           {canProcess && detail.settlement.settlement_status !== "RECEIVED" && (
             <section className="border-t border-ink/10 pt-4 space-y-4">
-              <div className="text-[10px] font-semibold text-ink/30 tracking-wide uppercase">Aksi Settlement</div>
+              <div className="text-[10px] font-semibold text-ink/50 tracking-wide uppercase">Aksi Settlement</div>
               {(detail.settlement.settlement_status === "READY_TO_COLLECT" || detail.settlement.settlement_status === "PENDING") && (
                 <div className="flex gap-2 items-end">
                   <Field label="Referensi Settlement (opsional)">
@@ -700,7 +700,7 @@ function BookingDetailModal({
 
           {detail.audit_log.length > 0 && (
             <section className="border-t border-ink/10 pt-4">
-              <div className="text-[10px] font-semibold text-ink/30 tracking-wide uppercase mb-1.5">Riwayat Perubahan</div>
+              <div className="text-[10px] font-semibold text-ink/50 tracking-wide uppercase mb-1.5">Riwayat Perubahan</div>
               <div className="space-y-1.5">
                 {detail.audit_log.map((a) => (
                   <div key={a.id} className="text-[10.5px] text-ink/50">
