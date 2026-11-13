@@ -313,7 +313,19 @@ const FLOATING_BREAKFAST_MIN_HARI_SEBELUM_CHECKIN = 1;
 // Extra bed (owner 2026-11-10): Rp 150.000 per extra bed per malam, dikali
 // jumlah malam menginap. Tidak ada batas waktu pemesanan.
 const ADDON_EXTRA_BED = {nama: 'Extra Bed', harga_per_malam: 150000};
-const EXTRA_BED_MAKS = 2;
+// Maksimal 1 extra bed per kamar (owner 2026-11-13): satu kamar untuk 2
+// orang, tamu ke-3 WAJIB extra bed, lebih dari 3 tidak bisa dalam satu kamar.
+// Berlaku sama untuk Private Living dan Excellent Living.
+const EXTRA_BED_MAKS = 1;
+const KAMAR_KAPASITAS_STANDAR = 2;
+const KAMAR_KAPASITAS_MAKS = 3;
+/** Pesan galat kalau jumlah tamu tidak muat di kamar, atau null kalau muat. */
+function cekKapasitasKamar(adults, children, ebQty){
+  const total = adults + children;
+  if(total > KAMAR_KAPASITAS_MAKS) return `Satu kamar maksimal ${KAMAR_KAPASITAS_MAKS} tamu (${KAMAR_KAPASITAS_STANDAR} orang + 1 extra bed).`;
+  if(total > KAMAR_KAPASITAS_STANDAR + ebQty) return `Kamar untuk ${KAMAR_KAPASITAS_STANDAR} orang. Untuk ${total} tamu wajib menambah 1 extra bed.`;
+  return null;
+}
 const namaExtraBed = (qty, malam) => `${ADDON_EXTRA_BED.nama}${qty > 1 ? ` x${qty}` : ''} (${malam} malam)`;
 
 /**
@@ -1098,6 +1110,9 @@ async function dataInvoiceEl(booking, guestHp){
     tgl_checkin: booking.tgl_checkin, tgl_checkout: booking.tgl_checkout, durasi_malam: booking.durasi_malam,
     tarif: Number(booking.tarif),
     kode_unik: Math.max(0, Number(booking.total_bayar ?? booking.tarif) - Number(booking.tarif)),
+    paket_dekorasi: booking.paket_dekorasi ?? null,
+    harga_paket: Number(booking.harga_paket ?? 0),
+    addons: rincianAddon(booking.paket_dekorasi, booking.harga_paket),
     total_bayar: tagihanTamu(booking),
     paid_at: booking.bukti_pembayaran_at, created_at: booking.created_at,
   };
@@ -5703,17 +5718,31 @@ async function layani(req){
         const tgl_checkin = b.tgl_checkin, tgl_checkout = b.tgl_checkout;
         const adults = Number.isFinite(Number(b.adults)) ? Math.trunc(Number(b.adults)) : 1;
         const children = Number.isFinite(Number(b.children)) ? Math.trunc(Number(b.children)) : 0;
+        // Extra bed (owner 2026-11-13): harga sama dengan Private Living,
+        // ditagih per malam, disimpan di harga_paket/paket_dekorasi persis
+        // seperti add-on PL (lihat rincianAddon & tagihanTamu) -- jadi
+        // bukan pendapatan kamar dan tidak ikut dibagi ke investor.
+        const eb_qty = Number.isFinite(Number(b.extra_bed)) ? Math.trunc(Number(b.extra_bed)) : 0;
         if(nama.length<2) return err('Nama wajib diisi');
         if(!room_type) return err('Silakan pilih tipe kamar terlebih dahulu.');
         if(!/^[0-9+][0-9+\-\s]{7,}$/.test(hp)) return err('Nomor WhatsApp tidak valid');
         if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return err('Email tidak valid');
         if(adults < 1 || adults > 20) return err('Jumlah dewasa tidak valid');
         if(children < 0 || children > 20) return err('Jumlah anak tidak valid');
+        if(eb_qty < 0 || eb_qty > EXTRA_BED_MAKS) return err(`Jumlah extra bed maksimal ${EXTRA_BED_MAKS}`);
+        {
+          const galatKapasitas = cekKapasitasKamar(adults, children, eb_qty);
+          if(galatKapasitas) return err(galatKapasitas);
+        }
         if(!isValidDateStr(tgl_checkin) || !isValidDateStr(tgl_checkout)) return err('Tanggal tidak valid');
         if(tgl_checkout <= tgl_checkin) return err('Tanggal checkout harus setelah checkin');
         if(tgl_checkin < todayWIB()) return err('Tanggal check-in sudah lewat');
         const nights = elMalam(tgl_checkin, tgl_checkout);
         if(nights > EL_MAKS_MALAM_ONLINE) return err(`Maksimal ${EL_MAKS_MALAM_ONLINE} malam`);
+        const addonEl = eb_qty > 0
+          ? {nama: namaExtraBed(eb_qty, nights), harga: ADDON_EXTRA_BED.harga_per_malam * eb_qty * nights}
+          : null;
+        const hargaAddonEl = addonEl?.harga ?? 0;
 
         // Kupon investor (kolom kode referral). Diperiksa sebelum apa pun
         // ditulis; kode yang tidak berlaku = pesanan ditolak dengan alasannya,
@@ -5766,6 +5795,9 @@ async function layani(req){
           tipe: 'harian', sumber: 'website', tgl_checkin, tgl_checkout,
           durasi_malam: nights, checkin_time: '14:00:00', adults, children,
           tarif: tarifAkhir, total_bayar: totalDitagih, status: 'menunggu_pembayaran', is_free_stay: false,
+          // Hanya dikirim kalau ada extra bed, supaya pemesanan tanpa add-on
+          // tidak berubah sama sekali.
+          ...(addonEl ? {paket_dekorasi: addonEl.nama, harga_paket: hargaAddonEl} : {}),
           catatan: `[Website ${kodeP}] Booking mandiri dari loonars.id (${rt.name}) -- menunggu pembayaran QRIS.${catatanKupon}${catatan ? ` ${catatan}` : ''}`,
           // Kolom kupon hanya dikirim bila kupon dipakai, supaya pemesanan
           // biasa tidak bergantung pada migrasi 20261108000001.
@@ -5778,16 +5810,21 @@ async function layani(req){
         }
 
         await notif(freeUnit.id, 'all', 'booking', `Booking baru dari Website ${kodeP} (menunggu pembayaran) -- ${freeUnit.nomor}`,
-          `${nama} (${hp}) - ${rt.name} - ${tgl_checkin} s/d ${tgl_checkout} - ${rp(totalDitagih)}${kuponHasil ? ` (kupon investor ${kuponCek.kupon.kode}, diskon ${rp(kuponHasil.diskon)})` : ''} -- kamar belum terkunci, menunggu konfirmasi pembayaran (kode ${paymentCode(booking.id)})`, booking.id);
+          `${nama} (${hp}) - ${rt.name} - ${tgl_checkin} s/d ${tgl_checkout} - ${rp(totalDitagih + hargaAddonEl)}${addonEl ? ` (termasuk ${addonEl.nama} ${rp(hargaAddonEl)})` : ''}${kuponHasil ? ` (kupon investor ${kuponCek.kupon.kode}, diskon ${rp(kuponHasil.diskon)})` : ''} -- kamar belum terkunci, menunggu konfirmasi pembayaran (kode ${paymentCode(booking.id)})`, booking.id);
         const notifySetting = await getSetting('villa_notify');
         await sendWa(notifySetting?.owner_hp ?? null,
-          `Booking baru dari website ${namaProperti()}\n\n${nama} (${hp})\n${rt.name} - kamar ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\n${kuponHasil ? `Kupon investor ${kuponCek.kupon.kode}: harga normal ${rp(harga.total)}, diskon ${kuponHasil.persen}% (${rp(kuponHasil.diskon)})\n` : ''}Total (dengan kode unik): ${rp(totalDitagih)}\n\nSistem mengonfirmasi otomatis begitu email pembayaran BTN masuk.`,
+          `Booking baru dari website ${namaProperti()}\n\n${nama} (${hp})\n${rt.name} - kamar ${freeUnit.nomor}\n${tgl_checkin} s/d ${tgl_checkout} (${nights} malam)\n${kuponHasil ? `Kupon investor ${kuponCek.kupon.kode}: harga normal ${rp(harga.total)}, diskon ${kuponHasil.persen}% (${rp(kuponHasil.diskon)})\n` : ''}${addonEl ? `Add-on: ${addonEl.nama} (${rp(hargaAddonEl)})\n` : ''}Total (dengan kode unik): ${rp(totalDitagih + hargaAddonEl)}\n\nSistem mengonfirmasi otomatis begitu email pembayaran BTN masuk.`,
           {booking_id: booking.id, unit_id: freeUnit.id, template_type: templateProperti('website_booking_awaiting_payment')});
 
         return json({
           booking_id: booking.id, unit_nomor: freeUnit.nomor, tipe_nama: rt.name,
           tgl_checkin, tgl_checkout, durasi_malam: nights,
-          tarif: tarifAkhir, total_bayar: totalDitagih, kode_unik: kodeUnik, status: booking.status,
+          // total_bayar di respons = yang harus ditransfer tamu (termasuk
+          // extra bed), sama seperti PL. Di database total_bayar tetap harga
+          // kamar + kode unik; extra bed di harga_paket (lihat tagihanTamu).
+          tarif: tarifAkhir, total_bayar: totalDitagih + hargaAddonEl, kode_unik: kodeUnik, status: booking.status,
+          paket_dekorasi: addonEl?.nama ?? null, harga_paket: hargaAddonEl,
+          addons: addonEl ? rincianAddon(addonEl.nama, hargaAddonEl) : [],
           harga_normal: harga.total, diskon_kupon: kuponHasil?.diskon ?? 0, kupon_kode: kuponHasil ? kuponCek.kupon.kode : null,
         }, 201);
       }
@@ -6025,6 +6062,10 @@ async function layani(req){
     if(bbq_qty < 0 || bbq_qty > BBQ_MAKS) return err(`Jumlah paket BBQ maksimal ${BBQ_MAKS}`);
     if(fb_qty < 0 || fb_qty > FLOATING_BREAKFAST_MAKS) return err(`Jumlah paket floating breakfast maksimal ${FLOATING_BREAKFAST_MAKS}`);
     if(eb_qty < 0 || eb_qty > EXTRA_BED_MAKS) return err(`Jumlah extra bed maksimal ${EXTRA_BED_MAKS}`);
+    {
+      const galatKapasitas = cekKapasitasKamar(adults, children, eb_qty);
+      if(galatKapasitas) return err(galatKapasitas);
+    }
     // Extra bed ditagih per malam. Sama dengan `nights` di bawah (dihitung
     // ulang di sini karena add-on divalidasi sebelum unit dicari).
     const malamAddon = Math.max(1, Math.round((new Date(tgl_checkout).getTime() - new Date(tgl_checkin).getTime())/86400000));
