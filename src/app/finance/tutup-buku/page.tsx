@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { fmtCurrencyFull, fmtDate, fmtDateTime, todayISO } from "@/lib/format";
 import { Card, CardHeader, Loading, Empty, Badge } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
+import { Meter } from "@/components/viz";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
 import type { FinanceChecklistItem, TutupBukuDaftar, TutupBukuDetail } from "@/lib/types";
 import { LABEL_UMUR, URUTAN_UMUR, bandingkanDenganSnapshot, piutangPerOta, type BarisPiutang, type UmurPiutang } from "@/lib/tutupBuku";
@@ -205,6 +206,20 @@ export default function TutupBukuPage() {
               <StatCard label="Selisih tercatat" value={fmtCurrencyFull(t.selisih)} sub="nilai mutasi vs seharusnya" />
             )}
           </div>
+
+          {t.count > 0 && (
+            <Card className="mb-4">
+              <div className="p-4 sm:p-5">
+                <div className="flex items-baseline justify-between text-[11px] text-ink/60 mb-1.5">
+                  <span>Booking yang uangnya sudah dicentang masuk</span>
+                  <span className="font-semibold text-ink tabular-nums">
+                    {t.count_masuk} / {t.count} booking
+                  </span>
+                </div>
+                <Meter nilai={t.count_masuk} maks={t.count} warna={t.count_masuk >= t.count ? "#4f6e55" : "#b4693f"} label="Booking dicentang masuk" />
+              </div>
+            </Card>
+          )}
 
           {banding && (banding.belum_cair_baru.length > 0 || banding.hilang.length > 0) && (
             <Card className="mb-4 border-ruby-500/40">

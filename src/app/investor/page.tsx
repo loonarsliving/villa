@@ -9,6 +9,7 @@ import { useAuth } from "@/lib/auth";
 import { fmtCurrency, currentPeriod } from "@/lib/format";
 import { pendapatanInvestor } from "@/lib/investorPendapatan";
 import type { Report } from "@/lib/types";
+import { AnimatedValue } from "@/components/AnimatedValue";
 
 /**
  * Beranda investor bergaya aplikasi (permintaan owner 14 Sep 2026).
@@ -57,7 +58,9 @@ export default function InvestorHomePage() {
           {pemasukanTetap !== null ? "Pemasukan Anda" : "Bagian Anda"}
         </div>
         <div className="px-4 py-4">
-          <div className="text-[28px] font-light text-slate-900 leading-none">{fmtCurrency(bagianAnda)}</div>
+          <div className="text-[28px] font-light text-slate-900 leading-none">
+            <AnimatedValue value={fmtCurrency(bagianAnda)} durasi={900} />
+          </div>
           <div className="text-[11.5px] text-slate-500 mt-1.5">
             {pemasukanTetap !== null
               ? "Angka tetap setiap bulan sesuai skema pembelian Anda"
@@ -94,7 +97,9 @@ function AngkaKecil({
   return (
     <div className={`px-4 py-3 ${garisKiri ? "border-l border-slate-100" : ""}`}>
       <div className="text-[10.5px] text-slate-400 mb-0.5">{label}</div>
-      <div className="text-[14px] font-medium text-slate-800">{fmtCurrency(nilai)}</div>
+      <div className="text-[14px] font-medium text-slate-800">
+        <AnimatedValue value={fmtCurrency(nilai)} />
+      </div>
     </div>
   );
 }

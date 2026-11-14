@@ -499,3 +499,73 @@ body {
   .viz-tumbuh-x, .viz-tumbuh-y { animation: none; }
   .viz-lipat { transition: none; }
 }
+
+/* ── Tabel menjadi kartu di HP (TabelKartu.tsx, owner 2026-11-14) ──
+   Gaya sama dengan kartu channel di Pendapatan & Channel: kartu krem
+   membulat, sel pertama = judul, sel lain = label kiri / nilai kanan. */
+@media (max-width: 639px) {
+  table[data-tk] { min-width: 0 !important; width: 100% !important; border-collapse: separate; }
+  table[data-tk] > thead { display: none; }
+  table[data-tk] > tbody, table[data-tk] > tfoot { display: block; padding: 4px 12px; }
+  table[data-tk] > tbody:first-of-type { padding-top: 12px; }
+  table[data-tk] > tfoot { padding-bottom: 12px; }
+  table[data-tk] tr {
+    display: block;
+    margin: 0 0 10px;
+    padding: 10px 12px;
+    border: 1px solid rgba(43, 38, 32, 0.07) !important;
+    border-radius: 14px;
+    background: rgba(246, 241, 232, 0.45);
+    animation: fade-up 0.45s var(--ease-out) backwards;
+  }
+  table[data-tk] tbody tr:nth-child(2) { animation-delay: 0.04s; }
+  table[data-tk] tbody tr:nth-child(3) { animation-delay: 0.08s; }
+  table[data-tk] tbody tr:nth-child(4) { animation-delay: 0.12s; }
+  table[data-tk] tbody tr:nth-child(5) { animation-delay: 0.16s; }
+  table[data-tk] tbody tr:nth-child(n + 6) { animation-delay: 0.2s; }
+  table[data-tk] > tfoot tr { background: rgba(180, 105, 63, 0.07); border-color: rgba(180, 105, 63, 0.18) !important; }
+  table[data-tk] td, table[data-tk] th {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 4px 0 !important;
+    border: 0 !important;
+    text-align: right;
+    white-space: normal !important;
+    min-width: 0;
+    word-break: break-word;
+  }
+  table[data-tk] td > * { min-width: 0; }
+  table[data-tk] td[data-label]::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    max-width: 45%;
+    text-align: left;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgba(43, 38, 32, 0.45);
+    font-weight: 500;
+  }
+  /* Sel pertama = judul kartu (tanpa label, rata kiri, sedikit lebih besar). */
+  table[data-tk] tr > td:first-child {
+    display: block;
+    text-align: left;
+    font-size: 12.5px;
+    padding: 0 0 6px !important;
+    margin-bottom: 4px;
+    border-bottom: 1px solid rgba(43, 38, 32, 0.06) !important;
+  }
+  table[data-tk] tr > td:first-child::before { display: none; }
+  table[data-tk] td[data-kosong] { display: none; }
+  table[data-tk] td[data-penuh] { display: block; text-align: left; padding-left: 0 !important; }
+  table[data-tk] tr[data-tk-satu] { background: transparent; border-style: dashed !important; }
+  table[data-tk] tr[data-tk-satu] > td:first-child { border-bottom: 0 !important; padding: 0 !important; margin: 0; text-align: center; }
+  /* Kolom aksi: tombol tetap mudah diketuk. */
+  table[data-tk] td button, table[data-tk] td a { min-height: 28px; }
+  table[data-tk] td input, table[data-tk] td select { max-width: 60%; }
+}
+@media (max-width: 639px) and (prefers-reduced-motion: reduce) {
+  table[data-tk] tr { animation: none; }
+}

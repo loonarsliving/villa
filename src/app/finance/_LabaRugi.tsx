@@ -3,6 +3,7 @@
 import { fmtCurrency, fmtCurrencyFull } from "@/lib/format";
 import { Card, CardHeader } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
+import { AirTerjun } from "@/components/viz";
 import { BIAYA_LANGSUNG, BIAYA_TETAP_BULANAN, HARI_PER_BULAN, OKUPANSI_STANDAR_PCT, hitungLabaRugi, payrollPeriode } from "@/lib/cogsStandar";
 import type { FinanceSurvivalKpis } from "@/lib/types";
 
@@ -55,6 +56,21 @@ export function LabaRugi({ data }: { data: FinanceSurvivalKpis }) {
         <StatCard label="Gross Profit" value={fmtCurrency(lr.grossProfit)} accent={lr.grossProfit >= 0 ? "sage" : "ruby"} sub={`Gross margin ${fmtPct(lr.grossMarginPct)}`} />
         <StatCard label="Net Profit" value={fmtCurrency(lr.netProfit)} accent={lr.netProfit >= 0 ? "sage" : "ruby"} sub={`Net margin ${fmtPct(lr.netMarginPct)}`} />
       </div>
+
+      <Card className="mb-4">
+        <CardHeader title="Dari Pendapatan ke Laba" subtitle="Ke mana uang pendapatan periode ini pergi" />
+        <div className="p-4 sm:p-5">
+          <AirTerjun
+            langkah={[
+              { label: "Gross Revenue", dari: 0, ke: lr.grossRevenue, jenis: "masuk", teks: fmtCurrencyFull(lr.grossRevenue) },
+              { label: "Komisi OTA", dari: lr.grossRevenue, ke: lr.netRevenue, jenis: "keluar", teks: `− ${fmtCurrencyFull(Math.abs(lr.komisiOta))}` },
+              { label: "COGS", sub: `${data.room_nights_mtd} malam terjual`, dari: lr.netRevenue, ke: lr.grossProfit, jenis: "keluar", teks: `− ${fmtCurrencyFull(Math.abs(lr.cogs))}` },
+              { label: "OPEX (gaji staf)", dari: lr.grossProfit, ke: lr.netProfit, jenis: "keluar", teks: `− ${fmtCurrencyFull(Math.abs(lr.opex))}` },
+              { label: "Net Profit", sub: `Net margin ${fmtPct(lr.netMarginPct)}`, dari: 0, ke: lr.netProfit, jenis: "hasil", teks: fmtCurrencyFull(lr.netProfit) },
+            ]}
+          />
+        </div>
+      </Card>
 
       <Card className="mb-4">
         <CardHeader title="Laba Rugi" subtitle={periode} />

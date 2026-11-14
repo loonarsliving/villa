@@ -74,10 +74,10 @@ export default function PendapatanPage() {
                 <div className={`${b.tebal ? "text-ink/80 font-medium" : "text-ink/50"} ${b.emas ? "text-gold-500" : ""}`}>{b.label}</div>
                 {b.keterangan && <div className="text-[10px] text-ink/55 mt-0.5">{b.keterangan}</div>}
               </div>
-              <div className="w-16 sm:w-20 mx-3 h-1 bg-ink/[0.08] rounded-full shrink-0 hidden sm:block">
+              <div className="w-14 sm:w-24 mx-3 h-1.5 bg-ink/[0.06] rounded-full shrink-0">
                 <div
-                  className={`h-full rounded-full ${b.kurang ? "bg-ruby-500" : b.emas ? "bg-gold-500" : "bg-sage-500"}`}
-                  style={{ width: `${Math.min(100, Math.max(0, persen(b.nilai)))}%` }}
+                  className={`h-full rounded-full viz-tumbuh-x ${b.kurang ? "bg-ruby-500" : b.emas ? "bg-gold-500" : "bg-sage-500"}`}
+                  style={{ width: `${Math.min(100, Math.max(0, persen(b.nilai)))}%`, animationDelay: `${0.06 * i}s` }}
                 />
               </div>
               <div

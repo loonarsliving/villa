@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { fmtCurrencyFull, fmtDate } from "@/lib/format";
 import { Card, CardHeader, Loading, Empty } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
+import { Meter } from "@/components/viz";
 import type { ElInvestorSaya } from "@/lib/types";
 
 const UNIT_STATUS: Record<string, string> = { tersedia: "Tersedia", dp: "DP", verifikasi: "Menunggu Verifikasi", terjual: "Terjual" };
@@ -53,6 +54,20 @@ export default function ElInvestorPage() {
             />
             <StatCard label="Jumlah Kamar Hotel" value={String(ok?.jumlah_kamar ?? 0)} accent="azure" />
           </div>
+
+          {ok && ok.room_nights_tersedia > 0 && (
+            <Card className="mb-5">
+              <div className="p-4 sm:p-5">
+                <div className="flex items-baseline justify-between text-[11px] text-ink/60 mb-1.5">
+                  <span>Malam kamar terisi bulan ini</span>
+                  <span className="font-semibold text-ink tabular-nums">
+                    {ok.room_nights_terisi} / {ok.room_nights_tersedia}
+                  </span>
+                </div>
+                <Meter nilai={ok.room_nights_terisi} maks={ok.room_nights_tersedia} warna="#4f6e55" label="Okupansi bulan ini" />
+              </div>
+            </Card>
+          )}
 
           <Card className="mb-5">
             <CardHeader title="Bagi Hasil" />

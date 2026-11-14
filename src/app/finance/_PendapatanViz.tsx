@@ -231,7 +231,7 @@ function Info({ k, v }: { k: string; v: string }) {
 
 function TabelChannel({ data: channels }: { data: FinanceChannelBreakdown }) {
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto" data-tabel="asli">
       <table className="w-full text-[11px] tabular-nums">
         <thead>
           <tr className="text-left text-ink/40 border-b border-ink/10">
@@ -635,7 +635,7 @@ export function PemasukanPerTanggal({ data: channels }: { data: FinanceChannelBr
 
 function TabelTanggal({ data: channels }: { data: FinanceChannelBreakdown }) {
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto" data-tabel="asli">
       <table className="w-full text-[11px] tabular-nums">
         <thead>
           <tr className="text-left text-ink/40 border-b border-ink/10">

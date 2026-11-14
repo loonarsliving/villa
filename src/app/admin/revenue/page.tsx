@@ -6,6 +6,7 @@ import { localApi } from "@/lib/api";
 import { fmtCurrency } from "@/lib/format";
 import { Loading, Card, CardHeader } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
+import { Meter, PerbandinganPeriode } from "@/components/viz";
 
 /**
  * Phase 5 (revenue-engine program, §12/§37): the first real hospitality
@@ -131,8 +132,35 @@ export default function RevenueDashboardPage() {
             <StatCard label="Lead Time" value={fmtNum(data.current.avg_lead_time_days, " hari")} accent="neutral" />
           </div>
 
+          <Card className="mb-4">
+            <CardHeader title="Dibanding periode sebelumnya" subtitle={`${data.previous.from} s/d ${data.previous.to} → ${data.current.from} s/d ${data.current.to}`} />
+            <div className="p-4 sm:p-5">
+              <PerbandinganPeriode
+                baris={[
+                  { label: "Occupancy", kini: data.current.occupancy_pct, lalu: data.previous.occupancy_pct, tampil: fmtPct },
+                  { label: "Room Revenue", kini: data.current.room_revenue, lalu: data.previous.room_revenue, tampil: (v) => fmtCurrency(v ?? undefined) },
+                  { label: "ADR", kini: data.current.adr, lalu: data.previous.adr, tampil: (v) => fmtCurrency(v ?? undefined) },
+                  { label: "RevPAR", kini: data.current.revpar, lalu: data.previous.revpar, tampil: (v) => fmtCurrency(v ?? undefined) },
+                  { label: "Booking", kini: data.current.booking_count, lalu: data.previous.booking_count, tampil: (v) => fmtNum(v) },
+                  { label: "Cancellation Rate", kini: data.current.cancellation_rate_pct, lalu: data.previous.cancellation_rate_pct, tampil: fmtPct, naikBaik: false },
+                ]}
+              />
+            </div>
+          </Card>
+
           <Card>
             <CardHeader title="Detail periode" subtitle={`${data.current.from} s/d ${data.current.to}`} />
+            {data.current.available_room_nights > 0 && (
+              <div className="px-4 sm:px-5 pt-4">
+                <div className="flex items-baseline justify-between text-[11px] text-ink/60 mb-1.5">
+                  <span>Kamar terjual dari kamar tersedia</span>
+                  <span className="font-semibold text-ink tabular-nums">
+                    {data.current.sold_room_nights} / {data.current.available_room_nights}
+                  </span>
+                </div>
+                <Meter nilai={data.current.sold_room_nights} maks={data.current.available_room_nights} label="Room-nights terjual" />
+              </div>
+            )}
             <div className="p-4 sm:p-5 text-[11px] text-ink/60 space-y-1.5">
               <div>Available room-nights: <strong className="text-ink/80">{data.current.available_room_nights}</strong></div>
               <div>Sold room-nights: <strong className="text-ink/80">{data.current.sold_room_nights}</strong></div>

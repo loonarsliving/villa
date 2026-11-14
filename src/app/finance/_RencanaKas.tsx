@@ -5,6 +5,8 @@ import { api } from "@/lib/api";
 import { fmtCurrencyFull, fmtDate, todayISO } from "@/lib/format";
 import { Card, CardHeader, Loading, Badge } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
+import { DiagramKolom, DuaBatang } from "@/components/viz";
+import { urutSlot, warnaChannel } from "@/lib/vizPendapatan";
 import { BIAYA_TETAP_BULANAN, PAYROLL_STAF } from "@/lib/cogsStandar";
 import { ASUMSI_PER_HARI_DEFAULT, GARANSI_PER_UNIT, TANGGAL_DIVIDEN, akhirBulanISO, hitungRencanaKas } from "@/lib/rencanaKas";
 import type { FinanceChecklist, FinanceSummary, InvestorProfile } from "@/lib/types";
@@ -206,6 +208,14 @@ export function RencanaKas() {
           title={`Cukup untuk dividen tanggal ${TANGGAL_DIVIDEN}?`}
           action={saldoKosong ? <Badge tone="pending">ISI SALDO</Badge> : <Badge tone={cukup ? "ok" : "danger"}>{cukup ? "CUKUP" : "KURANG"}</Badge>}
         />
+        {!saldoKosong && (
+          <div className="px-4 sm:px-5 pt-4 pb-2">
+            <DuaBatang
+              a={{ label: "Tersedia saat transfer dividen", nilai: Math.max(0, r.tersediaSaatDividen), teks: fmtCurrencyFull(r.tersediaSaatDividen), warna: "#4f6e55" }}
+              b={{ label: "Dividen garansi", nilai: r.dividen, teks: fmtCurrencyFull(r.dividen), warna: "#b4693f" }}
+            />
+          </div>
+        )}
         <div className="px-4 sm:px-5 pb-4 text-[12px] divide-y divide-ink/5">
           <Baris label="Saldo rekening hari ini" nilai={angka(isian.saldo)} />
           <Baris label={`Cair sebelum atau tanggal ${TANGGAL_DIVIDEN}`} nilai={hariIni > r.tanggalDividen ? 0 : r.akanCairSampaiDividen} />
@@ -217,6 +227,26 @@ export function RencanaKas() {
 
       <Card className="mb-4">
         <CardHeader title="Akan cair sampai akhir bulan" subtitle="Menurut jadwal settlement per channel" />
+        {r.akanCairPerBaris.length > 0 && (
+          <div className="px-4 sm:px-5 pt-5 pb-1">
+            <DiagramKolom
+              ariaLabel="Perkiraan uang cair per tanggal"
+              formatPenuh={fmtCurrencyFull}
+              tinggi={150}
+              kolom={Array.from(new Set(r.akanCairPerBaris.map((b) => b.tanggal)))
+                .sort()
+                .map((tgl) => ({
+                  kunci: tgl,
+                  label: fmtDate(tgl),
+                  judul: `Cair ${fmtDate(tgl)}`,
+                  segmen: urutSlot(
+                    r.akanCairPerBaris.filter((b) => b.tanggal === tgl),
+                    (b) => b.sumber,
+                  ).map((b) => ({ nama: b.sumber, nilai: b.jumlah, warna: warnaChannel(b.sumber) })),
+                }))}
+            />
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-[11.5px]">
             <thead>

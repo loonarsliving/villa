@@ -31,6 +31,12 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 - Per tanggal check-in: diagram kolom bertumpuk per channel (saklar Kotor/Bersih, tooltip, ketuk batang membuka rinciannya), daftar per tanggal yang bisa dibuka-tutup (rincian channel + booking menginap lama), total.
 - Tabel lama tetap ada lewat tombol "Tabel". Murni tampilan: semua angka apa adanya dari `/finance/channel-breakdown`, tidak ada rumus yang berubah. Palet channel divalidasi aman buta warna (urutan slot tetap: website, booking.com, agoda, traveloka, investor; lainnya abu-abu).
 
+### 2026-11-14 — Semua halaman villa: gaya Pendapatan & Channel (kartu di HP + diagram)
+- Owner: "rombak semua halaman repo villa pakai gaya yang sama". Tiga lapis, murni tampilan (tidak ada rumus/angka/skema yang berubah):
+- `src/components/TabelKartu.tsx` (dipasang di root layout): setiap `<table>` ber-`<thead>` (>= 3 kolom) diberi `data-tk` + `data-label` per sel; CSS di globals.css (< 640px) menampilkan tiap baris sebagai kartu krem (sel pertama = judul, lainnya label kiri / nilai kanan, tfoot = kartu ringkasan). Hanya atribut data-* yang ditambahkan, jadi tombol/input/perilaku tidak berubah. Pengecualian `data-tabel="asli"`: kalender harga EL dan tampilan "Tabel" di Pendapatan.
+- `src/components/viz/index.tsx`: kit diagram bersama (Saklar/Tombol, AngkaRingkas, Meter, PerbandinganPeriode, BatangPorsi, DiagramKolom, AirTerjun, DuaBatang, DaftarBatang).
+- Dipasang di: Revenue (perbandingan periode + meter room-nights), Perkiraan Okupansi (diagram kolom), Pertumbuhan investor (diagram 12 bulan, saklar pendapatan/net/per unit; nilai negatif tetap tampil apa adanya), Laba Rugi (air terjun pendapatan → laba), Rencana Kas (tersedia vs dividen, diagram uang cair per tanggal per channel), Survival (meter menuju target), Tutup Buku (meter booking dicentang), Keuangan EL (daftar batang per sumber/tipe), Unit Saya EL & beranda admin (meter), beranda investor (angka berhitung), Pendapatan investor (batang alur bagi hasil kini juga tampil di HP).
+
 ### 2026-11-14 — Dashboard villa: perbaikan keterbacaan + judul kartu serif + animasi hover
 - Teks pucat dinaikkan kontrasnya di semua halaman (`text-ink/30` → `/50`, `/35` → `/55`, `/25` → `/45`); di latar krem yang lama ±2:1.
 - `CardHeader`: judul huruf serif (sebelumnya huruf kecil KAPITAL) + garis terakota yang memanjang saat kartu di-hover (`group/card`, tanpa transform pada kartu).

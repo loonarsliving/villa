@@ -151,7 +151,7 @@ export default function ElHargaPage() {
         ) : data.length === 0 ? (
           <Empty label="Belum ada tipe kamar aktif" />
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" data-tabel="asli">
             <table className="text-[11.5px] min-w-full">
               <thead>
                 <tr className="text-ink/50">

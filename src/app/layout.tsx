@@ -4,6 +4,7 @@ import "./globals.css";
 import { ToastProvider } from "@/lib/toast";
 import { MotionProvider } from "@/components/MotionProvider";
 import { MotionLayer } from "@/components/MotionLayer";
+import { TabelKartu } from "@/components/TabelKartu";
 
 // Font disimpan di repo (src/app/fonts) agar build tidak bergantung pada Google
 // Fonts -- next/font/google sesekali gagal di CI GitHub (2026-11-01).
@@ -41,6 +42,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <MotionProvider>
           <ToastProvider>{children}</ToastProvider>
           <MotionLayer />
+          <TabelKartu />
         </MotionProvider>
       </body>
     </html>
