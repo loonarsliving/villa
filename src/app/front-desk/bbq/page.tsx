@@ -9,8 +9,12 @@ import { Card, CardHeader, Loading } from "@/components/Card";
 // Pesanan BBQ terpisah dari loonars.id/bbq (tabel addon_orders, villa-api
 // GET /addon-orders). Pemesan bisa siapa saja (owner 2026-10-13, pilihan A):
 // resepsionis mencocokkan "Menginap" dengan tamu yang benar-benar menginap.
+// Sejak 2026-11-14 juga memuat BBQ & floating breakfast yang ditambahkan saat
+// booking kamar website (sumber_pesanan 'booking').
 type AddonOrder = {
   id: string;
+  // 'booking' = ditambahkan saat booking kamar website (bookings.paket_dekorasi).
+  sumber_pesanan?: "bbq" | "booking";
   kode: string;
   item: string;
   qty: number;
@@ -76,7 +80,7 @@ export default function FrontDeskBbqPage() {
   const totalPaket = (orders ?? []).filter((o) => o.status === "lunas").reduce((a, o) => a + Number(o.qty), 0);
 
   return (
-    <FrontDeskShell pageTitle="Pesanan BBQ" pageSub="Dari loonars.id/bbq">
+    <FrontDeskShell pageTitle="Pesanan BBQ" pageSub="Dari loonars.id/bbq & booking kamar website">
       <div className="flex flex-wrap gap-2 mb-3.5">
         {FILTERS.map((f) => (
           <button
@@ -99,7 +103,7 @@ export default function FrontDeskBbqPage() {
         ) : orders === null ? (
           <Loading label="Memuat pesanan…" />
         ) : orders.length === 0 ? (
-          <Loading label="Belum ada pesanan BBQ" />
+          <Loading label="Belum ada pesanan BBQ / floating breakfast" />
         ) : (
           orders.map((o) => {
             const label = `${o.item}${o.qty > 1 ? ` x${o.qty}` : ""}`;
@@ -114,7 +118,7 @@ export default function FrontDeskBbqPage() {
             return (
               <div key={o.id} className="px-4 sm:px-5 py-3 border-b border-ink/[0.05] last:border-0">
                 <div className="flex items-start gap-3">
-                  <div className="text-xl leading-none mt-0.5">🔥</div>
+                  <div className="text-xl leading-none mt-0.5">{o.item.startsWith("Floating") ? "🍳" : "🔥"}</div>
                   <div className="flex-1 min-w-0">
                     <div className="text-[12px] font-semibold text-ink/85">
                       {fmtDate(o.tanggal, { weekday: "short", day: "2-digit", month: "short", year: "numeric" })}
@@ -122,6 +126,9 @@ export default function FrontDeskBbqPage() {
                         <span className="ml-1.5 text-[8.5px] font-semibold uppercase tracking-wide text-ruby-500 bg-ruby-500/10 border border-ruby-500/30 rounded px-1.5 py-0.5">{kapan}</span>
                       )}
                       <span className={`ml-1.5 text-[8.5px] font-semibold uppercase tracking-wide border rounded px-1.5 py-0.5 ${statusTone}`}>{statusLabel}</span>
+                      {o.sumber_pesanan === "booking" && (
+                        <span className="ml-1.5 text-[8.5px] font-semibold uppercase tracking-wide text-ink/60 bg-ink/5 border border-ink/15 rounded px-1.5 py-0.5">Dari booking kamar</span>
+                      )}
                     </div>
                     <div className="text-[11.5px] text-ink/70 mt-0.5">
                       <b>{label}</b> · {o.guest_nama} ·{" "}
@@ -143,6 +150,7 @@ export default function FrontDeskBbqPage() {
         )}
       </Card>
       <div className="bg-gold-500/10 border-l-2 border-gold-500 rounded-r p-3.5 text-[11px] text-ink/50 leading-relaxed mt-3.5">
+        Daftar ini memuat BBQ dari loonars.id/bbq dan BBQ / floating breakfast yang ditambahkan saat booking kamar (tanggalnya = tanggal check-in).
         Pesanan BBQ dari loonars.id/bbq bisa dibuat siapa saja. Cocokkan kolom &quot;Menginap&quot; dengan tamu yang benar-benar menginap,
         dan hubungi pemesan lewat WA bila ada yang tidak cocok. Pembayaran yang belum terkonfirmasi otomatis bisa dikonfirmasi owner dengan
         membalas &quot;LUNAS &lt;kode&gt;&quot;.
