@@ -10567,11 +10567,59 @@ async function layani(req){
     const {data, error} = await q;
     if(error) return err(error.message);
     const batas = Date.now() - BATAS_BAYAR_ADDON_JAM*3600*1000;
-    return json((data ?? []).map(o => ({
+    const pesanan = (data ?? []).map(o => ({
       ...o,
+      sumber_pesanan: 'bbq',
       kode: paymentCode(o.id),
       kedaluwarsa: o.status === 'menunggu_pembayaran' && Date.parse(o.created_at) < batas,
-    })));
+    }));
+
+    // BBQ & floating breakfast yang ditambahkan SAAT booking kamar website
+    // disimpan di bookings.paket_dekorasi, bukan addon_orders -- dulu tidak
+    // pernah muncul di daftar ini, sehingga resepsionis hanya tahu dari satu
+    // notifikasi yang mudah tenggelam (kasus 13 Nov 2026, BBQ tamu B1).
+    // Ditampilkan sebagai baris tambahan, hanya baca, tanggal = check-in.
+    let qb = supabase.from('bookings')
+      .select('id,guest_id,guest_nama,unit_nomor,tgl_checkin,tgl_checkout,paket_dekorasi,status,invoice_no,bukti_pembayaran_at,created_at')
+      .in('sumber', SUMBER_BOOKING_WEBSITE).not('paket_dekorasi', 'is', null)
+      .order('tgl_checkin', {ascending:true}).limit(300);
+    if(dari && isValidDateStr(dari)) qb = qb.gte('tgl_checkin', dari);
+    if(filter === 'lunas') qb = qb.in('status', ['terjadwal','checkin','checkout']).not('bukti_pembayaran_at', 'is', null);
+    else if(filter === 'menunggu') qb = qb.eq('status', 'menunggu_pembayaran');
+    else qb = qb.neq('status', 'batal');
+    const {data:bks, error:bErr} = await qb;
+    if(bErr) return err(bErr.message);
+    const guestIds = [...new Set((bks ?? []).map(b => b.guest_id).filter(Boolean))];
+    const {data:gs} = guestIds.length ? await supabase.from('guests').select('id,hp').in('id', guestIds) : {data:[]};
+    const hpTamu = new Map((gs ?? []).map(g => [g.id, g.hp]));
+    for(const b of bks ?? []){
+      for(const bagian of String(b.paket_dekorasi).split(' + ')){
+        const bbq = bagian.match(/^BBQ Family Package(?: x(\d+))?$/);
+        const fb = bagian.match(/^Floating Breakfast(?: x(\d+))?$/);
+        if(!bbq && !fb) continue;
+        const qty = Number((bbq ?? fb)[1] ?? 1);
+        const harga = bbq ? ADDON_BBQ.harga : ADDON_FLOATING_BREAKFAST.harga;
+        const lunas = !!b.bukti_pembayaran_at && b.status !== 'menunggu_pembayaran';
+        pesanan.push({
+          id: `${b.id}:${bbq ? 'bbq' : 'fb'}`,
+          sumber_pesanan: 'booking',
+          item: bbq ? ADDON_BBQ.nama : ADDON_FLOATING_BREAKFAST.nama,
+          qty, harga, total_bayar: harga * qty,
+          guest_nama: b.guest_nama, hp: hpTamu.get(b.guest_id) ?? '',
+          tanggal: b.tgl_checkin,
+          info_menginap: `Unit ${b.unit_nomor} · ${b.tgl_checkin} s/d ${b.tgl_checkout} (ditambahkan saat booking kamar)`,
+          catatan: null,
+          status: lunas ? 'lunas' : 'menunggu_pembayaran',
+          kedaluwarsa: false,
+          invoice_no: b.invoice_no ?? null,
+          paid_at: b.bukti_pembayaran_at ?? null,
+          created_at: b.created_at,
+          kode: paymentCode(b.id),
+        });
+      }
+    }
+    pesanan.sort((x, y) => String(x.tanggal).localeCompare(String(y.tanggal)) || String(x.created_at).localeCompare(String(y.created_at)));
+    return json(pesanan);
   }
 
   if(path==='/notifications' && m==='GET'){
