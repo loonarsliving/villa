@@ -20,6 +20,11 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 - Data (setelah deploy): `villa_users.is_active=true` untuk Liza; Musafa diterbitkan 12 kode menginap gratis A1 sendiri lewat `villa_terbitkan_voucher_investor` (Okt 2026–Sep 2027, sama dengan Liza) -- pilihan owner "Musafa dibuatkan 12 juga", jatah malam gratis A1 jadi 24/tahun.
 - Halaman `/admin/bukti-transfer` (Next.js) membaca semua akun owner aktif, jadi Liza otomatis mendapat bukti transfer versi Loonars dengan angka per unit yang sama -- disengaja.
 
+### 2026-11-14 — Dashboard villa: lapisan gerak interaktif (MotionLayer)
+- Owner: "kurang banyak animasi yang interaktif, kurang menakjubkan". `src/components/MotionLayer.tsx` (dipasang sekali di root layout) memberi efek ke semua halaman lewat kelas CSS: `.spot` sorotan mengikuti kursor, `.glow-border` bingkai bercahaya berputar saat hover (Card), `.tilt` kartu statistik miring 3D (hanya mouse), riak pada semua tombol, kartu `.anim-fade-up` di luar layar ditahan (`.io-wait`) sampai terlihat saat digulir, garis progres terakota tiap pindah halaman, konfeti lewat event `villa:rayakan` (dipicu toast hijau/berhasil).
+- Judul halaman muncul per kata; menu sidebar bermunculan berurutan sekali per sesi tab; header `AppHome` bergradasi bergerak + cahaya mengambang.
+- Card kini `relative` + `isolation` (sorotan di bawah isi). Tidak ada transform permanen pada kartu/halaman; tilt dilepas saat kursor pergi. Semua mati untuk `prefers-reduced-motion`.
+
 ### 2026-11-14 — Dashboard villa: perbaikan keterbacaan + judul kartu serif + animasi hover
 - Teks pucat dinaikkan kontrasnya di semua halaman (`text-ink/30` → `/50`, `/35` → `/55`, `/25` → `/45`); di latar krem yang lama ±2:1.
 - `CardHeader`: judul huruf serif (sebelumnya huruf kecil KAPITAL) + garis terakota yang memanjang saat kartu di-hover (`group/card`, tanpa transform pada kartu).

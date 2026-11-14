@@ -28,6 +28,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const push = useCallback((icon: string, title: string, msg: string, kind: ToastKind = "gold") => {
     const id = Date.now() + Math.random();
     setItems((prev) => [...prev, { id, icon, title, msg, kind }]);
+    // Aksi berhasil (toast hijau, mis. "Check-In Berhasil") dirayakan dengan
+    // konfeti kecil dari pojok kanan atas, tempat toast muncul (MotionLayer).
+    if (kind === "sage" && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("villa:rayakan", { detail: { x: window.innerWidth - 170, y: 60 } }));
+    }
     setTimeout(() => setItems((prev) => prev.filter((t) => t.id !== id)), 5000);
   }, []);
 
