@@ -473,3 +473,29 @@ body {
   .io-wait { animation-play-state: running !important; }
   .tilt { transform: none !important; }
 }
+
+/* ── Diagram Pendapatan & Channel (owner 2026-11-14) ──
+   Batang tumbuh dari garis dasarnya saat muncul. Transform hanya pada batang
+   diagram sendiri (tanpa anak position:fixed), bukan pada kartu. */
+.viz-tumbuh-x {
+  transform-origin: left center;
+  animation: viz-x 0.9s var(--ease-out) backwards;
+}
+.viz-tumbuh-y {
+  transform-origin: bottom center;
+  animation: viz-y 0.8s var(--ease-out) backwards;
+}
+@keyframes viz-x { from { transform: scaleX(0); } }
+@keyframes viz-y { from { transform: scaleY(0); } }
+/* Buka-tutup rincian tanpa mengukur tinggi: grid 0fr -> 1fr. */
+.viz-lipat {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.38s var(--ease-out), opacity 0.3s;
+  opacity: 0;
+}
+.viz-lipat-buka { grid-template-rows: 1fr; opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .viz-tumbuh-x, .viz-tumbuh-y { animation: none; }
+  .viz-lipat { transition: none; }
+}

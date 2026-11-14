@@ -25,6 +25,12 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 - Judul halaman muncul per kata; menu sidebar bermunculan berurutan sekali per sesi tab; header `AppHome` bergradasi bergerak + cahaya mengambang.
 - Card kini `relative` + `isolation` (sorotan di bawah isi). Tidak ada transform permanen pada kartu/halaman; tilt dilepas saat kursor pergi. Semua mati untuk `prefers-reduced-motion`.
 
+### 2026-11-14 — Pendapatan & Channel: diagram + tampilan HP
+- Owner: tabel "Revenue by Channel" dan "Pemasukan per Tanggal Check-in" melebar & terpotong di HP, minta tampilan lebih oke + diagram. Dipindah ke `src/app/finance/_PendapatanViz.tsx` (helper murni + tes: `src/lib/vizPendapatan.ts`).
+- Revenue by Channel: ringkasan kotor/potongan/bersih/outstanding (angka berhitung), batang porsi kotor per channel, kartu per channel (batang bersih vs potongan OTA, ADR, outstanding, settlement, bank).
+- Per tanggal check-in: diagram kolom bertumpuk per channel (saklar Kotor/Bersih, tooltip, ketuk batang membuka rinciannya), daftar per tanggal yang bisa dibuka-tutup (rincian channel + booking menginap lama), total.
+- Tabel lama tetap ada lewat tombol "Tabel". Murni tampilan: semua angka apa adanya dari `/finance/channel-breakdown`, tidak ada rumus yang berubah. Palet channel divalidasi aman buta warna (urutan slot tetap: website, booking.com, agoda, traveloka, investor; lainnya abu-abu).
+
 ### 2026-11-14 — Dashboard villa: perbaikan keterbacaan + judul kartu serif + animasi hover
 - Teks pucat dinaikkan kontrasnya di semua halaman (`text-ink/30` → `/50`, `/35` → `/55`, `/25` → `/45`); di latar krem yang lama ±2:1.
 - `CardHeader`: judul huruf serif (sebelumnya huruf kecil KAPITAL) + garis terakota yang memanjang saat kartu di-hover (`group/card`, tanpa transform pada kartu).

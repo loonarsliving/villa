@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FinanceShell } from "./_shell";
 import { PeriodeBar, usePeriode } from "./_periode";
 import { useAuth } from "@/lib/auth";
@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import { fmtCurrency, fmtCurrencyFull, fmtDate, fmtDateTime, todayISO } from "@/lib/format";
 import { Card, CardHeader, Loading, Empty, Badge } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
+import { PemasukanPerTanggal, RevenueByChannel } from "./_PendapatanViz";
 import { Modal, Field, inputCls, Btn } from "@/components/Modal";
 import type {
   FinanceSummary,
@@ -241,168 +242,9 @@ export function FinanceDashboard({ view }: { view: "pendapatan" | "transaksi" })
             </div>
           </Card>
 
-          {/* Channel breakdown */}
-          {channels && (
-            <Card className="mb-4">
-              <CardHeader title="Revenue by Channel" subtitle={`${range.from} s/d ${range.to}`} />
-              <div className="overflow-x-auto">
-                <table className="w-full text-[11px]">
-                  <thead>
-                    <tr className="text-left text-ink/40 border-b border-ink/10">
-                      <th className="px-4 py-2">Channel</th>
-                      <th className="px-3 py-2">Room Nights</th>
-                      <th className="px-3 py-2">Gross Revenue</th>
-                      <th className="px-3 py-2">OTA Deduction</th>
-                      <th className="px-3 py-2">Net Revenue</th>
-                      <th className="px-3 py-2">Avg Net ADR</th>
-                      <th className="px-3 py-2">Outstanding</th>
-                      <th className="px-3 py-2">Settlement</th>
-                      <th className="px-3 py-2">Bank Tujuan</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {channels.channels.length === 0 && (
-                      <tr>
-                        <td colSpan={9} className="px-4 py-6 text-center text-ink/50">
-                          Tidak ada data pada periode ini.
-                        </td>
-                      </tr>
-                    )}
-                    {channels.channels.map((c) => (
-                      <tr key={c.sumber} className="border-b border-ink/5">
-                        <td className="px-4 py-2.5">
-                          <div className="font-medium text-ink/80">{c.sumber}</div>
-                          <div className="text-ink/50">
-                            {c.normalized_channel} · {c.booking_count} booking
-                          </div>
-                        </td>
-                        <td className="px-3 py-2.5">{c.room_nights}</td>
-                        <td className="px-3 py-2.5">{fmtCurrencyFull(c.revenue)}</td>
-                        <td className="px-3 py-2.5 text-ruby-500">{c.ota_deduction > 0 ? `−${fmtCurrencyFull(c.ota_deduction)}` : "—"}</td>
-                        <td className="px-3 py-2.5 font-medium">{fmtCurrencyFull(c.net_revenue)}</td>
-                        <td className="px-3 py-2.5">{c.avg_net_adr != null ? fmtCurrencyFull(c.avg_net_adr) : "—"}</td>
-                        <td className="px-3 py-2.5">{fmtCurrencyFull(c.outstanding)}</td>
-                        <td className="px-3 py-2.5">
-                          {c.settled_count}/{c.settled_count + c.unsettled_count} diterima
-                        </td>
-                        <td className="px-3 py-2.5 text-ink/50">{c.destination_account ?? "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  {channels.channels.length > 0 && (
-                    <tfoot>
-                      <tr className="border-t border-ink/10 font-semibold text-ink/70">
-                        <td className="px-4 py-2.5">Total</td>
-                        <td className="px-3 py-2.5" />
-                        <td className="px-3 py-2.5">{fmtCurrencyFull(channels.totals.revenue)}</td>
-                        <td className="px-3 py-2.5" />
-                        <td className="px-3 py-2.5">{fmtCurrencyFull(channels.totals.net_revenue)}</td>
-                        <td className="px-3 py-2.5" />
-                        <td className="px-3 py-2.5">{fmtCurrencyFull(channels.totals.outstanding)}</td>
-                        <td className="px-3 py-2.5" colSpan={2}>
-                          OTA Receivable: {fmtCurrencyFull(channels.totals.ota_receivable)}
-                        </td>
-                      </tr>
-                    </tfoot>
-                  )}
-                </table>
-              </div>
-            </Card>
-          )}
-
-          {/* Per tanggal check-in x channel */}
-          {channels && (
-            <Card className="mb-4">
-              <CardHeader
-                title="Pemasukan per Tanggal Check-in"
-                subtitle="Per channel, kotor vs bersih setelah potongan komisi OTA"
-              />
-              <div className="overflow-x-auto">
-                <table className="w-full text-[11px]">
-                  <thead>
-                    <tr className="text-left text-ink/40 border-b border-ink/10">
-                      <th className="px-4 py-2">Tanggal / Channel</th>
-                      <th className="px-3 py-2">Booking</th>
-                      <th className="px-3 py-2">Malam</th>
-                      <th className="px-3 py-2">Kotor</th>
-                      <th className="px-3 py-2">Potongan OTA</th>
-                      <th className="px-3 py-2">Bersih</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {channels.by_date.length === 0 && (
-                      <tr>
-                        <td colSpan={6} className="px-4 py-6 text-center text-ink/50">
-                          Tidak ada data pada periode ini.
-                        </td>
-                      </tr>
-                    )}
-                    {channels.by_date.map((d) => (
-                      <Fragment key={d.tgl_checkin}>
-                        <tr className="border-t border-ink/10 bg-ink/[0.02] font-semibold text-ink/80">
-                          <td className="px-4 py-2">{fmtDate(d.tgl_checkin)}</td>
-                          <td className="px-3 py-2">{d.booking_count}</td>
-                          <td className="px-3 py-2">{d.malam}</td>
-                          <td className="px-3 py-2">{fmtCurrencyFull(d.gross)}</td>
-                          <td className="px-3 py-2 text-ruby-500">{d.ota_deduction > 0 ? `−${fmtCurrencyFull(d.ota_deduction)}` : "—"}</td>
-                          <td className="px-3 py-2">{fmtCurrencyFull(d.net)}</td>
-                        </tr>
-                        {d.channels.map((c) => (
-                          <Fragment key={`${d.tgl_checkin}-${c.sumber}`}>
-                            <tr className="border-b border-ink/5 text-ink/70">
-                              <td className="pl-8 pr-3 py-1.5">
-                                {c.sumber}
-                                <span className="text-ink/50"> · komisi {c.commission_pct}%</span>
-                              </td>
-                              <td className="px-3 py-1.5">{c.booking_count}</td>
-                              <td className="px-3 py-1.5">{c.malam}</td>
-                              <td className="px-3 py-1.5">{fmtCurrencyFull(c.gross)}</td>
-                              <td className="px-3 py-1.5 text-ruby-500">{c.ota_deduction > 0 ? `−${fmtCurrencyFull(c.ota_deduction)}` : "—"}</td>
-                              <td className="px-3 py-1.5">{fmtCurrencyFull(c.net)}</td>
-                            </tr>
-                            {c.menginap_lama.map((s) => (
-                              <tr key={`${d.tgl_checkin}-${c.sumber}-${s.unit_nomor}-${s.guest_nama}`} className="border-b border-ink/5">
-                                <td colSpan={6} className="pl-12 pr-3 py-1 text-[10px] text-gold-700">
-                                  ↳ termasuk 1 booking <strong>{s.malam} malam</strong>: Unit {s.unit_nomor ?? "—"} · {s.guest_nama ?? "—"} ·{" "}
-                                  {fmtDate(s.tgl_checkin)} s/d {s.tgl_checkout ? fmtDate(s.tgl_checkout) : "—"} · bersih {fmtCurrencyFull(s.bersih)}{" "}
-                                  (≈ {fmtCurrencyFull(s.bersih_per_malam)}/malam) -- seluruh nilainya tercatat di tanggal check-in ini.
-                                </td>
-                              </tr>
-                            ))}
-                          </Fragment>
-                        ))}
-                      </Fragment>
-                    ))}
-                  </tbody>
-                  {channels.by_date.length > 0 && (
-                    <tfoot>
-                      <tr className="border-t border-ink/20 font-semibold text-ink/80">
-                        <td className="px-4 py-2.5">Total</td>
-                        <td className="px-3 py-2.5">{channels.by_date.reduce((s, d) => s + d.booking_count, 0)}</td>
-                        <td className="px-3 py-2.5">{channels.by_date.reduce((s, d) => s + d.malam, 0)}</td>
-                        <td className="px-3 py-2.5">{fmtCurrencyFull(channels.by_date.reduce((s, d) => s + d.gross, 0))}</td>
-                        <td className="px-3 py-2.5 text-ruby-500">−{fmtCurrencyFull(channels.by_date.reduce((s, d) => s + d.ota_deduction, 0))}</td>
-                        <td className="px-3 py-2.5">{fmtCurrencyFull(channels.by_date.reduce((s, d) => s + d.net, 0))}</td>
-                      </tr>
-                    </tfoot>
-                  )}
-                </table>
-              </div>
-              <div className="px-4 py-3 text-[10px] text-ink/40 leading-relaxed">
-                Nilai = total seluruh masa inap, dicatat di tanggal check-in. Kotor = Grand Total Cloudbeds. Bersih = uang yang
-                ditransfer OTA: &quot;Deposit Amount&quot; Cloudbeds dikurangi komisi OTA per channel (Konfigurasi Settlement OTA);
-                potongan OTA = selisih kotor dan bersih. Channel yang komisinya belum diisi dihitung 0%.
-                Booking website/walk-in tidak punya fee OTA. Pajak/biaya bank tidak termasuk.
-                {channels.bersih_belum_tersedia > 0 && (
-                  <span className="text-ruby-500">
-                    {" "}
-                    {channels.bersih_belum_tersedia} booking OTA belum punya harga kamar dari Cloudbeds -- bersihnya sementara
-                    dihitung sama dengan kotor.
-                  </span>
-                )}
-              </div>
-            </Card>
-          )}
+          {/* Channel breakdown & per tanggal check-in (diagram + tabel) */}
+          {channels && <RevenueByChannel data={channels} range={range} />}
+          {channels && <PemasukanPerTanggal data={channels} />}
 
         </>
       )}
