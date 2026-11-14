@@ -7,6 +7,8 @@ import { AppHome, type TabItem } from "@/components/AppHome";
 import { api } from "@/lib/api";
 import { fmtCurrency } from "@/lib/format";
 import type { AdminOverview } from "@/lib/types";
+import { AnimatedValue } from "@/components/AnimatedValue";
+import { Meter } from "@/components/viz";
 
 /**
  * Beranda admin bergaya aplikasi (permintaan owner 14 Sep 2026).
@@ -50,7 +52,7 @@ export default function AdminHomePage() {
         <div className="px-4 py-3 bg-slate-50 text-[13px] font-semibold text-slate-700">Pendapatan Bulan Ini</div>
         <div className="px-4 py-4">
           <div className="text-[28px] font-light text-slate-900 leading-none">
-            {fmtCurrency(ov?.gross_revenue_bulan_ini)}
+            <AnimatedValue value={fmtCurrency(ov?.gross_revenue_bulan_ini)} durasi={900} />
           </div>
           <div className="text-[11.5px] text-slate-500 mt-1.5">Seluruh properti</div>
         </div>
@@ -60,12 +62,22 @@ export default function AdminHomePage() {
             <div className="text-[14px] font-medium text-slate-800">
               {ov ? `${ov.occupied} / ${ov.total_unit}` : "—"}
             </div>
+            {ov && ov.total_unit > 0 && (
+              <div className="mt-1.5">
+                <Meter nilai={ov.occupied} maks={ov.total_unit} warna="#4f6e55" label="Unit terisi" />
+              </div>
+            )}
           </div>
           <div className="px-4 py-3 border-l border-slate-100">
             <div className="text-[10.5px] text-slate-400 mb-0.5">Pengguna aktif</div>
             <div className="text-[14px] font-medium text-slate-800">
               {ov ? `${ov.user_aktif} / ${ov.total_user}` : "—"}
             </div>
+            {ov && ov.total_user > 0 && (
+              <div className="mt-1.5">
+                <Meter nilai={ov.user_aktif} maks={ov.total_user} warna="#2b7bb0" label="Pengguna aktif" />
+              </div>
+            )}
           </div>
         </div>
       </section>

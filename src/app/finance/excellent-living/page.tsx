@@ -7,6 +7,8 @@ import { fmtCurrencyFull, todayISO } from "@/lib/format";
 import { Card, CardHeader, Loading, Empty } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
 import { inputCls } from "@/components/Modal";
+import { DaftarBatang } from "@/components/viz";
+import { warnaChannel } from "@/lib/vizPendapatan";
 import type { ElFinanceRingkasan } from "@/lib/types";
 
 function awalBulan(): string {
@@ -19,7 +21,7 @@ function akhirBulan(): string {
   return d.toISOString().slice(0, 10);
 }
 
-function Rincian({ title, data }: { title: string; data: Record<string, number> }) {
+function Rincian({ title, data, warnaKanal = false }: { title: string; data: Record<string, number>; warnaKanal?: boolean }) {
   const rows = Object.entries(data).sort((a, b) => b[1] - a[1]);
   return (
     <Card>
@@ -27,13 +29,8 @@ function Rincian({ title, data }: { title: string; data: Record<string, number> 
       {rows.length === 0 ? (
         <Empty label="Belum ada data" />
       ) : (
-        <div className="p-4">
-          {rows.map(([k, v]) => (
-            <div key={k} className="flex justify-between py-1.5 border-b border-ink/[0.05] last:border-0 text-[12px]">
-              <span className="text-ink/60">{k}</span>
-              <span className="text-ink/80">{fmtCurrencyFull(v)}</span>
-            </div>
-          ))}
+        <div className="p-4 sm:p-5">
+          <DaftarBatang items={rows.map(([k, v]) => ({ label: k, nilai: v, teks: fmtCurrencyFull(v), warna: warnaKanal ? warnaChannel(k) : undefined }))} />
         </div>
       )}
     </Card>
@@ -84,7 +81,7 @@ export default function ElKeuanganPage() {
             <StatCard label="Jumlah Kamar" value={String(data.jumlah_kamar)} />
           </div>
           <div className="grid md:grid-cols-2 gap-5 mb-5">
-            <Rincian title="Per Sumber" data={data.per_sumber} />
+            <Rincian title="Per Sumber" data={data.per_sumber} warnaKanal />
             <Rincian title="Per Tipe Kamar" data={data.per_tipe} />
           </div>
           <Card>

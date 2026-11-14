@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { AdminShell } from "../_shell";
 import { localApi } from "@/lib/api";
 import { Loading, Card, CardHeader, Empty } from "@/components/Card";
+import { DiagramKolom, WARNA_UTAMA } from "@/components/viz";
 
 /**
  * Phase 10 (revenue-engine program): occupancy forecast foundation.
@@ -69,6 +70,21 @@ export default function OccupancyForecastPage() {
           )}
           <Card>
             <CardHeader title="14 Hari ke Depan" subtitle={`Berdasarkan ${data.history_days_available} hari riwayat snapshot riil`} />
+            <div className="px-4 sm:px-5 pt-4">
+              <DiagramKolom
+                ariaLabel="Perkiraan okupansi 14 hari ke depan"
+                maks={100}
+                format={(n) => `${Math.round(n)}%`}
+                labelKosong="belum cukup data"
+                kolom={data.forecast.map((d) => ({
+                  kunci: d.date,
+                  label: fmtDate(d.date),
+                  judul: `${WEEKDAY_NAMES[d.weekday]}, ${fmtDate(d.date)}`,
+                  segmen: d.forecast_occupancy_pct === null ? null : [{ nama: "Okupansi", nilai: d.forecast_occupancy_pct, warna: WARNA_UTAMA }],
+                  catatan: `${d.sample_count} sampel`,
+                }))}
+              />
+            </div>
             <div className="p-3 sm:p-4 overflow-x-auto">
               <div className="flex gap-2 min-w-max">
                 {data.forecast.map((d) => (

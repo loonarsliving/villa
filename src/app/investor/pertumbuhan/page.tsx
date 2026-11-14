@@ -7,6 +7,7 @@ import { Card, CardHeader, Loading } from "@/components/Card";
 import { currentPeriod, fmtCurrencyFull, recentPeriods } from "@/lib/format";
 import { buildGrowthRows, type GrowthRow } from "@/lib/investorGrowth";
 import type { Report } from "@/lib/types";
+import { AngkaRingkas, DiagramKolom, Saklar, Tombol, WARNA_UTAMA } from "@/components/viz";
 
 /**
  * Pertumbuhan pendapatan Loonars untuk investor (permintaan owner
@@ -18,6 +19,7 @@ import type { Report } from "@/lib/types";
 export default function PertumbuhanPage() {
   const [rows, setRows] = useState<GrowthRow[] | null>(null);
   const [galat, setGalat] = useState<string | null>(null);
+  const [metrik, setMetrik] = useState<"gross" | "net" | "perUnit">("gross");
 
   useEffect(() => {
     const months = recentPeriods(12);
@@ -36,16 +38,46 @@ export default function PertumbuhanPage() {
   return (
     <InvestorShell pageTitle="Pertumbuhan Loonars" pageSub="Perkembangan pendapatan seluruh villa">
       {terakhir && (
-        <div className="grid grid-cols-2 gap-3 mb-3.5">
-          <div className="bg-base-800 border border-ink/[0.08] rounded p-4">
-            <div className="text-[9px] text-ink/40 uppercase tracking-wide">Pendapatan {terakhir.label}</div>
-            <div className="font-serif text-xl font-light text-ink mt-1">{fmtCurrencyFull(terakhir.gross)}</div>
+        <Card className="mb-3.5">
+          <div className="p-4 sm:p-5 grid grid-cols-2 gap-x-4 gap-y-3">
+            <AngkaRingkas label={`Pendapatan ${terakhir.label}`} nilai={fmtCurrencyFull(terakhir.gross)} />
+            <AngkaRingkas
+              label="Dibanding bulan sebelumnya"
+              nilai={fmtPct(terakhir.changePct)}
+              tone={terakhir.changePct === null || terakhir.changePct === 0 ? undefined : terakhir.changePct > 0 ? "sage" : "ruby"}
+            />
           </div>
-          <div className="bg-base-800 border border-ink/[0.08] rounded p-4">
-            <div className="text-[9px] text-ink/40 uppercase tracking-wide">Dibanding bulan sebelumnya</div>
-            <div className="font-serif text-xl font-light text-ink mt-1">{fmtPct(terakhir.changePct)}</div>
+        </Card>
+      )}
+
+      {rows && rows.length > 0 && (
+        <Card className="mb-3.5">
+          <CardHeader
+            title="Grafik 12 Bulan"
+            subtitle="Ketuk batang untuk melihat angkanya; bulan berjalan tampil pudar"
+          />
+          <div className="px-4 sm:px-5 pt-3 pb-3">
+            <Saklar className="mb-4">
+              <Tombol aktif={metrik === "gross"} onClick={() => setMetrik("gross")}>Pendapatan</Tombol>
+              <Tombol aktif={metrik === "net"} onClick={() => setMetrik("net")}>Net profit</Tombol>
+              <Tombol aktif={metrik === "perUnit"} onClick={() => setMetrik("perUnit")}>Per unit</Tombol>
+            </Saklar>
+            <DiagramKolom
+              ariaLabel="Pendapatan seluruh villa per bulan"
+              formatPenuh={fmtCurrencyFull}
+              kolom={rows.map((r) => ({
+                kunci: r.period,
+                label: r.label.split(" ")[0].slice(0, 3),
+                judul: r.label + (r.berjalan ? " (sementara)" : ""),
+                pudar: r.berjalan,
+                // Nilai negatif (rugi) tidak digambar ke bawah; batangnya kosong dan angkanya tetap tampil apa adanya.
+                segmen: [{ nama: "Nilai", nilai: Math.max(0, r[metrik]), warna: WARNA_UTAMA }],
+                nilaiTampil: fmtCurrencyFull(r[metrik]),
+                catatan: r.changePct !== null ? `${fmtPct(r.changePct)} pendapatan dari bulan lalu` : undefined,
+              }))}
+            />
           </div>
-        </div>
+        </Card>
       )}
 
       <Card>

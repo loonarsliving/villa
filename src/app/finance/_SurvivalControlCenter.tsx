@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { fmtCurrency, fmtCurrencyFull } from "@/lib/format";
 import { Card, CardHeader, Loading, Badge } from "@/components/Card";
 import { StatCard } from "@/components/StatCard";
+import { Meter } from "@/components/viz";
 import type { FinanceSurvivalKpis, SurvivalStatus } from "@/lib/types";
 
 /**
@@ -191,6 +192,22 @@ export function SurvivalControlCenter({ from, to }: { from: string; to: string }
             </div>
           </div>
         </div>
+        {s.this_month.room_nights_required != null && s.this_month.room_nights_required > 0 && (
+          <div className="px-4 sm:px-5 pb-3">
+            <div className="flex items-baseline justify-between text-[11px] text-ink/60 mb-1.5">
+              <span>Menuju target sebulan</span>
+              <span className="font-semibold text-ink tabular-nums">
+                {s.this_month.room_nights_so_far} / {Math.ceil(s.this_month.room_nights_required)} malam
+              </span>
+            </div>
+            <Meter
+              nilai={s.this_month.room_nights_so_far}
+              maks={Math.ceil(s.this_month.room_nights_required)}
+              warna={s.this_month.room_nights_still_needed === 0 ? "#4f6e55" : "#b4693f"}
+              label="Malam terjual menuju target"
+            />
+          </div>
+        )}
         <div className="px-4 sm:px-5 pb-4 text-[10.5px] text-ink/40">
           Kalau dari {s.this_month.room_nights_still_needed != null ? Math.ceil(s.this_month.room_nights_still_needed) : "—"} malam yang masih kurang itu terjual dari sisa hari bulan ini, target
           tercapai.
