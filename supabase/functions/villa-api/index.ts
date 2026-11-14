@@ -5098,6 +5098,24 @@ async function elKetersediaanCloudbeds(checkin, checkout){
 }
 
 /**
+ * Padanan elKetersediaanCloudbeds untuk Private Living (akun Cloudbeds
+ * utama, lewat jembatan Vercel yang sama): { <roomTypeID>: kamar yang masih
+ * dibuka Cloudbeds, terkecil di seluruh malam } atau null kalau tidak terbaca.
+ */
+async function kamarDijualCloudbedsPl(checkin, checkout){
+  const cron = await getSetting('cron');
+  if(!cron?.secret) return null;
+  try{
+    const res = await fetch(`${URL_KETERSEDIAAN_CLOUDBEDS_EL}?${new URLSearchParams({checkin, checkout, properti: 'PL'})}`, {
+      headers: {'Authorization': `Bearer ${cron.secret}`}, signal: AbortSignal.timeout(15000),
+    });
+    if(!res.ok) return null;
+    const j = await res.json().catch(()=>null);
+    return j?.tipe && typeof j.tipe === 'object' ? j.tipe : null;
+  }catch{ return null; }
+}
+
+/**
  * Ketersediaan + harga EL untuk loonars.id dari tabel bersama (harus dipanggil
  * dalam konteks properti EL). Kamar berstatus 'maintenance' (belum dibuka
  * manager) tidak dihitung; bentrok = booking aktif, tahanan, Kamar Maintenance,
@@ -5657,6 +5675,24 @@ async function layani(req){
         if(!entry.sampleFreeUnit) entry.sampleFreeUnit = u;
       }
     }
+    // Jumlah kamar yang masih DIBUKA Cloudbeds per tipe (allotment/tutup
+    // jual ikut terhitung) -- lihat kamarDijualCloudbedsPl. Tidak terbaca =
+    // tidak dibatasi di sini (pemesanan tetap dicek ulang).
+    if([...byType.values()].some(e=>e.available>0)){
+      const cb = await kamarDijualCloudbedsPl(checkin, checkout);
+      if(cb){
+        const {data:petaCb} = await supabase.from('cloudbeds_room_mapping').select('unit_id,cloudbeds_room_id');
+        const tipeUnit = new Map((units??[]).map(u=>[u.id, rtById.get(u.room_type_id)?.code ?? 'unknown']));
+        for(const entry of byType.values()){
+          const id = (petaCb ?? []).find(r=>tipeUnit.get(r.unit_id) === entry.code)?.cloudbeds_room_id;
+          const tipeCb = id ? String(id).replace(/-\d+$/, '') : null;
+          if(tipeCb && cb[tipeCb] != null && Number(cb[tipeCb]) < entry.available){
+            entry.available = Math.max(0, Number(cb[tipeCb]));
+            if(entry.available === 0) entry.sampleFreeUnit = null;
+          }
+        }
+      }
+    }
     const room_types_result = [];
     for(const entry of byType.values()){
       let price_total = null, price_total_normal = null;
@@ -6197,6 +6233,20 @@ async function layani(req){
     if(belumTercatat >= unitKosong){
       console.error('public/bookings: kamar habis menurut Cloudbeds', {tgl_checkin, tgl_checkout, room_type, unitKosong, belumTercatat});
       return err('Maaf, villa sudah penuh untuk tanggal yang dipilih. Silakan pilih tanggal lain atau hubungi kami di WhatsApp.', 409);
+    }
+    // Jumlah kamar yang DIBUKA Cloudbeds untuk tipe ini (bukan hanya
+    // reservasinya). 14 Nov 2026: B1 31 Des & B3 30 Des terjual di website,
+    // dibayar, lalu ditolak Cloudbeds "could not accommodate" -- Cloudbeds
+    // menutup kamar tanpa reservasi yang bisa dihitung di atas. Tidak
+    // terbaca = pengecekan di atas saja yang berlaku (seperti sebelumnya).
+    {
+      const cb = await kamarDijualCloudbedsPl(tgl_checkin, tgl_checkout);
+      const {data:petaCb} = await supabase.from('cloudbeds_room_mapping').select('cloudbeds_room_id').eq('unit_id', freeUnit.id).maybeSingle();
+      const tipeCb = petaCb?.cloudbeds_room_id ? String(petaCb.cloudbeds_room_id).replace(/-\d+$/, '') : null;
+      if(cb && tipeCb && cb[tipeCb] != null && Number(cb[tipeCb]) <= 0){
+        console.error('public/bookings: tipe kamar ditutup/habis menurut Cloudbeds', {tgl_checkin, tgl_checkout, room_type, tipeCb});
+        return err('Maaf, villa sudah penuh untuk tanggal yang dipilih. Silakan pilih tanggal lain atau hubungi kami di WhatsApp.', 409);
+      }
     }
 
     const nights = Math.max(1, Math.round((new Date(tgl_checkout).getTime() - new Date(tgl_checkin).getTime())/86400000));
