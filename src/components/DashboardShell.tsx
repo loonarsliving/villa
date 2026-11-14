@@ -25,6 +25,8 @@ export interface NavSection {
 // melompat kembali ke atas.
 let penandaSebelumnya: number | null = null;
 let gulirSidebar = 0;
+// Menu bermunculan berurutan hanya sekali per sesi tab (bukan tiap pindah halaman).
+let menuSudahMasuk = false;
 
 const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
@@ -32,6 +34,10 @@ function NavList({ sections, pathname, onNavigate }: { sections: NavSection[]; p
   const navRef = useRef<HTMLElement | null>(null);
   const penandaRef = useRef<HTMLSpanElement | null>(null);
   const kunci = sections.map((s) => s.items.map((i) => i.href).join(",")).join("|");
+
+  useEffect(() => {
+    menuSudahMasuk = true;
+  }, []);
 
   useIsoLayoutEffect(() => {
     const nav = navRef.current;
@@ -57,6 +63,8 @@ function NavList({ sections, pathname, onNavigate }: { sections: NavSection[]; p
     penandaSebelumnya = top;
   }, [pathname, kunci]);
 
+  let nomorMenu = 0;
+  const animasiMasuk = !menuSudahMasuk;
   return (
     <nav
       ref={navRef}
@@ -75,6 +83,7 @@ function NavList({ sections, pathname, onNavigate }: { sections: NavSection[]; p
           <div key={sec.title}>
             <div className="text-[8.5px] font-semibold text-[#d6b98f]/70 tracking-[0.22em] uppercase px-2 py-3.5">{sec.title}</div>
             {sec.items.map((item) => {
+              const urutan = nomorMenu++;
               const active = pathname === item.href;
               return (
                 <Link
@@ -82,7 +91,8 @@ function NavList({ sections, pathname, onNavigate }: { sections: NavSection[]; p
                   href={item.href}
                   data-aktif={active}
                   onClick={onNavigate}
-                  className={`group relative flex items-center gap-2.5 px-2.5 py-2.5 rounded-xl text-[13px] mb-0.5 ${
+                  style={animasiMasuk ? { animationDelay: `${0.1 + urutan * 0.035}s` } : undefined}
+                  className={`group relative flex items-center gap-2.5 px-2.5 py-2.5 rounded-xl text-[13px] mb-0.5 ${animasiMasuk ? "nav-in " : ""}${
                     active ? "text-white font-medium" : "text-cream/65 hover:bg-cream/[0.06] hover:text-cream"
                   }`}
                 >
@@ -218,7 +228,14 @@ export function DashboardShell({
               ☰
             </button>
             <div key={pathname} className="anim-fade-up min-w-0">
-              <div className="font-serif text-xl sm:text-2xl font-normal text-ink truncate">{pageTitle}</div>
+              <div className="font-serif text-xl sm:text-2xl font-normal text-ink truncate" aria-label={pageTitle}>
+                {pageTitle.split(" ").map((w, i) => (
+                  <span key={i} className="kata" aria-hidden>
+                    <span style={{ animationDelay: `${0.05 + i * 0.07}s` }}>{w}</span>
+                    {"\u00a0"}
+                  </span>
+                ))}
+              </div>
               {pageSub && <div className="text-[10px] text-ink/50 truncate hidden sm:block">{pageSub}</div>}
             </div>
           </div>

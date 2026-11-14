@@ -161,12 +161,15 @@ export function AppHome({
             pasang lewat prop -- lapisan gelap di bawah ini sudah disiapkan
             supaya teks putih tetap terbaca di atas foto seterang apa pun. */}
         <div
-          className="absolute inset-0"
+          className="absolute inset-0 gradasi-hidup"
           style={{
             backgroundImage:
               "radial-gradient(120% 90% at 85% 15%, rgba(180,105,63,0.55) 0%, transparent 60%), linear-gradient(160deg, #1f2d22 0%, #2d4433 55%, #3e5a44 100%)",
           }}
         />
+        {/* Cahaya mengambang -- hiasan saja. */}
+        <div aria-hidden className="orb w-40 h-40 bg-[rgba(214,185,143,0.35)] -top-10 right-10" />
+        <div aria-hidden className="orb w-32 h-32 bg-[rgba(111,139,106,0.35)] bottom-0 left-6" style={{ animationDelay: "-4s", animationDuration: "11s" }} />
         <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 via-transparent to-slate-900/30" />
 
         <div className="relative h-full flex flex-col justify-between px-5 py-4">

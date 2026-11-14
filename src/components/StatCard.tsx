@@ -36,7 +36,7 @@ export function StatCard({
   return (
     <div
       onClick={onClick}
-      className={`group sheen anim-fade-up relative ${a.tint} rounded-2xl p-4 overflow-hidden transition duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-ink/[0.07] ${
+      className={`group sheen spot tilt anim-fade-up relative ${a.tint} rounded-2xl p-4 overflow-hidden transition duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-ink/[0.07] ${
         onClick ? "cursor-pointer active:scale-[0.98]" : ""
       }`}
     >

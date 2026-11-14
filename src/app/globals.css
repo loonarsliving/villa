@@ -291,3 +291,185 @@ body {
 .font-serif.tabular-nums {
   font-variant-numeric: lining-nums tabular-nums;
 }
+
+/* ══ Lapisan gerak interaktif (2026-11-14, src/components/MotionLayer.tsx) ══ */
+
+/* Sorotan cahaya mengikuti kursor. ::before di bawah isi kartu (isolation). */
+.spot {
+  isolation: isolate;
+}
+.spot::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  background: radial-gradient(300px circle at var(--mx, 50%) var(--my, 50%), rgba(180, 105, 63, 0.17), transparent 70%);
+}
+.spot:hover::before {
+  opacity: 1;
+}
+
+/* Bingkai bercahaya yang berputar saat kartu diarahkan kursor. */
+@property --sudut {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+.glow-border::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  background: conic-gradient(from var(--sudut), transparent 0deg, rgba(180, 105, 63, 0.75) 60deg, rgba(214, 185, 143, 0.6) 120deg, transparent 180deg, transparent 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: putar-bingkai 3.2s linear infinite;
+  animation-play-state: paused;
+}
+.glow-border:hover::after {
+  opacity: 1;
+  animation-play-state: running;
+}
+@keyframes putar-bingkai {
+  to {
+    --sudut: 360deg;
+  }
+}
+
+/* Kartu miring 3D (transform diatur MotionLayer, dilepas saat kursor pergi). */
+.tilt {
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.3s ease;
+  will-change: transform;
+}
+
+/* Riak saat tombol diketuk. */
+.ripple-wrap {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.ripple {
+  position: absolute;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.18;
+  transform: scale(0);
+  animation: riak 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes riak {
+  to {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
+/* Kartu di luar layar ditahan sampai terlihat (animasi fill-mode backwards). */
+.io-wait,
+.io-wait.anim-fade-up {
+  animation-play-state: paused !important;
+}
+
+/* Garis progres terakota di atas layar saat pindah halaman. */
+.route-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 2px;
+  width: 100%;
+  z-index: 500;
+  pointer-events: none;
+  transform: scaleX(0);
+  transform-origin: left;
+  background: linear-gradient(90deg, #b4693f, #d6b98f, #4f6e55);
+  box-shadow: 0 0 10px rgba(180, 105, 63, 0.6);
+  opacity: 0;
+}
+.route-bar-go {
+  animation: garis-rute 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes garis-rute {
+  0% { transform: scaleX(0); opacity: 1; }
+  70% { transform: scaleX(1); opacity: 1; }
+  100% { transform: scaleX(1); opacity: 0; }
+}
+
+/* Konfeti. */
+.confetti-box {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  pointer-events: none;
+  overflow: hidden;
+}
+.confetti-box > i {
+  position: absolute;
+  width: 7px;
+  height: 11px;
+  border-radius: 2px;
+  animation: konfeti 1.3s cubic-bezier(0.16, 0.84, 0.44, 1) forwards;
+}
+@keyframes konfeti {
+  0% { transform: translate(0, 0) rotate(0); opacity: 1; }
+  80% { opacity: 1; }
+  100% { transform: translate(var(--dx), calc(var(--dy) + 140px)) rotate(var(--rot)); opacity: 0; }
+}
+
+/* Judul halaman muncul per kata. */
+.kata {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: bottom;
+  padding-bottom: 0.08em;
+}
+.kata > span {
+  display: inline-block;
+  animation: kata-naik 0.7s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+@keyframes kata-naik {
+  from { transform: translateY(105%); opacity: 0; }
+}
+
+/* Menu sidebar bermunculan berurutan (sekali saat pertama dibuka). */
+.nav-in {
+  animation: nav-masuk 0.5s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+@keyframes nav-masuk {
+  from { opacity: 0; transform: translateX(-14px); }
+}
+
+/* Gradasi yang bergerak pelan (header beranda investor/admin). */
+.gradasi-hidup {
+  background-size: 200% 200% !important;
+  animation: gradasi-geser 14s ease-in-out infinite alternate;
+}
+@keyframes gradasi-geser {
+  from { background-position: 0% 30%; }
+  to { background-position: 100% 70%; }
+}
+.orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(30px);
+  pointer-events: none;
+  animation: orb-melayang 9s ease-in-out infinite alternate;
+}
+@keyframes orb-melayang {
+  from { transform: translate(0, 0) scale(1); }
+  to { transform: translate(30px, -18px) scale(1.15); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spot::before, .glow-border::after, .route-bar, .confetti-box { display: none !important; }
+  .io-wait { animation-play-state: running !important; }
+  .tilt { transform: none !important; }
+}
