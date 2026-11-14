@@ -45,6 +45,13 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 - Perbaikan: kartu "Check-In Hari Ini" dulu meminta `/bookings?date_from=hari ini&date_to=hari ini`, yang menurut `datesOverlap` tidak memuat tamu yang check-in hari ini; kini memakai rentang kemarin..besok (pola HandoverHarian).
 - "Jadwal Tamu Hari Ini" (serah terima + Salin untuk WA) tetap ada, kini di bagian yang bisa dibuka-tutup di bawah peta.
 
+### 2026-11-14 — Kalender Booking: desain baru + tampilan Daftar per hari
+- Owner: "kalender booking apa tidak ada desain lebih bagus dan memudahkan?". `src/app/front-desk/booking/_Kalender.tsx` + `src/lib/kalenderBooking.ts` (+ tes). Data & detail booking (DokumenCheckin) sama seperti sebelumnya.
+- Kalender: kepala tanggal (hari + tanggal, akhir pekan diwarnai, hari ini dibulatkan terakota), baris **Terisi per malam** (x/total, "Penuh"), batang ala hotel dari tengah hari check-in ke tengah hari check-out (hari pergantian tamu terlihat), warna per status (menginap hijau, terjadwal terakota, sudah keluar abu, menunggu bayar putus-putus), tooltip detail saat hover, sorotan kolom tanggal.
+- Toolbar: ‹ Hari ini ›, lompat ke tanggal, 7/14/21/30 hari, cari tamu/unit/no. HP (batang lain diredupkan), saringan status dengan jumlah.
+- Ringkasan rentang: okupansi, malam kosong, tamu datang/pulang.
+- Tampilan **Daftar** per hari (bawaan di HP, pilihan diingat di browser): kartu tiap tanggal dengan meter terisi, daftar Datang & Pulang; ketuk → detail booking.
+
 ### 2026-11-14 — Dashboard villa: perbaikan keterbacaan + judul kartu serif + animasi hover
 - Teks pucat dinaikkan kontrasnya di semua halaman (`text-ink/30` → `/50`, `/35` → `/55`, `/25` → `/45`); di latar krem yang lama ±2:1.
 - `CardHeader`: judul huruf serif (sebelumnya huruf kecil KAPITAL) + garis terakota yang memanjang saat kartu di-hover (`group/card`, tanpa transform pada kartu).
