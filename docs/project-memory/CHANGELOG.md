@@ -37,6 +37,14 @@ Built entirely from `git log` on `main` (branch `claude/project-memory-audit-af4
 - `src/components/viz/index.tsx`: kit diagram bersama (Saklar/Tombol, AngkaRingkas, Meter, PerbandinganPeriode, BatangPorsi, DiagramKolom, AirTerjun, DuaBatang, DaftarBatang).
 - Dipasang di: Revenue (perbandingan periode + meter room-nights), Perkiraan Okupansi (diagram kolom), Pertumbuhan investor (diagram 12 bulan, saklar pendapatan/net/per unit; nilai negatif tetap tampil apa adanya), Laba Rugi (air terjun pendapatan → laba), Rencana Kas (tersedia vs dividen, diagram uang cair per tanggal per channel), Survival (meter menuju target), Tutup Buku (meter booking dicentang), Keuangan EL (daftar batang per sumber/tipe), Unit Saya EL & beranda admin (meter), beranda investor (angka berhitung), Pendapatan investor (batang alur bagi hasil kini juga tampil di HP).
 
+### 2026-11-14 — Front Desk: papan kerja resepsionis yang interaktif
+- Owner: "di halaman reception apa tidak ada tampilan yang lebih interaktif dan lebih mempermudah reception?". `src/app/front-desk/_Papan.tsx` + `src/lib/papanFrontDesk.ts` (+ tes).
+- **Tamu Datang** (termasuk yang terlambat) dan **Tamu Pulang** hari ini langsung di halaman, masing-masing dengan meter progres, tombol WhatsApp tamu, dan tombol sekali-ketuk **Check-In** (membuka kartu check-in yang sama → POST /checkin) / **Check-Out** (modal check-out yang sama, unit sudah terpilih → POST /checkout). Tidak ada jalur baru ke villa-api.
+- **Peta Unit** kini bisa diketuk: saringan (Tersedia/Terisi/Datang/Pulang/Kotor/Maintenance + jumlah), nama tamu di tiap unit, penanda datang ↓ / pulang ↑, cincin berdenyut untuk unit yang tamunya akan datang; ketuk → detail tamu + aksi Check-In/Check-Out/Housekeeping.
+- Kotak **cari tamu/unit/no. HP** (tombol `/` di keyboard) menyaring papan dan meredupkan unit yang tidak cocok. Data disegarkan diam-diam tiap 60 detik saat tab terlihat.
+- Perbaikan: kartu "Check-In Hari Ini" dulu meminta `/bookings?date_from=hari ini&date_to=hari ini`, yang menurut `datesOverlap` tidak memuat tamu yang check-in hari ini; kini memakai rentang kemarin..besok (pola HandoverHarian).
+- "Jadwal Tamu Hari Ini" (serah terima + Salin untuk WA) tetap ada, kini di bagian yang bisa dibuka-tutup di bawah peta.
+
 ### 2026-11-14 — Dashboard villa: perbaikan keterbacaan + judul kartu serif + animasi hover
 - Teks pucat dinaikkan kontrasnya di semua halaman (`text-ink/30` → `/50`, `/35` → `/55`, `/25` → `/45`); di latar krem yang lama ±2:1.
 - `CardHeader`: judul huruf serif (sebelumnya huruf kecil KAPITAL) + garis terakota yang memanjang saat kartu di-hover (`group/card`, tanpa transform pada kartu).

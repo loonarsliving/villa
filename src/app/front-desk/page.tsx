@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FrontDeskShell } from "./_shell";
 import { useAuth } from "@/lib/auth";
@@ -14,6 +14,8 @@ import { CheckinCard, HOUSE_RULES_EXCELLENT_LIVING, type CheckinCardGuest, type 
 import { usePropertiAktif } from "@/lib/properti";
 import { HandoverHarian } from "@/components/HandoverHarian";
 import type { Booking, Summary, Unit, Notification } from "@/lib/types";
+import { susunPapan } from "@/lib/papanFrontDesk";
+import { PetaUnit, TamuHariIni } from "./_Papan";
 
 const statusColor: Record<string, string> = {
   available: "border-sage-500/30",
@@ -39,7 +41,10 @@ export default function FrontDeskPage() {
   const [sum, setSum] = useState<Summary | null>(null);
   const [units, setUnits] = useState<Unit[]>([]);
   const [notifs, setNotifs] = useState<Notification[]>([]);
-  const [kedatangan, setKedatangan] = useState<{ sudah: number; total: number } | null>(null);
+  // Booking kemarin..besok (sama dengan Jadwal Tamu Hari Ini) untuk papan kerja.
+  const [rows, setRows] = useState<Booking[] | null>(null);
+  const [cari, setCari] = useState("");
+  const cariRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(true);
   const [ciOpen, setCiOpen] = useState(false);
   const [coOpen, setCoOpen] = useState(false);
@@ -65,42 +70,67 @@ export default function FrontDeskPage() {
     checkoutDate: string | null;
   } | null>(null);
 
-  async function load() {
-    setLoading(true);
+  async function load(diam = false) {
+    if (!diam) setLoading(true);
     try {
-      const hariIni = todayISO();
+      const kemarin = todayISO(new Date(Date.now() - 86400000));
+      const besok = todayISO(new Date(Date.now() + 86400000));
       const [s, u, n, b] = await Promise.all([
         api.get<Summary>("/summary"),
         api.get<Unit[]>("/units"),
         api.get<Notification[]>("/notifications?role=receptionist"),
-        // /summary.checkin_today hanya menghitung yang MASIH terjadwal, jadi
-        // tamu yang sudah check-in hilang dari kartu (20 Okt 2026: tertulis
-        // "1" padahal 8 tamu datang hari itu, 7 sudah masuk). Gagal di sini
-        // tidak boleh menjatuhkan halaman -- kartu kembali ke angka lama.
-        api.get<Booking[]>(`/bookings?date_from=${hariIni}&date_to=${hariIni}`).catch(() => null),
+        // Rentang kemarin..besok = semua booking yang masuk <= hari ini dan
+        // keluar >= hari ini (datesOverlap di villa-api; pola HandoverHarian).
+        // Dulu rentangnya hari ini..hari ini, yang menurut datesOverlap tidak
+        // memuat tamu yang check-in hari ini. Gagal di sini tidak boleh
+        // menjatuhkan halaman -- kartu kembali ke angka /summary.
+        api.get<Booking[]>(`/bookings?date_from=${kemarin}&date_to=${besok}`).catch(() => null),
       ]);
       setSum(s);
       setUnits(u || []);
       setNotifs(n || []);
-      if (b) {
-        const datang = b.filter((x) => x.tgl_checkin === hariIni && ["terjadwal", "checkin", "checkout"].includes(x.status));
-        setKedatangan({ sudah: datang.filter((x) => x.status !== "terjadwal").length, total: datang.length });
-      } else {
-        setKedatangan(null);
-      }
+      setRows(b);
     } catch (e) {
       // Tanpa ini, satu permintaan yang gagal membuat setLoading(false)
       // tidak pernah dijalankan: halaman Front Desk berhenti di "Memuat…"
       // selamanya tanpa memberi tahu apa pun ke resepsionis.
-      toast("⚠", "Gagal memuat data", e instanceof Error ? e.message : "Periksa koneksi internet, lalu muat ulang.", "ruby");
+      if (!diam) toast("⚠", "Gagal memuat data", e instanceof Error ? e.message : "Periksa koneksi internet, lalu muat ulang.", "ruby");
     } finally {
-      setLoading(false);
+      if (!diam) setLoading(false);
     }
   }
 
   useEffect(() => {
     load();
+    // Segarkan diam-diam tiap menit supaya booking OTA yang baru masuk dan
+    // check-in rekan shift langsung terlihat tanpa memuat ulang halaman.
+    const t = setInterval(() => {
+      if (document.visibilityState === "visible") load(true);
+    }, 60000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Tombol "/" langsung ke kotak cari tamu (seperti di aplikasi besar).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (e.key === "/" && !(el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable))) {
+        e.preventDefault();
+        cariRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const papan = useMemo(() => (rows ? susunPapan(rows, todayISO()) : null), [rows]);
+  const kedatangan = papan
+    ? (() => {
+        const hariIniSaja = papan.datang.filter((d) => !d.terlambat);
+        return { sudah: hariIniSaja.filter((d) => d.selesai).length, total: hariIniSaja.length };
+      })()
+    : null;
 
   function openCheckin() {
     setSelectedBookingId("");
@@ -124,6 +154,11 @@ export default function FrontDeskPage() {
     setCoUnitId(occ[0]?.id || "");
     setCoOpen(true);
   }
+  /** Modal check-out yang sama, unitnya sudah terpilih (dari papan / peta unit). */
+  function checkoutUnit(unitId: string) {
+    setCoUnitId(unitId);
+    setCoOpen(true);
+  }
 
   // Check-in a booking that already exists (Cloudbeds/OTA-synced or logged
   // earlier) -- never creates a new booking, since that already conflicts
@@ -135,6 +170,11 @@ export default function FrontDeskPage() {
       toast("⚠", "Pilih booking", "Pilih salah satu booking terjadwal untuk di-check-in.", "ruby");
       return;
     }
+    mulaiCheckin(bk);
+  }
+
+  /** Buka kartu check-in untuk booking terjadwal -- dari modal maupun dari papan Tamu Datang. */
+  function mulaiCheckin(bk: Booking) {
     setPendingCheckin({
       booking_id: bk.id,
       unit_id: bk.unit_id,
@@ -299,6 +339,33 @@ export default function FrontDeskPage() {
         <StatCard label="Perlu Dibersihkan" value={String(sum?.dirty ?? "—")} accent="ruby" onClick={() => router.push("/front-desk/housekeeping")} />
       </div>
 
+      <div className="relative mb-3.5">
+        <svg viewBox="0 0 20 20" className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-ink/35 pointer-events-none" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+          <circle cx="9" cy="9" r="5.5" />
+          <path d="m13.5 13.5 3.5 3.5" strokeLinecap="round" />
+        </svg>
+        <input
+          ref={cariRef}
+          value={cari}
+          onChange={(e) => setCari(e.target.value)}
+          onKeyDown={(e) => e.key === "Escape" && setCari("")}
+          placeholder={`Cari tamu, ${properti === "PL" ? "unit" : "kamar"}, atau no. HP…`}
+          aria-label="Cari tamu"
+          className="w-full rounded-full border border-ink/10 bg-base-900 pl-10 pr-20 py-2.5 text-[12.5px] text-ink placeholder:text-ink/35 outline-none focus:border-gold-500/60 focus:shadow-[0_0_0_4px_rgba(180,105,63,0.1)] transition"
+        />
+        {cari ? (
+          <button type="button" onClick={() => setCari("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-[10.5px] text-ink/50 hover:text-ink px-2 py-1">
+            Hapus
+          </button>
+        ) : (
+          <kbd className="hidden sm:block absolute right-4 top-1/2 -translate-y-1/2 text-[10px] text-ink/35 border border-ink/15 rounded px-1.5 py-0.5">/</kbd>
+        )}
+      </div>
+
+      {papan && (
+        <TamuHariIni papan={papan} cari={cari} onCheckin={mulaiCheckin} onCheckout={checkoutUnit} unitLabel={properti === "PL" ? "Unit" : "Kamar"} />
+      )}
+
       <div className="grid lg:grid-cols-[2fr_1fr] gap-3.5">
         <div className="flex flex-col gap-3.5">
           <Card>
@@ -308,6 +375,16 @@ export default function FrontDeskPage() {
             <div className="p-4 sm:p-5">
               {loading ? (
                 <Loading />
+              ) : papan ? (
+                <PetaUnit
+                  units={units}
+                  papan={papan}
+                  cari={cari}
+                  unitLabel={properti === "PL" ? "Unit" : "Kamar"}
+                  onCheckin={mulaiCheckin}
+                  onCheckout={checkoutUnit}
+                  onHousekeeping={() => router.push("/front-desk/housekeeping")}
+                />
               ) : (
                 <div className="flex gap-2 flex-wrap">
                   {units.map((u) => (
@@ -318,7 +395,14 @@ export default function FrontDeskPage() {
                   ))}
                 </div>
               )}
-              <HandoverHarian refreshKey={units.length + (sum?.occupied ?? 0) + (sum?.checkin_today ?? 0)} />
+              {/* Isinya kini juga ada di papan Tamu Datang/Pulang; tetap tersedia untuk serah terima shift & "Salin untuk WA". */}
+              <details className="group mt-4 border-t border-ink/[0.06] pt-3">
+                <summary className="cursor-pointer list-none flex items-center justify-between text-[11px] font-semibold text-ink/65 hover:text-ink">
+                  <span>📋 Serah terima shift · salin untuk WA</span>
+                  <span className="text-ink/40 transition-transform group-open:rotate-180">▾</span>
+                </summary>
+                <HandoverHarian refreshKey={units.length + (sum?.occupied ?? 0) + (sum?.checkin_today ?? 0)} />
+              </details>
             </div>
           </Card>
           <Card>
