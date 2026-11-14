@@ -14,7 +14,10 @@ export const maxDuration = 30;
  * reservasi OTA yang belum tersinkron atau blokir kamar tetap mengurangi
  * jumlah ini, jadi Cloudbeds sendiri yang menjadi penentu terakhir.
  * Hasil: { tipe: { <roomTypeID>: jumlah terkecil di seluruh malam } }.
- * Hanya rahasia cron.
+ * Hanya rahasia cron. Sejak 2026-11-14 juga untuk PL (?properti=PL, akun
+ * Cloudbeds utama): website PL sempat menjual B1 31 Des & B3 30 Des yang
+ * kemudian ditolak Cloudbeds ("could not accommodate") karena hanya
+ * reservasi yang dibandingkan, bukan jumlah kamar yang dibuka Cloudbeds.
  */
 export async function GET(request: Request) {
   if (!(await isAuthorizedCronRequest(request))) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -22,7 +25,7 @@ export async function GET(request: Request) {
   const checkin = url.searchParams.get("checkin") ?? "";
   const checkout = url.searchParams.get("checkout") ?? "";
   const kode = (url.searchParams.get("properti") ?? "EL").trim().toUpperCase();
-  if (!/^[A-Z]{2,6}$/.test(kode) || kode === "PL") return NextResponse.json({ error: "properti tidak valid" }, { status: 400 });
+  if (!/^[A-Z]{2,6}$/.test(kode)) return NextResponse.json({ error: "properti tidak valid" }, { status: 400 });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(checkin) || !/^\d{4}-\d{2}-\d{2}$/.test(checkout) || checkout <= checkin) {
     return NextResponse.json({ error: "checkin/checkout tidak valid" }, { status: 400 });
   }
